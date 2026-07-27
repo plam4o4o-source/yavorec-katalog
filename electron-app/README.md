@@ -67,27 +67,60 @@ npm run build
 - Ако правите build от Linux/Mac за Windows таргет, electron-builder изтегля
   необходимите Windows инструменти автоматично (изисква интернет при първия build).
 
-## CRUD функционалности
+## Раздели
 
-| Раздел      | Действия                                                  |
-|-------------|-------------------------------------------------------------|
-| Книги       | добавяне, редакция, изтриване, търсене (заглавие/автор/ISBN/инв. №), наличност |
-| Категории   | добавяне, редакция, изтриване                                |
-| Читатели    | добавяне, редакция, изтриване, търсене                       |
-| Заемане/връщане | заемане на книга (проверява свободни бройки), приемане на връщане |
-| Табло       | брой книги, читатели, заети и просрочени заемания             |
+| Раздел | Какво прави |
+|---|---|
+| Табло | обобщени показатели: книги, читатели, заети, просрочени |
+| Книги | пълна библиографска карта (автор, заглавие, ISBN, УДК, сигнатура, авторски знак и др.), търсене, наличности |
+| Категории | добавяне/редакция/изтриване на видовете документи |
+| Инвентарна книга | ledger по чл. 16, ал. 1 (Приложение № 4) — вписване, отметки за проверки, връзка с партида и акт |
+| КДБФ | Книга за движение на фонда — части № 1 (постъпили), № 2 (резултати), № 3 (отчислени), по години |
+| Постъпления | партиди по чл. 14 — общ брой, документ на придобиване, инвентиране на екземпляри към партидата |
+| Отчисляване | актове по чл. 30 – 39 — сканиране/въвеждане на инв. номера, причина, комисия, анулиране на акт |
+| Инвентаризация | сесии по репрезентативния метод (чл. 40 – 41) — сканиране, автоматично маркиране на липсващи, допустими загуби |
+| Читатели | пълна анкета по чл. 42, ал. 3 (ЕГН, лична карта, адреси, категория, ОРЗД съгласие) |
+| Заемане и връщане | заемане (проверява свободни бройки), връщане, продължаване на срок |
+| Просрочени | списък на просрочените заемания с изчислено обезщетение по чл. 43 |
+| Периодика | картотека на изданията + кардекс на постъпилите броеве |
+| МЗС | регистър на заявки за междубиблиотечно заемане (входящи/изходящи) |
+| Справки и статистика | годишни показатели, разбивки по фонд/език/отдел/категория, най-търсени заглавия |
+| Онлайн каталог | локален експорт на `katalog.json`; **не** включва git-sync конвейера към chyavorec.org (той е в `inventar-biblioteka.html`) |
+| Баркод етикети | печат на Code 39 етикети за фонда + проверка на баркод четец |
+| Одитна следа | автоматичен запис кой служител какво е извършил, CSV експорт |
+| Настройки | данни за библиотеката, параметри на обслужването, постоянна комисия |
 
 ## Схема на базата данни
 
 ```sql
 categories(id, name)
-books(id, inv_number, title, author, category_id -> categories, year, isbn, price, description, created_at)
+books(id, inv_number, barcode, register_date, title, subtitle, author, category_id -> categories,
+      year, volume, isbn, pages, language, udk, call_number, author_mark, city, publisher,
+      keywords, annotation, cover_url, department, status, price, description,
+      acquisition_id -> acquisitions, deaccession_act_id -> deaccession_acts, deaccession_date, created_at)
 inventory(id, book_id -> books, quantity)
-readers(id, name, phone, address, email, card_no, note, created_at)
-loans(id, reader_id -> readers, book_id -> books, date_out, date_due, date_in)
+inventory_checks(id, book_id -> books, date)
+acquisitions(id, no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note)
+deaccession_acts(id, no, year, date, order_no, reason_code, reason_text, disposal, attach, committee1..3)
+deaccession_items(id, act_id -> deaccession_acts, book_id, inv_number, author, title, volume, year, price, udk, category, language)
+inventory_sessions(id, date, scope, department, committee1..3, pool_size, closed)
+inventory_session_scans(id, session_id -> inventory_sessions, book_id, scanned_at)
+inventory_session_missing(id, session_id -> inventory_sessions, book_id, inv_number, title, author, price)
+readers(id, name, phone, address, address2, email, card_no, egn, id_card_no, id_card_date, id_card_issuer,
+        birth_date, category, registered_at, re_registered_at, status, gdpr_consent, parent_consent, note, created_at)
+loans(id, reader_id -> readers, book_id -> books, date_out, date_due, date_in, fine)
+periodicals(id, title, freq, publisher, issn, department, note)
+periodical_issues(id, periodical_id -> periodicals, issue_no, date, price, note)
+mzs_requests(id, no, year, date, direction, partner, author, title, isbn, requester, status, due_date, note)
+audit_log(id, ts, user, action, detail)
+visits(id, date, count)
+settings(id=1, org, lib_name, place, bulstat, reg_no, director, director_role, librarian, cat_url,
+         loan_days, max_books, extensions_count, extension_days, fine_per_day, annual_fee,
+         free_access_pct, next_inv_number, committee1..3)
 ```
 
-`date_in IS NULL` означава, че заемането е активно (книгата все още е заета).
+`date_in IS NULL` в `loans` означава, че заемането е активно (книгата все още е заета).
+`status = 'отчислен'` в `books` означава, че документът е изваден от фонда с акт и не се брои в наличностите/статистиката.
 
 ## Как да добавя нова таблица
 
@@ -123,11 +156,16 @@ loans(id, reader_id -> readers, book_id -> books, date_out, date_due, date_in)
 
 ## Забележка за обхвата на тази версия
 
-Тази Electron версия покрива основния работен цикъл на библиотеката (фонд,
-категории, читатели, заемане/връщане) — точно схемата, заявена за десктоп
-приложението. Специфичните за Наредба № 3 модули на оригиналното HTML
-приложение (Инвентарна книга, КДБФ, Постъпления, Отчисляване, Инвентаризация,
-МЗС, Периодика, Одитна следа, Баркод етикети, онлайн публикуване към
-chyavorec.org) **не са пренесени тук** — те продължават да се управляват през
-`inventar-biblioteka.html`, както досега. Ако искате някой от тях и в Electron
-версията, кажете кой конкретно раздел — ще го добавим по образеца по-горе.
+Тази Electron версия пренася всички модули на `inventar-biblioteka.html`, с
+едно съзнателно изключение: **автоматичното публикуване към chyavorec.org**
+(git-sync конвейерът с `katalog.json`, GitHub и Task Scheduler) остава
+изцяло в `inventar-biblioteka.html` — тази десктоп версия предлага само
+локален еднократен JSON експорт вместо него (виж раздел „Онлайн каталог“ по-горе).
+
+Не пренесени (защото са специфични за браузърната архитектура на другото
+приложение, не за самата библиотечна дейност): криптиране на файла на диска,
+File System Access API избор на папка, ротационни резервни копия в браузъра,
+цветови теми, печат/PDF оформление на официалните формуляри (протоколи,
+актове, картони) — в тази версия действията записват директно в SQLite и
+могат да се разпечатат само като таблици на екрана. Ако някое от тях ви
+трябва, кажете кое конкретно.
