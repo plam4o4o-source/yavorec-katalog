@@ -1,0 +1,48 @@
+{
+  "name": "inventar-desktop",
+  "version": "1.0.0",
+  "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
+  "main": "main.js",
+  "author": "Пачо",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "pack": "electron-builder --dir"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "org.chyavorec.inventar",
+    "productName": "Инвентар",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "db/schema.sql",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

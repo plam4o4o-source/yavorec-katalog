@@ -1,0 +1,127 @@
+:root{
+  --paper:#F4F0E4; --paper2:#FBF9F3; --paper3:#EAE4D4;
+  --rule:#D9D1BD; --rule2:#C4B99E;
+  --ink:#1B1813; --ink2:#5C5344; --ink3:#8A8171;
+  --spine:#1A1208; --spine2:#241809; --spine3:#3A2A12;
+  --brass:#96731F; --brassL:#C9A84C; --brassD:#6E5314;
+  --red:#A32B22; --redL:#F0DEDA;
+  --green:#3E6B4A; --greenL:#DFE9E0;
+  --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:'Consolas','Courier New',monospace;
+  --serif:Georgia,'Times New Roman',serif;
+  --rail:236px;
+  --sh:0 1px 2px rgba(27,24,19,.08),0 8px 24px -12px rgba(27,24,19,.25);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  font-family:var(--sans); font-size:14px; color:var(--ink);
+  background:var(--paper);
+}
+#app{display:flex;height:100vh}
+
+/* ---------- Sidebar ---------- */
+#rail{
+  width:var(--rail); flex:0 0 var(--rail); background:var(--spine); color:#e9e2cf;
+  display:flex; flex-direction:column; overflow-y:auto;
+}
+.brand{padding:20px 18px 14px; border-bottom:1px solid var(--spine3)}
+.brandTitle{font-family:var(--serif); font-size:22px; font-weight:700; color:var(--brassL); letter-spacing:.02em}
+.brandSub{font-size:11px; color:#B8AF95; margin-top:4px; line-height:1.4}
+#nav{padding:10px 0 20px}
+.nav-grp{font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:14px 18px 6px}
+#nav a{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 18px; color:#DCD4BB; text-decoration:none; font-size:13px;
+}
+#nav a:hover{background:var(--spine2)}
+#nav a.on{background:var(--spine3); color:#fff; font-weight:600; border-left:3px solid var(--brassL)}
+#nav a .n{background:var(--brassD); color:#F4EFDF; font-size:11px; padding:1px 7px; border-radius:10px}
+
+/* ---------- Main ---------- */
+#main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
+#topbar{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  padding:22px 30px 14px; border-bottom:1px solid var(--rule); background:var(--paper2);
+}
+#topbar h1{font-family:var(--serif); font-size:26px; margin:0; color:var(--spine2)}
+.sub{font-size:12px; color:var(--ink3); margin-top:2px}
+#view{padding:22px 30px 40px}
+
+/* ---------- Cards / dashboard ---------- */
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:20px}
+.card{background:var(--paper2); border:1px solid var(--rule); border-radius:4px; padding:16px 18px; box-shadow:var(--sh)}
+.card .num{font-family:var(--serif); font-size:32px; font-weight:700; color:var(--brassD)}
+.card .lbl{font-size:12px; color:var(--ink2); margin-top:2px}
+
+/* ---------- Toolbar / search ---------- */
+.toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center}
+.toolbar input[type=text], .toolbar input[type=search]{
+  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:3px;
+  font-family:var(--sans); font-size:13px; background:#fff;
+}
+
+/* ---------- Buttons ---------- */
+.btn{
+  border:1px solid var(--rule2); background:var(--paper2); color:var(--ink);
+  padding:8px 14px; border-radius:3px; font-size:13px; cursor:pointer;
+}
+.btn:hover{background:var(--paper3)}
+.btn.pri{background:var(--brass); border-color:var(--brassD); color:#fff}
+.btn.pri:hover{background:var(--brassD)}
+.btn.dgr{background:var(--red); border-color:#7C1F18; color:#fff}
+.btn.dgr:hover{background:#7C1F18}
+.btn.sm{padding:4px 9px; font-size:12px}
+
+/* ---------- Ledger table ---------- */
+.wrap{overflow-x:auto; border:1px solid var(--rule); border-radius:4px; background:var(--paper2)}
+table.ledger{width:100%; border-collapse:collapse; font-size:13px}
+table.ledger th{
+  text-align:left; padding:9px 12px; background:var(--paper3); color:var(--ink2);
+  font-size:11px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid var(--rule2);
+}
+table.ledger td{padding:8px 12px; border-bottom:1px solid var(--rule)}
+table.ledger tbody tr:hover{background:var(--paper3)}
+table.ledger .num{font-family:var(--mono)}
+.badge{padding:2px 8px; border-radius:10px; font-size:11px}
+.badge.ok{background:var(--greenL); color:var(--green)}
+.badge.warn{background:var(--redL); color:var(--red)}
+.empty{padding:30px; text-align:center; color:var(--ink3)}
+
+/* ---------- Modal ---------- */
+.veil{
+  position:fixed; inset:0; background:rgba(27,24,19,.45); display:none;
+  align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; z-index:50;
+}
+.veil.on{display:flex}
+.modal{
+  background:var(--paper2); border-radius:6px; width:100%; max-width:560px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35); overflow:hidden;
+}
+.modal header{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:16px 20px; border-bottom:1px solid var(--rule); background:var(--paper3);
+}
+.modal header h2{font-family:var(--serif); font-size:19px; margin:0}
+.modal .x{background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink2)}
+.modal .body{padding:18px 20px; max-height:65vh; overflow-y:auto}
+.modal footer{padding:14px 20px; border-top:1px solid var(--rule); display:flex; justify-content:flex-end; gap:8px}
+
+/* ---------- Forms ---------- */
+.field{margin-bottom:12px}
+.field label{display:block; font-size:12px; color:var(--ink2); margin-bottom:4px}
+.field input, .field select, .field textarea{
+  width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:3px;
+  font-family:var(--sans); font-size:13px; background:#fff;
+}
+.grid.g2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.grid.g3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px}
+
+/* ---------- Toasts ---------- */
+#toasts{position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:100}
+.toast{
+  background:var(--spine2); color:#F4EFDF; padding:10px 16px; border-radius:4px;
+  font-size:13px; box-shadow:var(--sh); transition:opacity .3s;
+}
+.toast.ok{background:var(--green)}
+.toast.err{background:var(--red)}

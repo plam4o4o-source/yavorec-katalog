@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Инвентар · Библиотечна система</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="rail">
+      <div class="brand">
+        <div class="brandTitle">Инвентар</div>
+        <div class="brandSub">НЧ „Васил Левски – 1922“ · с. Яворец</div>
+      </div>
+      <nav id="nav"></nav>
+    </aside>
+    <main id="main">
+      <header id="topbar">
+        <div>
+          <h1 id="vTitle">Табло</h1>
+          <div id="vSub" class="sub">обобщение на състоянието</div>
+        </div>
+        <div id="topActions"></div>
+      </header>
+      <section id="view"></section>
+    </main>
+  </div>
+
+  <div id="veil" class="veil">
+    <div id="modal" class="modal"></div>
+  </div>
+  <div id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
