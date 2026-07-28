@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('api', {
     choose: invoke('dbLocation:choose'),
     resetDefault: invoke('dbLocation:resetDefault')
   },
+  backup: {
+    list: invoke('backup:list'),
+    now: invoke('backup:now'),
+    restoreFromList: invoke('backup:restoreFromList'),
+    restoreBrowse: invoke('backup:restoreBrowse')
+  },
   categories: {
     list: invoke('categories:list'),
     create: invoke('categories:create'),
@@ -128,6 +134,8 @@ contextBridge.exposeInMainWorld('api', {
     disconnectFolder: invoke('catalog:disconnectFolder'),
     writeNow: invoke('catalog:writeNow'),
     export: invoke('catalog:export'),
-    exportCsv: invoke('catalog:exportCsv')
+    exportCsv: invoke('catalog:exportCsv'),
+    updateGh: invoke('catalog:updateGh'),
+    gitPublishNow: invoke('catalog:gitPublishNow')
   }
 });

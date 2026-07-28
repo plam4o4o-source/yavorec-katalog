@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const Database = require('better-sqlite3');
 const { autoUpdater } = require('electron-updater');
 
@@ -66,7 +67,10 @@ function initDb() {
     lbl_w: 'INTEGER DEFAULT 40',
     lbl_h: 'INTEGER DEFAULT 30',
     theme: "TEXT DEFAULT '1'",
-    catalog_folder: 'TEXT'
+    catalog_folder: 'TEXT',
+    gh_user: "TEXT DEFAULT 'plam4o4o-source'",
+    gh_repo: "TEXT DEFAULT 'yavorec-katalog'",
+    gh_branch: "TEXT DEFAULT 'main'"
   });
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
@@ -107,6 +111,108 @@ ipcMain.handle('dbLocation:resetDefault', () =>
     app.exit(0);
   })
 );
+
+/* ---------------- Резервни копия ----------------
+   Автоматично, веднъж на ден (при първото стартиране за деня — програмата не
+   тече постоянно на заден фон, затова "веднъж на ден" на практика означава
+   "при следващото пускане"), плюс ръчно копие по всяко време. Копията служат
+   за възстановяване след срив на компютъра/програмата, или за пренасяне на
+   базата данни на друг компютър със същата програма. */
+const AUTO_BACKUP_KEEP_DAYS = 30;
+function backupsDir() {
+  const dir = path.join(resolveDbDir(), 'backups');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function doBackupTo(destPath) {
+  if (db) db.pragma('wal_checkpoint(TRUNCATE)');
+  fs.copyFileSync(resolveDbPath(), destPath);
+}
+function pruneOldAutoBackups() {
+  const dir = backupsDir();
+  const cutoff = Date.now() - AUTO_BACKUP_KEEP_DAYS * 86400000;
+  fs.readdirSync(dir).forEach(f => {
+    if (!f.startsWith('auto-')) return;
+    const full = path.join(dir, f);
+    try { if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full); } catch (e) { /* игнорирай */ }
+  });
+}
+function autoBackupIfNeeded() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const dest = path.join(backupsDir(), `auto-${today}.db`);
+    if (!fs.existsSync(dest)) {
+      doBackupTo(dest);
+      pruneOldAutoBackups();
+      console.log('Автоматично резервно копие:', dest);
+    }
+  } catch (err) {
+    console.error('Автоматично резервно копие — грешка:', err.message);
+  }
+}
+function backupTimestamp() {
+  return new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+}
+ipcMain.handle('backup:list', () =>
+  run(() => {
+    const dir = backupsDir();
+    return fs.readdirSync(dir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const full = path.join(dir, f);
+        const st = fs.statSync(full);
+        return { name: f, path: full, size: st.size, mtime: st.mtimeMs, auto: f.startsWith('auto-') };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  })
+);
+ipcMain.handle('backup:now', async () => {
+  try {
+    const defaultPath = path.join(backupsDir(), `Inventar-backup-${backupTimestamp()}.db`);
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Направи резервно копие (може да е и на USB/мрежов диск за пренасяне на друг компютър)',
+      defaultPath,
+      filters: [{ name: 'SQLite база данни', extensions: ['db'] }]
+    });
+    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+    doBackupTo(filePath);
+    logAudit('Резервно копие', 'ръчно копие: ' + filePath);
+    return { ok: true, data: filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+function performRestore(sourcePath) {
+  const safetyDir = backupsDir();
+  const safetyPath = path.join(safetyDir, `before-restore-${backupTimestamp()}.db`);
+  if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); }
+  const activePath = resolveDbPath();
+  if (fs.existsSync(activePath)) fs.copyFileSync(activePath, safetyPath);
+  if (db) { db.close(); db = null; }
+  fs.copyFileSync(sourcePath, activePath);
+  app.relaunch();
+  app.exit(0);
+}
+ipcMain.handle('backup:restoreFromList', (e, sourcePath) =>
+  run(() => {
+    if (!fs.existsSync(sourcePath)) throw new Error('Файлът с резервното копие не е намерен.');
+    performRestore(sourcePath);
+  })
+);
+ipcMain.handle('backup:restoreBrowse', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Изберете файл с резервно копие за възстановяване (.db)',
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite база данни', extensions: ['db'] }]
+    });
+    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+    performRestore(filePaths[0]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -157,6 +263,8 @@ ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall
 let mainWindow;
 app.whenReady().then(() => {
   initDb();
+  autoBackupIfNeeded();
+  startAutoPushTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
   app.on('activate', () => {
@@ -165,6 +273,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (AUTO_PUSH_TIMER) clearInterval(AUTO_PUSH_TIMER);
   if (db) db.close();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -1095,12 +1204,54 @@ ipcMain.handle('stats:report', (e, year) =>
   })
 );
 
-/* ---------------- Онлайн каталог ----------------
+/* ---------------- Онлайн каталог (публикуване през GitHub) ----------------
    Изнасят се само библиографски данни и наличност — никога читатели, цени
-   или служебни бележки. Ако е зададена папка (Настройки → Онлайн каталог),
-   katalog.json се записва автоматично там при всяка промяна във фонда —
-   папката може да е локална, синхронизирана (OneDrive/Google Drive) или
-   работно копие на git хранилище (виж README за git-sync конвейера). */
+   или служебни бележки. Свързаната папка е работно копие (git clone) на
+   GitHub хранилището, от което сайтът чете каталога чрез
+   raw.githubusercontent.com. katalog.json се записва там автоматично при
+   всяка промяна във фонда; за разлика от браузърното приложение (което се
+   нуждаеше от отделен Windows Task Scheduler + .bat, защото браузърът не
+   може да изпълнява git), тук Electron изпълнява git add/commit/push пряко:
+   веднъж на 5 минути автоматично (ако има промяна) и по желание веднага
+   чрез бутона „Публикувай в GitHub сега“. Изисква git да е инсталиран и
+   вече удостоверен (git credential manager) на компютъра. */
+function gitRun(folder, args) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd: folder, windowsHide: true, timeout: 30000 }, (error, stdout, stderr) => {
+      resolve({ ok: !error, code: error ? error.code : 0, stdout: (stdout || '').trim(), stderr: (stderr || '').trim() });
+    });
+  });
+}
+function isGitRepo(folder) {
+  return folder && fs.existsSync(path.join(folder, '.git'));
+}
+async function gitPublish(folder) {
+  if (!isGitRepo(folder)) return { ok: false, error: 'Папката не е git хранилище (липсва .git). Клонирайте хранилището с "git clone" веднъж, преди да я свържете тук.' };
+  const add = await gitRun(folder, ['add', 'katalog.json']);
+  if (!add.ok) return { ok: false, error: 'git add: ' + (add.stderr || 'грешка') };
+  const commit = await gitRun(folder, ['commit', '-m', 'Автоматично обновяване на каталога — ' + new Date().toISOString()]);
+  if (!commit.ok && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
+    return { ok: false, error: 'git commit: ' + (commit.stderr || commit.stdout || 'грешка') };
+  }
+  const push = await gitRun(folder, ['push']);
+  if (!push.ok) return { ok: false, error: 'git push: ' + (push.stderr || 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
+  return { ok: true, committed: commit.ok };
+}
+let AUTO_PUSH_TIMER = null;
+function startAutoPushTimer() {
+  if (AUTO_PUSH_TIMER) return;
+  AUTO_PUSH_TIMER = setInterval(async () => {
+    try {
+      const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+      if (!s || !s.catalog_folder || !isGitRepo(s.catalog_folder)) return;
+      const r = await gitPublish(s.catalog_folder);
+      if (r.ok && r.committed) console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
+      else if (!r.ok) console.error('Автоматично публикуване в GitHub — грешка:', r.error);
+    } catch (err) {
+      console.error('Автоматично публикуване в GitHub — грешка:', err.message);
+    }
+  }, 5 * 60 * 1000);
+}
 function publicBookFields(b) {
   return {
     inv: b.inv_number, barcode: b.barcode, title: b.title, subtitle: b.subtitle,
@@ -1124,22 +1275,37 @@ function writeCatalogIfConfigured() {
     console.error('Автоматичен запис на каталога:', err.message);
   }
 }
+function ghRawUrl(s) {
+  const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim(), b = (s.gh_branch || 'main').trim() || 'main';
+  if (!u || !r) return null;
+  return `https://raw.githubusercontent.com/${u}/${r}/${b}/katalog.json`;
+}
 ipcMain.handle('catalog:status', () =>
   run(() => {
-    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+    const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch FROM settings WHERE id = 1').get();
     const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND department != 'служебен'`).get().n;
     const avail = db.prepare(`
       SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND b.department != 'служебен'
       AND COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id=b.id),0) >
           (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.date_in IS NULL)
     `).get().n;
-    return { folder: s ? s.catalog_folder : null, total: pub, available: avail };
+    return {
+      folder: s.catalog_folder || null, total: pub, available: avail,
+      isGitRepo: isGitRepo(s.catalog_folder), rawUrl: ghRawUrl(s),
+      ghUser: s.gh_user, ghRepo: s.gh_repo, ghBranch: s.gh_branch
+    };
+  })
+);
+ipcMain.handle('catalog:updateGh', (e, { gh_user, gh_repo, gh_branch }) =>
+  run(() => {
+    db.prepare('UPDATE settings SET gh_user=?, gh_repo=?, gh_branch=? WHERE id=1')
+      .run((gh_user || '').trim(), (gh_repo || '').trim(), (gh_branch || 'main').trim() || 'main');
   })
 );
 ipcMain.handle('catalog:chooseFolder', async () => {
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Папка за автоматичен запис на katalog.json (може да е git хранилище, OneDrive и т.н.)',
+      title: 'Изберете локалното работно копие (git clone) на GitHub хранилището yavorec-katalog',
       properties: ['openDirectory', 'createDirectory']
     });
     if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
@@ -1154,6 +1320,14 @@ ipcMain.handle('catalog:chooseFolder', async () => {
 ipcMain.handle('catalog:disconnectFolder', () =>
   run(() => { db.prepare('UPDATE settings SET catalog_folder = NULL WHERE id = 1').run(); })
 );
+ipcMain.handle('catalog:gitPublishNow', async () => {
+  const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+  if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
+  writeCatalogIfConfigured();
+  const r = await gitPublish(s.catalog_folder);
+  if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
+  return r;
+});
 ipcMain.handle('catalog:writeNow', () =>
   run(() => {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();

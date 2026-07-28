@@ -321,7 +321,10 @@ CREATE TABLE IF NOT EXISTS settings (
   lbl_w             INTEGER DEFAULT 40,
   lbl_h             INTEGER DEFAULT 30,
   theme             TEXT DEFAULT '1',
-  catalog_folder    TEXT
+  catalog_folder    TEXT,
+  gh_user           TEXT DEFAULT 'plam4o4o-source',
+  gh_repo           TEXT DEFAULT 'yavorec-katalog',
+  gh_branch         TEXT DEFAULT 'main'
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
