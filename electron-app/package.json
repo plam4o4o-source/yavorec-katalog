@@ -23,6 +23,7 @@
   "build": {
     "appId": "org.chyavorec.inventar",
     "productName": "Инвентар",
+    "publish": null,
     "asar": true,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"
