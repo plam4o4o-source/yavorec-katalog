@@ -1,0 +1,35 @@
+name: Build & publish Windows installer
+
+# Стартира се автоматично при качване на таг във формат vX.Y.Z (напр. v1.2.0).
+# Строи .exe инсталатора на истинска Windows машина (GitHub-hosted runner —
+# не е нужен wine) и публикува GitHub Release с трите файла (.exe, .exe.blockmap,
+# latest.yml), които electron-updater очаква за автоматичното обновяване.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: electron-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        run: npm run build -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
