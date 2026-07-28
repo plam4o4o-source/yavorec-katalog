@@ -36,6 +36,18 @@ function resolveDbPath() {
   return path.join(dir, 'library.db');
 }
 
+// CREATE TABLE IF NOT EXISTS в schema.sql не пипа таблица, която вече съществува —
+// затова колони, добавени в по-нова версия на програмата, трябва изрично да се
+// добавят и към вече съществуваща база данни (иначе UPDATE/SELECT към тях гърми
+// с "no such column" в стари, вече инсталирани бази). table/columns са фиксирани
+// литерали в кода (не потребителски вход), затова е безопасно да се сглобяват в SQL.
+function ensureColumns(table, columns) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
+  for (const [name, ddl] of Object.entries(columns)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  }
+}
+
 function initDb() {
   const dbPath = resolveDbPath();
   const isNew = !fs.existsSync(dbPath);
@@ -48,6 +60,14 @@ function initDb() {
   // so the same path works both in dev and in a packaged build.
   const schemaSql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
   db.exec(schemaSql);
+
+  ensureColumns('settings', {
+    lbl_mode: "TEXT DEFAULT 'sheet'",
+    lbl_w: 'INTEGER DEFAULT 40',
+    lbl_h: 'INTEGER DEFAULT 30',
+    theme: "TEXT DEFAULT '1'",
+    catalog_folder: 'TEXT'
+  });
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
 }
@@ -164,6 +184,9 @@ function friendlyDbError(err) {
   }
   if (err.code === 'SQLITE_CONSTRAINT_NOTNULL' || m.includes('NOT NULL constraint failed')) {
     return 'Задължително поле липсва.';
+  }
+  if (m.includes('no such column') || m.includes('no such table')) {
+    return 'Базата данни не е напълно обновена за тази версия на програмата. Затворете и рестартирайте програмата; ако грешката продължи, пишете за поддръжка. (' + m + ')';
   }
   return m;
 }
