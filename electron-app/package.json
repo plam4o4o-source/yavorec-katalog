@@ -50,7 +50,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "Inventar-Setup-${version}.${ext}"
     }
   }
 }
