@@ -237,7 +237,10 @@ CREATE TABLE IF NOT EXISTS settings (
   next_inv_number   INTEGER DEFAULT 1,
   committee1        TEXT,
   committee2        TEXT,
-  committee3        TEXT
+  committee3        TEXT,
+  lbl_mode          TEXT DEFAULT 'sheet',
+  lbl_w             INTEGER DEFAULT 40,
+  lbl_h             INTEGER DEFAULT 30
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 

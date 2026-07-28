@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   settings: {
     get: invoke('settings:get'),
-    update: invoke('settings:update')
+    update: invoke('settings:update'),
+    updateLabelFormat: invoke('settings:updateLabelFormat')
   },
   categories: {
     list: invoke('categories:list'),
@@ -58,6 +59,8 @@ contextBridge.exposeInMainWorld('api', {
   loans: {
     list: invoke('loans:list'),
     overdue: invoke('loans:overdue'),
+    overdueByReader: invoke('loans:overdueByReader'),
+    byReader: invoke('loans:byReader'),
     checkout: invoke('loans:checkout'),
     return: invoke('loans:return'),
     extend: invoke('loans:extend')

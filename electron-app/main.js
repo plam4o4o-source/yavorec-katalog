@@ -64,12 +64,29 @@ app.on('window-all-closed', () => {
 });
 
 /* ---------------- Помощни функции ---------------- */
+function friendlyDbError(err) {
+  const m = err.message || '';
+  if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || m.includes('UNIQUE constraint failed')) {
+    if (m.includes('books.inv_number')) return 'Този инвентарен номер вече е зает от друг документ.';
+    if (m.includes('books.barcode')) return 'Този баркод вече е зает от друг документ.';
+    if (m.includes('readers.card_no')) return 'Тази читателска карта вече е издадена на друг читател.';
+    if (m.includes('categories.name')) return 'Категория с това име вече съществува.';
+    return 'Стойността вече съществува и трябва да бъде уникална.';
+  }
+  if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || m.includes('FOREIGN KEY constraint failed')) {
+    return 'Действието е невъзможно, защото записът е свързан с други данни.';
+  }
+  if (err.code === 'SQLITE_CONSTRAINT_NOTNULL' || m.includes('NOT NULL constraint failed')) {
+    return 'Задължително поле липсва.';
+  }
+  return m;
+}
 function run(fn) {
   try {
     return { ok: true, data: fn() };
   } catch (err) {
     console.error(err);
-    return { ok: false, error: err.message };
+    return { ok: false, error: friendlyDbError(err) };
   }
 }
 function logAudit(action, detail) {
@@ -99,6 +116,12 @@ ipcMain.handle('settings:update', (e, s) =>
       WHERE id = 1
     `).run(s);
     logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
+  })
+);
+ipcMain.handle('settings:updateLabelFormat', (e, { lbl_mode, lbl_w, lbl_h }) =>
+  run(() => {
+    db.prepare('UPDATE settings SET lbl_mode=?, lbl_w=?, lbl_h=? WHERE id=1')
+      .run(lbl_mode, parseInt(lbl_w, 10) || 40, parseInt(lbl_h, 10) || 30);
   })
 );
 
@@ -449,6 +472,23 @@ ipcMain.handle('loans:list', (e, { onlyOpen } = {}) =>
 );
 ipcMain.handle('loans:overdue', () =>
   run(() => db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all())
+);
+ipcMain.handle('loans:byReader', (e, readerId) =>
+  run(() => db.prepare(`${LOAN_SELECT} WHERE l.reader_id = ? ORDER BY l.date_out DESC`).all(readerId))
+);
+ipcMain.handle('loans:overdueByReader', () =>
+  run(() => {
+    const rows = db.prepare(`
+      SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, SUM(1) AS n,
+             SUM((julianday('now') - julianday(l.date_due)) * s.fine_per_day) AS fine
+      FROM loans l JOIN readers r ON r.id = l.reader_id, settings s
+      WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') AND s.id = 1
+      GROUP BY l.reader_id
+    `).all();
+    const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.reader_id, l.date_due`).all();
+    rows.forEach(r => { r.loans = detail.filter(d => d.reader_id === r.reader_id); });
+    return rows;
+  })
 );
 ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due }) =>
   run(() => {

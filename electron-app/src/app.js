@@ -108,6 +108,57 @@ function code39svg(text, w, h) {
   return `<svg viewBox="0 0 ${w || 160} ${h || 40}" width="100%" height="${h || 40}" preserveAspectRatio="none" shape-rendering="crispEdges">${bars}</svg>`;
 }
 
+/* ---------------- Печат: обща инфраструктура ---------------- */
+let SETTINGS_CACHE = null;
+async function loadSettingsCache() { SETTINGS_CACHE = await call(window.api.settings.get()); return SETTINGS_CACHE; }
+function shead() {
+  const s = SETTINGS_CACHE || {};
+  return `<div class="porg"><b>${esc(s.org || '')}</b><br>${esc(s.lib_name || '')}<br>${esc(s.place || '')}${s.bulstat ? ' · ЕИК ' + esc(s.bulstat) : ''}</div>`;
+}
+function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
+function setPrintPage(opts) {
+  opts = opts || {};
+  let st = document.getElementById('dynPrintStyle');
+  if (!st) { st = document.createElement('style'); st.id = 'dynPrintStyle'; document.head.appendChild(st); }
+  const size = opts.widthMm ? opts.widthMm + 'mm ' + opts.heightMm + 'mm' : 'A4' + (opts.landscape ? ' landscape' : '');
+  st.textContent = `@media print{ @page{size:${size};margin:${opts.margin || '14mm 12mm'}} ${opts.extraCss || ''} }`;
+}
+function doPrint(html) {
+  $('#printArea').innerHTML = html;
+  toast('За PDF файл: в прозореца за печат изберете „Save as PDF“ / „Microsoft Print to PDF“ вместо принтер.');
+  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => window.print(), 150)));
+}
+function printLabelSheet(cardsHtml) {
+  const s = SETTINGS_CACHE || {};
+  if (s.lbl_mode === 'roll') {
+    const w = +s.lbl_w || 40, h = +s.lbl_h || 30;
+    setPrintPage({
+      widthMm: w, heightMm: h, margin: '0',
+      extraCss: `.lblsheet{display:block}.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:none;` +
+        `page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center}`
+    });
+  } else {
+    setPrintPage({ landscape: false, margin: '10mm 8mm' });
+  }
+  doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
+}
+function lblCard(b) {
+  const s = SETTINGS_CACHE || {};
+  return `<div class="lbl"><div class="l1">${esc(s.place || s.org || '')}</div>
+    ${code39svg(b.barcode || String(b.inv_number), 150, 40)}
+    <div class="l3">${esc(b.barcode || b.inv_number)}${b.call_number ? ' · ' + esc(b.call_number) : ''}</div></div>`;
+}
+function sigLblCard(b) {
+  const s = SETTINGS_CACHE || {};
+  return `<div class="lbl lbl-sig">
+    <div class="ls-udk">${esc(b.udk || '')}</div>
+    <div class="ls-avt">${esc(b.author_mark || b.call_number || '')}</div>
+    <div class="ls-org">${esc(s.lib_name || '')}, ${esc(s.place || '')}</div>
+    ${code39svg(b.barcode || String(b.inv_number), 150, 36)}
+    <div class="ls-inv">${b.inv_number}</div>
+  </div>`;
+}
+
 /* ---------------- Навигация ---------------- */
 const NAV = [
   { g: 'Общ преглед', items: [['dash', 'Табло']] },
@@ -369,7 +420,8 @@ async function renderInvBook() {
       <div class="card"><div class="num">${active.length}</div><div class="lbl">Налични</div></div>
       <div class="card"><div class="num">${rows.length - active.length}</div><div class="lbl">Отчислени</div></div>
     </div>
-    <div class="toolbar"><button class="btn pri" onclick="bookForm()">+ Нов документ</button></div>
+    <div class="toolbar"><button class="btn pri" onclick="bookForm()">+ Нов документ</button>
+      <button class="btn" onclick="printInvBookDoc()">Печат на инвентарната книга / PDF</button></div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
         <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Забележка</th></tr></thead>
@@ -387,7 +439,29 @@ async function renderInvBook() {
           </tr>`).join('') : `<tr><td colspan="10" class="empty">Инвентарната книга е празна.</td></tr>`}
       </tbody>
     </table></div>`;
+  window._INVBOOK_ROWS = rows;
 }
+function printInvBookDoc() {
+  const rows = window._INVBOOK_ROWS || [];
+  setPrintPage({ landscape: true, margin: '10mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>ИНВЕНТАРНА КНИГА</h2>
+    <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
+    Разпечатано на ${bg(today())} · записи: ${rows.length}</div>
+    <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
+    <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Забележка</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td>${bg(r.register_date)}</td><td>${r.inv_number ?? ''}</td>
+      <td>${(r.checks || []).map(c => bg(c)).join(' ')}</td>
+      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
+      <td>${esc(r.year || '')}</td><td>${mny(r.price)}</td>
+      <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(r.call_number || '')}</td>
+      <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td><td>${esc(r.description || '')}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} записа. Листовете се прошнуроват, номерират, подпечатват и
+    заверяват с подписа на ръководителя (чл. 26, ал. 2).</div>
+    ${ssig(['Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………'), esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': ' + esc((SETTINGS_CACHE || {}).director || '…………………')])}</div>`);
+}
+window.printInvBookDoc = printInvBookDoc;
 
 /* ---------------- КДБФ ---------------- */
 let KDBF_TAB = 'p1', KDBF_YEAR = null;
@@ -400,6 +474,7 @@ async function renderKdbf() {
     const m = {}; rows.forEach(x => { const k = x[key] || '—'; m[k] = (m[k] || 0) + 1; });
     return Object.entries(m).map(([k, v]) => `${esc(k)}: ${v}`).join(', ');
   };
+  window._KDBF_REPORT = r;
   $('#view').innerHTML = `
     <div class="toolbar">
       <div class="tabs" style="display:flex;gap:6px">
@@ -408,6 +483,7 @@ async function renderKdbf() {
         <button class="btn sm ${KDBF_TAB === 'p3' ? 'pri' : ''}" onclick="KDBF_TAB='p3';renderKdbf()">Част № 3 · Отчислени</button>
       </div>
       <select onchange="KDBF_YEAR=this.value;renderKdbf()">${years.map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <button class="btn" onclick="printKdbfDoc()">Печат / PDF</button>
     </div>
     ${KDBF_TAB === 'p1' ? `
       <div class="note"><b>Приложение № 1 към чл. 13, ал. 3, т. 1</b> — постъпили книги и материали за ${y} г.</div>
@@ -437,6 +513,39 @@ async function renderKdbf() {
       </div>`}
   `;
 }
+
+function printKdbfDoc() {
+  const r = window._KDBF_REPORT; if (!r) return;
+  const y = r.year;
+  setPrintPage({ landscape: true, margin: '10mm' });
+  doPrint(`
+    <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
+     <div class="pmeta"><b>Част № 1. Регистриране на постъпили книги, периодични издания и други материали</b><br>
+     Приложение № 1 към чл. 13, ал. 3, т. 1 · ${y} г.</div>
+     <table><thead><tr><th>Дата</th><th>№</th><th>Откъде и как</th><th>Вид, № и дата на документа</th><th>Общо</th>
+     <th>Инвентирани</th><th>Стойност</th><th>Инв. № от – до</th></tr></thead><tbody>
+     ${r.part1.map(a => `<tr><td>${bg(a.date)}</td><td>${a.no}</td><td>${esc(a.from_source || '')} / ${esc(a.how || '')}</td>
+     <td>${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} / ${bg(a.doc_date)}</td><td>${a.total_count}</td><td>${a.registered_count}</td>
+     <td>${mny(a.registered_value)}</td><td>${a.inv_from ? a.inv_from + '–' + a.inv_to : ''}</td></tr>`).join('')}
+     </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+
+    <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
+     <div class="pmeta"><b>Част № 3. Регистриране на отчислените книги, периодични издания и други материали</b><br>
+     Приложение № 3 към чл. 13, ал. 3, т. 3 · ${y} г.</div>
+     <table><thead><tr><th>Дата</th><th>№</th><th>Акт № / дата</th><th>Общо</th><th>Стойност</th><th>Причина</th></tr></thead><tbody>
+     ${r.part3.map(a => `<tr><td>${bg(a.date)}</td><td>${a.no}</td><td>№ ${a.no} / ${bg(a.date)}</td>
+     <td>${a.item_count}</td><td>${mny(a.item_value)}</td><td>${esc(a.reason_text || '')}</td></tr>`).join('')}
+     </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+
+    <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
+     <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
+     <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, лв.</th></tr></thead><tbody>
+     <tr><td>Наличност към 31.12.${y} г.</td><td>${r.stockEnd.n}</td><td>${mny(r.stockEnd.v)}</td></tr>
+     <tr><td>Постъпили през ${y} г.</td><td>${r.acquiredYear.n}</td><td>${mny(r.acquiredYear.v)}</td></tr>
+     <tr><td>Отчислени през ${y} г.</td><td>${r.deaccYear.n}</td><td>${mny(r.deaccYear.v)}</td></tr>
+     </tbody></table>${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
+}
+window.printKdbfDoc = printKdbfDoc;
 
 /* ---------------- Постъпления ---------------- */
 async function renderAcq() {
@@ -507,11 +616,56 @@ async function openAcq(id) {
       ${a.items.map(i => `<tr><td class="num">${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td>
       <td class="num">${esc(i.year || '')}</td><td class="num">${mny(i.price)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="hint">Все още няма инвентирани документи по тази партида.</div>'}`,
-    `<button class="btn dgr" onclick="delAcq(${id})">Изтрий</button>
+    `<button class="btn l dgr" onclick="delAcq(${id})">Изтрий</button>
+     ${a.how === 'дарение' ? `<button class="btn l" onclick="printDonationDoc(${id})">Акт за дарение / PDF</button>` : ''}
+     ${a.doc_type && a.doc_type.indexOf('без документ') > -1 ? `<button class="btn l" onclick="printAcqNoDocDoc(${id})">Протокол за придобиване / PDF</button>` : ''}
      <button class="btn" onclick="closeModal();bookForm(null, ${id})">+ Инвентирай документ</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
 }
 window.openAcq = openAcq;
+async function printDonationDoc(id) {
+  const a = await call(window.api.acquisitions.get(id));
+  if (!a) return;
+  const s = SETTINGS_CACHE || {};
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за приемане на дарение на библиотечни документи</span></h2>
+    <div class="pmeta">На основание чл. 6 от Наредба № 3 от 18.11.2014 г. комисия в състав
+    ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'} прие дарение от:<br>
+    <b>Дарител:</b> ${esc(a.from_source || '')}<br><b>Адрес:</b> ${esc(a.donor_address || '…………………')}<br>
+    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || a.items.reduce((x, i) => x + (Number(i.price) || 0), 0))}<br>
+    <b>Основание за придобиване:</b> дарение</div>
+    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Стойност, лв.</th></tr></thead><tbody>
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${mny(i.price)}</td></tr>`).join('')}
+    </tbody></table>` : ''}
+    <div class="pmeta">Актът е съставен в три екземпляра — за счетоводството, за библиотеката и за дарителя.</div>
+    ${ssig(['Дарител: …………………', 'Комисия: …………………', 'УТВЪРДИЛ: …………………'])}</div>`);
+}
+window.printDonationDoc = printDonationDoc;
+async function printAcqNoDocDoc(id) {
+  const a = await call(window.api.acquisitions.get(id));
+  if (!a) return;
+  const s = SETTINGS_CACHE || {};
+  const total = a.sum || a.items.reduce((x, i) => x + (Number(i.price) || 0), 0);
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>ПРОТОКОЛ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за придобиване на библиотечни документи без съпроводителен документ</span></h2>
+    <div class="pmeta">Днес, ${bg(a.date)} г., комисия в състав ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'},
+    установи наличието в библиотеката на посочените по-долу документи, за които <b>липсва</b> първичен счетоводен документ по чл. 3, ал. 2
+    от Наредба № 3 от 18.11.2014 г. Комисията извърши експертна оценка на стойността им, за да послужи настоящият протокол като основание
+    за редовно вписване в Книгата за движение на библиотечния фонд и в инвентарната книга.<br>
+    <b>Начин на постъпване:</b> ${esc(a.how || '')} &nbsp; <b>Откъде/от кого:</b> ${esc(a.from_source || '')}<br>
+    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща оценена стойност:</b> ${mny(total)}
+    ${a.note ? '<br><b>Забележка:</b> ' + esc(a.note) : ''}</div>
+    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Оценена стойност</th></tr></thead><tbody>
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${mny(i.price)}</td></tr>`).join('')}
+    <tr><td colspan="4"><b>ОБЩО</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>`
+    : '<div class="pmeta">Все още няма инвентирани документи по тази партида.</div>'}
+    <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,
+    част № 1, като заместващ първичен документ.</div>
+    ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+}
+window.printAcqNoDocDoc = printAcqNoDocDoc;
 async function delAcq(id) {
   if (!confirm('Изтриване на партидата?')) return;
   const res = await window.api.acquisitions.delete(id);
@@ -624,10 +778,34 @@ async function openAct(id) {
     <td class="num">${mny(a.items.reduce((s, l) => s + (Number(l.price) || 0), 0))}</td></tr>
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
-    `<button class="btn dgr" onclick="revokeAct(${id})">Анулирай акта</button>
+    `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>
+     <button class="btn" onclick="printActDoc(${id})">Печат на акта / PDF</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
 }
 window.openAct = openAct;
+async function printActDoc(id) {
+  const a = await call(window.api.deaccessionActs.get(id));
+  if (!a) return;
+  const s = SETTINGS_CACHE || {};
+  const total = a.items.reduce((sum, l) => sum + (Number(l.price) || 0), 0);
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за отчисляване на библиотечни документи</span></h2>
+    <div class="pmeta">Днес, ${bg(a.date)} г., комисия, назначена със заповед ${a.order_no ? '№ ' + esc(a.order_no) : '№ …………'} на
+    ${esc(s.director_role || 'ръководителя')} на ${esc(s.org || '')}, в състав:<br>
+    1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
+    на основание <b>чл. 30, т. ${a.reason_code}</b> от Наредба № 3 от 18.11.2014 г. — <b>${esc(a.reason_text)}</b> — отчислява от библиотечния фонд
+    <b>${a.items.length}</b> библиотечни документа на обща стойност <b>${mny(total)}</b></div>
+    <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th><th>Стойност, лв.</th></tr></thead><tbody>
+    ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
+    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
+    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${mny(l.price)}</td></tr>`).join('')}
+    <tr><td colspan="5"><b>ОБЩО</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>
+    <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
+    Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>
+    ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+}
+window.printActDoc = printActDoc;
 async function revokeAct(id) {
   if (!confirm('Анулиране на акта и връщане на документите във фонда. Използвайте само при сгрешен акт. Да продължа?')) return;
   const res = await window.api.deaccessionActs.revoke(id);
@@ -647,12 +825,13 @@ async function renderReaders() {
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
     </div>
     <div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:160px"></th></tr></thead>
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:230px"></th></tr></thead>
       <tbody>
         ${readers.length ? readers.map(r => `
           <tr><td>${esc(r.name)}</td><td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
             <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
             <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
+                <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
                 <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
           : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`}
       </tbody>
@@ -796,6 +975,7 @@ async function renderOver() {
   $('#view').innerHTML = `
     <div class="note w"><b>Чл. 43, ал. 2 и чл. 49, ал. 1, т. 3</b> — библиотекарят следи сроковете при забава.
     Общо дължимо обезщетение: <b>${mny(total)}</b></div>
+    <div class="toolbar"><button class="btn" onclick="printOverdueNotices()">Печат на напомняния / PDF</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Читател</th><th>Инв. №</th><th>Заглавие</th>
       <th>Срок</th><th>Дни</th><th>Обезщетение</th><th style="width:180px"></th></tr></thead><tbody>
     ${rows.map(l => {
@@ -991,6 +1171,7 @@ function mzsBadgeClass(s) { return { 'заявено': '', 'изпратено':
 async function renderMzs() {
   const rows = await call(window.api.mzs.list());
   if (!rows) return;
+  window._MZS_ROWS = rows;
   $('#view').innerHTML = `
     <div class="note">Регистър на заявките за междубиблиотечно заемане — изходящи и входящи.</div>
     <div class="toolbar"><button class="btn pri" onclick="mzsForm()">+ Нова заявка</button></div>
@@ -1027,11 +1208,28 @@ async function mzsForm(m) {
       ${fld('Срок за връщане', 'due_date', { val: v.due_date || '', type: 'date' })}
       ${fld('Забележка', 'note', { val: v.note || '', type: 'textarea', rows: 2 })}
     </form>`,
-    `${m ? `<button class="btn dgr" onclick="delMzs(${m.id})">Изтрий</button>` : ''}
+    `${m ? `<button class="btn l dgr" onclick="delMzs(${m.id})">Изтрий</button>
+     <button class="btn l" onclick="printMzsDoc(${m.id})">Печат / PDF</button>` : ''}
      <button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveMzs(${m ? m.id : 'null'})">Запиши</button>`);
 }
 window.mzsForm = mzsForm;
+function printMzsDoc(id) {
+  const m = (window._MZS_ROWS || []).find(x => x.id === id);
+  if (!m) return;
+  const s = SETTINGS_CACHE || {};
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ № ${m.no} / ${bg(m.date)}</h2>
+    <div class="pmeta">
+    <b>Посока:</b> ${esc(m.direction)} &nbsp; <b>Библиотека партньор:</b> ${esc(m.partner)}<br>
+    <b>Търсен документ:</b> ${esc([m.author, m.title].filter(Boolean).join('. '))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
+    ${m.requester ? '<b>Заявител:</b> ' + esc(m.requester) + '<br>' : ''}
+    <b>Статус:</b> ${esc(m.status)}${m.due_date ? ' · срок за връщане ' + bg(m.due_date) : ''}
+    ${m.note ? '<br><b>Забележка:</b> ' + esc(m.note) : ''}</div>
+    ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………'), esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+}
+window.printMzsDoc = printMzsDoc;
 async function saveMzs(id) {
   const d = formData('#mzsF'); d.id = id;
   if (!d.partner.trim() || !d.title.trim()) return toast('Библиотеката партньор и заглавието са задължителни.', 'err');
@@ -1042,7 +1240,8 @@ async function saveMzs(id) {
 window.saveMzs = saveMzs;
 async function openMzs(id) {
   const rows = await call(window.api.mzs.list());
-  const m = (rows || []).find(x => x.id === id);
+  window._MZS_ROWS = rows || [];
+  const m = window._MZS_ROWS.find(x => x.id === id);
   if (m) mzsForm(m);
 }
 window.openMzs = openMzs;
@@ -1132,15 +1331,53 @@ window.exportCatalog = exportCatalog;
 
 /* ---------------- Баркод етикети ---------------- */
 async function renderLabels() {
+  const s = SETTINGS_CACHE || await loadSettingsCache();
   $('#view').innerHTML = `
-    <div class="note">Етикетите се печатат във формат <b>Code 39</b> — разчита се от всеки USB баркод четец без настройка.</div>
-    <div class="card"><h3 style="margin-top:0">Баркод етикети за фонда</h3>
-      <div class="grid g2">
-        ${fld('От инвентарен №', 'lblFrom', {})}
-        ${fld('До инвентарен №', 'lblTo', {})}
-      </div>
-      <div class="toolbar"><button class="btn pri" onclick="printLabelsRange()">Печат на етикети</button></div>
+    <div class="note">Етикетите се печатат във формат <b>Code 39</b> — разчита се от всеки USB баркод четец без настройка.
+    Съвместимо е с обикновен принтер (A4 лист, 3 колони) и с ролкови лейбъл принтери (Zebra, Brother QL, Dymo и др.).</div>
+
+    <div class="card"><h3 style="margin-top:0">Формат на печат за етикети</h3>
+      <form id="lblFmtF" onsubmit="return false">
+        <div class="grid g3">
+          ${fld('Формат', 'lbl_mode', { type: 'select', allowEmpty: false, val: s.lbl_mode, opts: [{ v: 'sheet', t: 'A4 лист (3 колони)' }, { v: 'roll', t: 'Ролков лейбъл принтер (1 етикет на страница)' }] })}
+          ${fld('Ширина на етикета (мм)', 'lbl_w', { val: s.lbl_w, type: 'number', hint: 'само за ролков принтер' })}
+          ${fld('Височина на етикета (мм)', 'lbl_h', { val: s.lbl_h, type: 'number', hint: 'само за ролков принтер' })}
+        </div>
+      </form>
+      <button class="btn pri" onclick="saveLabelFormat()">Запиши формата</button>
     </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><h3 style="margin-top:0">Баркод етикети за фонда</h3>
+        <p class="hint" style="margin-top:0">Всеки етикет съдържа името на библиотеката, баркод и инвентарен номер.</p>
+        <div class="grid g2">
+          ${fld('От инвентарен №', 'lblFrom', {})}
+          ${fld('До инвентарен №', 'lblTo', {})}
+        </div>
+        <div class="toolbar"><button class="btn pri" onclick="printLabelsRange()">Печат на диапазон</button>
+        <button class="btn" onclick="printLabelsAll()">Всички</button></div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Читателски карти</h3>
+        <p class="hint" style="margin-top:0">Печат на баркод карти за всички активни читатели.</p>
+        <button class="btn pri" onclick="printCardsAll()">Печат на карти</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Етикети за сигнатура (за гръбчето на книгата)</h3>
+      <div class="note" style="margin-top:0">УДК на първия ред, авторски знак под него, името на библиотеката над баркода,
+      инвентарният номер под баркода.</div>
+      <div class="grid g2">
+        ${fld('От инвентарен №', 'sigFrom', {})}
+        ${fld('До инвентарен №', 'sigTo', {})}
+      </div>
+      <div class="toolbar"><button class="btn pri" onclick="printSignatureLabelsRange()">Печат на диапазон</button>
+      <button class="btn" onclick="printSignatureLabelsAll()">Всички</button></div>
+      <div style="margin-top:10px;width:170px;border:1px solid var(--rule2);background:#fff;padding:8px 6px;text-align:center">
+        ${sigLblCard({ udk: '821.163.2-31', author_mark: 'В-15', inv_number: 1, barcode: '1' })}
+      </div>
+      <div class="hint" style="margin-top:6px">Пример за оформлението.</div>
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Проверка на четеца</h3>
       <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
         <div style="width:200px;border:1px solid var(--rule2);background:#fff;padding:9px;text-align:center">
@@ -1151,8 +1388,7 @@ async function renderLabels() {
           <div id="testOut" class="hint" style="margin-top:7px">Ако се появи TEST-123, четецът е настроен правилно.</div>
         </div>
       </div>
-    </div>
-    <div id="printArea" style="display:none"></div>`;
+    </div>`;
   const t = $('#testScan');
   t.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return; e.preventDefault();
@@ -1161,21 +1397,96 @@ async function renderLabels() {
       : 'Прочетено: <b>' + esc(t.value) + '</b> — различава се от очакваното TEST-123.';
   });
 }
+async function saveLabelFormat() {
+  const d = formData('#lblFmtF');
+  await call(window.api.settings.updateLabelFormat(d), 'Форматът за печат на етикети е записан.');
+  await loadSettingsCache();
+}
+window.saveLabelFormat = saveLabelFormat;
+async function activeBooks() {
+  const books = await call(window.api.books.list(''));
+  return (books || []).filter(b => b.status !== 'отчислен');
+}
 async function printLabelsRange() {
   const from = parseInt($('[name=lblFrom]').value, 10), to = parseInt($('[name=lblTo]').value, 10);
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
-  const books = await call(window.api.books.list(''));
-  const s = await call(window.api.settings.get());
-  const rows = (books || []).filter(b => b.inv_number >= from && b.inv_number <= to);
-  if (!rows.length) return toast('Няма книги в този диапазон.', 'err');
-  const cards = rows.map(b => `<div class="lbl-card">
-    <div class="lbl-lib">${esc(s ? s.lib_name : '')}</div>
-    ${code39svg(b.barcode || String(b.inv_number), 160, 40)}
-    <div class="lbl-inv">${b.inv_number}</div></div>`).join('');
-  $('#printArea').innerHTML = `<div class="lbl-sheet">${cards}</div>`;
-  window.print();
+  const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
+  if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
+  printLabelSheet(rows.map(lblCard).join(''));
 }
 window.printLabelsRange = printLabelsRange;
+async function printLabelsAll() {
+  const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
+  if (!rows.length) return toast('Фондът е празен.', 'err');
+  printLabelSheet(rows.map(lblCard).join(''));
+}
+window.printLabelsAll = printLabelsAll;
+async function printSignatureLabelsRange() {
+  const from = parseInt($('[name=sigFrom]').value, 10), to = parseInt($('[name=sigTo]').value, 10);
+  if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
+  const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
+  if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
+  printLabelSheet(rows.map(sigLblCard).join(''));
+}
+window.printSignatureLabelsRange = printSignatureLabelsRange;
+async function printSignatureLabelsAll() {
+  const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
+  if (!rows.length) return toast('Фондът е празен.', 'err');
+  printLabelSheet(rows.map(sigLblCard).join(''));
+}
+window.printSignatureLabelsAll = printSignatureLabelsAll;
+async function printCardsAll() {
+  const readers = await call(window.api.readers.list(''));
+  const rows = (readers || []).filter(r => r.status !== 'прекратен');
+  if (!rows.length) return toast('Няма активни читатели.', 'err');
+  const s = SETTINGS_CACHE || {};
+  printLabelSheet(rows.map(r => `<div class="lbl">
+    <div class="l1">${esc(s.lib_name || '')}</div>${code39svg(r.card_no || String(r.id), 150, 40)}
+    <div class="l3">${esc(r.card_no || '')}</div>
+    <div style="font-size:8pt;margin-top:1mm">${esc(r.name || '')}</div></div>`).join(''));
+}
+window.printCardsAll = printCardsAll;
+async function printReaderCard(id) {
+  const r = await call(window.api.readers.get(id));
+  if (!r) return;
+  const loans = await call(window.api.loans.byReader(id)) || [];
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2>ЧИТАТЕЛСКИ КАРТОН № ${esc(r.card_no || '')}</h2>
+    <div class="pmeta">
+    <b>Име:</b> ${esc(r.name)}<br>
+    <b>ЕГН:</b> ${esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
+    <b>Постоянен адрес:</b> ${esc(r.address || '…')}<br>
+    <b>Телефон:</b> ${esc(r.phone || '…')} &nbsp; <b>Имейл:</b> ${esc(r.email || '…')}<br>
+    <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}</div>
+    <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
+      ${code39svg(r.card_no || String(r.id), 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no || '')}</div></div>
+    <table><thead><tr><th>Дата на заемане</th><th>Инв. №</th><th>Заглавие</th><th>Срок</th><th>Върнат на</th></tr></thead><tbody>
+    ${loans.slice(0, 14).map(l => `<tr><td>${bg(l.date_out)}</td><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
+      <td>${bg(l.date_due) || ''}</td><td>${l.date_in ? bg(l.date_in) : ''}</td></tr>`).join('')}
+    </tbody></table>
+    ${ssig(['Подпис на читателя: …………………', 'Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………')])}</div>`);
+}
+window.printReaderCard = printReaderCard;
+async function printOverdueNotices() {
+  const rows = await call(window.api.loans.overdueByReader());
+  if (!rows || !rows.length) return toast('Няма просрочени заемания.', 'err');
+  const s = SETTINGS_CACHE || {};
+  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  doPrint(rows.map(r => `<div class="pdoc">${shead()}
+    <h2>НАПОМНИТЕЛНО ПИСМО</h2>
+    <div class="pmeta">До: <b>${esc(r.name)}</b><br>
+    Адрес: ${esc(r.address2 || r.address || '…………………')}<br><br>
+    Уважаеми/а читателю,<br><br>
+    Съгласно чл. 43, ал. 1 от Наредба № 3 от 18.11.2014 г. всеки ползвател е длъжен да върне заетите библиотечни документи
+    в определения срок. Според нашата документация срокът на изброените по-долу документи е изтекъл.</div>
+    <table><thead><tr><th>Инв. №</th><th>Заглавие</th><th>Зает на</th><th>Срок</th></tr></thead><tbody>
+    ${r.loans.map(l => `<tr><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td><td>${bg(l.date_out)}</td><td>${bg(l.date_due)}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b> (${s.fine_per_day} лв./ден забава по чл. 43, ал. 2).</div>
+    ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''));
+}
+window.printOverdueNotices = printOverdueNotices;
 
 /* ---------------- Одитна следа ---------------- */
 let ODIT_Q = '';
@@ -1256,9 +1567,10 @@ async function renderSetup() {
 async function saveSetup() {
   const d = formData('#stF'); d.id = 1;
   await call(window.api.settings.update(d), 'Настройките са записани.');
+  await loadSettingsCache();
 }
 window.saveSetup = saveSetup;
 
 /* ---------------- Старт ---------------- */
 initUserBadge();
-route();
+loadSettingsCache().then(route);
