@@ -1,0 +1,128 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
+
+contextBridge.exposeInMainWorld('api', {
+  app: {
+    setUser: invoke('app:setUser'),
+    getUser: invoke('app:getUser'),
+    getVersion: invoke('app:getVersion'),
+    checkForUpdates: invoke('app:checkForUpdates'),
+    installUpdate: invoke('app:installUpdate'),
+    onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data))
+  },
+  settings: {
+    get: invoke('settings:get'),
+    update: invoke('settings:update'),
+    updateLabelFormat: invoke('settings:updateLabelFormat'),
+    updateTheme: invoke('settings:updateTheme')
+  },
+  dbLocation: {
+    get: invoke('dbLocation:get'),
+    choose: invoke('dbLocation:choose'),
+    resetDefault: invoke('dbLocation:resetDefault')
+  },
+  categories: {
+    list: invoke('categories:list'),
+    create: invoke('categories:create'),
+    update: invoke('categories:update'),
+    delete: invoke('categories:delete')
+  },
+  books: {
+    list: invoke('books:list'),
+    get: invoke('books:get'),
+    byBarcode: invoke('books:byBarcode'),
+    create: invoke('books:create'),
+    update: invoke('books:update'),
+    delete: invoke('books:delete'),
+    addCheck: invoke('books:addCheck'),
+    checks: invoke('books:checks')
+  },
+  invBook: {
+    list: invoke('invBook:list')
+  },
+  acquisitions: {
+    list: invoke('acquisitions:list'),
+    get: invoke('acquisitions:get'),
+    nextNo: invoke('acquisitions:nextNo'),
+    create: invoke('acquisitions:create'),
+    delete: invoke('acquisitions:delete')
+  },
+  deaccessionActs: {
+    list: invoke('deaccessionActs:list'),
+    get: invoke('deaccessionActs:get'),
+    nextNo: invoke('deaccessionActs:nextNo'),
+    findBook: invoke('deaccessionActs:findBook'),
+    create: invoke('deaccessionActs:create'),
+    revoke: invoke('deaccessionActs:revoke')
+  },
+  kdbf: {
+    report: invoke('kdbf:report')
+  },
+  readers: {
+    list: invoke('readers:list'),
+    get: invoke('readers:get'),
+    byCard: invoke('readers:byCard'),
+    create: invoke('readers:create'),
+    update: invoke('readers:update'),
+    delete: invoke('readers:delete')
+  },
+  loans: {
+    list: invoke('loans:list'),
+    overdue: invoke('loans:overdue'),
+    overdueByReader: invoke('loans:overdueByReader'),
+    byReader: invoke('loans:byReader'),
+    checkout: invoke('loans:checkout'),
+    checkoutByCode: invoke('loans:checkoutByCode'),
+    return: invoke('loans:return'),
+    returnByCode: invoke('loans:returnByCode'),
+    extend: invoke('loans:extend')
+  },
+  dashboard: {
+    stats: invoke('dashboard:stats'),
+    full: invoke('dashboard:full')
+  },
+  inventorySessions: {
+    list: invoke('inventorySessions:list'),
+    requirement: invoke('inventorySessions:requirement'),
+    start: invoke('inventorySessions:start'),
+    get: invoke('inventorySessions:get'),
+    scan: invoke('inventorySessions:scan'),
+    close: invoke('inventorySessions:close')
+  },
+  periodicals: {
+    list: invoke('periodicals:list'),
+    get: invoke('periodicals:get'),
+    create: invoke('periodicals:create'),
+    update: invoke('periodicals:update'),
+    delete: invoke('periodicals:delete')
+  },
+  periodicalIssues: {
+    add: invoke('periodicalIssues:add'),
+    delete: invoke('periodicalIssues:delete')
+  },
+  mzs: {
+    list: invoke('mzs:list'),
+    nextNo: invoke('mzs:nextNo'),
+    create: invoke('mzs:create'),
+    update: invoke('mzs:update'),
+    delete: invoke('mzs:delete')
+  },
+  audit: {
+    list: invoke('audit:list')
+  },
+  visits: {
+    add: invoke('visits:add')
+  },
+  stats: {
+    report: invoke('stats:report')
+  },
+  catalog: {
+    status: invoke('catalog:status'),
+    chooseFolder: invoke('catalog:chooseFolder'),
+    disconnectFolder: invoke('catalog:disconnectFolder'),
+    writeNow: invoke('catalog:writeNow'),
+    export: invoke('catalog:export'),
+    exportCsv: invoke('catalog:exportCsv')
+  }
+});

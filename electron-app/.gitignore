@@ -1,0 +1,6 @@
+node_modules/
+dist/
+db/library.db
+db/library.db-wal
+db/library.db-shm
+*.log

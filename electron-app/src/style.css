@@ -1,0 +1,222 @@
+:root{
+  --paper:#F4F0E4; --paper2:#FBF9F3; --paper3:#EAE4D4;
+  --rule:#D9D1BD; --rule2:#C4B99E;
+  --ink:#1B1813; --ink2:#5C5344; --ink3:#8A8171;
+  --spine:#1A1208; --spine2:#241809; --spine3:#3A2A12;
+  --brass:#96731F; --brassL:#C9A84C; --brassD:#6E5314;
+  --red:#A32B22; --redL:#F0DEDA;
+  --green:#3E6B4A; --greenL:#DFE9E0;
+  --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:'Consolas','Courier New',monospace;
+  --serif:Georgia,'Times New Roman',serif;
+  --rail:270px;
+  --sh:0 1px 2px rgba(27,24,19,.08),0 8px 24px -12px rgba(27,24,19,.25);
+}
+/* ---------- Цветови теми (Настройки → Външен вид) — тема 1 „Бронз“ е по подразбиране, зададена в :root ---------- */
+html[data-theme="2"]{ /* Наситено синьо */
+  --paper:#EEF2F6; --paper2:#F8FAFC; --paper3:#E2E9EF; --rule:#CBD8E3; --rule2:#B3C4D4;
+  --spine:#0F1B2E; --spine2:#15263D; --spine3:#22364F;
+  --brass:#2C5C8F; --brassL:#6FA8DC; --brassD:#1B3E60;
+}
+html[data-theme="3"]{ /* Горско зелено */
+  --paper:#EFF3EC; --paper2:#F9FBF7; --paper3:#E2E9DC; --rule:#CBDAC2; --rule2:#B2C7A5;
+  --spine:#0E1F14; --spine2:#16301E; --spine3:#254A30;
+  --brass:#2E6B45; --brassL:#75B48D; --brassD:#1D4A2E;
+}
+html[data-theme="4"]{ /* Бордо */
+  --paper:#F5EDEC; --paper2:#FCF7F6; --paper3:#EBDEDC; --rule:#DCC2BE; --rule2:#C9A29C;
+  --spine:#22090F; --spine2:#331019; --spine3:#4A1B26;
+  --brass:#7A2036; --brassL:#B85670; --brassD:#4E1322;
+}
+html[data-theme="5"]{ /* Графит */
+  --paper:#EEF0F1; --paper2:#F9FAFA; --paper3:#E2E5E7; --rule:#C9CFD3; --rule2:#AFB8BD;
+  --spine:#1C2126; --spine2:#262D34; --spine3:#3A4550;
+  --brass:#536573; --brassL:#93A7B5; --brassD:#37454F;
+}
+html[data-theme="6"]{ /* Кафяво-теракота */
+  --paper:#F3ECE3; --paper2:#FBF7F1; --paper3:#E9DECE; --rule:#D9C6AC; --rule2:#C6AC87;
+  --spine:#22140A; --spine2:#301D0F; --spine3:#4A2E18;
+  --brass:#A65A2E; --brassL:#D99461; --brassD:#7A3F1D;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  font-family:var(--sans); font-size:14px; color:var(--ink);
+  background:var(--paper);
+}
+#app{display:flex;height:100vh}
+
+/* ---------- Sidebar ---------- */
+#rail{
+  width:var(--rail); flex:0 0 var(--rail); background:var(--spine); color:#e9e2cf;
+  display:flex; flex-direction:column; overflow-y:auto;
+}
+.brand{padding:24px 20px 16px; border-bottom:1px solid var(--spine3)}
+.brandTitle{font-family:var(--serif); font-size:28px; font-weight:700; color:var(--brassL); letter-spacing:.02em}
+.brandTagline{font-size:12px; color:#C9BFA0; margin-top:3px; letter-spacing:.08em; text-transform:uppercase}
+.brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
+#nav{padding:12px 0 20px}
+.nav-grp{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:16px 20px 7px}
+#nav a{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:10px 20px; color:#DCD4BB; text-decoration:none; font-size:14.5px;
+}
+#nav a:hover{background:var(--spine2)}
+#nav a.on{background:var(--spine3); color:#fff; font-weight:600; border-left:3px solid var(--brassL)}
+#nav a .n{background:var(--brassD); color:#F4EFDF; font-size:12px; padding:2px 8px; border-radius:10px}
+
+/* ---------- Main ---------- */
+#main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
+#topbar{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  padding:22px 30px 14px; border-bottom:1px solid var(--rule); background:var(--paper2);
+}
+#topbar h1{font-family:var(--serif); font-size:26px; margin:0; color:var(--spine2)}
+.sub{font-size:12px; color:var(--ink3); margin-top:2px}
+#view{padding:22px 30px 40px}
+
+/* ---------- Cards / dashboard ---------- */
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:20px}
+.card{background:var(--paper2); border:1px solid var(--rule); border-radius:4px; padding:16px 18px; box-shadow:var(--sh)}
+.card .num{font-family:var(--serif); font-size:32px; font-weight:700; color:var(--brassD)}
+.card .lbl{font-size:12px; color:var(--ink2); margin-top:2px}
+
+/* ---------- Toolbar / search ---------- */
+.toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center}
+.toolbar input[type=text], .toolbar input[type=search]{
+  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:3px;
+  font-family:var(--sans); font-size:13px; background:#fff;
+}
+
+/* ---------- Сканиране на баркод (заемане/връщане, инвентаризация, отчисляване) ---------- */
+.scan{
+  width:100%; padding:12px 14px; border:2px solid var(--brass); border-radius:2px;
+  font-family:var(--mono); font-size:16px; background:#fff;
+}
+.scanlog{padding:7px 10px; margin-bottom:5px; font-size:13px; border-left:3px solid var(--rule2); background:var(--paper3)}
+.scanlog.ok{background:var(--greenL); border-left-color:var(--green)}
+.scanlog.warn,.scanlog.err{background:var(--redL); border-left-color:var(--red)}
+
+/* ---------- Buttons ---------- */
+.btn{
+  border:1px solid var(--rule2); background:var(--paper2); color:var(--ink);
+  padding:8px 14px; border-radius:3px; font-size:13px; cursor:pointer;
+}
+.btn:hover{background:var(--paper3)}
+.btn.pri{background:var(--brass); border-color:var(--brassD); color:#fff}
+.btn.pri:hover{background:var(--brassD)}
+.btn.dgr{background:var(--red); border-color:#7C1F18; color:#fff}
+.btn.dgr:hover{background:#7C1F18}
+.btn.sm{padding:4px 9px; font-size:12px}
+
+/* ---------- Ledger table ---------- */
+.wrap{overflow-x:auto; border:1px solid var(--rule); border-radius:4px; background:var(--paper2)}
+table.ledger{width:100%; border-collapse:collapse; font-size:13px}
+table.ledger th{
+  text-align:left; padding:9px 12px; background:var(--paper3); color:var(--ink2);
+  font-size:11px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid var(--rule2);
+}
+table.ledger td{padding:8px 12px; border-bottom:1px solid var(--rule)}
+table.ledger tbody tr:hover{background:var(--paper3)}
+table.ledger .num{font-family:var(--mono)}
+.badge{padding:2px 8px; border-radius:10px; font-size:11px}
+.badge.ok{background:var(--greenL); color:var(--green)}
+.badge.warn{background:var(--redL); color:var(--red)}
+.empty{padding:30px; text-align:center; color:var(--ink3)}
+
+/* ---------- Modal ---------- */
+.veil{
+  position:fixed; inset:0; background:rgba(27,24,19,.45); display:none;
+  align-items:flex-start; justify-content:center; padding:40px 20px; overflow-y:auto; z-index:50;
+}
+.veil.on{display:flex}
+.modal{
+  background:var(--paper2); border-radius:6px; width:100%; max-width:560px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35); overflow:hidden;
+}
+.modal header{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:16px 20px; border-bottom:1px solid var(--rule); background:var(--paper3);
+}
+.modal header h2{font-family:var(--serif); font-size:19px; margin:0}
+.modal .x{background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink2)}
+.modal .body{padding:18px 20px; max-height:65vh; overflow-y:auto}
+.modal footer{padding:14px 20px; border-top:1px solid var(--rule); display:flex; justify-content:flex-end; gap:8px}
+
+/* ---------- Forms ---------- */
+.field{margin-bottom:12px}
+.field label{display:block; font-size:12px; color:var(--ink2); margin-bottom:4px}
+.field input, .field select, .field textarea{
+  width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:3px;
+  font-family:var(--sans); font-size:13px; background:#fff;
+}
+.grid.g2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.grid.g3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px}
+.grid.g4{display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px}
+fieldset{border:1px solid var(--rule); border-radius:4px; margin:0 0 14px; padding:12px 14px}
+fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); padding:0 6px}
+
+/* ---------- Странична лента — долен колонтитул ---------- */
+#rail{display:flex; flex-direction:column}
+.railFoot{margin-top:auto; padding:16px 20px; border-top:1px solid var(--spine3)}
+.userBadge{
+  width:100%; background:var(--spine2); border:1.5px solid var(--brassD); color:#F4EFDF; padding:13px 14px;
+  border-radius:4px; font-size:14.5px; font-weight:600; cursor:pointer; text-align:left;
+}
+.userBadge:hover{background:var(--spine3); border-color:var(--brassL)}
+.appCredit{font-size:10px; color:#8A8168; margin-top:10px; text-align:center; line-height:1.4}
+
+/* ---------- Checkbox полета ---------- */
+.chk{display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--ink2); margin:10px 0; cursor:pointer}
+.chk input{margin-top:2px}
+.fh{font-weight:400; color:var(--ink3); font-size:11px}
+
+/* ---------- Badge (статус/КПИ маркери) ---------- */
+.badge{padding:2px 8px; border-radius:10px; font-size:11px; background:var(--paper3); color:var(--ink2)}
+.badge.ok{background:var(--greenL); color:var(--green)}
+.badge.warn{background:var(--redL); color:var(--red)}
+.num.warn{color:var(--red); font-weight:700}
+
+/* ---------- Карти (табло, справки) ---------- */
+.card h3{font-family:var(--serif); font-size:16px; margin:0 0 10px}
+
+/* ---------- Печат на етикети ---------- */
+.lblsheet{display:grid; grid-template-columns:repeat(3,1fr); gap:3mm}
+.lbl{border:1px dashed #999; padding:2.5mm; text-align:center; break-inside:avoid}
+.lbl .l1{font-size:7.5pt; font-weight:700; letter-spacing:.04em; margin-bottom:1mm}
+.lbl .l3{font-family:var(--mono); font-size:8pt; margin-top:1mm; letter-spacing:.06em}
+.lbl svg{width:100%; height:11mm}
+.lbl-sig{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6mm; padding:1.8mm 2mm}
+.lbl-sig .ls-udk{font-weight:700; font-size:8.5pt; line-height:1.1}
+.lbl-sig .ls-avt{font-size:8pt; line-height:1.1}
+
+/* ---------- Печатни документи (протоколи, актове, картони) ----------
+   #printArea е скрита на екрана и се показва само при печат (window.print()),
+   по същия принцип като #print в оригиналното приложение. */
+#printArea{display:none}
+.pdoc h2{font-family:var(--serif); font-size:19pt; text-align:center; margin:0 0 3mm}
+.pdoc .porg{text-align:center; font-size:10pt; line-height:1.45; margin-bottom:6mm}
+.pdoc .porg b{font-size:11.5pt}
+.pdoc .pmeta{font-size:9.5pt; margin-bottom:4mm; line-height:1.7}
+.pdoc table{border-collapse:collapse; width:100%; margin-bottom:5mm; font-size:9.5pt}
+.pdoc table th,.pdoc table td{border:1px solid #999; padding:1.5mm 2mm; text-align:left}
+.pdoc table th{background:#eee}
+.pdoc .psig{display:flex; justify-content:space-between; margin-top:14mm; font-size:10pt; gap:20mm}
+.pdoc .psig div{flex:1; border-top:1px solid #000; padding-top:2mm}
+
+@media print{
+  body *{visibility:hidden}
+  #printArea, #printArea *{visibility:visible}
+  #printArea{position:absolute; left:0; top:0; width:100%; display:block !important; padding:0}
+  #printArea .pdoc{page-break-after:always; padding:0 0 12mm}
+  #printArea .pdoc:last-child{page-break-after:auto}
+}
+
+/* ---------- Toasts ---------- */
+#toasts{position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:100}
+.toast{
+  background:var(--spine2); color:#F4EFDF; padding:10px 16px; border-radius:4px;
+  font-size:13px; box-shadow:var(--sh); transition:opacity .3s;
+}
+.toast.ok{background:var(--green)}
+.toast.err{background:var(--red)}
