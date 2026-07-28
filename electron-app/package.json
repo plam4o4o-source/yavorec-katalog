@@ -28,7 +28,8 @@
       {
         "provider": "github",
         "owner": "plam4o4o-source",
-        "repo": "yavorec-katalog"
+        "repo": "yavorec-katalog",
+        "releaseType": "release"
       }
     ],
     "asar": true,
