@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('api', {
   readers: {
     list: invoke('readers:list'),
     get: invoke('readers:get'),
+    byCard: invoke('readers:byCard'),
     create: invoke('readers:create'),
     update: invoke('readers:update'),
     delete: invoke('readers:delete')
@@ -62,7 +63,9 @@ contextBridge.exposeInMainWorld('api', {
     overdueByReader: invoke('loans:overdueByReader'),
     byReader: invoke('loans:byReader'),
     checkout: invoke('loans:checkout'),
+    checkoutByCode: invoke('loans:checkoutByCode'),
     return: invoke('loans:return'),
+    returnByCode: invoke('loans:returnByCode'),
     extend: invoke('loans:extend')
   },
   dashboard: {

@@ -61,6 +61,15 @@ body{
   font-family:var(--sans); font-size:13px; background:#fff;
 }
 
+/* ---------- Сканиране на баркод (заемане/връщане, инвентаризация, отчисляване) ---------- */
+.scan{
+  width:100%; padding:12px 14px; border:2px solid var(--brass); border-radius:2px;
+  font-family:var(--mono); font-size:16px; background:#fff;
+}
+.scanlog{padding:7px 10px; margin-bottom:5px; font-size:13px; border-left:3px solid var(--rule2); background:var(--paper3)}
+.scanlog.ok{background:var(--greenL); border-left-color:var(--green)}
+.scanlog.warn,.scanlog.err{background:var(--redL); border-left-color:var(--red)}
+
 /* ---------- Buttons ---------- */
 .btn{
   border:1px solid var(--rule2); background:var(--paper2); color:var(--ink);

@@ -437,6 +437,7 @@ ipcMain.handle('readers:list', (e, query) =>
   })
 );
 ipcMain.handle('readers:get', (e, id) => run(() => db.prepare('SELECT * FROM readers WHERE id = ?').get(id)));
+ipcMain.handle('readers:byCard', (e, card) => run(() => db.prepare('SELECT * FROM readers WHERE card_no = ?').get(card)));
 ipcMain.handle('readers:create', (e, r) =>
   run(() => {
     const payload = readerPayload(r);
@@ -524,6 +525,45 @@ ipcMain.handle('loans:extend', (e, { id, days }) =>
     db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(newDue, id);
     logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue);
     return newDue;
+  })
+);
+
+/* Заемане и връщане чрез баркод четец — четецът въвежда текст и Enter, точно
+   както при физическа клавиатура, затова тук се приема inv. номер или баркод. */
+ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
+  run(() => {
+    const tx = db.transaction(() => {
+      const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?`).get(code, code);
+      if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
+      if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
+      const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
+      if (openLoan) throw new Error('Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + openLoan.date_due + '.');
+      const s = db.prepare('SELECT max_books, loan_days FROM settings WHERE id = 1').get();
+      const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
+      if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
+      const out = date_out || today();
+      const due = new Date(out); due.setDate(due.getDate() + (s.loan_days || 30));
+      const dueStr = due.toISOString().slice(0, 10);
+      const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
+      logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
+      return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
+    });
+    return tx();
+  })
+);
+ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
+  run(() => {
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
+    const loan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
+    if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
+    const inDate = date_in || today();
+    const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+    const daysLate = loan.date_due ? Math.max(0, Math.round((new Date(inDate) - new Date(loan.date_due)) / 864e5)) : 0;
+    const fine = daysLate * (s.fine_per_day || 0);
+    db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
+    logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+    return { title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine };
   })
 );
 

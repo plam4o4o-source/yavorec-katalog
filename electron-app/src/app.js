@@ -893,54 +893,114 @@ async function deleteReader(id) {
 }
 window.deleteReader = deleteReader;
 
-/* ---------------- Заемане и връщане ---------------- */
+/* ---------------- Заемане и връщане (изцяло чрез сканиране на баркод) ----------------
+   Баркод четецът работи като клавиатура: въвежда текста и накрая изпраща Enter.
+   Затова навсякъде тук слушаме за Enter в обикновени текстови полета — четецът
+   не изисква никаква настройка. */
+let CIRC = { readerId: null, mode: 'out' };
 async function renderCirc() {
-  const [open, books, readers, settings] = await Promise.all([
-    call(window.api.loans.list({ onlyOpen: true })), call(window.api.books.list('')),
-    call(window.api.readers.list('')), call(window.api.settings.get())
-  ]);
-  if (!open) return;
-  window._SETTINGS = settings;
-  const bookOpts = (books || []).filter(b => b.available > 0)
-    .map(b => `<option value="${b.id}">${esc(b.title)} (${b.available} налични)</option>`).join('');
-  const readerOpts = (readers || []).map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('');
-  const defDue = new Date(); defDue.setDate(defDue.getDate() + (settings ? settings.loan_days : 30));
-  $('#view').innerHTML = `
-    <div class="wrap" style="margin-bottom:20px">
-      <table class="ledger"><thead><tr><th colspan="6">Ново заемане</th></tr></thead>
-      <tbody><tr><td colspan="6" style="padding:14px">
-        <form id="circF" onsubmit="return false" class="grid g3">
-          <div class="field"><label>Читател</label><select name="reader_id">${readerOpts || '<option value="">— няма читатели —</option>'}</select></div>
-          <div class="field"><label>Книга</label><select name="book_id">${bookOpts || '<option value="">— няма налични книги —</option>'}</select></div>
-          <div class="field"><label>Срок за връщане</label><input name="date_due" type="date" value="${defDue.toISOString().slice(0, 10)}"></div>
-        </form>
-      </td></tr>
-      <tr><td colspan="6" style="text-align:right;padding:0 14px 14px"><button class="btn pri" onclick="checkoutBook()">Заеми книгата</button></td></tr>
-      </tbody></table>
-    </div>
-    <div class="wrap"><table class="ledger">
-      <thead><tr><th>Читател</th><th>Книга</th><th>Дата на заемане</th><th>Срок</th><th style="width:180px"></th></tr></thead>
-      <tbody>
-        ${open.length ? open.map(l => `
-          <tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td><td class="num">${bg(l.date_out)}</td>
-            <td class="num ${l.date_due && l.date_due < today() ? 'warn' : ''}">${bg(l.date_due) || '—'}</td>
-            <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
-                <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button></td></tr>`).join('')
-          : `<tr><td colspan="5" class="empty">Няма заети в момента книги.</td></tr>`}
-      </tbody>
-    </table></div>`;
+  const s = SETTINGS_CACHE || await loadSettingsCache();
+  const tabs = `<div class="toolbar">
+    <button class="btn ${CIRC.mode === 'out' ? 'pri' : ''}" onclick="CIRC.mode='out';renderCirc()">Заемане</button>
+    <button class="btn ${CIRC.mode === 'in' ? 'pri' : ''}" onclick="CIRC.mode='in';renderCirc()">Връщане</button>
+  </div>`;
+
+  if (CIRC.mode === 'in') {
+    $('#view').innerHTML = tabs + `
+      <div class="card"><h3 style="margin-top:0">Приемане на върнати документи</h3>
+        <div class="note" style="margin-top:0">Сканирайте баркода на всеки върнат документ. Системата приключва заемането,
+        отбелязва датата на връщане и изчислява обезщетение при забава.</div>
+        <input id="inScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
+        <div id="inLog" style="margin-top:14px"></div>
+      </div>`;
+    const el = $('#inScan'); el.focus();
+    el.addEventListener('keydown', async e => {
+      if (e.key !== 'Enter') return; e.preventDefault();
+      const code = el.value.trim(); el.value = ''; if (!code) return;
+      const res = await window.api.loans.returnByCode({ code, date_in: today() });
+      const log = $('#inLog');
+      if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
+      const r = res.data;
+      log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
+        <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
+        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
+      toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')' : 'Приета обратно: инв. № ' + r.inv_number, r.daysLate ? 'err' : 'ok');
+    });
+    return;
+  }
+
+  let col1, col2, table = '';
+  if (CIRC.readerId) {
+    const r = await call(window.api.readers.get(CIRC.readerId));
+    if (!r) { CIRC.readerId = null; return renderCirc(); }
+    const myLoans = await call(window.api.loans.byReader(CIRC.readerId)) || [];
+    const openMine = myLoans.filter(l => !l.date_in);
+    col1 = `<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1">
+      <b style="font-size:17px">${esc(r.name)}</b>
+      <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${s.max_books ? ' / ' + s.max_books : ''}</div></div>
+      <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
+      ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
+    col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
+      <div class="hint" style="margin-top:6px">Срок за заемане: ${s.loan_days} дни</div>
+      <div id="outLog" style="margin-top:12px"></div>`;
+    if (openMine.length) {
+      table = `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Заети от този читател</h3>
+        <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th style="width:160px"></th></tr></thead><tbody>
+        ${openMine.map(l => `<tr><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
+          <td class="num">${bg(l.date_out)}</td>
+          <td class="num ${l.date_due && l.date_due < today() ? 'warn' : ''}">${bg(l.date_due) || '—'}</td>
+          <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
+              <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button></td></tr>`).join('')}
+        </tbody></table></div></div>`;
+    }
+  } else {
+    col1 = `<input id="pScan" class="scan" placeholder="Сканирай читателска карта или въведи име…" autocomplete="off">
+      <div id="pSug" style="margin-top:10px"></div>`;
+    col2 = `<div class="hint">Първо изберете читател.</div>`;
+  }
+
+  $('#view').innerHTML = tabs + `<div class="grid g2">
+    <div class="card"><h3 style="margin-top:0">1 · Читател</h3>${col1}</div>
+    <div class="card"><h3 style="margin-top:0">2 · Документи</h3>${col2}</div>
+  </div>${table}`;
+
+  const ps = $('#pScan');
+  if (ps) {
+    ps.focus();
+    ps.addEventListener('input', debounce(async () => {
+      const q = ps.value.trim();
+      if (!q) { $('#pSug').innerHTML = ''; return; }
+      const rows = await call(window.api.readers.list(q)) || [];
+      $('#pSug').innerHTML = rows.length
+        ? rows.slice(0, 6).map(r => `<button class="btn" style="display:block;width:100%;text-align:left;margin-bottom:4px"
+            onclick="selectCircReader(${r.id})"><b>${esc(r.name)}</b> · ${esc(r.card_no || '')} · ${esc(r.category || '')}</button>`).join('')
+        : `<div class="hint">Няма съвпадение. <button class="btn sm" onclick="readerForm()">+ Нов читател</button></div>`;
+    }, 200));
+    ps.addEventListener('keydown', async e => {
+      if (e.key !== 'Enter') return; e.preventDefault();
+      const r = await call(window.api.readers.byCard(ps.value.trim()));
+      if (r) selectCircReader(r.id); else toast('Няма читател с тази карта.', 'err');
+    });
+  }
+  const bs = $('#bScan');
+  if (bs) {
+    bs.focus();
+    bs.addEventListener('keydown', async e => {
+      if (e.key !== 'Enter') return; e.preventDefault();
+      const code = bs.value.trim(); bs.value = ''; if (!code) return;
+      const res = await window.api.loans.checkoutByCode({ reader_id: CIRC.readerId, code, date_out: today() });
+      const log = $('#outLog');
+      if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
+      const l = res.data;
+      log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b></div>`);
+      toast('Заемане: инв. № ' + l.inv_number + ' до ' + bg(l.date_due), 'ok');
+      renderCirc();
+    });
+  }
 }
-async function checkoutBook() {
-  const d = formData('#circF');
-  if (!d.reader_id || !d.book_id) return toast('Изберете читател и книга.', 'err');
-  const res = await window.api.loans.checkout({
-    reader_id: parseInt(d.reader_id, 10), book_id: parseInt(d.book_id, 10), date_out: today(), date_due: d.date_due || null
-  });
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Книгата е заета.', 'ok');
-  renderCirc();
-}
-window.checkoutBook = checkoutBook;
+function selectCircReader(id) { CIRC.readerId = id; CIRC.mode = 'out'; renderCirc(); }
+window.selectCircReader = selectCircReader;
 async function returnBook(id) {
   const res = await window.api.loans.return({ id, date_in: today() });
   if (!res.ok) return toast(res.error, 'err');
@@ -949,7 +1009,7 @@ async function returnBook(id) {
 }
 window.returnBook = returnBook;
 async function extendLoan(id) {
-  const s = window._SETTINGS || { extension_days: 30 };
+  const s = SETTINGS_CACHE || { extension_days: 30 };
   const res = await window.api.loans.extend({ id, days: s.extension_days || 30 });
   if (!res.ok) return toast(res.error, 'err');
   toast('Срокът е продължен до ' + bg(res.data) + '.', 'ok');
