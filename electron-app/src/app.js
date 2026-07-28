@@ -6,7 +6,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 const today = () => new Date().toISOString().slice(0, 10);
 const yr = (d) => (d || today()).slice(0, 4);
 const bg = (d) => d ? d.split('-').reverse().join('.') : '';
-const mny = (n) => (Number(n) || 0).toFixed(2) + ' лв.';
+/* Фиксиран, необратим курс лев–евро по Регламент (ЕС) 2025/1409 на Съвета — БНБ,
+   в сила от 01.01.2026 г. Не е борсов курс и не се обновява. */
+const EUR_RATE = 1.95583;
+const bgn = (n) => (Number(n) || 0).toFixed(2);
+const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
+const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 function toast(msg, type) {
@@ -81,6 +86,20 @@ const PRICHINI = [
 ];
 const PER_FREQ = ['седмично', 'двуседмично', 'месечно', 'тримесечно', 'полугодишно', 'годишно', 'нередовно'];
 const MZS_STATUS = ['заявено', 'изпратено', 'получено', 'върнато', 'отказано'];
+const THEMES = [
+  { id: '1', name: 'Бронз', spine: '#1A1208', brass: '#96731F', paper: '#F4F0E4' },
+  { id: '2', name: 'Наситено синьо', spine: '#0F1B2E', brass: '#2C5C8F', paper: '#EEF2F6' },
+  { id: '3', name: 'Горско зелено', spine: '#0E1F14', brass: '#2E6B45', paper: '#EFF3EC' },
+  { id: '4', name: 'Бордо', spine: '#22090F', brass: '#7A2036', paper: '#F5EDEC' },
+  { id: '5', name: 'Графит', spine: '#1C2126', brass: '#536573', paper: '#EEF0F1' },
+  { id: '6', name: 'Кафяво-теракота', spine: '#22140A', brass: '#A65A2E', paper: '#F3ECE3' }
+];
+async function setTheme(id) {
+  await call(window.api.settings.updateTheme(id));
+  await loadSettingsCache();
+  if (VIEW === 'setup') renderSetup();
+}
+window.setTheme = setTheme;
 
 /* ---------------- Code 39 баркод (SVG) ---------------- */
 const C39 = {'0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn',
@@ -110,7 +129,19 @@ function code39svg(text, w, h) {
 
 /* ---------------- Печат: обща инфраструктура ---------------- */
 let SETTINGS_CACHE = null;
-async function loadSettingsCache() { SETTINGS_CACHE = await call(window.api.settings.get()); return SETTINGS_CACHE; }
+async function loadSettingsCache() {
+  SETTINGS_CACHE = await call(window.api.settings.get());
+  updateBrandSub();
+  applyTheme();
+  return SETTINGS_CACHE;
+}
+function updateBrandSub() {
+  const el = $('#brandSub'); if (!el || !SETTINGS_CACHE) return;
+  el.textContent = [SETTINGS_CACHE.org, SETTINGS_CACHE.place].filter(Boolean).join(' · ');
+}
+function applyTheme() {
+  document.documentElement.dataset.theme = (SETTINGS_CACHE && SETTINGS_CACHE.theme) || '1';
+}
 function shead() {
   const s = SETTINGS_CACHE || {};
   return `<div class="porg"><b>${esc(s.org || '')}</b><br>${esc(s.lib_name || '')}<br>${esc(s.place || '')}${s.bulstat ? ' · ЕИК ' + esc(s.bulstat) : ''}</div>`;
@@ -276,16 +307,61 @@ window.installUpdateNow = installUpdateNow;
 
 /* ---------------- Табло ---------------- */
 async function renderDash() {
-  const s = await call(window.api.dashboard.stats());
-  if (!s) return;
+  const r = await call(window.api.dashboard.full());
+  if (!r) return;
   $('#view').innerHTML = `
-    <div class="cards">
-      <div class="card"><div class="num">${s.books}</div><div class="lbl">Книги във фонда</div></div>
-      <div class="card"><div class="num">${s.readers}</div><div class="lbl">Читатели</div></div>
-      <div class="card"><div class="num">${s.loansOpen}</div><div class="lbl">Заети в момента</div></div>
-      <div class="card"><div class="num">${s.overdue}</div><div class="lbl">Просрочени</div></div>
+    <div class="cards" style="margin-bottom:18px">
+      <div class="card"><div class="num">${r.fundCount.toLocaleString('bg-BG')}</div><div class="lbl">Библиотечен фонд</div></div>
+      <div class="card"><div class="num" style="font-size:22px">${mny(r.fundValue)}</div><div class="lbl">Стойност на фонда</div></div>
+      <div class="card"><div class="num">${r.loansOpen}</div><div class="lbl">Заети в момента</div><div class="hint">при ${r.activeReaders} активни читатели</div></div>
+      <div class="card"><div class="num ${r.overdueCount ? 'warn' : ''}">${r.overdueCount}</div><div class="lbl">Просрочени</div></div>
     </div>
-    <div class="hint">Използвайте менюто вляво, за да управлявате фонда, читателите и движението на библиотечния фонд.</div>
+
+    <div class="grid g3">
+      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
+        ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
+        ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+        <th>Читател</th><th>Документ</th><th>Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
+        ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
+        <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
+        <td class="num warn">${Math.round((new Date(today()) - new Date(l.date_due)) / 864e5)}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
+      </div>
+      <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
+        <div style="font-size:13px;line-height:2.1">
+          <div style="display:flex;justify-content:space-between"><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
+          <div style="display:flex;justify-content:space-between"><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
+          <div style="display:flex;justify-content:space-between"><span>Заемания</span><b>${r.loansYear}</b></div>
+          <div style="display:flex;justify-content:space-between"><span>Записани читатели</span><b>${r.readersYear}</b></div>
+          <hr style="border:0;border-top:1px solid var(--rule);margin:9px 0">
+          <div style="display:flex;justify-content:space-between"><span>Инвентаризация — цел</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
+          <div class="hint">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><h3 style="margin-top:0">Бързи действия</h3>
+        <div class="toolbar" style="margin:0">
+          <button class="btn pri" onclick="bookForm()">+ Нов документ</button>
+          <button class="btn" onclick="go('circ')">Заемане / връщане</button>
+          <button class="btn" onclick="readerForm()">+ Нов читател</button>
+          <button class="btn" onclick="go('acq')">Нова партида</button>
+        </div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
+        <div style="font-size:13px">
+          ${r.upcoming.length ? r.upcoming.map(l => `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--rule)">
+          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
+          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
+        </div>
+      </div>
+    </div>
+
+    ${r.fundCount === 0 ? `<div class="note w" style="margin-top:18px"><b>Първи стъпки.</b>
+    1) Попълнете <a href="#setup">Настройки</a> — име на библиотеката, ръководител, комисия и начален инвентарен номер.
+    2) Заведете партида в <a href="#acq">Постъпления</a> (чл. 14).
+    3) Каталогизирайте документите в <a href="#books">Книги</a>. Инвентарните номера се дават последователно (чл. 16, ал. 2).</div>` : ''}
   `;
 }
 
@@ -382,8 +458,9 @@ async function bookForm(id, presetAcqId) {
         ${fld('Партида в КДБФ', 'acquisition_id', { type: 'select', opts: acqOpts, val: v.acquisition_id || '', emptyLabel: '— без партида —' })}
         ${fld('Сигнатура', 'call_number', { val: v.call_number || '' })}
       </div>
-      <div class="grid g3">
+      <div class="grid g4">
         ${fld('Цена (лв.)', 'price', { val: v.price ?? 0, type: 'number', step: '0.01', req: 1 })}
+        ${fld('Цена (€)', 'price_eur', { val: eur(v.price || 0), type: 'number', step: '0.01', hint: 'автоматично при промяна' })}
         ${fld('Отдел / местонахождение', 'department', { type: 'select', opts: OTDELI, val: v.department })}
         ${fld('Налични бройки', 'quantity', { val: v.quantity ?? 1, type: 'number', min: 0 })}
       </div>
@@ -422,6 +499,11 @@ async function bookForm(id, presetAcqId) {
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
+  const priceEl = $('#bookF [name=price]'), priceEurEl = $('#bookF [name=price_eur]');
+  if (priceEl && priceEurEl) {
+    priceEl.addEventListener('input', () => { priceEurEl.value = eur(priceEl.value); });
+    priceEurEl.addEventListener('input', () => { priceEl.value = (parseFloat(priceEurEl.value || 0) * EUR_RATE).toFixed(2); });
+  }
 }
 window.bookForm = bookForm;
 async function saveBook(id) {
@@ -1410,20 +1492,76 @@ window.saveVisits = saveVisits;
 
 /* ---------------- Онлайн каталог ---------------- */
 async function renderCatalog() {
+  const [status, s] = await Promise.all([call(window.api.catalog.status()), call(window.api.settings.get())]);
+  if (!status) return;
   $('#view').innerHTML = `
-    <div class="note">Автоматичното публикуване към chyavorec.org (чрез katalog.json и git синхронизация) се управлява
-    от отделното приложение <b>inventar-biblioteka.html</b> и не е част от тази десктоп версия.</div>
-    <div class="card"><h3 style="margin-top:0">Локален експорт на каталога</h3>
-      <p style="font-size:13.5px">Изнася наличния фонд в JSON файл със същия формат, използван за онлайн каталога.</p>
-      <button class="btn pri" onclick="exportCatalog()">Експорт на katalog.json…</button>
+    <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
+    Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл.</div>
+
+    <div class="card"><h3 style="margin-top:0">Автоматично публикуване</h3>
+      ${status.folder ? `
+        <div class="note">Свързана папка: <b style="font-family:var(--mono)">${esc(status.folder)}</b> —
+        <code>katalog.json</code> се записва там автоматично при всяка промяна във фонда (нова книга, редакция,
+        заемане, връщане, отчисляване).</div>
+        <div class="toolbar">
+          <button class="btn pri" onclick="catalogWriteNow()">Генерирай сега</button>
+          <button class="btn dgr" onclick="catalogDisconnect()">Спри автоматичния запис</button>
+        </div>`
+      : `
+        <div class="note">Изберете папка на компютъра — може да е обикновена локална папка, синхронизирана папка на
+        OneDrive/Google Drive, или работно копие на git хранилище (за конвейера към chyavorec.org — виж README).
+        Програмата ще записва <code>katalog.json</code> там автоматично при всяка промяна във фонда.</div>
+        <button class="btn pri" onclick="catalogChooseFolder()">Избери папка…</button>`}
+      <div class="hint" style="margin-top:10px">Записи, които ще излязат в каталога: <b>${status.total}</b> ·
+      от тях налични: <b>${status.available}</b></div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Публичен адрес на сайта</h3>
+      <p class="hint" style="margin-top:0">Редактира се в „Настройки“ → „Библиотека“ → „Адрес на сайта“.</p>
+      <div class="hint">Текущ адрес: <b>${esc(s ? s.cat_url || '—' : '—')}</b></div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ръчен експорт</h3>
+      <p style="font-size:13.5px;margin-top:0">Извежда снимка на данните във файл по избор, независимо от папката за
+      автоматично публикуване по-горе.</p>
+      <div class="toolbar">
+        <button class="btn" onclick="exportCatalog()">Каталог (JSON)…</button>
+        <button class="btn" onclick="exportCatalogCsv()">Целия фонд (CSV)…</button>
+      </div>
     </div>`;
 }
+async function catalogChooseFolder() {
+  const res = await window.api.catalog.chooseFolder();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Папката е свързана — katalog.json се обновява автоматично.', 'ok');
+  renderCatalog();
+}
+window.catalogChooseFolder = catalogChooseFolder;
+async function catalogDisconnect() {
+  if (!confirm('Спиране на автоматичния запис на katalog.json?')) return;
+  await call(window.api.catalog.disconnectFolder(), 'Изключено.');
+  renderCatalog();
+}
+window.catalogDisconnect = catalogDisconnect;
+async function catalogWriteNow() {
+  const res = await window.api.catalog.writeNow();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Каталогът е обновен.', 'ok');
+  renderCatalog();
+}
+window.catalogWriteNow = catalogWriteNow;
 async function exportCatalog() {
   const res = await window.api.catalog.export();
   if (!res.ok) return toast(res.error, 'err');
   toast('Каталогът е записан в ' + res.data, 'ok');
 }
 window.exportCatalog = exportCatalog;
+async function exportCatalogCsv() {
+  const res = await window.api.catalog.exportCsv();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Таблицата е записана в ' + res.data, 'ok');
+}
+window.exportCatalogCsv = exportCatalogCsv;
 
 /* ---------------- Баркод етикети ---------------- */
 async function renderLabels() {
@@ -1452,6 +1590,10 @@ async function renderLabels() {
         </div>
         <div class="toolbar"><button class="btn pri" onclick="printLabelsRange()">Печат на диапазон</button>
         <button class="btn" onclick="printLabelsAll()">Всички</button></div>
+        <div style="margin-top:10px;width:170px;border:1px solid var(--rule2);background:#fff;padding:8px 6px;text-align:center">
+          ${lblCard({ barcode: '1', inv_number: 1, call_number: 'В-15/ВАЗ' })}
+        </div>
+        <div class="hint" style="margin-top:6px">Пример за оформлението.</div>
       </div>
       <div class="card"><h3 style="margin-top:0">Читателски карти</h3>
         <p class="hint" style="margin-top:0">Печат на баркод карти за всички активни читатели.</p>
@@ -1620,7 +1762,7 @@ window.exportAuditCSV = exportAuditCSV;
 
 /* ---------------- Настройки ---------------- */
 async function renderSetup() {
-  const s = await call(window.api.settings.get());
+  const [s, dbLoc] = await Promise.all([call(window.api.settings.get()), call(window.api.dbLocation.get())]);
   if (!s) return;
   $('#view').innerHTML = `
     <form id="stF" onsubmit="return false">
@@ -1659,11 +1801,53 @@ async function renderSetup() {
     </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Външен вид — цветова тема</h3>
+      <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        ${THEMES.map(t => `<button type="button" onclick="setTheme('${t.id}')"
+          style="width:112px;border:2px solid ${s.theme === t.id ? 'var(--ink)' : 'var(--rule2)'};border-radius:4px;padding:0;overflow:hidden;cursor:pointer;background:none;text-align:left">
+          <span style="display:block;height:36px;background:${t.spine}"></span>
+          <span style="display:block;height:15px;background:${t.brass}"></span>
+          <span style="display:block;padding:6px 8px;font-size:11px;background:${t.paper};color:#1B1813">${esc(t.name)}${s.theme === t.id ? ' ✓' : ''}</span>
+        </button>`).join('')}
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Работа в мрежа (няколко компютъра)</h3>
+      <div class="note" style="margin-top:0">За да работят няколко работни компютъра с една и съща база данни, посочете
+      папка на <b>споделен мрежов диск</b> (напр. картографиран диск <code>Z:\\</code> или път от вида
+      <code>\\\\СЪРВЪР\\споделена-папка</code>) — всички програми, сочещи към тази папка, ще виждат едни и същи данни.</div>
+      <div class="note w"><b>Важно за надеждността:</b> SQLite (форматът на базата данни) официално <b>не е препоръчан</b>
+      за едновременен запис от няколко компютъра върху мрежов диск (SMB) — заключването на файлове по мрежата не винаги
+      работи коректно и в редки случаи може да доведе до повредена база. Препоръки: работете един по един, когато е
+      възможно; правете редовно резервно копие на файла <code>library.db</code>; ако забележите грешки „database is
+      locked“ или повредени данни — върнете последното добро резервно копие. За библиотека с интензивна едновременна
+      работа от много станции е по-безопасно решение истинска клиент-сървър база данни, което е извън обхвата на тази версия.</div>
+      <div class="hint">Текуща папка: <b style="font-family:var(--mono)">${esc(dbLoc ? dbLoc.folder : '')}</b>
+      ${dbLoc && dbLoc.isDefault ? ' (по подразбиране, локална)' : ' (персонализирана)'}</div>
+      <div class="toolbar">
+        <button class="btn pri" onclick="chooseDbLocation()">Избери мрежова/друга папка…</button>
+        ${dbLoc && !dbLoc.isDefault ? '<button class="btn" onclick="resetDbLocation()">Върни към локалната по подразбиране</button>' : ''}
+      </div>
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Обновяване</h3>
       ${updateStatusHtml()}
     </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
 }
+async function chooseDbLocation() {
+  if (!confirm('Програмата ще копира текущата база данни в новата папка и ще се рестартира. Продължавате ли?')) return;
+  const res = await window.api.dbLocation.choose();
+  if (!res.ok) return toast(res.error, 'err');
+}
+window.chooseDbLocation = chooseDbLocation;
+async function resetDbLocation() {
+  if (!confirm('Връщане към локалната база данни по подразбиране (тази на мрежовия диск остава непроменена)? Програмата ще се рестартира.')) return;
+  await window.api.dbLocation.resetDefault();
+}
+window.resetDbLocation = resetDbLocation;
 function updateStatusHtml() {
   const st = UPDATE_STATUS || { state: 'idle' };
   const line = {

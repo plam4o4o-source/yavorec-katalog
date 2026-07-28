@@ -7,10 +7,31 @@ const { autoUpdater } = require('electron-updater');
 let db;
 let CURRENT_USER = '';
 
+/* ---------------- Местоположение на базата данни (за работа в мрежа) ----------------
+   Малък config.json в постоянната потребителска папка сочи къде реално живее
+   library.db — по подразбиране до самата програма/userData, но може да бъде
+   и папка на мрежов диск, споделена от няколко работни компютъра. */
+function configPath() {
+  const dir = app.getPath('userData');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, 'config.json');
+}
+function readConfig() {
+  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch (e) { return {}; }
+}
+function writeConfig(cfg) {
+  fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2), 'utf8');
+}
+function defaultDbDir() {
+  return app.isPackaged ? app.getPath('userData') : path.join(__dirname, 'db');
+}
+function resolveDbDir() {
+  const cfg = readConfig();
+  if (cfg.dbFolder && fs.existsSync(cfg.dbFolder)) return cfg.dbFolder;
+  return defaultDbDir();
+}
 function resolveDbPath() {
-  const dir = app.isPackaged
-    ? app.getPath('userData')
-    : path.join(__dirname, 'db');
+  const dir = resolveDbDir();
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'library.db');
 }
@@ -21,6 +42,7 @@ function initDb() {
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 8000'); // изчаква вместо да гърми "database is locked" при мрежов достъп от няколко компютъра
 
   // fs.readFileSync reads transparently through app.asar for plain text files,
   // so the same path works both in dev and in a packaged build.
@@ -29,6 +51,42 @@ function initDb() {
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
 }
+
+ipcMain.handle('dbLocation:get', () =>
+  run(() => ({ folder: resolveDbDir(), isDefault: !readConfig().dbFolder, isPackaged: app.isPackaged }))
+);
+ipcMain.handle('dbLocation:choose', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Изберете папка за базата данни (локална или мрежова)',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+    const newDir = filePaths[0];
+    const oldPath = resolveDbPath();
+    const newPath = path.join(newDir, 'library.db');
+    if (path.resolve(oldPath) === path.resolve(newPath)) return { ok: false, error: 'Това е текущата папка на базата данни.' };
+    if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); db.close(); }
+    if (fs.existsSync(oldPath)) fs.copyFileSync(oldPath, newPath);
+    const cfg = readConfig();
+    cfg.dbFolder = newDir;
+    writeConfig(cfg);
+    app.relaunch();
+    app.exit(0);
+    return { ok: true, data: newDir };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('dbLocation:resetDefault', () =>
+  run(() => {
+    const cfg = readConfig();
+    delete cfg.dbFolder;
+    writeConfig(cfg);
+    app.relaunch();
+    app.exit(0);
+  })
+);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -153,6 +211,9 @@ ipcMain.handle('settings:updateLabelFormat', (e, { lbl_mode, lbl_w, lbl_h }) =>
       .run(lbl_mode, parseInt(lbl_w, 10) || 40, parseInt(lbl_h, 10) || 30);
   })
 );
+ipcMain.handle('settings:updateTheme', (e, theme) =>
+  run(() => { db.prepare('UPDATE settings SET theme=? WHERE id=1').run(String(theme)); })
+);
 
 /* ---------------- Категории ---------------- */
 ipcMain.handle('categories:list', () =>
@@ -232,7 +293,9 @@ ipcMain.handle('books:create', (e, book) =>
       logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
       return id;
     });
-    return tx(book);
+    const id = tx(book);
+    writeCatalogIfConfigured();
+    return id;
   })
 );
 ipcMain.handle('books:update', (e, book) =>
@@ -249,10 +312,14 @@ ipcMain.handle('books:update', (e, book) =>
       logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
     });
     tx(book);
+    writeCatalogIfConfigured();
   })
 );
 ipcMain.handle('books:delete', (e, id) =>
-  run(() => db.prepare('DELETE FROM books WHERE id = ?').run(id))
+  run(() => {
+    db.prepare('DELETE FROM books WHERE id = ?').run(id);
+    writeCatalogIfConfigured();
+  })
 );
 ipcMain.handle('books:addCheck', (e, { bookId, date }) =>
   run(() => db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(bookId, date || today()))
@@ -389,7 +456,9 @@ ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
       logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text);
       return actId;
     });
-    return tx();
+    const actId = tx();
+    writeCatalogIfConfigured();
+    return actId;
   })
 );
 ipcMain.handle('deaccessionActs:revoke', (e, id) =>
@@ -406,6 +475,7 @@ ipcMain.handle('deaccessionActs:revoke', (e, id) =>
       logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда');
     });
     tx();
+    writeCatalogIfConfigured();
   })
 );
 
@@ -534,7 +604,9 @@ ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due })
       logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : ''));
       return info.lastInsertRowid;
     });
-    return tx();
+    const id = tx();
+    writeCatalogIfConfigured();
+    return id;
   })
 );
 ipcMain.handle('loans:return', (e, { id, date_in }) =>
@@ -542,6 +614,7 @@ ipcMain.handle('loans:return', (e, { id, date_in }) =>
     db.prepare('UPDATE loans SET date_in = ? WHERE id = ?').run(date_in, id);
     const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
     if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title);
+    writeCatalogIfConfigured();
   })
 );
 ipcMain.handle('loans:extend', (e, { id, days }) =>
@@ -577,7 +650,9 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
       logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
       return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
     });
-    return tx();
+    const result = tx();
+    writeCatalogIfConfigured();
+    return result;
   })
 );
 ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
@@ -592,6 +667,7 @@ ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     const fine = daysLate * (s.fine_per_day || 0);
     db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
     logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+    writeCatalogIfConfigured();
     return { title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine };
   })
 );
@@ -607,6 +683,40 @@ ipcMain.handle('dashboard:stats', () =>
       WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')
     `).get().n
   }))
+);
+ipcMain.handle('dashboard:full', () =>
+  run(() => {
+    const y = yearOf();
+    const fund = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS v FROM books WHERE status != 'отчислен'").get();
+    const activeReaders = db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n;
+    const loansOpen = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n;
+    const overdueRows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due LIMIT 7`).all();
+    const overdueCount = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n;
+    const acquiredYear = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE substr(register_date,1,4) = ?`).get(y).n;
+    const deaccessionedYear = db.prepare(`
+      SELECT COUNT(*) AS n FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
+    `).get(y).n;
+    const loansYear = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE substr(date_out,1,4) = ?`).get(y).n;
+    const readersYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?`).get(y, y).n;
+    const active = fund.n;
+    const pct = pctRequired(active);
+    const target = Math.ceil(active * pct / 100);
+    const scannedYear = db.prepare(`
+      SELECT COUNT(*) AS n FROM inventory_session_scans sc JOIN inventory_sessions s ON s.id = sc.session_id
+      WHERE substr(s.date,1,4) = ?
+    `).get(y).n;
+    const upcoming = db.prepare(`
+      ${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL
+      AND l.date_due >= date('now') AND julianday(l.date_due) - julianday('now') <= 3
+      ORDER BY l.date_due
+    `).all();
+    return {
+      fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
+      year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
+      inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
+      upcoming
+    };
+  })
 );
 
 /* ---------------- Инвентаризация ---------------- */
@@ -852,22 +962,107 @@ ipcMain.handle('stats:report', (e, year) =>
   })
 );
 
-/* ---------------- Онлайн каталог — локален експорт (без git-sync конвейера) ---------------- */
+/* ---------------- Онлайн каталог ----------------
+   Изнасят се само библиографски данни и наличност — никога читатели, цени
+   или служебни бележки. Ако е зададена папка (Настройки → Онлайн каталог),
+   katalog.json се записва автоматично там при всяка промяна във фонда —
+   папката може да е локална, синхронизирана (OneDrive/Google Drive) или
+   работно копие на git хранилище (виж README за git-sync конвейера). */
+function publicBookFields(b) {
+  return {
+    inv: b.inv_number, barcode: b.barcode, title: b.title, subtitle: b.subtitle,
+    author: b.author, city: b.city, publisher: b.publisher, year: b.year,
+    category: b.category_name, language: b.language, udk: b.udk,
+    department: b.department, keywords: b.keywords, annotation: b.annotation,
+    cover: b.cover_url, isbn: b.isbn, available: b.available > 0
+  };
+}
+function buildCatalogPayload() {
+  const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND b.department != 'служебен' ORDER BY b.title`).all();
+  return books.map(publicBookFields);
+}
+function writeCatalogIfConfigured() {
+  try {
+    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+    if (!s || !s.catalog_folder) return;
+    const file = path.join(s.catalog_folder, 'katalog.json');
+    fs.writeFileSync(file, JSON.stringify(buildCatalogPayload(), null, 2), 'utf8');
+  } catch (err) {
+    console.error('Автоматичен запис на каталога:', err.message);
+  }
+}
+ipcMain.handle('catalog:status', () =>
+  run(() => {
+    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+    const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND department != 'служебен'`).get().n;
+    const avail = db.prepare(`
+      SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND b.department != 'служебен'
+      AND COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id=b.id),0) >
+          (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.date_in IS NULL)
+    `).get().n;
+    return { folder: s ? s.catalog_folder : null, total: pub, available: avail };
+  })
+);
+ipcMain.handle('catalog:chooseFolder', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Папка за автоматичен запис на katalog.json (може да е git хранилище, OneDrive и т.н.)',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+    db.prepare('UPDATE settings SET catalog_folder = ? WHERE id = 1').run(filePaths[0]);
+    writeCatalogIfConfigured();
+    logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + filePaths[0]);
+    return { ok: true, data: filePaths[0] };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('catalog:disconnectFolder', () =>
+  run(() => { db.prepare('UPDATE settings SET catalog_folder = NULL WHERE id = 1').run(); })
+);
+ipcMain.handle('catalog:writeNow', () =>
+  run(() => {
+    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+    if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
+    writeCatalogIfConfigured();
+    return true;
+  })
+);
 ipcMain.handle('catalog:export', async () => {
   try {
-    const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' ORDER BY b.title`).all();
-    const payload = books.map(b => ({
-      inv: b.inv_number, title: b.title, author: b.author, year: b.year,
-      category: b.category_name, isbn: b.isbn, cover: b.cover_url, available: b.available > 0
-    }));
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: 'Експорт на онлайн каталог',
       defaultPath: 'katalog.json',
       filters: [{ name: 'JSON', extensions: ['json'] }]
     });
     if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+    const payload = buildCatalogPayload();
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
     logAudit('Експорт на каталог', filePath + ' — ' + payload.length + ' записа');
+    return { ok: true, data: filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('catalog:exportCsv', async () => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Експорт на фонда (CSV)',
+      defaultPath: 'fond.csv',
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    });
+    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+    const rows = db.prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
+    const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Място', 'Издателство',
+      'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Цена (лв.)', 'Цена (€)', 'Състояние'];
+    const esc = (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"';
+    const csv = [h.join(';')].concat(rows.map(b => [
+      b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title, b.city, b.publisher,
+      b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
+      (b.price || 0).toFixed(2), ((b.price || 0) / 1.95583).toFixed(2), b.status
+    ].map(esc).join(';'))).join('\r\n');
+    fs.writeFileSync(filePath, '﻿' + csv, 'utf8');
     return { ok: true, data: filePath };
   } catch (err) {
     return { ok: false, error: err.message };

@@ -240,7 +240,9 @@ CREATE TABLE IF NOT EXISTS settings (
   committee3        TEXT,
   lbl_mode          TEXT DEFAULT 'sheet',
   lbl_w             INTEGER DEFAULT 40,
-  lbl_h             INTEGER DEFAULT 30
+  lbl_h             INTEGER DEFAULT 30,
+  theme             TEXT DEFAULT '1',
+  catalog_folder    TEXT
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 

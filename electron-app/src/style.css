@@ -9,8 +9,34 @@
   --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
   --mono:'Consolas','Courier New',monospace;
   --serif:Georgia,'Times New Roman',serif;
-  --rail:236px;
+  --rail:270px;
   --sh:0 1px 2px rgba(27,24,19,.08),0 8px 24px -12px rgba(27,24,19,.25);
+}
+/* ---------- Цветови теми (Настройки → Външен вид) — тема 1 „Бронз“ е по подразбиране, зададена в :root ---------- */
+html[data-theme="2"]{ /* Наситено синьо */
+  --paper:#EEF2F6; --paper2:#F8FAFC; --paper3:#E2E9EF; --rule:#CBD8E3; --rule2:#B3C4D4;
+  --spine:#0F1B2E; --spine2:#15263D; --spine3:#22364F;
+  --brass:#2C5C8F; --brassL:#6FA8DC; --brassD:#1B3E60;
+}
+html[data-theme="3"]{ /* Горско зелено */
+  --paper:#EFF3EC; --paper2:#F9FBF7; --paper3:#E2E9DC; --rule:#CBDAC2; --rule2:#B2C7A5;
+  --spine:#0E1F14; --spine2:#16301E; --spine3:#254A30;
+  --brass:#2E6B45; --brassL:#75B48D; --brassD:#1D4A2E;
+}
+html[data-theme="4"]{ /* Бордо */
+  --paper:#F5EDEC; --paper2:#FCF7F6; --paper3:#EBDEDC; --rule:#DCC2BE; --rule2:#C9A29C;
+  --spine:#22090F; --spine2:#331019; --spine3:#4A1B26;
+  --brass:#7A2036; --brassL:#B85670; --brassD:#4E1322;
+}
+html[data-theme="5"]{ /* Графит */
+  --paper:#EEF0F1; --paper2:#F9FAFA; --paper3:#E2E5E7; --rule:#C9CFD3; --rule2:#AFB8BD;
+  --spine:#1C2126; --spine2:#262D34; --spine3:#3A4550;
+  --brass:#536573; --brassL:#93A7B5; --brassD:#37454F;
+}
+html[data-theme="6"]{ /* Кафяво-теракота */
+  --paper:#F3ECE3; --paper2:#FBF7F1; --paper3:#E9DECE; --rule:#D9C6AC; --rule2:#C6AC87;
+  --spine:#22140A; --spine2:#301D0F; --spine3:#4A2E18;
+  --brass:#A65A2E; --brassL:#D99461; --brassD:#7A3F1D;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
@@ -25,18 +51,19 @@ body{
   width:var(--rail); flex:0 0 var(--rail); background:var(--spine); color:#e9e2cf;
   display:flex; flex-direction:column; overflow-y:auto;
 }
-.brand{padding:20px 18px 14px; border-bottom:1px solid var(--spine3)}
-.brandTitle{font-family:var(--serif); font-size:22px; font-weight:700; color:var(--brassL); letter-spacing:.02em}
-.brandSub{font-size:11px; color:#B8AF95; margin-top:4px; line-height:1.4}
-#nav{padding:10px 0 20px}
-.nav-grp{font-size:10px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:14px 18px 6px}
+.brand{padding:24px 20px 16px; border-bottom:1px solid var(--spine3)}
+.brandTitle{font-family:var(--serif); font-size:28px; font-weight:700; color:var(--brassL); letter-spacing:.02em}
+.brandTagline{font-size:12px; color:#C9BFA0; margin-top:3px; letter-spacing:.08em; text-transform:uppercase}
+.brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
+#nav{padding:12px 0 20px}
+.nav-grp{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:16px 20px 7px}
 #nav a{
   display:flex; justify-content:space-between; align-items:center;
-  padding:8px 18px; color:#DCD4BB; text-decoration:none; font-size:13px;
+  padding:10px 20px; color:#DCD4BB; text-decoration:none; font-size:14.5px;
 }
 #nav a:hover{background:var(--spine2)}
 #nav a.on{background:var(--spine3); color:#fff; font-weight:600; border-left:3px solid var(--brassL)}
-#nav a .n{background:var(--brassD); color:#F4EFDF; font-size:11px; padding:1px 7px; border-radius:10px}
+#nav a .n{background:var(--brassD); color:#F4EFDF; font-size:12px; padding:2px 8px; border-radius:10px}
 
 /* ---------- Main ---------- */
 #main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
@@ -131,13 +158,13 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 
 /* ---------- Странична лента — долен колонтитул ---------- */
 #rail{display:flex; flex-direction:column}
-.railFoot{margin-top:auto; padding:12px 18px; border-top:1px solid var(--spine3)}
+.railFoot{margin-top:auto; padding:16px 20px; border-top:1px solid var(--spine3)}
 .userBadge{
-  width:100%; background:none; border:1px solid var(--spine3); color:#B8AF95; padding:7px 10px;
-  border-radius:3px; font-size:11.5px; cursor:pointer; text-align:left;
+  width:100%; background:var(--spine2); border:1.5px solid var(--brassD); color:#F4EFDF; padding:13px 14px;
+  border-radius:4px; font-size:14.5px; font-weight:600; cursor:pointer; text-align:left;
 }
-.userBadge:hover{background:var(--spine2); color:#fff}
-.appCredit{font-size:10px; color:#8A8168; margin-top:8px; text-align:center; line-height:1.4}
+.userBadge:hover{background:var(--spine3); border-color:var(--brassL)}
+.appCredit{font-size:10px; color:#8A8168; margin-top:10px; text-align:center; line-height:1.4}
 
 /* ---------- Checkbox полета ---------- */
 .chk{display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--ink2); margin:10px 0; cursor:pointer}

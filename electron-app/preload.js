@@ -14,7 +14,13 @@ contextBridge.exposeInMainWorld('api', {
   settings: {
     get: invoke('settings:get'),
     update: invoke('settings:update'),
-    updateLabelFormat: invoke('settings:updateLabelFormat')
+    updateLabelFormat: invoke('settings:updateLabelFormat'),
+    updateTheme: invoke('settings:updateTheme')
+  },
+  dbLocation: {
+    get: invoke('dbLocation:get'),
+    choose: invoke('dbLocation:choose'),
+    resetDefault: invoke('dbLocation:resetDefault')
   },
   categories: {
     list: invoke('categories:list'),
@@ -73,7 +79,8 @@ contextBridge.exposeInMainWorld('api', {
     extend: invoke('loans:extend')
   },
   dashboard: {
-    stats: invoke('dashboard:stats')
+    stats: invoke('dashboard:stats'),
+    full: invoke('dashboard:full')
   },
   inventorySessions: {
     list: invoke('inventorySessions:list'),
@@ -111,6 +118,11 @@ contextBridge.exposeInMainWorld('api', {
     report: invoke('stats:report')
   },
   catalog: {
-    export: invoke('catalog:export')
+    status: invoke('catalog:status'),
+    chooseFolder: invoke('catalog:chooseFolder'),
+    disconnectFolder: invoke('catalog:disconnectFolder'),
+    writeNow: invoke('catalog:writeNow'),
+    export: invoke('catalog:export'),
+    exportCsv: invoke('catalog:exportCsv')
   }
 });
