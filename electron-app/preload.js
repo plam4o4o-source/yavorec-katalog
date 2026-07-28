@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('api', {
     restoreFromList: invoke('backup:restoreFromList'),
     restoreBrowse: invoke('backup:restoreBrowse')
   },
+  limits: {
+    usage: invoke('limits:usage'),
+    update: invoke('limits:update')
+  },
   categories: {
     list: invoke('categories:list'),
     create: invoke('categories:create'),
