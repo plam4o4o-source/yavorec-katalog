@@ -1390,13 +1390,38 @@ function isGitRepo(folder) {
 }
 async function gitPublish(folder) {
   if (!isGitRepo(folder)) return { ok: false, error: 'Папката не е git хранилище (липсва .git). Клонирайте хранилището с "git clone" веднъж, преди да я свържете тук.' };
+
+  const branchRes = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branch = branchRes.ok && branchRes.stdout ? branchRes.stdout : 'main';
+
   const add = await gitRun(folder, ['add', 'katalog.json']);
   if (!add.ok) return { ok: false, error: 'git add: ' + (add.stderr || 'грешка') };
   const commit = await gitRun(folder, ['commit', '-m', 'Автоматично обновяване на каталога — ' + new Date().toISOString()]);
   if (!commit.ok && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
     return { ok: false, error: 'git commit: ' + (commit.stderr || commit.stdout || 'грешка') };
   }
-  const push = await gitRun(folder, ['push']);
+
+  let push = await gitRun(folder, ['push', '-u', 'origin', branch]);
+
+  // Отхвърлен push (non-fast-forward) означава, че хранилището е било обновено отдругаде —
+  // друг работен компютър, който също публикува каталога, или промяна направена в GitHub.
+  // Това е нормално, а не грешка: изтегляме новото състояние, пренасяме нашия commit върху
+  // него и опитваме пак. При разминаване в katalog.json печели нашата версия, защото файлът
+  // е изцяло генериран от тази база данни — няма ръчни редакции, които да се загубят.
+  if (!push.ok && /rejected|non-fast-forward|fetch first|behind/i.test(push.stderr)) {
+    const fetch = await gitRun(folder, ['fetch', 'origin', branch]);
+    if (!fetch.ok) return { ok: false, error: 'git fetch: ' + (fetch.stderr || 'грешка при изтегляне от GitHub') };
+
+    const rebase = await gitRun(folder, ['rebase', '-X', 'theirs', 'origin/' + branch]);
+    if (!rebase.ok) {
+      await gitRun(folder, ['rebase', '--abort']);
+      return { ok: false, error: 'Хранилището е обновено отдругаде и промените не можаха да се обединят ' +
+        'автоматично. Отворете папката на хранилището и изпълнете „git pull“ ръчно, после опитайте пак. ' +
+        '(' + (rebase.stderr || rebase.stdout || '') + ')' };
+    }
+    push = await gitRun(folder, ['push', 'origin', branch]);
+  }
+
   if (!push.ok) return { ok: false, error: 'git push: ' + (push.stderr || 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
   return { ok: true, committed: commit.ok };
 }
