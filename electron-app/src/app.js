@@ -149,13 +149,9 @@ function lblCard(b) {
     <div class="l3">${esc(b.barcode || b.inv_number)}${b.call_number ? ' · ' + esc(b.call_number) : ''}</div></div>`;
 }
 function sigLblCard(b) {
-  const s = SETTINGS_CACHE || {};
   return `<div class="lbl lbl-sig">
     <div class="ls-udk">${esc(b.udk || '')}</div>
     <div class="ls-avt">${esc(b.author_mark || b.call_number || '')}</div>
-    <div class="ls-org">${esc(s.lib_name || '')}, ${esc(s.place || '')}</div>
-    ${code39svg(b.barcode || String(b.inv_number), 150, 36)}
-    <div class="ls-inv">${b.inv_number}</div>
   </div>`;
 }
 
@@ -1364,8 +1360,8 @@ async function renderLabels() {
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Етикети за сигнатура (за гръбчето на книгата)</h3>
-      <div class="note" style="margin-top:0">УДК на първия ред, авторски знак под него, името на библиотеката над баркода,
-      инвентарният номер под баркода.</div>
+      <div class="note" style="margin-top:0">Само УДК на първия ред и авторски знак под него — без баркод, име на
+      библиотеката или инвентарен номер.</div>
       <div class="grid g2">
         ${fld('От инвентарен №', 'sigFrom', {})}
         ${fld('До инвентарен №', 'sigTo', {})}

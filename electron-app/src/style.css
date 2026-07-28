@@ -149,12 +149,9 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .lbl .l1{font-size:7.5pt; font-weight:700; letter-spacing:.04em; margin-bottom:1mm}
 .lbl .l3{font-family:var(--mono); font-size:8pt; margin-top:1mm; letter-spacing:.06em}
 .lbl svg{width:100%; height:11mm}
-.lbl-sig{display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:.6mm; padding:1.8mm 2mm}
+.lbl-sig{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6mm; padding:1.8mm 2mm}
 .lbl-sig .ls-udk{font-weight:700; font-size:8.5pt; line-height:1.1}
 .lbl-sig .ls-avt{font-size:8pt; line-height:1.1}
-.lbl-sig .ls-org{font-size:5.6pt; line-height:1.15; margin-top:.8mm; letter-spacing:.01em}
-.lbl-sig svg{width:100%; height:9mm; margin-top:.6mm}
-.lbl-sig .ls-inv{font-family:var(--mono); font-size:7.5pt; margin-top:.4mm; letter-spacing:.04em}
 
 /* ---------- Печатни документи (протоколи, актове, картони) ----------
    #printArea е скрита на екрана и се показва само при печат (window.print()),
