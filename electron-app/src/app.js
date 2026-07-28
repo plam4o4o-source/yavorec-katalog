@@ -45,8 +45,25 @@ function formData(sel) {
 async function call(promise, okMsg) {
   const res = await promise;
   if (!res.ok) { toast(res.error || 'Възникна грешка.', 'err'); return null; }
-  if (okMsg) toast(okMsg, 'ok');
+  if (okMsg) { toast(okMsg, 'ok'); markSaved(); }
   return res.data;
+}
+
+/* ---------------- Индикатор за последен автоматичен запис ----------------
+   Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се
+   записва веднага в базата данни — няма отделно "незапазено" състояние и
+   няма нужда от бутон „Запази“ за самите данни (той остава само там, където
+   формата съдържа много полета и логично трябва изрично потвърждение). */
+let LAST_SAVED = null;
+function markSaved() {
+  LAST_SAVED = new Date();
+  const el = $('#savedIndicator');
+  if (el) el.innerHTML = '<span class="dot"></span> Запазено в ' +
+    LAST_SAVED.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
+}
+function initSavedIndicator() {
+  const el = $('#savedIndicator');
+  if (el && !LAST_SAVED) el.innerHTML = '<span class="dot"></span> Автоматичен запис — включен';
 }
 
 /* Бърз конструктор на форма-поле, за да не се повтаря разметката за всяко поле. */
@@ -96,6 +113,7 @@ const THEMES = [
 ];
 async function setTheme(id) {
   await call(window.api.settings.updateTheme(id));
+  markSaved();
   await loadSettingsCache();
   if (VIEW === 'setup') renderSetup();
 }
@@ -521,7 +539,7 @@ async function deleteBook(id) {
   if (!confirm('Да изтрия ли тази книга?')) return;
   const res = await window.api.books.delete(id);
   if (!res.ok) return toast(res.error, 'err');
-  toast('Книгата е изтрита.', 'ok');
+  toast('Книгата е изтрита.', 'ok'); markSaved();
   RENDERERS[VIEW]();
 }
 window.deleteBook = deleteBook;
@@ -789,7 +807,7 @@ async function delAcq(id) {
   if (!confirm('Изтриване на партидата?')) return;
   const res = await window.api.acquisitions.delete(id);
   if (!res.ok) return toast(res.error, 'err');
-  closeModal(); renderAcq(); toast('Партидата е изтрита.', 'ok');
+  closeModal(); renderAcq(); toast('Партидата е изтрита.', 'ok'); markSaved();
 }
 window.delAcq = delAcq;
 
@@ -881,7 +899,7 @@ async function saveAct() {
   const p = PRICHINI.find(x => x.k == d.reason_code);
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
-  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': отчислени са ' + ACT_LIST.length + ' документа.', 'ok'); }
+  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': отчислени са ' + ACT_LIST.length + ' документа.', 'ok'); markSaved(); }
 }
 window.saveAct = saveAct;
 async function openAct(id) {
@@ -929,7 +947,7 @@ async function revokeAct(id) {
   if (!confirm('Анулиране на акта и връщане на документите във фонда. Използвайте само при сгрешен акт. Да продължа?')) return;
   const res = await window.api.deaccessionActs.revoke(id);
   if (!res.ok) return toast(res.error, 'err');
-  closeModal(); renderActs(); toast('Актът е анулиран.', 'ok');
+  closeModal(); renderActs(); toast('Актът е анулиран.', 'ok'); markSaved();
 }
 window.revokeAct = revokeAct;
 
@@ -1011,7 +1029,7 @@ async function deleteReader(id) {
   if (!confirm('Да изтрия ли този читател?')) return;
   const res = await window.api.readers.delete(id);
   if (!res.ok) return toast(res.error, 'err');
-  toast('Читателят е изтрит.', 'ok');
+  toast('Читателят е изтрит.', 'ok'); markSaved();
   renderReaders();
 }
 window.deleteReader = deleteReader;
@@ -1048,6 +1066,7 @@ async function renderCirc() {
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
         ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
       toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')' : 'Приета обратно: инв. № ' + r.inv_number, r.daysLate ? 'err' : 'ok');
+      markSaved();
     });
     return;
   }
@@ -1118,6 +1137,7 @@ async function renderCirc() {
       const l = res.data;
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b></div>`);
       toast('Заемане: инв. № ' + l.inv_number + ' до ' + bg(l.date_due), 'ok');
+      markSaved();
       renderCirc();
     });
   }
@@ -1127,7 +1147,7 @@ window.selectCircReader = selectCircReader;
 async function returnBook(id) {
   const res = await window.api.loans.return({ id, date_in: today() });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Книгата е върната.', 'ok');
+  toast('Книгата е върната.', 'ok'); markSaved();
   if (VIEW === 'over') renderOver(); else renderCirc();
 }
 window.returnBook = returnBook;
@@ -1135,7 +1155,7 @@ async function extendLoan(id) {
   const s = SETTINGS_CACHE || { extension_days: 30 };
   const res = await window.api.loans.extend({ id, days: s.extension_days || 30 });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Срокът е продължен до ' + bg(res.data) + '.', 'ok');
+  toast('Срокът е продължен до ' + bg(res.data) + '.', 'ok'); markSaved();
   if (VIEW === 'over') renderOver(); else renderCirc();
 }
 window.extendLoan = extendLoan;
@@ -1207,6 +1227,7 @@ async function beginInvent() {
   const d = formData('#ivF');
   const id = await call(window.api.inventorySessions.start(d));
   if (!id) return;
+  markSaved();
   INVENT_SESSION = { id, log: [] };
   closeModal(); renderInventRun();
 }
@@ -1236,12 +1257,14 @@ async function renderInventRun() {
     const log = $('#ivLog');
     if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div style="padding:5px 9px;background:var(--redL);font-size:12.5px">${esc(res.error)}</div>`); return; }
     log.insertAdjacentHTML('afterbegin', `<div style="padding:5px 9px;background:var(--greenL);font-size:12.5px"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}</div>`);
+    markSaved();
     const k = $('#view .card .num'); if (k) renderInventRun();
   });
 }
 async function closeInvent() {
   const res = await window.api.inventorySessions.close(INVENT_SESSION.id);
   if (!res.ok) return toast(res.error, 'err');
+  markSaved();
   const r = res.data;
   INVENT_SESSION = null;
   const over = Math.max(0, r.missing - r.allowedLoss);
@@ -1329,11 +1352,13 @@ async function addIssue(periodicalId) {
   if (!d.issue_no) return toast('Въведете номер на брой.', 'err');
   d.periodical_id = periodicalId;
   await call(window.api.periodicalIssues.add(d));
+  markSaved();
   openPeriodical(periodicalId);
 }
 window.addIssue = addIssue;
 async function delIssue(id, periodicalId) {
   await call(window.api.periodicalIssues.delete(id));
+  markSaved();
   openPeriodical(periodicalId);
 }
 window.delIssue = delIssue;
@@ -1427,7 +1452,7 @@ window.openMzs = openMzs;
 async function delMzs(id) {
   if (!confirm('Изтриване на заявката?')) return;
   await call(window.api.mzs.delete(id));
-  closeModal(); renderMzs(); toast('Изтрито.', 'ok');
+  closeModal(); renderMzs(); toast('Изтрито.', 'ok'); markSaved();
 }
 window.delMzs = delMzs;
 
@@ -1673,24 +1698,45 @@ async function renderCatalog() {
   if (!status) return;
   $('#view').innerHTML = `
     <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
-    Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл.</div>
+    Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл. Каталогът се
+    публикува през <b>GitHub</b> — сайтът chyavorec.org чете файла на живо от там, без нужда от друг сървър.</div>
 
-    <div class="card"><h3 style="margin-top:0">Автоматично публикуване</h3>
+    <div class="card"><h3 style="margin-top:0">Работна папка (git clone на хранилището)</h3>
       ${status.folder ? `
         <div class="note">Свързана папка: <b style="font-family:var(--mono)">${esc(status.folder)}</b> —
         <code>katalog.json</code> се записва там автоматично при всяка промяна във фонда (нова книга, редакция,
-        заемане, връщане, отчисляване).</div>
+        заемане, връщане, отчисляване).
+        ${status.isGitRepo
+          ? '<br><b>Разпозната като git хранилище</b> — публикуването в GitHub става автоматично на всеки 5 минути (ако има промяна), или веднага с бутона по-долу.'
+          : '<br><span style="color:var(--red)">Внимание: тази папка не е git хранилище (липсва .git) — направете <code>git clone</code> на хранилището веднъж и изберете тази папка отново.</span>'}
+        </div>
         <div class="toolbar">
-          <button class="btn pri" onclick="catalogWriteNow()">Генерирай сега</button>
+          <button class="btn pri" onclick="catalogGitPublishNow()">Публикувай в GitHub сега</button>
+          <button class="btn" onclick="catalogWriteNow()">Генерирай katalog.json (без push)</button>
           <button class="btn dgr" onclick="catalogDisconnect()">Спри автоматичния запис</button>
         </div>`
       : `
-        <div class="note">Изберете папка на компютъра — може да е обикновена локална папка, синхронизирана папка на
-        OneDrive/Google Drive, или работно копие на git хранилище (за конвейера към chyavorec.org — виж README).
-        Програмата ще записва <code>katalog.json</code> там автоматично при всяка промяна във фонда.</div>
-        <button class="btn pri" onclick="catalogChooseFolder()">Избери папка…</button>`}
+        <div class="note">Едно и само веднъж — на този компютър направете <code>git clone</code> на хранилището
+        (напр. <code>git clone https://github.com/${esc(status.ghUser || 'plam4o4o-source')}/${esc(status.ghRepo || 'yavorec-katalog')}.git</code>),
+        после изберете тук получената папка. Програмата ще записва <code>katalog.json</code> там автоматично при
+        всяка промяна във фонда, и ще го публикува в GitHub сама (git add/commit/push) — не е нужен друг скрипт или
+        планирана задача.</div>
+        <button class="btn pri" onclick="catalogChooseFolder()">Избери папката на хранилището…</button>`}
       <div class="hint" style="margin-top:10px">Записи, които ще излязат в каталога: <b>${status.total}</b> ·
       от тях налични: <b>${status.available}</b></div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Хранилище в GitHub</h3>
+      <div class="note" style="margin-top:0">Адресът, който сайтът ползва, се сглобява сам от потребителя,
+      хранилището и клона в GitHub. Сменяйте ги само ако направите ново хранилище.</div>
+      <form id="ghF" onsubmit="return false"><div class="grid g3">
+        ${fld('Потребител в GitHub', 'gh_user', { val: status.ghUser || '', hint: 'напр. plam4o4o-source' })}
+        ${fld('Хранилище', 'gh_repo', { val: status.ghRepo || '', hint: 'напр. yavorec-katalog' })}
+        ${fld('Клон', 'gh_branch', { val: status.ghBranch || 'main', hint: 'обикновено main' })}
+      </div></form>
+      <div class="toolbar"><button class="btn pri" onclick="saveGhSettings()">Запиши и сглоби адреса</button></div>
+      <div class="hint" style="margin-top:10px">Адрес, който ползва сайтът:<br>
+      <code style="word-break:break-all">${esc(status.rawUrl || '(попълнете потребител и хранилище)')}</code></div>
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Публичен адрес на сайта</h3>
@@ -1727,6 +1773,20 @@ async function catalogWriteNow() {
   renderCatalog();
 }
 window.catalogWriteNow = catalogWriteNow;
+async function catalogGitPublishNow() {
+  toast('Публикуване в GitHub…', 'ok');
+  const res = await window.api.catalog.gitPublishNow();
+  if (!res.ok) return toast(res.error, 'err');
+  toast(res.committed ? 'Публикувано в GitHub.' : 'Няма промяна за публикуване.', 'ok');
+  renderCatalog();
+}
+window.catalogGitPublishNow = catalogGitPublishNow;
+async function saveGhSettings() {
+  const d = formData('#ghF');
+  await call(window.api.catalog.updateGh(d), 'Настройките за GitHub са записани.');
+  renderCatalog();
+}
+window.saveGhSettings = saveGhSettings;
 async function exportCatalog() {
   const res = await window.api.catalog.export();
   if (!res.ok) return toast(res.error, 'err');
@@ -1938,8 +1998,18 @@ async function exportAuditCSV() {
 window.exportAuditCSV = exportAuditCSV;
 
 /* ---------------- Настройки ---------------- */
+function fmtBytes(n) {
+  if (n > 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' МБ';
+  return Math.round(n / 1024) + ' КБ';
+}
+function fmtDateTime(ms) {
+  const d = new Date(ms);
+  return bg(d.toISOString().slice(0, 10)) + ' ' + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
+}
 async function renderSetup() {
-  const [s, dbLoc] = await Promise.all([call(window.api.settings.get()), call(window.api.dbLocation.get())]);
+  const [s, dbLoc, backups] = await Promise.all([
+    call(window.api.settings.get()), call(window.api.dbLocation.get()), call(window.api.backup.list())
+  ]);
   if (!s) return;
   $('#view').innerHTML = `
     <form id="stF" onsubmit="return false">
@@ -2009,11 +2079,49 @@ async function renderSetup() {
       </div>
     </div>
 
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Резервно копие</h3>
+      <div class="note" style="margin-top:0">Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се
+      записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави
+      <b>автоматично резервно копие веднъж на ден</b> (при първото стартиране за деня) в подпапка <code>backups</code>
+      до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата,
+      или за пренасяне на данните на друг компютър със същата програма.</div>
+      <div class="toolbar">
+        <button class="btn pri" onclick="backupNow()">Направи резервно копие сега…</button>
+        <button class="btn" onclick="restoreBackupBrowse()">Възстанови от файл…</button>
+      </div>
+      ${backups && backups.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
+        <th>Файл</th><th>Дата и час</th><th>Размер</th><th>Вид</th><th></th></tr></thead><tbody>
+        ${backups.map(b => `<tr><td style="font-family:var(--mono);font-size:12px">${esc(b.name)}</td>
+          <td class="num">${fmtDateTime(b.mtime)}</td><td class="num">${fmtBytes(b.size)}</td>
+          <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}</td>
+          <td><button class="btn sm" onclick="restoreBackupFromList('${esc(b.path).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">Възстанови</button></td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Обновяване</h3>
       ${updateStatusHtml()}
     </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
 }
+async function backupNow() {
+  const res = await window.api.backup.now();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Резервно копие записано: ' + res.data, 'ok');
+  renderSetup();
+}
+window.backupNow = backupNow;
+async function restoreBackupFromList(path) {
+  if (!confirm('Възстановяване от това резервно копие ще замени текущите данни в програмата и ще я рестартира. Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?')) return;
+  const res = await window.api.backup.restoreFromList(path);
+  if (!res.ok) toast(res.error, 'err');
+}
+window.restoreBackupFromList = restoreBackupFromList;
+async function restoreBackupBrowse() {
+  if (!confirm('Ще изберете файл с резервно копие (.db) от компютъра/USB/мрежов диск. Той ще замени текущите данни в програмата и тя ще се рестартира. Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?')) return;
+  const res = await window.api.backup.restoreBrowse();
+  if (!res.ok) toast(res.error, 'err');
+}
+window.restoreBackupBrowse = restoreBackupBrowse;
 async function chooseDbLocation() {
   if (!confirm('Програмата ще копира текущата база данни в новата папка и ще се рестартира. Продължавате ли?')) return;
   const res = await window.api.dbLocation.choose();
@@ -2054,5 +2162,6 @@ window.saveSetup = saveSetup;
 /* ---------------- Старт ---------------- */
 initUserBadge();
 initAppCredit();
+initSavedIndicator();
 initAutoUpdateUI();
 loadSettingsCache().then(route);
