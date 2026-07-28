@@ -234,6 +234,20 @@ async function setCurrentUser() {
 }
 window.setCurrentUser = setCurrentUser;
 
+/* ---------------- Версия и авторство ---------------- */
+const APP_YEAR_START = 2026; // годината на създаване на Electron версията — фиксирана веднъж
+function appYears() {
+  const y = new Date().getFullYear();
+  return y > APP_YEAR_START ? APP_YEAR_START + '–' + y : String(APP_YEAR_START);
+}
+let APP_CREDIT_TEXT = '';
+async function initAppCredit() {
+  const version = await call(window.api.app.getVersion());
+  APP_CREDIT_TEXT = 'Създадено от Пачо · Всички права запазени © ' + appYears() + (version ? ' · v' + version : '');
+  const el = $('#appCredit');
+  if (el) el.textContent = APP_CREDIT_TEXT;
+}
+
 /* ---------------- Табло ---------------- */
 async function renderDash() {
   const s = await call(window.api.dashboard.stats());
@@ -1618,7 +1632,8 @@ async function renderSetup() {
       <div class="hint">Комисията се назначава със заповед на ръководителя; участието на библиотекар и счетоводител е задължително (чл. 35, ал. 1).</div>
     </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
-    </form>`;
+    </form>
+    <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
 }
 async function saveSetup() {
   const d = formData('#stF'); d.id = 1;
@@ -1629,4 +1644,5 @@ window.saveSetup = saveSetup;
 
 /* ---------------- Старт ---------------- */
 initUserBadge();
+initAppCredit();
 loadSettingsCache().then(route);

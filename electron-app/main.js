@@ -102,6 +102,7 @@ function naturalLoss(n, freeAccessPct) { return (freeAccessPct > 50 ? n * 10 : n
 /* ---------------- Текущ служител (за одитната следа) ---------------- */
 ipcMain.handle('app:setUser', (e, name) => run(() => { CURRENT_USER = (name || '').trim(); return CURRENT_USER; }));
 ipcMain.handle('app:getUser', () => run(() => CURRENT_USER));
+ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
 
 /* ---------------- Настройки ---------------- */
 ipcMain.handle('settings:get', () => run(() => db.prepare('SELECT * FROM settings WHERE id = 1').get()));

@@ -5,7 +5,8 @@ const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('api', {
   app: {
     setUser: invoke('app:setUser'),
-    getUser: invoke('app:getUser')
+    getUser: invoke('app:getUser'),
+    getVersion: invoke('app:getVersion')
   },
   settings: {
     get: invoke('settings:get'),
