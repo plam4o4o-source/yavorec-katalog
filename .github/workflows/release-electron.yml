@@ -1,14 +1,16 @@
 name: Build & publish Windows installer
 
-# Стартира се автоматично при качване на таг във формат vX.Y.Z (напр. v1.2.0).
-# Строи .exe инсталатора на истинска Windows машина (GitHub-hosted runner —
-# не е нужен wine) и публикува GitHub Release с трите файла (.exe, .exe.blockmap,
+# Стартира се автоматично при качване на таг във формат vX.Y.Z (напр. v1.2.0),
+# или ръчно от раздел "Actions" в GitHub (workflow_dispatch). Строи .exe
+# инсталатора на истинска Windows машина (GitHub-hosted runner — не е нужен
+# wine) и публикува GitHub Release с трите файла (.exe, .exe.blockmap,
 # latest.yml), които electron-updater очаква за автоматичното обновяване.
 
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch: {}
 
 permissions:
   contents: write

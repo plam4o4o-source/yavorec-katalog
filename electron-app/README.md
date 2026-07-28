@@ -126,6 +126,10 @@ GitHub Release с **и трите нужни файла** автоматично
 3. Готово — GitHub Actions сам ще build-не `.exe`-то, `.blockmap`-а и `latest.yml`
    и ще ги публикува като Release (проверка: раздел „Actions“ в GitHub хранилището).
 
+Workflow-ът може да се пусне и ръчно (без таг), от раздел „Actions“ →
+„Build & publish Windows installer“ → „Run workflow“ (`workflow_dispatch`) —
+удобно за тестов build без да се качва официална версия.
+
 От този момент всяка вече инсталирана програма ще открие версията при следващото
 си стартиране и ще се обнови сама.
 
