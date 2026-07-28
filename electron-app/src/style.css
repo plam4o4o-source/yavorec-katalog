@@ -81,6 +81,72 @@ body{
 .card .num{font-family:var(--serif); font-size:32px; font-weight:700; color:var(--brassD)}
 .card .lbl{font-size:12px; color:var(--ink2); margin-top:2px}
 
+/* ---------- Табло: сканиране, KPI плочки, ленти, бързи действия ---------- */
+.dashScan{display:flex; align-items:center; gap:20px; margin-bottom:16px; flex-wrap:wrap}
+.dashScan-l{flex:0 0 auto; min-width:220px}
+.dashScan .scan{flex:1; min-width:260px}
+.scanHit{margin-bottom:16px; border-left:4px solid var(--brass)}
+.scanHit-head{font-size:12px; color:var(--ink2); margin-bottom:6px}
+.scanHit-title{font-family:var(--serif); font-size:19px; color:var(--spine2)}
+
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px}
+.kpi{
+  display:flex; align-items:center; gap:14px; padding:16px 18px;
+  background:var(--paper2); border:1px solid var(--rule); border-left:4px solid var(--brass);
+  border-radius:4px; box-shadow:var(--sh);
+}
+.kpi.warn{border-left-color:var(--red)}
+.kpi.ok{border-left-color:var(--green)}
+.kpi-ico{font-size:26px; line-height:1; opacity:.85; flex:0 0 auto}
+.kpi-body{min-width:0}
+.kpi-num{font-family:var(--serif); font-size:30px; font-weight:700; color:var(--brassD); line-height:1.1}
+.kpi.warn .kpi-num{color:var(--red)}
+.kpi-lbl{font-size:12.5px; color:var(--ink2); margin-top:2px}
+.kpi-extra{font-size:11.5px; color:var(--ink3); margin-top:3px}
+
+.statRows{font-size:13px}
+.statRows div{display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--rule)}
+.statRows div:last-child{border-bottom:0}
+
+.bar{height:8px; background:var(--paper3); border-radius:4px; overflow:hidden}
+.bar-fill{height:100%; background:var(--brass); border-radius:4px; transition:width .3s}
+.bar-fill.done{background:var(--green)}
+.bar-fill.near{background:#C98A2E}
+.bar-fill.full{background:var(--red)}
+
+.quickGrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:9px}
+.quickBtn{
+  display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 8px;
+  background:var(--paper); border:1px solid var(--rule2); border-radius:4px;
+  font-family:var(--sans); font-size:12.5px; color:var(--ink); cursor:pointer; text-align:center;
+}
+.quickBtn span{font-size:20px; line-height:1}
+.quickBtn:hover{background:var(--paper3); border-color:var(--brass)}
+
+.upcomingRow{display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--rule)}
+.upcomingRow:last-child{border-bottom:0}
+
+/* ---------- Дневник: попълване направо в таблицата ---------- */
+.dnvTable td{padding:2px 3px}
+.dnvTable th{position:sticky; top:0; z-index:2; background:var(--paper3)}
+.dnvTable td.dnvDay{padding:8px 10px; font-weight:600; background:var(--paper3); position:sticky; left:0; z-index:1}
+.dnvTable th:first-child{left:0; z-index:3}
+.dnvCell{
+  width:56px; padding:5px 6px; border:1px solid transparent; border-radius:3px;
+  font-family:var(--mono); font-size:12.5px; text-align:right; background:transparent; color:var(--ink);
+}
+.dnvCell:hover{border-color:var(--rule2); background:#fff}
+.dnvCell:focus{border-color:var(--brass); background:#fff; outline:none; box-shadow:0 0 0 2px rgba(150,115,31,.15)}
+.dnvCell.hrs{width:62px; text-align:center}
+.dnvCell.saved{background:var(--greenL); border-color:var(--green)}
+.dnvTable td.calc{background:var(--paper3); font-weight:600; font-family:var(--mono); padding:8px 10px}
+.dnvTable tr.dnvToday td.dnvDay{background:var(--brass); color:#fff}
+.dnvTable tr.dnvTotal{font-weight:600; background:var(--paper3)}
+.dnvTable tr.dnvTotal td{padding:9px 10px; border-top:2px solid var(--rule2)}
+.dnvTable tr.dnvTotal.ytd td{border-top:1px solid var(--rule)}
+/* Стрелките на number полетата само заемат място в толкова тясна таблица */
+.dnvCell[type=number]::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
+
 /* ---------- Toolbar / search ---------- */
 .toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center}
 .toolbar input[type=text], .toolbar input[type=search]{

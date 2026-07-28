@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const { autoUpdater } = require('electron-updater');
 
@@ -75,7 +76,9 @@ function initDb() {
     catalog_folder: 'TEXT',
     gh_user: "TEXT DEFAULT 'plam4o4o-source'",
     gh_repo: "TEXT DEFAULT 'yavorec-katalog'",
-    gh_branch: "TEXT DEFAULT 'main'"
+    gh_branch: "TEXT DEFAULT 'main'",
+    limit_books: 'INTEGER DEFAULT 0',
+    limit_readers: 'INTEGER DEFAULT 0'
   });
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
@@ -129,9 +132,64 @@ function backupsDir() {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
-function doBackupTo(destPath) {
+/* Криптиране на резервни копия (по избор, с парола) ----------------------------
+   AES-256-GCM; ключът се извежда от паролата чрез scrypt със случайна сол за всеки
+   файл. GCM дава и проверка за цялост — повреден или подправен файл се засича при
+   разшифроването, вместо да се възстанови мълчаливо счупена база данни.
+
+   Формат: "INVBAK01" (8B) | сол (16B) | iv (12B) | authTag (16B) | шифрован SQLite файл
+
+   Криптират се само РЪЧНИТЕ копия (тези, които реално пътуват на USB/друг компютър).
+   Автоматичните дневни копия остават некриптирани — те лежат до самата база данни,
+   която също е некриптирана, така че парола там не би добавила реална защита, а
+   само риск от заключване на данните. */
+const BACKUP_MAGIC = Buffer.from('INVBAK01', 'utf8');
+function deriveBackupKey(password, salt) {
+  return crypto.scryptSync(String(password), salt, 32, { N: 16384, r: 8, p: 1 });
+}
+function isEncryptedBackup(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const head = Buffer.alloc(BACKUP_MAGIC.length);
+    const read = fs.readSync(fd, head, 0, BACKUP_MAGIC.length, 0);
+    fs.closeSync(fd);
+    return read === BACKUP_MAGIC.length && head.equals(BACKUP_MAGIC);
+  } catch (e) {
+    return false;
+  }
+}
+function encryptBackupFile(plainPath, destPath, password) {
+  const salt = crypto.randomBytes(16);
+  const iv = crypto.randomBytes(12);
+  const key = deriveBackupKey(password, salt);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const data = fs.readFileSync(plainPath);
+  const enc = Buffer.concat([cipher.update(data), cipher.final()]);
+  fs.writeFileSync(destPath, Buffer.concat([BACKUP_MAGIC, salt, iv, cipher.getAuthTag(), enc]));
+}
+function decryptBackupToTemp(srcPath, password) {
+  const buf = fs.readFileSync(srcPath);
+  const salt = buf.subarray(8, 24);
+  const iv = buf.subarray(24, 36);
+  const tag = buf.subarray(36, 52);
+  const enc = buf.subarray(52);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveBackupKey(password, salt), iv);
+  decipher.setAuthTag(tag);
+  let dec;
+  try {
+    dec = Buffer.concat([decipher.update(enc), decipher.final()]);
+  } catch (e) {
+    throw new Error('Грешна парола или повреден файл с резервно копие.');
+  }
+  const tmp = path.join(app.getPath('temp'), 'inventar-restore-' + Date.now() + '.db');
+  fs.writeFileSync(tmp, dec);
+  return tmp;
+}
+
+function doBackupTo(destPath, password) {
   if (db) db.pragma('wal_checkpoint(TRUNCATE)');
-  fs.copyFileSync(resolveDbPath(), destPath);
+  if (password) encryptBackupFile(resolveDbPath(), destPath, password);
+  else fs.copyFileSync(resolveDbPath(), destPath);
 }
 function pruneOldAutoBackups() {
   const dir = backupsDir();
@@ -162,58 +220,85 @@ ipcMain.handle('backup:list', () =>
   run(() => {
     const dir = backupsDir();
     return fs.readdirSync(dir)
-      .filter(f => f.endsWith('.db'))
+      .filter(f => f.endsWith('.db') || f.endsWith('.invbak'))
       .map(f => {
         const full = path.join(dir, f);
         const st = fs.statSync(full);
-        return { name: f, path: full, size: st.size, mtime: st.mtimeMs, auto: f.startsWith('auto-') };
+        return {
+          name: f, path: full, size: st.size, mtime: st.mtimeMs,
+          auto: f.startsWith('auto-'), encrypted: isEncryptedBackup(full)
+        };
       })
       .sort((a, b) => b.mtime - a.mtime);
   })
 );
-ipcMain.handle('backup:now', async () => {
+ipcMain.handle('backup:now', async (e, opts) => {
   try {
-    const defaultPath = path.join(backupsDir(), `Inventar-backup-${backupTimestamp()}.db`);
+    const password = opts && opts.password ? String(opts.password) : '';
+    const ext = password ? 'invbak' : 'db';
+    const defaultPath = path.join(backupsDir(), `Inventar-backup-${backupTimestamp()}.${ext}`);
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: 'Направи резервно копие (може да е и на USB/мрежов диск за пренасяне на друг компютър)',
       defaultPath,
-      filters: [{ name: 'SQLite база данни', extensions: ['db'] }]
+      filters: password
+        ? [{ name: 'Криптирано резервно копие', extensions: ['invbak'] }]
+        : [{ name: 'SQLite база данни', extensions: ['db'] }]
     });
     if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-    doBackupTo(filePath);
-    logAudit('Резервно копие', 'ръчно копие: ' + filePath);
-    return { ok: true, data: filePath };
+    doBackupTo(filePath, password);
+    logAudit('Резервно копие', (password ? 'ръчно криптирано копие: ' : 'ръчно копие: ') + filePath);
+    return { ok: true, data: filePath, encrypted: !!password };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 });
-function performRestore(sourcePath) {
-  const safetyDir = backupsDir();
-  const safetyPath = path.join(safetyDir, `before-restore-${backupTimestamp()}.db`);
+function performRestore(sourcePath, password) {
+  let realSource = sourcePath;
+  let tmpToClean = null;
+  if (isEncryptedBackup(sourcePath)) {
+    if (!password) throw new Error('Файлът е криптиран — необходима е парола.');
+    realSource = decryptBackupToTemp(sourcePath, password);
+    tmpToClean = realSource;
+  }
+  const safetyPath = path.join(backupsDir(), `before-restore-${backupTimestamp()}.db`);
   if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); }
   const activePath = resolveDbPath();
   if (fs.existsSync(activePath)) fs.copyFileSync(activePath, safetyPath);
   if (db) { db.close(); db = null; }
-  fs.copyFileSync(sourcePath, activePath);
+  fs.copyFileSync(realSource, activePath);
+  if (tmpToClean) { try { fs.unlinkSync(tmpToClean); } catch (e) { /* временният файл ще се изчисти от системата */ } }
   app.relaunch();
   app.exit(0);
 }
-ipcMain.handle('backup:restoreFromList', (e, sourcePath) =>
+ipcMain.handle('backup:restoreFromList', (e, { path: sourcePath, password }) =>
   run(() => {
     if (!fs.existsSync(sourcePath)) throw new Error('Файлът с резервното копие не е намерен.');
-    performRestore(sourcePath);
+    if (isEncryptedBackup(sourcePath) && !password) return { needsPassword: true, path: sourcePath };
+    performRestore(sourcePath, password);
+    return { needsPassword: false };
   })
 );
-ipcMain.handle('backup:restoreBrowse', async () => {
+ipcMain.handle('backup:restoreBrowse', async (e, opts) => {
   try {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Изберете файл с резервно копие за възстановяване (.db)',
-      properties: ['openFile'],
-      filters: [{ name: 'SQLite база данни', extensions: ['db'] }]
-    });
-    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
-    performRestore(filePaths[0]);
-    return { ok: true };
+    let target = opts && opts.path;
+    if (!target) {
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Изберете файл с резервно копие за възстановяване',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Резервни копия (.db, .invbak)', extensions: ['db', 'invbak'] },
+          { name: 'Всички файлове', extensions: ['*'] }
+        ]
+      });
+      if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+      target = filePaths[0];
+    }
+    const password = opts && opts.password ? String(opts.password) : '';
+    if (isEncryptedBackup(target) && !password) {
+      return { ok: true, data: { needsPassword: true, path: target } };
+    }
+    performRestore(target, password);
+    return { ok: true, data: { needsPassword: false } };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -417,6 +502,42 @@ const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitl
   'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'status', 'price',
   'description', 'acquisition_id'];
 
+/* ---------------- Лимит на броя записи ----------------
+   Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
+   Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
+   остава възможна дори ако лимитът вече е достигнат или намален след това. */
+function checkRecordLimit(kind) {
+  const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
+  const cfg = kind === 'books'
+    ? { limit: s.limit_books, table: 'books', label: 'документи във фонда' }
+    : { limit: s.limit_readers, table: 'readers', label: 'читатели' };
+  const limit = parseInt(cfg.limit, 10) || 0;
+  if (limit <= 0) return;
+  const n = db.prepare(`SELECT COUNT(*) AS n FROM ${cfg.table}`).get().n;
+  if (n >= limit) {
+    throw new Error(`Достигнат е зададеният лимит от ${limit} ${cfg.label}. ` +
+      'Увеличете или премахнете лимита в „Настройки“ → „Ограничения“, за да добавяте нови записи.');
+  }
+}
+ipcMain.handle('limits:usage', () =>
+  run(() => {
+    const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
+    return {
+      books: db.prepare('SELECT COUNT(*) AS n FROM books').get().n,
+      readers: db.prepare('SELECT COUNT(*) AS n FROM readers').get().n,
+      limitBooks: parseInt(s.limit_books, 10) || 0,
+      limitReaders: parseInt(s.limit_readers, 10) || 0
+    };
+  })
+);
+ipcMain.handle('limits:update', (e, { limit_books, limit_readers }) =>
+  run(() => {
+    db.prepare('UPDATE settings SET limit_books=?, limit_readers=? WHERE id=1')
+      .run(Math.max(0, parseInt(limit_books, 10) || 0), Math.max(0, parseInt(limit_readers, 10) || 0));
+    logAudit('Редакция на настройки', 'променени лимити на записите');
+  })
+);
+
 function bookPayload(b) {
   const out = {};
   BOOK_FIELDS.forEach(f => { out[f] = b[f] === undefined || b[f] === '' ? null : b[f]; });
@@ -447,6 +568,7 @@ ipcMain.handle('books:byBarcode', (e, code) =>
 
 ipcMain.handle('books:create', (e, book) =>
   run(() => {
+    checkRecordLimit('books');
     const tx = db.transaction((b) => {
       const payload = bookPayload(b);
       const info = db.prepare(`
@@ -711,6 +833,7 @@ ipcMain.handle('readers:get', (e, id) => run(() => db.prepare('SELECT * FROM rea
 ipcMain.handle('readers:byCard', (e, card) => run(() => db.prepare('SELECT * FROM readers WHERE card_no = ?').get(card)));
 ipcMain.handle('readers:create', (e, r) =>
   run(() => {
+    checkRecordLimit('readers');
     const payload = readerPayload(r);
     const info = db.prepare(`
       INSERT INTO readers (${READER_FIELDS.join(',')}) VALUES (${READER_FIELDS.map(f => '@' + f).join(',')})

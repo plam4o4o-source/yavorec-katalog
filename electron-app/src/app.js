@@ -207,7 +207,7 @@ function sigLblCard(b) {
 /* ---------------- Навигация ---------------- */
 const NAV = [
   { g: 'Общ преглед', items: [['dash', 'Табло']] },
-  { g: 'Фонд', items: [['books', 'Книги'], ['categories', 'Категории'], ['invbook', 'Инвентарна книга'],
+  { g: 'Фонд', items: [['books', 'Книги'], ['invbook', 'Инвентарна книга'],
     ['kdbf', 'КДБФ'], ['acq', 'Постъпления'], ['acts', 'Отчисляване'], ['invent', 'Инвентаризация']] },
   { g: 'Читатели', items: [['readers', 'Читатели'], ['circ', 'Заемане и връщане'], ['over', 'Просрочени']] },
   { g: 'Други регистри', items: [['periodika', 'Периодика'], ['mzs', 'МЗС'], ['dnevnik', 'Дневник']] },
@@ -217,7 +217,6 @@ const NAV = [
 const TITLES = {
   dash: ['Табло', 'обобщение на състоянието'],
   books: ['Библиотечен фонд', 'каталогизация и издирване'],
-  categories: ['Категории', 'видове документи'],
   invbook: ['Инвентарна книга', 'Приложение № 4 към чл. 16, ал. 1'],
   kdbf: ['Книга за движение на библиотечния фонд', 'Приложения № 1, 2 и 3 към чл. 13, ал. 3'],
   acq: ['Постъпления', 'раздел II и чл. 14 от Наредба № 3'],
@@ -249,7 +248,7 @@ function drawNav() {
 }
 
 const RENDERERS = {
-  dash: renderDash, books: renderBooks, categories: renderCategories, invbook: renderInvBook,
+  dash: renderDash, books: renderBooks, invbook: renderInvBook,
   kdbf: renderKdbf, acq: renderAcq, acts: renderActs, invent: renderInvent,
   readers: renderReaders, circ: renderCirc, over: renderOver,
   periodika: renderPeriodika, mzs: renderMzs, dnevnik: renderDnevnik,
@@ -346,15 +345,34 @@ window.installUpdateNow = installUpdateNow;
 async function renderDash() {
   const r = await call(window.api.dashboard.full());
   if (!r) return;
+  const pct = r.inventoryTarget ? Math.min(100, Math.round(r.inventoryScannedYear / r.inventoryTarget * 100)) : 0;
+  const kpi = (icon, num, lbl, extra, cls) => `
+    <div class="kpi ${cls || ''}">
+      <div class="kpi-ico">${icon}</div>
+      <div class="kpi-body">
+        <div class="kpi-num">${num}</div>
+        <div class="kpi-lbl">${lbl}</div>
+        ${extra ? `<div class="kpi-extra">${extra}</div>` : ''}
+      </div>
+    </div>`;
   $('#view').innerHTML = `
-    <div class="cards" style="margin-bottom:18px">
-      <div class="card"><div class="num">${r.fundCount.toLocaleString('bg-BG')}</div><div class="lbl">Библиотечен фонд</div></div>
-      <div class="card"><div class="num" style="font-size:22px">${mny(r.fundValue)}</div><div class="lbl">Стойност на фонда</div></div>
-      <div class="card"><div class="num">${r.loansOpen}</div><div class="lbl">Заети в момента</div><div class="hint">при ${r.activeReaders} активни читатели</div></div>
-      <div class="card"><div class="num ${r.overdueCount ? 'warn' : ''}">${r.overdueCount}</div><div class="lbl">Просрочени</div></div>
+    <div class="card dashScan">
+      <div class="dashScan-l">
+        <h3 style="margin:0 0 2px">Бързо търсене / сканиране</h3>
+        <div class="hint" style="margin:0">Сканирайте баркод на документ или читателска карта — програмата разпознава сама какво е.</div>
+      </div>
+      <input id="dashScan" class="scan" placeholder="Сканирай баркод, инв. № или № читателска карта…" autocomplete="off">
+    </div>
+    <div id="dashScanResult"></div>
+
+    <div class="kpis">
+      ${kpi('📚', r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
+      ${kpi('📖', r.loansOpen, 'Заети в момента', 'при ' + r.activeReaders + ' активни читатели')}
+      ${kpi('⏰', r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
+      ${kpi('📅', r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
     </div>
 
-    <div class="grid g3">
+    <div class="grid g3" style="margin-top:16px">
       <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
         ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
         ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
@@ -365,30 +383,34 @@ async function renderDash() {
         </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
       </div>
       <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
-        <div style="font-size:13px;line-height:2.1">
-          <div style="display:flex;justify-content:space-between"><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
-          <div style="display:flex;justify-content:space-between"><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
-          <div style="display:flex;justify-content:space-between"><span>Заемания</span><b>${r.loansYear}</b></div>
-          <div style="display:flex;justify-content:space-between"><span>Записани читатели</span><b>${r.readersYear}</b></div>
-          <hr style="border:0;border-top:1px solid var(--rule);margin:9px 0">
-          <div style="display:flex;justify-content:space-between"><span>Инвентаризация — цел</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
-          <div class="hint">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
+        <div class="statRows">
+          <div><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
+          <div><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
+          <div><span>Заемания</span><b>${r.loansYear}</b></div>
+          <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
         </div>
+        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
+        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
+        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
       </div>
     </div>
 
     <div class="grid g2" style="margin-top:16px">
       <div class="card"><h3 style="margin-top:0">Бързи действия</h3>
-        <div class="toolbar" style="margin:0">
-          <button class="btn pri" onclick="bookForm()">+ Нов документ</button>
-          <button class="btn" onclick="go('circ')">Заемане / връщане</button>
-          <button class="btn" onclick="readerForm()">+ Нов читател</button>
-          <button class="btn" onclick="go('acq')">Нова партида</button>
+        <div class="quickGrid">
+          <button class="quickBtn" onclick="bookForm()"><span>➕</span>Нов документ</button>
+          <button class="quickBtn" onclick="go('circ')"><span>🔄</span>Заемане / връщане</button>
+          <button class="quickBtn" onclick="readerForm()"><span>👤</span>Нов читател</button>
+          <button class="quickBtn" onclick="go('acq')"><span>📦</span>Нова партида</button>
+          <button class="quickBtn" onclick="go('dnevnik')"><span>📝</span>Дневник</button>
+          <button class="quickBtn" onclick="go('labels')"><span>🏷️</span>Етикети</button>
         </div>
       </div>
       <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
         <div style="font-size:13px">
-          ${r.upcoming.length ? r.upcoming.map(l => `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--rule)">
+          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
           <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
           <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
         </div>
@@ -400,24 +422,72 @@ async function renderDash() {
     2) Заведете партида в <a href="#acq">Постъпления</a> (чл. 14).
     3) Каталогизирайте документите в <a href="#books">Книги</a>. Инвентарните номера се дават последователно (чл. 16, ал. 2).</div>` : ''}
   `;
+  const sc = $('#dashScan');
+  if (sc) {
+    sc.focus();
+    sc.addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const code = sc.value.trim(); sc.value = '';
+      if (code) await dashLookup(code);
+    });
+  }
 }
+/* Разпознава сканираното само по това дали съвпада с документ или с читателска карта —
+   не се налага потребителят предварително да избира какво сканира. */
+async function dashLookup(code) {
+  const box = $('#dashScanResult');
+  const [book, reader] = await Promise.all([
+    window.api.books.byBarcode(code), window.api.readers.byCard(code)
+  ]);
+  const b = book.ok ? book.data : null;
+  const rd = reader.ok ? reader.data : null;
+  if (b) {
+    const loans = await call(window.api.loans.list());
+    const open = (loans || []).filter(l => l.book_id === b.id && !l.date_in);
+    box.innerHTML = `<div class="card scanHit">
+      <div class="scanHit-head"><b>Документ</b> · инв. № ${b.inv_number ?? '—'}
+        <button class="btn sm" style="float:right" onclick="bookForm(${b.id})">Отвори карта</button></div>
+      <div class="scanHit-title">${esc(b.title)}</div>
+      <div class="hint">${esc([b.author, b.publisher, b.year].filter(Boolean).join(' · '))}</div>
+      <div style="margin-top:8px">
+        ${b.status === 'отчислен' ? '<span class="badge warn">отчислен</span>'
+          : open.length ? `<span class="badge warn">заета от ${esc(open[0].reader_name || '')} до ${bg(open[0].date_due)}</span>`
+          : '<span class="badge ok">налична</span>'}
+        <span class="hint" style="margin-left:8px">${esc(b.department || '')}${b.call_number ? ' · ' + esc(b.call_number) : ''}</span>
+      </div></div>`;
+  } else if (rd) {
+    const loans = await call(window.api.loans.byReader(rd.id));
+    const open = (loans || []).filter(l => !l.date_in);
+    box.innerHTML = `<div class="card scanHit">
+      <div class="scanHit-head"><b>Читател</b> · карта ${esc(rd.card_no || '—')}
+        <button class="btn sm" style="float:right" onclick="go('circ')">Заемане / връщане</button></div>
+      <div class="scanHit-title">${esc(rd.name)}</div>
+      <div class="hint">${esc(rd.category || '')}${rd.phone ? ' · ' + esc(rd.phone) : ''}</div>
+      <div style="margin-top:8px">
+        ${rd.status === 'прекратен' ? '<span class="badge warn">прекратена регистрация</span>'
+          : `<span class="badge ok">активен</span>`}
+        <span class="hint" style="margin-left:8px">заети в момента: <b>${open.length}</b></span>
+      </div></div>`;
+  } else {
+    box.innerHTML = `<div class="note w">Няма намерен документ или читател с код <b>${esc(code)}</b>.</div>`;
+  }
+}
+window.dashLookup = dashLookup;
 
-/* ---------------- Категории ---------------- */
-async function renderCategories() {
-  const cats = await call(window.api.categories.list());
-  if (!cats) return;
-  $('#view').innerHTML = `
+/* ---------------- Категории (управляват се в „Настройки“) ---------------- */
+function categoriesCardHtml(cats) {
+  return `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Категории (видове документи)</h3>
+    <div class="note" style="margin-top:0">Категориите се избират при вписване на всеки документ във фонда
+    и излизат в справките и в онлайн каталога.</div>
     <div class="toolbar"><button class="btn pri" onclick="categoryForm()">+ Нова категория</button></div>
-    <div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th style="width:140px"></th></tr></thead>
-      <tbody>
-        ${cats.length ? cats.map(c => `
-          <tr><td>${esc(c.name)}</td>
-            <td><button class="btn sm" onclick="categoryForm(${c.id}, '${esc(c.name).replace(/'/g, "\\'")}')">Редакция</button>
-                <button class="btn sm dgr" onclick="deleteCategory(${c.id})">Изтрий</button></td></tr>`).join('')
-          : `<tr><td colspan="2" class="empty">Няма категории.</td></tr>`}
-      </tbody>
-    </table></div>`;
+    ${cats && cats.length ? `<div class="wrap"><table class="ledger">
+      <thead><tr><th>Име</th><th style="width:150px"></th></tr></thead><tbody>
+      ${cats.map(c => `<tr><td>${esc(c.name)}</td>
+        <td><button class="btn sm" onclick="categoryForm(${c.id}, '${esc(c.name).replace(/'/g, "\\'")}')">Редакция</button>
+            <button class="btn sm dgr" onclick="deleteCategory(${c.id})">Изтрий</button></td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="hint">Няма категории.</div>'}
+  </div>`;
 }
 function categoryForm(id, name) {
   modal(id ? 'Редакция на категория' : 'Нова категория',
@@ -431,13 +501,13 @@ async function saveCategory(id) {
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
   if (id) await call(window.api.categories.update({ id, name: d.name }), 'Категорията е обновена.');
   else await call(window.api.categories.create(d.name), 'Категорията е добавена.');
-  closeModal(); renderCategories();
+  closeModal(); renderSetup();
 }
 window.saveCategory = saveCategory;
 async function deleteCategory(id) {
   if (!confirm('Да изтрия ли тази категория?')) return;
   await call(window.api.categories.delete(id), 'Категорията е изтрита.');
-  renderCategories();
+  renderSetup();
 }
 window.deleteCategory = deleteCategory;
 
@@ -1509,6 +1579,11 @@ const DNEVNIK_B_COLS = [
   ['b_cat_82', '82 Лит.'], ['b_cat_9', '9 Ист.'], ['b_cat_91', '91 Геогр.'], ['b_cat_fiction', 'Худ. л-ра'],
   ['b_cat_child_nf', 'Дет.отр.'], ['b_cat_child_f', 'Дет.худ.'], ['b_cat_reading_used', 'В читални']
 ];
+/* Всички реални (въвеждани) полета от ДВАТА раздела. Записът в базата презаписва целия ред,
+   затова при запис на клетка от Раздел А трябва да се изпратят и стойностите на Раздел Б —
+   иначе те биха се нулирали. */
+const DNEVNIK_ALL_FIELDS = [...DNEVNIK_A_COLS, ...DNEVNIK_B_COLS]
+  .map(([k]) => k).filter(k => !k.startsWith('$'));
 function dnevnikCell(row, key) {
   if (key === 'a_hours' || key === 'b_hours') return hhmm(row[key]);
   const k = key.startsWith('$') ? key.slice(1) : key;
@@ -1523,15 +1598,28 @@ async function renderDnevnik() {
   window._DNEVNIK = r;
   const cols = DNEVNIK_TAB === 'b' ? DNEVNIK_B_COLS : DNEVNIK_A_COLS;
   const years = [...new Set([y, parseInt(yr(), 10)])].sort((a, b) => b - a);
-  const dayRowHtml = (row) => `<tr><td class="num">${row.day}</td>
-    ${cols.map(([k]) => `<td class="num">${dnevnikCell(row, k)}</td>`).join('')}
-    <td><button class="btn sm" onclick="dnevnikDayForm('${row.date}')">Редакция</button></td></tr>`;
-  const totalRowHtml = (label, row) => `<tr style="font-weight:600;background:var(--paper3)"><td>${esc(label)}</td>
-    ${cols.map(([k]) => `<td class="num">${dnevnikCell(row, k)}</td>`).join('')}<td></td></tr>`;
+  const todayStr = today();
+  // Всяка клетка е поле за въвеждане — попълва се направо в таблицата, като в хартиения
+  // дневник. Изчислените колони („Всичко“) и двата обобщителни реда остават само за четене,
+  // защото се смятат от въведените стойности.
+  const cellHtml = (row, k) => {
+    if (k.startsWith('$')) return `<td class="num calc">${dnevnikCell(row, k)}</td>`;
+    if (k === 'a_hours' || k === 'b_hours') {
+      return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"
+        data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
+    }
+    return `<td><input class="dnvCell" type="number" min="0" value="${row[k] || 0}"
+      data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
+  };
+  const dayRowHtml = (row) => `<tr class="${row.date === todayStr ? 'dnvToday' : ''}">
+    <td class="num dnvDay">${row.day}</td>${cols.map(([k]) => cellHtml(row, k)).join('')}</tr>`;
+  const totalRowHtml = (label, row, cls) => `<tr class="dnvTotal ${cls || ''}"><td>${esc(label)}</td>
+    ${cols.map(([k]) => `<td class="num">${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
   $('#view').innerHTML = `
     <div class="note">Електронен вариант на месечния статистически дневник на читалищните библиотеки —
-    Раздел А (читатели и посещения) и Раздел Б (заети материали). Тоталите за месеца и от началото на
-    годината се смятат автоматично, при всяка промяна в дневните данни.</div>
+    Раздел А (читатели и посещения) и Раздел Б (заети материали). <b>Попълва се направо в таблицата</b> —
+    всяка стойност се записва веднага при излизане от полето. Колоните „Всичко“ и двата обобщителни
+    реда се изчисляват автоматично и не се въвеждат ръчно.</div>
     <div class="toolbar">
       <select onchange="DNEVNIK_YEAR=parseInt(this.value,10);renderDnevnik()">${years.map(x => `<option value="${x}" ${x === y ? 'selected' : ''}>${x}</option>`).join('')}</select>
       <select onchange="DNEVNIK_MONTH=parseInt(this.value,10);renderDnevnik()">${MESETSI.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
@@ -1539,16 +1627,65 @@ async function renderDnevnik() {
         <button class="btn sm ${DNEVNIK_TAB === 'a' ? 'pri' : ''}" onclick="DNEVNIK_TAB='a';renderDnevnik()">Раздел А · Читатели и посещения</button>
         <button class="btn sm ${DNEVNIK_TAB === 'b' ? 'pri' : ''}" onclick="DNEVNIK_TAB='b';renderDnevnik()">Раздел Б · Заети материали</button>
       </div>
+      <button class="btn" onclick="dnevnikDayForm('${todayStr}')">Подробно за днес…</button>
       <button class="btn" onclick="printDnevnikDoc()">Печат / PDF</button>
       <button class="btn" onclick="exportDnevnikCsv()">Експорт CSV</button>
     </div>
-    <div class="wrap"><table class="ledger"><thead><tr>
-      <th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th></th>
+    <div class="wrap"><table class="ledger dnvTable"><thead><tr>
+      <th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}
     </tr></thead><tbody>
       ${r.days.map(dayRowHtml).join('')}
       ${totalRowHtml('Всичко за месеца', r.monthTotal)}
-      ${totalRowHtml('Всичко от нач. на годината', r.ytdTotal)}
+      ${totalRowHtml('Всичко от нач. на годината', r.ytdTotal, 'ytd')}
     </tbody></table></div>`;
+}
+/* Записва една клетка и опреснява само изчислените колони и двата обобщителни реда,
+   без да пречертава цялата таблица — така фокусът и позицията на превъртане се запазват
+   и въвеждането ден след ден остава непрекъснато. */
+async function dnevnikSaveCell(el) {
+  const date = el.dataset.date, field = el.dataset.field;
+  const r = window._DNEVNIK;
+  const row = r && r.days.find(d => d.date === date);
+  if (!row) return;
+  const val = (field === 'a_hours' || field === 'b_hours') ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
+  if ((row[field] || 0) === val) return; // без промяна — не пипай базата
+  row[field] = val;
+  const payload = { date };
+  DNEVNIK_ALL_FIELDS.forEach(f => { payload[f] = row[f] || 0; });
+  payload.note = row.note || '';
+  const res = await window.api.dnevnik.saveDay(payload);
+  if (!res.ok) return toast(res.error, 'err');
+  markSaved();
+  el.classList.add('saved');
+  setTimeout(() => el.classList.remove('saved'), 700);
+  if (field === 'a_hours' || field === 'b_hours') el.value = hhmm(val);
+  await dnevnikRefreshTotals();
+}
+window.dnevnikSaveCell = dnevnikSaveCell;
+async function dnevnikRefreshTotals() {
+  const r = await call(window.api.dnevnik.getMonth({ year: DNEVNIK_YEAR, month: DNEVNIK_MONTH }));
+  if (!r) return;
+  window._DNEVNIK = r;
+  const cols = DNEVNIK_TAB === 'b' ? DNEVNIK_B_COLS : DNEVNIK_A_COLS;
+  // изчислените колони по редовете
+  r.days.forEach(row => {
+    cols.forEach(([k]) => {
+      if (!k.startsWith('$')) return;
+      const cell = document.querySelector(`.dnvTable tbody tr:nth-child(${row.day}) td:nth-child(${cols.findIndex(c => c[0] === k) + 2})`);
+      if (cell) cell.textContent = dnevnikCell(row, k);
+    });
+  });
+  // двата обобщителни реда
+  const rows = document.querySelectorAll('.dnvTable tbody tr.dnvTotal');
+  const fill = (tr, data) => {
+    if (!tr) return;
+    cols.forEach(([k], i) => {
+      const td = tr.children[i + 1];
+      if (td) td.textContent = dnevnikCell(data, k);
+    });
+  };
+  fill(rows[0], r.monthTotal);
+  fill(rows[1], r.ytdTotal);
 }
 function dnevnikGroup(title, fields, row) {
   return `<fieldset><legend>${esc(title)}</legend><div class="grid g4">
@@ -2025,9 +2162,10 @@ function fmtDateTime(ms) {
   return bg(d.toISOString().slice(0, 10)) + ' ' + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
 }
 async function renderSetup() {
-  const [s, dbLoc, backups, employees] = await Promise.all([
+  const [s, dbLoc, backups, employees, cats, limits] = await Promise.all([
     call(window.api.settings.get()), call(window.api.dbLocation.get()),
-    call(window.api.backup.list()), call(window.api.employees.list())
+    call(window.api.backup.list()), call(window.api.employees.list()),
+    call(window.api.categories.list()), call(window.api.limits.usage())
   ]);
   if (!s) return;
   window._EMPLOYEES_ALL = employees || [];
@@ -2068,6 +2206,26 @@ async function renderSetup() {
     </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
+
+    ${categoriesCardHtml(cats)}
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ограничения на записите</h3>
+      <div class="note" style="margin-top:0">Горна граница за броя записи в програмата. <b>0 означава без
+      ограничение.</b> Проверява се само при добавяне на нов запис — вече въведените данни остават
+      достъпни и редактируеми дори ако лимитът бъде намален по-късно.</div>
+      <form id="limF" onsubmit="return false"><div class="grid g2">
+        ${fld('Лимит на документите във фонда', 'limit_books', { val: limits ? limits.limitBooks : 0, type: 'number',
+          hint: limits ? 'в момента: ' + limits.books.toLocaleString('bg-BG') : '' })}
+        ${fld('Лимит на читателите', 'limit_readers', { val: limits ? limits.limitReaders : 0, type: 'number',
+          hint: limits ? 'в момента: ' + limits.readers.toLocaleString('bg-BG') : '' })}
+      </div></form>
+      ${limits && (limits.limitBooks > 0 || limits.limitReaders > 0) ? `
+        <div style="margin-top:6px">
+          ${limits.limitBooks > 0 ? limitBarHtml('Документи', limits.books, limits.limitBooks) : ''}
+          ${limits.limitReaders > 0 ? limitBarHtml('Читатели', limits.readers, limits.limitReaders) : ''}
+        </div>` : ''}
+      <div class="toolbar"><button class="btn pri" onclick="saveLimits()">Запиши ограниченията</button></div>
+    </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Външен вид — цветова тема</h3>
       <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
@@ -2123,14 +2281,15 @@ async function renderSetup() {
       до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата,
       или за пренасяне на данните на друг компютър със същата програма.</div>
       <div class="toolbar">
-        <button class="btn pri" onclick="backupNow()">Направи резервно копие сега…</button>
+        <button class="btn pri" onclick="backupNowForm()">Направи резервно копие сега…</button>
         <button class="btn" onclick="restoreBackupBrowse()">Възстанови от файл…</button>
       </div>
       ${backups && backups.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
         <th>Файл</th><th>Дата и час</th><th>Размер</th><th>Вид</th><th></th></tr></thead><tbody>
         ${backups.map(b => `<tr><td style="font-family:var(--mono);font-size:12px">${esc(b.name)}</td>
           <td class="num">${fmtDateTime(b.mtime)}</td><td class="num">${fmtBytes(b.size)}</td>
-          <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}</td>
+          <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}
+              ${b.encrypted ? '<span class="badge" title="Защитено с парола">🔒 криптирано</span>' : ''}</td>
           <td><button class="btn sm" onclick="restoreBackupFromList('${esc(b.path).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">Възстанови</button></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}
     </div>
@@ -2169,23 +2328,70 @@ async function deleteEmployee(id) {
   renderSetup();
 }
 window.deleteEmployee = deleteEmployee;
+function backupNowForm() {
+  modal('Ръчно резервно копие', `
+    <div class="note" style="margin-top:0">Копието може да се защити с парола — препоръчително, ако файлът
+    ще пътува на USB или ще се изпраща по интернет, тъй като съдържа лични данни на читателите (ЕГН, адреси).</div>
+    <form id="bkF" onsubmit="return false">
+      <label class="chk"><input type="checkbox" id="bkEnc" onchange="document.getElementById('bkPassWrap').style.display=this.checked?'block':'none'">
+        <span>Защити копието с парола (криптиране AES-256)</span></label>
+      <div id="bkPassWrap" style="display:none">
+        ${fld('Парола', 'password', { type: 'password' })}
+        ${fld('Повтори паролата', 'password2', { type: 'password' })}
+        <div class="note w" style="margin-top:0"><b>Пазете паролата.</b> Без нея това копие е
+        невъзстановимо — няма начин за отключване, ако бъде забравена.</div>
+      </div>
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="backupNow()">Направи копие</button>`);
+}
+window.backupNowForm = backupNowForm;
 async function backupNow() {
-  const res = await window.api.backup.now();
+  const enc = $('#bkEnc') && $('#bkEnc').checked;
+  let password = '';
+  if (enc) {
+    const d = formData('#bkF');
+    if (!d.password) return toast('Въведете парола или махнете отметката за криптиране.', 'err');
+    if (d.password !== d.password2) return toast('Двете пароли не съвпадат.', 'err');
+    password = d.password;
+  }
+  const res = await window.api.backup.now({ password });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Резервно копие записано: ' + res.data, 'ok');
+  closeModal();
+  toast((res.encrypted ? 'Криптирано резервно копие записано: ' : 'Резервно копие записано: ') + res.data, 'ok');
   renderSetup();
 }
 window.backupNow = backupNow;
+function askBackupPassword(path, fromList) {
+  modal('Криптирано резервно копие', `
+    <div class="note" style="margin-top:0">Файлът е защитен с парола. Въведете паролата, с която е направен.</div>
+    <form id="rsF" onsubmit="return false">${fld('Парола', 'password', { type: 'password' })}</form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="restoreWithPassword('${esc(path).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', ${fromList ? 'true' : 'false'})">Възстанови</button>`);
+}
+async function restoreWithPassword(path, fromList) {
+  const d = formData('#rsF');
+  if (!d.password) return toast('Въведете парола.', 'err');
+  const res = fromList
+    ? await window.api.backup.restoreFromList({ path, password: d.password })
+    : await window.api.backup.restoreBrowse({ path, password: d.password });
+  if (!res.ok) return toast(res.error, 'err');
+}
+window.restoreWithPassword = restoreWithPassword;
+const RESTORE_WARN = 'Възстановяването ще замени текущите данни в програмата и ще я рестартира. ' +
+  'Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?';
 async function restoreBackupFromList(path) {
-  if (!confirm('Възстановяване от това резервно копие ще замени текущите данни в програмата и ще я рестартира. Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?')) return;
-  const res = await window.api.backup.restoreFromList(path);
-  if (!res.ok) toast(res.error, 'err');
+  if (!confirm(RESTORE_WARN)) return;
+  const res = await window.api.backup.restoreFromList({ path });
+  if (!res.ok) return toast(res.error, 'err');
+  if (res.data && res.data.needsPassword) askBackupPassword(res.data.path, true);
 }
 window.restoreBackupFromList = restoreBackupFromList;
 async function restoreBackupBrowse() {
-  if (!confirm('Ще изберете файл с резервно копие (.db) от компютъра/USB/мрежов диск. Той ще замени текущите данни в програмата и тя ще се рестартира. Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?')) return;
+  if (!confirm('Ще изберете файл с резервно копие (.db или .invbak) от компютъра/USB/мрежов диск. ' + RESTORE_WARN)) return;
   const res = await window.api.backup.restoreBrowse();
-  if (!res.ok) toast(res.error, 'err');
+  if (!res.ok) return toast(res.error, 'err');
+  if (res.data && res.data.needsPassword) askBackupPassword(res.data.path, false);
 }
 window.restoreBackupBrowse = restoreBackupBrowse;
 async function chooseDbLocation() {
@@ -2218,6 +2424,24 @@ function updateStatusHtml() {
       ${st.state === 'downloaded' ? '<button class="btn pri" onclick="installUpdateNow()">Инсталирай и рестартирай</button>' : ''}
     </div>`;
 }
+function limitBarHtml(label, used, limit) {
+  const pct = Math.min(100, Math.round(used / limit * 100));
+  const cls = pct >= 100 ? 'full' : pct >= 85 ? 'near' : '';
+  return `<div style="margin-top:8px">
+    <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+      <span>${esc(label)}</span><b>${used.toLocaleString('bg-BG')} / ${limit.toLocaleString('bg-BG')}</b></div>
+    <div class="bar"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
+    ${pct >= 85 ? `<div class="hint" style="margin-top:4px;color:var(--red)">${pct >= 100
+      ? 'Лимитът е достигнат — нови записи не могат да се добавят.'
+      : 'Наближавате лимита.'}</div>` : ''}
+  </div>`;
+}
+async function saveLimits() {
+  const d = formData('#limF');
+  await call(window.api.limits.update(d), 'Ограниченията са записани.');
+  renderSetup();
+}
+window.saveLimits = saveLimits;
 async function saveSetup() {
   const d = formData('#stF'); d.id = 1;
   await call(window.api.settings.update(d), 'Настройките са записани.');
