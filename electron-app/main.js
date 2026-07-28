@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const { autoUpdater } = require('electron-updater');
 
 let db;
 let CURRENT_USER = '';
@@ -49,10 +50,37 @@ function createWindow() {
   return win;
 }
 
+/* ---------------- Автоматично обновяване (GitHub Releases) ----------------
+   Работи само в инсталирана (пакетирана) версия — при `npm start` в режим
+   на разработка автоматично се прескача, за да не пречи. Изисква публичен
+   GitHub Release, съдържащ инсталатора и latest.yml (виж README). */
+function initAutoUpdate(win) {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  const send = (channel, data) => { if (win && !win.isDestroyed()) win.webContents.send(channel, data); };
+  autoUpdater.on('checking-for-update', () => send('update:status', { state: 'checking' }));
+  autoUpdater.on('update-available', (info) => send('update:status', { state: 'available', version: info.version }));
+  autoUpdater.on('update-not-available', () => send('update:status', { state: 'not-available' }));
+  autoUpdater.on('download-progress', (p) => send('update:status', { state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (info) => send('update:status', { state: 'downloaded', version: info.version }));
+  autoUpdater.on('error', (err) => send('update:status', { state: 'error', message: err.message }));
+  autoUpdater.checkForUpdates().catch(err => console.error('Автообновяване:', err.message));
+}
+ipcMain.handle('app:checkForUpdates', () =>
+  run(() => {
+    if (!app.isPackaged) throw new Error('Проверката за обновления работи само в инсталираната програма.');
+    autoUpdater.checkForUpdates().catch(err => console.error('Автообновяване:', err.message));
+    return true;
+  })
+);
+ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall(); }));
+
 let mainWindow;
 app.whenReady().then(() => {
   initDb();
   mainWindow = createWindow();
+  initAutoUpdate(mainWindow);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });

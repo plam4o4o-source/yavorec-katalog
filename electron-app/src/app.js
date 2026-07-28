@@ -248,6 +248,32 @@ async function initAppCredit() {
   if (el) el.textContent = APP_CREDIT_TEXT;
 }
 
+/* ---------------- Автоматично обновяване ---------------- */
+let UPDATE_STATUS = { state: 'idle' };
+function initAutoUpdateUI() {
+  if (!window.api.app.onUpdateStatus) return;
+  window.api.app.onUpdateStatus((data) => {
+    UPDATE_STATUS = data;
+    if (data.state === 'available') toast('Налична е нова версия ' + data.version + ' — изтегля се…', 'ok');
+    else if (data.state === 'downloaded') {
+      toast('Версия ' + data.version + ' е изтеглена. Ще се инсталира при затваряне на програмата.', 'ok');
+    } else if (data.state === 'error') {
+      console.error('Автообновяване:', data.message);
+    }
+    if (VIEW === 'setup') renderSetup();
+  });
+}
+async function checkForUpdatesNow() {
+  const res = await window.api.app.checkForUpdates();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Проверка за обновления…', 'ok');
+}
+window.checkForUpdatesNow = checkForUpdatesNow;
+async function installUpdateNow() {
+  await window.api.app.installUpdate();
+}
+window.installUpdateNow = installUpdateNow;
+
 /* ---------------- Табло ---------------- */
 async function renderDash() {
   const s = await call(window.api.dashboard.stats());
@@ -1633,7 +1659,29 @@ async function renderSetup() {
     </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Обновяване</h3>
+      ${updateStatusHtml()}
+    </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
+}
+function updateStatusHtml() {
+  const st = UPDATE_STATUS || { state: 'idle' };
+  const line = {
+    idle: '', checking: 'Проверка за обновления…',
+    available: 'Намерена е нова версия ' + (st.version || '') + ' — изтегля се…',
+    'not-available': 'Инсталирана е последната версия.',
+    downloading: 'Изтегля се обновление' + (st.percent ? ' — ' + st.percent + '%' : '') + '…',
+    downloaded: 'Версия ' + (st.version || '') + ' е готова за инсталиране.',
+    error: 'Грешка при проверка: ' + (st.message || '')
+  }[st.state] || '';
+  return `
+    <div class="hint" style="margin-bottom:10px">Програмата проверява автоматично за нова версия в GitHub при всяко
+    стартиране (изисква интернет връзка). Изтеглената версия се инсталира при следващото затваряне на програмата.</div>
+    ${line ? `<div class="note" style="margin-top:0">${esc(line)}</div>` : ''}
+    <div class="toolbar">
+      <button class="btn" onclick="checkForUpdatesNow()">Провери сега</button>
+      ${st.state === 'downloaded' ? '<button class="btn pri" onclick="installUpdateNow()">Инсталирай и рестартирай</button>' : ''}
+    </div>`;
 }
 async function saveSetup() {
   const d = formData('#stF'); d.id = 1;
@@ -1645,4 +1693,5 @@ window.saveSetup = saveSetup;
 /* ---------------- Старт ---------------- */
 initUserBadge();
 initAppCredit();
+initAutoUpdateUI();
 loadSettingsCache().then(route);

@@ -13,7 +13,8 @@
     "pack": "electron-builder --dir"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0"
+    "better-sqlite3": "^11.3.0",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
@@ -23,7 +24,13 @@
   "build": {
     "appId": "org.chyavorec.inventar",
     "productName": "Инвентар",
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "plam4o4o-source",
+        "repo": "yavorec-katalog"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"

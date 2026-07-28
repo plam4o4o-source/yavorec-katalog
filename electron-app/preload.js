@@ -6,7 +6,10 @@ contextBridge.exposeInMainWorld('api', {
   app: {
     setUser: invoke('app:setUser'),
     getUser: invoke('app:getUser'),
-    getVersion: invoke('app:getVersion')
+    getVersion: invoke('app:getVersion'),
+    checkForUpdates: invoke('app:checkForUpdates'),
+    installUpdate: invoke('app:installUpdate'),
+    onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data))
   },
   settings: {
     get: invoke('settings:get'),
