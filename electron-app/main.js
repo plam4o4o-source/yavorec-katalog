@@ -52,10 +52,15 @@ function ensureColumns(table, columns) {
 function initDb() {
   const dbPath = resolveDbPath();
   const isNew = !fs.existsSync(dbPath);
+  const isNetwork = !!readConfig().dbFolder; // персонализирана папка — обичайно мрежов диск
   db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
+  // WAL разчита на споделена памет (mmap) между процесите, която не работи надеждно през
+  // мрежови дялове (SMB/CIFS) — там rollback journal (DELETE) е по-безопасният избор по
+  // документацията на SQLite. По-дългият busy_timeout дава повече време за изчакване вместо
+  // веднага да гърми "database is locked", когато няколко компютъра пишат почти едновременно.
+  db.pragma(isNetwork ? 'journal_mode = DELETE' : 'journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 8000'); // изчаква вместо да гърми "database is locked" при мрежов достъп от няколко компютъра
+  db.pragma('busy_timeout = ' + (isNetwork ? 20000 : 8000));
 
   // fs.readFileSync reads transparently through app.asar for plain text files,
   // so the same path works both in dev and in a packaged build.
@@ -263,6 +268,9 @@ ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall
 let mainWindow;
 app.whenReady().then(() => {
   initDb();
+  // "Кой служител работи в момента" е настройка на този компютър (не на споделената база
+  // данни) — всяко работно място пази собствения си избор в локалния config.json.
+  CURRENT_USER = readConfig().lastUserName || '';
   autoBackupIfNeeded();
   startAutoPushTimer();
   mainWindow = createWindow();
@@ -286,6 +294,7 @@ function friendlyDbError(err) {
     if (m.includes('books.barcode')) return 'Този баркод вече е зает от друг документ.';
     if (m.includes('readers.card_no')) return 'Тази читателска карта вече е издадена на друг читател.';
     if (m.includes('categories.name')) return 'Категория с това име вече съществува.';
+    if (m.includes('employees.name')) return 'Служител с това име вече съществува.';
     return 'Стойността вече съществува и трябва да бъде уникална.';
   }
   if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || m.includes('FOREIGN KEY constraint failed')) {
@@ -318,8 +327,39 @@ function pctRequired(n) { return n <= 50000 ? 10 : n <= 200000 ? 5 : 2; }
 function naturalLoss(n, freeAccessPct) { return (freeAccessPct > 50 ? n * 10 : n * 5) / 1000; }
 
 /* ---------------- Текущ служител (за одитната следа) ---------------- */
-ipcMain.handle('app:setUser', (e, name) => run(() => { CURRENT_USER = (name || '').trim(); return CURRENT_USER; }));
+ipcMain.handle('app:setUser', (e, name) =>
+  run(() => {
+    CURRENT_USER = (name || '').trim();
+    const cfg = readConfig(); cfg.lastUserName = CURRENT_USER; writeConfig(cfg);
+    return CURRENT_USER;
+  })
+);
 ipcMain.handle('app:getUser', () => run(() => CURRENT_USER));
+
+/* ---------------- Служители ---------------- */
+ipcMain.handle('employees:list', () => run(() => db.prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
+ipcMain.handle('employees:create', (e, name) =>
+  run(() => {
+    if (!name || !name.trim()) throw new Error('Въведете име на служителя.');
+    const info = db.prepare('INSERT INTO employees (name) VALUES (?)').run(name.trim());
+    logAudit('Нов служител', name.trim());
+    return info.lastInsertRowid;
+  })
+);
+ipcMain.handle('employees:update', (e, { id, name, active }) =>
+  run(() => {
+    const cur = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
+    if (!cur) throw new Error('Служителят не е намерен.');
+    db.prepare('UPDATE employees SET name=?, active=? WHERE id=?').run(
+      name !== undefined && name !== null ? name.trim() : cur.name,
+      active !== undefined && active !== null ? (active ? 1 : 0) : cur.active,
+      id
+    );
+  })
+);
+ipcMain.handle('employees:delete', (e, id) =>
+  run(() => { db.prepare('DELETE FROM employees WHERE id = ?').run(id); })
+);
 ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
 
 /* ---------------- Настройки ---------------- */
@@ -1252,27 +1292,57 @@ function startAutoPushTimer() {
     }
   }, 5 * 60 * 1000);
 }
+// Полетата и обвивката {library, place, generated, items} трябва да съвпадат ТОЧНО с
+// формàта, който `inventar-biblioteka.html` и страницата page-katalog.html на сайта вече
+// очакват (кратки ключове inv/a/t/s/c/p/y/v/l/u/g/o/k/n/cv/av) — сайтът чете това по
+// живо от GitHub и не знае нищо за схемата на Electron версията.
 function publicBookFields(b) {
   return {
-    inv: b.inv_number, barcode: b.barcode, title: b.title, subtitle: b.subtitle,
-    author: b.author, city: b.city, publisher: b.publisher, year: b.year,
-    category: b.category_name, language: b.language, udk: b.udk,
-    department: b.department, keywords: b.keywords, annotation: b.annotation,
-    cover: b.cover_url, isbn: b.isbn, available: b.available > 0
+    inv: b.inv_number, a: b.author || '', t: b.title || '', s: b.subtitle || '',
+    c: b.city || '', p: b.publisher || '', y: b.year || '', v: b.category_name || '',
+    l: b.language || '', u: b.udk || '', g: b.call_number || '', o: b.department || '',
+    k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '', av: b.available > 0 ? 1 : 0
   };
 }
 function buildCatalogPayload() {
   const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND b.department != 'служебен' ORDER BY b.title`).all();
-  return books.map(publicBookFields);
+  const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
+  return {
+    library: s.lib_name || '', place: s.place || '',
+    generated: new Date().toISOString().slice(0, 10),
+    items: books.map(publicBookFields)
+  };
 }
+function catalogPayloadItemCount(payload) {
+  return Array.isArray(payload) ? payload.length : (payload && Array.isArray(payload.items) ? payload.items.length : 0);
+}
+// Връща {written:true} при успешен запис, {written:false, blocked:true} ако предпазната
+// мярка е спряла записа (виж коментара долу), или {written:false} при обикновена грешка/
+// липсваща папка. Автоматичните извиквания (след запис на книга, заемане и т.н.) само
+// подминават резултата; ръчните бутони го ползват, за да покажат ясно съобщение.
 function writeCatalogIfConfigured() {
   try {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-    if (!s || !s.catalog_folder) return;
+    if (!s || !s.catalog_folder) return { written: false };
     const file = path.join(s.catalog_folder, 'katalog.json');
-    fs.writeFileSync(file, JSON.stringify(buildCatalogPayload(), null, 2), 'utf8');
+    const payload = buildCatalogPayload();
+    // Предпазна мярка: не презаписвай непразен публикуван каталог с празен. Това пази от
+    // случаен запис от прясна/тестова инсталация (празен фонд) върху вече публикувани
+    // реални данни — например, ако папката е свързана, преди фондът да е зареден в тази база.
+    if (payload.items.length === 0 && fs.existsSync(file)) {
+      try {
+        const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (catalogPayloadItemCount(existing) > 0) {
+          console.error('Пропуснат автоматичен запис на каталога: новите данни са празни, а публикуваният файл не е.');
+          return { written: false, blocked: true };
+        }
+      } catch (e) { /* повреден/нечетим съществуващ файл — продължи с обичайния запис */ }
+    }
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), 'utf8');
+    return { written: true };
   } catch (err) {
     console.error('Автоматичен запис на каталога:', err.message);
+    return { written: false };
   }
 }
 function ghRawUrl(s) {
@@ -1323,7 +1393,8 @@ ipcMain.handle('catalog:disconnectFolder', () =>
 ipcMain.handle('catalog:gitPublishNow', async () => {
   const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
   if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
-  writeCatalogIfConfigured();
+  const w = writeCatalogIfConfigured();
+  if (w.blocked) return { ok: false, error: 'Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.' };
   const r = await gitPublish(s.catalog_folder);
   if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
   return r;
@@ -1332,7 +1403,8 @@ ipcMain.handle('catalog:writeNow', () =>
   run(() => {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
-    writeCatalogIfConfigured();
+    const w = writeCatalogIfConfigured();
+    if (w.blocked) throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.');
     return true;
   })
 );
@@ -1346,7 +1418,7 @@ ipcMain.handle('catalog:export', async () => {
     if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
     const payload = buildCatalogPayload();
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
-    logAudit('Експорт на каталог', filePath + ' — ' + payload.length + ' записа');
+    logAudit('Експорт на каталог', filePath + ' — ' + payload.items.length + ' записа');
     return { ok: true, data: filePath };
   } catch (err) {
     return { ok: false, error: err.message };
