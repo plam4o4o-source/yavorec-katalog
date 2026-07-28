@@ -266,7 +266,10 @@ async function route() {
   await RENDERERS[VIEW]();
 }
 
-/* ---------------- Служител (одитна следа) ---------------- */
+/* ---------------- Служител (одитна следа) ----------------
+   Изборът "кой работи в момента" е локален за този компютър (пази се в config.json на
+   работната станция), а самият списък със служители е общ — идва от споделената база
+   данни, затова важи еднакво на всички компютри, свързани към нея. */
 async function initUserBadge() {
   const name = await call(window.api.app.getUser());
   renderUserBadge(name);
@@ -274,15 +277,30 @@ async function initUserBadge() {
 function renderUserBadge(name) {
   const el = $('#userBadge');
   if (!el) return;
-  el.textContent = name ? 'Служител: ' + name : 'Служител: (задайте име)';
+  el.textContent = name ? 'Служител: ' + name : 'Служител: (изберете)';
 }
-async function setCurrentUser() {
-  const name = prompt('Име на служителя, който работи в момента (записва се в одитната следа):', '');
-  if (name === null) return;
-  const saved = await call(window.api.app.setUser(name.trim()));
+async function chooseEmployeeModal() {
+  const employees = await call(window.api.employees.list());
+  if (!employees) return;
+  window._EMPLOYEES_ACTIVE = employees.filter(e => e.active);
+  modal('Кой служител работи в момента?',
+    window._EMPLOYEES_ACTIVE.length
+      ? `<div style="display:flex;flex-direction:column;gap:8px">
+          ${window._EMPLOYEES_ACTIVE.map(e => `<button type="button" class="btn" style="text-align:left" onclick="pickEmployee(${e.id})">${esc(e.name)}</button>`).join('')}
+        </div>`
+      : '<div class="hint">Все още няма добавени служители — добавете ги в „Настройки“ → „Служители“.</div>',
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="closeModal();go('setup')">Управление на служителите</button>`);
+}
+window.chooseEmployeeModal = chooseEmployeeModal;
+async function pickEmployee(id) {
+  const emp = (window._EMPLOYEES_ACTIVE || []).find(x => x.id === id);
+  if (!emp) return;
+  const saved = await call(window.api.app.setUser(emp.name));
   renderUserBadge(saved);
+  closeModal();
 }
-window.setCurrentUser = setCurrentUser;
+window.pickEmployee = pickEmployee;
 
 /* ---------------- Версия и авторство ---------------- */
 const APP_YEAR_START = 2026; // годината на създаване на Electron версията — фиксирана веднъж
@@ -2007,10 +2025,12 @@ function fmtDateTime(ms) {
   return bg(d.toISOString().slice(0, 10)) + ' ' + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
 }
 async function renderSetup() {
-  const [s, dbLoc, backups] = await Promise.all([
-    call(window.api.settings.get()), call(window.api.dbLocation.get()), call(window.api.backup.list())
+  const [s, dbLoc, backups, employees] = await Promise.all([
+    call(window.api.settings.get()), call(window.api.dbLocation.get()),
+    call(window.api.backup.list()), call(window.api.employees.list())
   ]);
   if (!s) return;
+  window._EMPLOYEES_ALL = employees || [];
   $('#view').innerHTML = `
     <form id="stF" onsubmit="return false">
     <div class="grid g2">
@@ -2079,6 +2099,23 @@ async function renderSetup() {
       </div>
     </div>
 
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Служители</h3>
+      <div class="note" style="margin-top:0">Списъкът е общ за всички компютри, свързани към тази база данни. Изборът
+      „кой служител работи в момента“ (долу вляво в лентата) е локален за всеки компютър и записва избраното име в
+      одитната следа при всяко действие.</div>
+      <div class="toolbar"><button class="btn pri" onclick="employeeForm()">+ Нов служител</button></div>
+      ${employees && employees.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
+        <th>Име</th><th>Състояние</th><th></th></tr></thead><tbody>
+        ${employees.map(e => `<tr><td>${esc(e.name)}</td>
+          <td>${e.active ? '<span class="badge ok">активен</span>' : '<span class="badge warn">неактивен</span>'}</td>
+          <td>
+            <button class="btn sm" onclick="employeeForm(${e.id})">Редакция</button>
+            <button class="btn sm" onclick="toggleEmployeeActive(${e.id},${e.active})">${e.active ? 'Деактивирай' : 'Активирай'}</button>
+            <button class="btn sm dgr" onclick="deleteEmployee(${e.id})">Изтрий</button>
+          </td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="hint">Все още няма добавени служители.</div>'}
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Резервно копие</h3>
       <div class="note" style="margin-top:0">Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се
       записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави
@@ -2103,6 +2140,35 @@ async function renderSetup() {
     </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
 }
+function employeeForm(id) {
+  const emp = id ? (window._EMPLOYEES_ALL || []).find(x => x.id === id) : null;
+  modal(emp ? 'Редакция на служител' : 'Нов служител', `
+    <form id="empF" onsubmit="return false">
+      ${fld('Име', 'name', { val: emp ? emp.name : '', req: 1 })}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="saveEmployee(${id || 'null'})">Запиши</button>`);
+}
+window.employeeForm = employeeForm;
+async function saveEmployee(id) {
+  const d = formData('#empF');
+  if (!d.name.trim()) return toast('Въведете име.', 'err');
+  if (id) await call(window.api.employees.update({ id, name: d.name }), 'Служителят е обновен.');
+  else await call(window.api.employees.create(d.name), 'Служителят е добавен.');
+  closeModal(); renderSetup();
+}
+window.saveEmployee = saveEmployee;
+async function toggleEmployeeActive(id, active) {
+  await call(window.api.employees.update({ id, active: active ? 0 : 1 }), active ? 'Служителят е деактивиран.' : 'Служителят е активиран.');
+  renderSetup();
+}
+window.toggleEmployeeActive = toggleEmployeeActive;
+async function deleteEmployee(id) {
+  if (!confirm('Изтриване на служителя? Записите в одитната следа с неговото име остават непроменени.')) return;
+  await call(window.api.employees.delete(id), 'Служителят е изтрит.');
+  renderSetup();
+}
+window.deleteEmployee = deleteEmployee;
 async function backupNow() {
   const res = await window.api.backup.now();
   if (!res.ok) return toast(res.error, 'err');

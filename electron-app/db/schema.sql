@@ -215,6 +215,15 @@ CREATE TABLE IF NOT EXISTS visits (
   count   INTEGER NOT NULL DEFAULT 0
 );
 
+-- Служители — избират се като "текущо работещ" (за одитната следа); общ списък за
+-- всички компютри, свързани към същата база данни (локална мрежа).
+CREATE TABLE IF NOT EXISTS employees (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  active     INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Дневник на библиотеката — Раздел А (читатели/посещения) и Раздел Б (заети материали),
 -- по образец на официалния месечен статистически дневник (e_Dnevnik_AB_CH2). Един ред на
 -- календарен ден; месечните и годишните тотали се смятат живо (SUM), не се пазят отделно.

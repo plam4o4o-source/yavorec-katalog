@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('api', {
     installUpdate: invoke('app:installUpdate'),
     onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data))
   },
+  employees: {
+    list: invoke('employees:list'),
+    create: invoke('employees:create'),
+    update: invoke('employees:update'),
+    delete: invoke('employees:delete')
+  },
   settings: {
     get: invoke('settings:get'),
     update: invoke('settings:update'),
