@@ -32,6 +32,10 @@ function modal(title, body, footer) {
 }
 function closeModal() { $('#veil').classList.remove('on'); $('#modal').innerHTML = ''; }
 window.closeModal = closeModal;
+// Esc затваря отворения прозорец — същото като бутона „Отказ“.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#veil').classList.contains('on')) closeModal();
+});
 
 function formData(sel) {
   const out = {};
@@ -191,11 +195,15 @@ function printLabelSheet(cardsHtml) {
   }
   doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
 }
+/* Етикет за фонда: наименование на библиотеката, населено място, баркод (Code 39)
+   и инвентарният номер под баркода. */
 function lblCard(b) {
   const s = SETTINGS_CACHE || {};
-  return `<div class="lbl"><div class="l1">${esc(s.place || s.org || '')}</div>
+  return `<div class="lbl">
+    <div class="l1">${esc(s.lib_name || s.org || '')}</div>
+    <div class="l2">${esc(s.place || '')}</div>
     ${code39svg(b.barcode || String(b.inv_number), 150, 40)}
-    <div class="l3">${esc(b.barcode || b.inv_number)}${b.call_number ? ' · ' + esc(b.call_number) : ''}</div></div>`;
+    <div class="l3">${esc(b.inv_number ?? b.barcode ?? '')}</div></div>`;
 }
 function sigLblCard(b) {
   return `<div class="lbl lbl-sig">
@@ -573,34 +581,33 @@ async function bookForm(id, presetAcqId) {
       </div>
     </fieldset>
     <fieldset><legend>Библиографско описание</legend>
-      ${fld('Заглавие', 'title', { val: v.title || '', req: 1 })}
       <div class="grid g2">
+        ${fld('Заглавие', 'title', { val: v.title || '', req: 1 })}
         ${fld('Автор (фамилия, име)', 'author', { val: v.author || '', ph: 'Вазов, Иван' })}
-        ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
       </div>
       <div class="grid g4">
+        ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
         ${fld('Място на издаване', 'city', { val: v.city || '' })}
         ${fld('Издателство', 'publisher', { val: v.publisher || '' })}
         ${fld('Година', 'year', { val: v.year || '' })}
-        ${fld('Том / част', 'volume', { val: v.volume || '' })}
       </div>
       <div class="grid g4">
+        ${fld('Том / част', 'volume', { val: v.volume || '' })}
         ${fld('ISBN / ISSN', 'isbn', { val: v.isbn || '' })}
         ${fld('Страници', 'pages', { val: v.pages || '' })}
         ${fld('Език', 'language', { type: 'select', opts: EZICI, val: v.language })}
+      </div>
+      <div class="grid g4">
         ${fld('УДК', 'udk', { val: v.udk || '' })}
+        ${fld('Авторски знак', 'author_mark', { val: v.author_mark || '', hint: 'напр. „В-15“' })}
+        ${fld('Ключови думи', 'keywords', { val: v.keywords || '', hint: 'през запетая' })}
+        ${fld('Адрес на корица (URL)', 'cover_url', { val: v.cover_url || '' })}
       </div>
-      ${fld('Авторски знак', 'author_mark', { val: v.author_mark || '', hint: 'за етикета за сигнатура, напр. „В-15“' })}
-      ${fld('Ключови думи (през запетая)', 'keywords', { val: v.keywords || '' })}
-      ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 3 })}
-      ${fld('Адрес на корица (URL)', 'cover_url', { val: v.cover_url || '' })}
-    </fieldset>
-    <fieldset><legend>Състояние и бележки</legend>
-      <div class="grid g2">
+      <div class="grid g3">
         ${fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'за реставрация', 'отчислен'], val: v.status, allowEmpty: false })}
-        ${fld('Забележка', 'description', { val: v.description || '' })}
+        ${fld('Забележка', 'description', { val: v.description || '', hint: 'поправки не се допускат — чл. 17, ал. 2' })}
+        ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 2 })}
       </div>
-      <div class="hint">Поправки в инвентарната книга не се допускат — новият текст се нанася в „Забележка“ (чл. 17, ал. 2).</div>
     </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
@@ -637,35 +644,76 @@ async function renderInvBook() {
   const rows = await call(window.api.invBook.list());
   if (!rows) return;
   const active = rows.filter(r => r.status !== 'отчислен');
+  const deacc = rows.length - active.length;
+  const value = active.reduce((s, r) => s + (r.price || 0), 0);
+  const checked = rows.filter(r => (r.checks || []).length).length;
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
-    Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи са отбелязани в червено (чл. 39).</div>
-    <div class="cards" style="margin-bottom:14px">
-      <div class="card"><div class="num">${rows.length}</div><div class="lbl">Вписани общо</div></div>
-      <div class="card"><div class="num">${active.length}</div><div class="lbl">Налични</div></div>
-      <div class="card"><div class="num">${rows.length - active.length}</div><div class="lbl">Отчислени</div></div>
+    Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>
+
+    <div class="kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="kpi-ico">📗</div><div class="kpi-body">
+        <div class="kpi-num">${rows.length.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Вписани общо</div>
+        <div class="kpi-extra">от началото на книгата</div></div></div>
+      <div class="kpi ok"><div class="kpi-ico">✅</div><div class="kpi-body">
+        <div class="kpi-num">${active.length.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Налични</div><div class="kpi-extra">${mny(value)}</div></div></div>
+      <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">📕</div><div class="kpi-body">
+        <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Отчислени</div>
+        <div class="kpi-extra">${rows.length ? Math.round(deacc / rows.length * 100) : 0}% от вписаните</div></div></div>
+      <div class="kpi"><div class="kpi-ico">🔍</div><div class="kpi-body">
+        <div class="kpi-num">${checked.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">С отбелязана проверка</div>
+        <div class="kpi-extra">чл. 40 – 41</div></div></div>
     </div>
-    <div class="toolbar"><button class="btn pri" onclick="bookForm()">+ Нов документ</button>
-      <button class="btn" onclick="printInvBookDoc()">Печат на инвентарната книга / PDF</button></div>
-    <div class="wrap"><table class="ledger">
+
+    <div class="toolbar">
+      <input type="search" id="ibSearch" placeholder="Търсене по инв. №, автор, заглавие или сигнатура…"
+        value="${esc(INVBOOK_QUERY)}" oninput="invBookFilter(this.value)">
+      <button class="btn pri" onclick="bookForm()">+ Нов документ</button>
+      <button class="btn" onclick="printInvBookDoc()">Печат на инвентарната книга / PDF</button>
+    </div>
+    <div class="wrap"><table class="ledger ibTable">
       <thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
-        <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Забележка</th></tr></thead>
-      <tbody>
-        ${rows.length ? rows.map(r => `
-          <tr style="${r.status === 'отчислен' ? 'color:var(--red);text-decoration:line-through' : ''}">
-            <td class="num">${bg(r.register_date)}</td><td class="num">${r.inv_number ?? ''}</td>
-            <td style="font-size:11px">${(r.checks || []).map(c => bg(c)).join('<br>')}</td>
-            <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
-            <td class="num">${esc(r.year || '')}</td><td class="num">${mny(r.price)}</td>
-            <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
-            <td class="num">${esc(r.call_number || '')}</td>
-            <td class="num" style="font-size:11px;color:var(--red)">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>
-            <td style="font-size:11.5px">${esc(r.description || '')}</td>
-          </tr>`).join('') : `<tr><td colspan="10" class="empty">Инвентарната книга е празна.</td></tr>`}
-      </tbody>
+        <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th></tr></thead>
+      <tbody id="ibBody">${invBookRowsHtml(rows)}</tbody>
     </table></div>`;
   window._INVBOOK_ROWS = rows;
 }
+let INVBOOK_QUERY = '';
+function invBookRowsHtml(rows) {
+  if (!rows.length) return `<tr><td colspan="10" class="empty">Инвентарната книга е празна.</td></tr>`;
+  return rows.map(r => {
+    const off = r.status === 'отчислен';
+    return `<tr class="${off ? 'ibOff' : ''}">
+      <td class="num">${bg(r.register_date)}</td>
+      <td class="num"><b>${r.inv_number ?? ''}</b></td>
+      <td style="font-size:11px">${(r.checks || []).map(c => `<span class="badge ok" style="font-size:10px">${bg(c)}</span>`).join(' ')}</td>
+      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
+      <td class="num">${esc(r.year || '')}</td><td class="num">${mny(r.price)}</td>
+      <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
+      <td class="num">${esc(r.call_number || '')}</td>
+      <td class="num" style="font-size:11px">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>
+      <td>${off ? '<span class="badge warn">отчислен</span>' : '<span class="badge ok">наличен</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+function invBookFilter(q) {
+  INVBOOK_QUERY = q;
+  const t = q.trim().toLowerCase();
+  const all = window._INVBOOK_ROWS || [];
+  const rows = !t ? all : all.filter(r =>
+    String(r.inv_number ?? '').includes(t) ||
+    (r.author || '').toLowerCase().includes(t) ||
+    (r.title || '').toLowerCase().includes(t) ||
+    (r.call_number || '').toLowerCase().includes(t));
+  const body = $('#ibBody');
+  if (body) body.innerHTML = rows.length ? invBookRowsHtml(rows)
+    : `<tr><td colspan="10" class="empty">Няма съвпадения за „${esc(q)}“.</td></tr>`;
+}
+window.invBookFilter = invBookFilter;
 function printInvBookDoc() {
   const rows = window._INVBOOK_ROWS || [];
   setPrintPage({ landscape: true, margin: '10mm' });
@@ -731,14 +779,66 @@ async function renderKdbf() {
       </tbody></table></div>`
     : `
       <div class="note"><b>Приложение № 2 към чл. 13, ал. 3, т. 2</b> — резултати от движението на фонда към 31.12.${y} г.</div>
-      <div class="cards">
-        <div class="card"><div class="num">${r.stockEnd.n}</div><div class="lbl">Наличност 31.12.${y}</div><div class="lbl">${mny(r.stockEnd.v)}</div></div>
-        <div class="card"><div class="num">+${r.acquiredYear.n}</div><div class="lbl">Постъпили</div><div class="lbl">${mny(r.acquiredYear.v)}</div></div>
-        <div class="card"><div class="num">−${r.deaccYear.n}</div><div class="lbl">Отчислени</div><div class="lbl">${mny(r.deaccYear.v)}</div></div>
-      </div>`}
+      ${kdbfPart2Html(r, y)}`}
   `;
 }
 
+/* Част № 2 като поток на движението: начално салдо + постъпили − отчислени = крайно салдо.
+   Началното салдо не идва от заявка — извежда се от крайното, за да съвпада винаги с него. */
+function kdbfPart2Html(r, y) {
+  const endN = r.stockEnd.n, endV = r.stockEnd.v;
+  const accN = r.acquiredYear.n, accV = r.acquiredYear.v;
+  const decN = r.deaccYear.n, decV = r.deaccYear.v;
+  const startN = endN - accN + decN, startV = endV - accV + decV;
+  const netN = accN - decN;
+  const growth = startN ? Math.round(netN / startN * 1000) / 10 : 0;
+  return `
+    <div class="flow" style="margin-bottom:16px">
+      <div class="flowBox">
+        <div class="fv">${startN.toLocaleString('bg-BG')}</div>
+        <div class="fl">Наличност 01.01.${y}</div><div class="fm">${mny(startV)}</div></div>
+      <div class="flowOp">+</div>
+      <div class="flowBox plus">
+        <div class="fv">${accN.toLocaleString('bg-BG')}</div>
+        <div class="fl">Постъпили през ${y}</div><div class="fm">${mny(accV)}</div></div>
+      <div class="flowOp">−</div>
+      <div class="flowBox minus">
+        <div class="fv">${decN.toLocaleString('bg-BG')}</div>
+        <div class="fl">Отчислени през ${y}</div><div class="fm">${mny(decV)}</div></div>
+      <div class="flowOp">=</div>
+      <div class="flowBox strong">
+        <div class="fv">${endN.toLocaleString('bg-BG')}</div>
+        <div class="fl">Наличност 31.12.${y}</div><div class="fm">${mny(endV)}</div></div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card"><h3 style="margin-top:0">Обобщение за ${y} г.</h3>
+        <div class="statRows">
+          <div><span>Чист прираст на фонда</span><b style="color:${netN >= 0 ? 'var(--green)' : 'var(--red)'}">
+            ${netN >= 0 ? '+' : ''}${netN.toLocaleString('bg-BG')} документа</b></div>
+          <div><span>Изменение на стойността</span><b style="color:${accV - decV >= 0 ? 'var(--green)' : 'var(--red)'}">
+            ${accV - decV >= 0 ? '+' : '−'}${mny(Math.abs(accV - decV))}</b></div>
+          <div><span>Ръст спрямо началото на годината</span><b>${netN >= 0 ? '+' : ''}${growth}%</b></div>
+          <div><span>Средна цена на документ</span><b>${mny(endN ? endV / endN : 0)}</b></div>
+        </div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Съотношение постъпили / отчислени</h3>
+        ${(accN + decN) ? `
+          <div class="chartRow">
+            <div class="cr-top"><span class="cr-k">Постъпили</span><span class="cr-v"><b>${accN}</b></span></div>
+            <div class="chartTrack"><div class="chartFill g" style="width:${Math.max(2, accN / Math.max(accN, decN) * 100)}%"></div></div>
+          </div>
+          <div class="chartRow">
+            <div class="cr-top"><span class="cr-k">Отчислени</span><span class="cr-v"><b>${decN}</b></span></div>
+            <div class="chartTrack"><div class="chartFill r" style="width:${Math.max(2, decN / Math.max(accN, decN) * 100)}%"></div></div>
+          </div>
+          <div class="hint" style="margin-top:10px">${netN >= 0
+            ? 'Фондът нараства — постъпленията надвишават отчисленията.'
+            : 'Фондът намалява — отчисленията надвишават постъпленията.'}</div>`
+        : '<span class="hint">Няма движение през тази година.</span>'}
+      </div>
+    </div>`;
+}
 function printKdbfDoc() {
   const r = window._KDBF_REPORT; if (!r) return;
   const y = r.year;
@@ -1281,22 +1381,59 @@ async function renderInvent() {
   if (INVENT_SESSION) return renderInventRun();
   const [req, sessions] = await Promise.all([call(window.api.inventorySessions.requirement()), call(window.api.inventorySessions.list())]);
   if (!req) return;
+  // Напредъкът за годината: колко от изисквания обхват вече е обхванат от приключените проверки.
+  const thisYear = yr();
+  const yearSessions = (sessions || []).filter(s => (s.date || '').slice(0, 4) === thisYear);
+  const scannedYear = yearSessions.reduce((n, s) => n + (s.scanned || 0), 0);
+  const pct = req.target ? Math.min(100, Math.round(scannedYear / req.target * 100)) : 0;
   $('#view').innerHTML = `
     <div class="note"><b>Чл. 40, т. 2</b> — инвентаризация по репрезентативния метод се извършва ежегодно върху
     не по-малко от <b>${req.pct}%</b> от фонда.</div>
-    <div class="cards" style="margin-bottom:16px">
-      <div class="card"><div class="num">${req.active}</div><div class="lbl">Фонд</div></div>
-      <div class="card"><div class="num">${req.target}</div><div class="lbl">Изискван обхват (${req.pct}%)</div></div>
-      <div class="card"><div class="num">${req.naturalLoss.toFixed(1)}</div><div class="lbl">Допустими загуби (чл. 41)</div></div>
+
+    <div class="grid g3" style="margin-bottom:16px">
+      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Напредък за ${thisYear} г.</h3>
+        <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+          ${ringSvg(pct, 'от изисквания обхват')}
+          <div style="flex:1;min-width:190px">
+            <div class="statRows">
+              <div><span>Проверени тази година</span><b>${scannedYear.toLocaleString('bg-BG')}</b></div>
+              <div><span>Изискван обхват (${req.pct}%)</span><b>${req.target.toLocaleString('bg-BG')}</b></div>
+              <div><span>Остават</span><b style="color:${scannedYear >= req.target ? 'var(--green)' : 'var(--red)'}">
+                ${Math.max(0, req.target - scannedYear).toLocaleString('bg-BG')}</b></div>
+            </div>
+          </div>
+        </div>
+        ${scannedYear >= req.target
+          ? '<div class="note" style="margin-bottom:0">Изискването по чл. 40, т. 2 за тази година е изпълнено.</div>'
+          : `<div class="note w" style="margin-bottom:0">Остават <b>${req.target - scannedYear}</b> документа до изпълнение на изискването за ${thisYear} г.</div>`}
+      </div>
+      <div class="card"><h3 style="margin-top:0">Показатели</h3>
+        <div class="statRows">
+          <div><span>Библиотечен фонд</span><b>${req.active.toLocaleString('bg-BG')}</b></div>
+          <div><span>Изискван процент</span><b>${req.pct}%</b></div>
+          <div><span>Допустими загуби</span><b>${req.naturalLoss.toFixed(1)}</b></div>
+        </div>
+        <div class="hint" style="margin-top:10px">Допустимите загуби по чл. 41 се изчисляват спрямо фонда
+        и дела на свободния достъп.</div>
+      </div>
     </div>
+
     <div class="toolbar"><button class="btn pri" onclick="startInventForm()">Започни нова проверка</button></div>
-    <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Обхват</th><th>Проверени</th>
-      <th>Липсващи</th><th>Комисия</th><th>Състояние</th></tr></thead><tbody>
-    ${sessions.length ? sessions.map(s => `<tr><td class="num">${bg(s.date)}</td><td>${esc(s.scope || '')}</td>
-      <td class="num">${s.pool_size}</td><td class="num"></td>
+    <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Обхват</th><th>В обхвата</th>
+      <th>Проверени</th><th>Липсващи</th><th>Комисия</th><th>Състояние</th></tr></thead><tbody>
+    ${sessions.length ? sessions.map(s => {
+      const sp = s.pool_size ? Math.min(100, Math.round((s.scanned || 0) / s.pool_size * 100)) : 0;
+      return `<tr><td class="num">${bg(s.date)}</td><td>${esc(s.scope || '')}</td>
+      <td class="num">${s.pool_size}</td>
+      <td><div style="display:flex;align-items:center;gap:8px">
+        <b class="num">${s.scanned || 0}</b>
+        <div class="chartTrack" style="flex:1;min-width:60px;height:7px"><div class="chartFill" style="width:${sp}%"></div></div>
+        <span class="hint">${sp}%</span></div></td>
+      <td class="num">${s.closed ? `<b style="color:${s.missing ? 'var(--red)' : 'var(--green)'}">${s.missing || 0}</b>` : '<span class="hint">—</span>'}</td>
       <td style="font-size:12px">${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ')}</td>
-      <td>${s.closed ? '<span class="badge ok">приключена</span>' : '<span class="badge warn">отворена</span>'}</td></tr>`).join('')
-      : `<tr><td colspan="6" class="empty">Няма извършени проверки.</td></tr>`}
+      <td>${s.closed ? '<span class="badge ok">приключена</span>' : '<span class="badge warn">отворена</span>'}</td></tr>`;
+    }).join('')
+      : `<tr><td colspan="7" class="empty">Няма извършени проверки.</td></tr>`}
     </tbody></table></div>`;
 }
 function startInventForm() {
@@ -1322,31 +1459,59 @@ async function beginInvent() {
 window.beginInvent = beginInvent;
 async function renderInventRun() {
   const s = await call(window.api.inventorySessions.get(INVENT_SESSION.id));
+  const found = s.scans.length, pool = s.pool_size || 0;
+  const left = Math.max(0, pool - found);
+  const pct = pool ? Math.min(100, Math.round(found / pool * 100)) : 0;
   $('#view').innerHTML = `
-    <div class="note w"><b>Проверка в ход</b> — ${bg(s.date)} · ${esc(s.scope || '')}. Въвеждайте инвентарните номера един по един.</div>
-    <div class="cards" style="margin-bottom:14px">
-      <div class="card"><div class="num">${s.pool_size}</div><div class="lbl">В обхвата</div></div>
-      <div class="card"><div class="num">${s.scans.length}</div><div class="lbl">Намерени</div></div>
+    <div class="note w"><b>Проверка в ход</b> — ${bg(s.date)} · ${esc(s.scope || '')}. Сканирайте или въвеждайте
+    инвентарните номера един по един; всеки намерен документ се отбелязва веднага.</div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:22px;flex-wrap:wrap">
+        <div id="ivRing">${ringSvg(pct, 'проверени от обхвата')}</div>
+        <div style="flex:1;min-width:200px">
+          <div class="statRows">
+            <div><span>В обхвата</span><b>${pool.toLocaleString('bg-BG')}</b></div>
+            <div><span>Намерени</span><b id="ivFound" style="color:var(--green)">${found.toLocaleString('bg-BG')}</b></div>
+            <div><span>Остават</span><b id="ivLeft">${left.toLocaleString('bg-BG')}</b></div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="card" style="margin-bottom:14px"><div class="bd" style="padding:14px">
-      <input id="ivScan" placeholder="Инвентарен №/баркод…" autocomplete="off" style="width:100%;padding:12px;border:2px solid var(--brass);border-radius:2px;font-family:var(--mono);font-size:16px">
-      <div id="ivLog" style="margin-top:10px;max-height:200px;overflow:auto"></div>
-    </div></div>
+
+    <div class="card" style="margin-bottom:14px">
+      <h3 style="margin-top:0">Сканиране</h3>
+      <input id="ivScan" class="scan" placeholder="Инвентарен №/баркод…" autocomplete="off">
+      <div id="ivLog" style="margin-top:10px;max-height:230px;overflow:auto"></div>
+    </div>
     <div class="toolbar">
       <button class="btn pri" onclick="closeInvent()">Приключи и състави протокол</button>
       <button class="btn" onclick="if(confirm('Прекратяване без запис?')){INVENT_SESSION=null;renderInvent()}">Прекрати</button>
     </div>`;
   const el = $('#ivScan'); el.focus();
+  let scanned = found;
   el.addEventListener('keydown', async e => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const code = el.value.trim(); el.value = ''; if (!code) return;
     const res = await window.api.inventorySessions.scan({ sessionId: INVENT_SESSION.id, code });
     const log = $('#ivLog');
-    if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div style="padding:5px 9px;background:var(--redL);font-size:12.5px">${esc(res.error)}</div>`); return; }
-    log.insertAdjacentHTML('afterbegin', `<div style="padding:5px 9px;background:var(--greenL);font-size:12.5px"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}</div>`);
+    if (!res.ok) {
+      log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`);
+      return;
+    }
+    log.insertAdjacentHTML('afterbegin',
+      `<div class="scanlog ok"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}</div>`);
     markSaved();
-    const k = $('#view .card .num'); if (k) renderInventRun();
+    // Броячите се обновяват на място. Пълно пречертаване тук би изтрило дневника
+    // на сканиранията, който току-що беше допълнен.
+    scanned++;
+    const nLeft = Math.max(0, pool - scanned);
+    const nPct = pool ? Math.min(100, Math.round(scanned / pool * 100)) : 0;
+    const f = $('#ivFound'), l = $('#ivLeft'), rg = $('#ivRing');
+    if (f) f.textContent = scanned.toLocaleString('bg-BG');
+    if (l) l.textContent = nLeft.toLocaleString('bg-BG');
+    if (rg) rg.innerHTML = ringSvg(nPct, 'проверени от обхвата');
   });
 }
 async function closeInvent() {
@@ -1793,11 +1958,20 @@ async function renderStats() {
   const y = STATS_YEAR || yr();
   const r = await call(window.api.stats.report(y));
   if (!r) return;
-  const bars = (data, tot) => data.map(([k, v]) => `
-    <div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;font-size:12.5px">
-    <span>${esc(k)}</span><b>${v} · ${tot ? Math.round(v / tot * 100) : 0}%</b></div>
-    <div style="height:7px;background:var(--paper3);border-radius:1px;overflow:hidden">
-    <div style="height:100%;width:${tot ? v / tot * 100 : 0}%;background:var(--brass)"></div></div></div>`).join('');
+  // Скалата е спрямо най-голямата стойност в групата, а не спрямо целия фонд — иначе при
+  // разпределение като „98% български“ всички останали ленти са невидими черти.
+  const bars = (data, tot, cls) => {
+    if (!data || !data.length) return '<span class="hint">няма данни</span>';
+    const max = Math.max(...data.map(([, v]) => v)) || 1;
+    return data.map(([k, v]) => `
+      <div class="chartRow">
+        <div class="cr-top"><span class="cr-k">${esc(k)}</span>
+          <span class="cr-v"><b>${v}</b> · ${tot ? Math.round(v / tot * 100) : 0}%</span></div>
+        <div class="chartTrack"><div class="chartFill ${cls || ''}" style="width:${Math.max(2, v / max * 100)}%"></div></div>
+      </div>`).join('');
+  };
+  const totalReturned = r.returnedOnTime + r.returnedLate;
+  const onTimePct = totalReturned ? Math.round(r.returnedOnTime / totalReturned * 100) : 0;
   $('#view').innerHTML = `
     <div class="toolbar">
       <select onchange="STATS_YEAR=this.value;renderStats()">
@@ -1807,30 +1981,83 @@ async function renderStats() {
       <span style="flex:1"></span>
       <button class="btn sm" onclick="addVisits()">Впиши посещения</button>
     </div>
-    <div class="cards" style="margin-bottom:16px">
-      <div class="card"><div class="num">${r.fundCount}</div><div class="lbl">Библиотечен фонд</div><div class="lbl">${mny(r.fundValue)}</div></div>
-      <div class="card"><div class="num">${r.readersCount}</div><div class="lbl">Регистрирани читатели</div></div>
-      <div class="card"><div class="num">${r.loansCount}</div><div class="lbl">Заемания</div></div>
-      <div class="card"><div class="num">${r.visits}</div><div class="lbl">Посещения</div></div>
+
+    <div class="kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="kpi-ico">📚</div><div class="kpi-body">
+        <div class="kpi-num">${r.fundCount.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Библиотечен фонд</div><div class="kpi-extra">${mny(r.fundValue)}</div></div></div>
+      <div class="kpi"><div class="kpi-ico">👥</div><div class="kpi-body">
+        <div class="kpi-num">${r.readersCount.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Регистрирани читатели</div><div class="kpi-extra">през ${y} г.</div></div></div>
+      <div class="kpi"><div class="kpi-ico">🔄</div><div class="kpi-body">
+        <div class="kpi-num">${r.loansCount.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Заемания</div><div class="kpi-extra">през ${y} г.</div></div></div>
+      <div class="kpi"><div class="kpi-ico">🚪</div><div class="kpi-body">
+        <div class="kpi-num">${r.visits.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Посещения</div><div class="kpi-extra">БДС ISO 2789</div></div></div>
     </div>
+
     <div class="grid g3">
-      <div class="card"><h3 style="margin-top:0">Фонд по езици</h3>${bars(r.fundByLanguage, r.fundCount) || '<span class="hint">няма данни</span>'}</div>
-      <div class="card"><h3 style="margin-top:0">Фонд по отдели</h3>${bars(r.fundByDepartment, r.fundCount) || '<span class="hint">няма данни</span>'}</div>
-      <div class="card"><h3 style="margin-top:0">Фонд по категории</h3>${bars(r.fundByCategory, r.fundCount) || '<span class="hint">няма данни</span>'}</div>
+      <div class="card"><h3 style="margin-top:0">Фонд по езици</h3>${bars(r.fundByLanguage, r.fundCount)}</div>
+      <div class="card"><h3 style="margin-top:0">Фонд по отдели</h3>${bars(r.fundByDepartment, r.fundCount)}</div>
+      <div class="card"><h3 style="margin-top:0">Фонд по категории</h3>${bars(r.fundByCategory, r.fundCount)}</div>
     </div>
-    <div class="grid g2" style="margin-top:16px">
-      <div class="card"><h3 style="margin-top:0">Движение през ${y}</h3><div style="font-size:13px;line-height:2.1">
-        <div style="display:flex;justify-content:space-between"><span>Постъпили</span><b style="color:var(--green)">+${r.acquiredCount} · ${mny(r.acquiredValue)}</b></div>
-        <div style="display:flex;justify-content:space-between"><span>Отчислени</span><b style="color:var(--red)">−${r.deaccessionedCount} · ${mny(r.deaccessionedValue)}</b></div>
-        <div style="display:flex;justify-content:space-between"><span>Върнати в срок</span><b>${r.returnedOnTime}</b></div>
-        <div style="display:flex;justify-content:space-between"><span>Върнати със забава</span><b>${r.returnedLate}</b></div>
-      </div></div>
+
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card"><h3 style="margin-top:0">Движение на фонда през ${y}</h3>
+        <div class="chartRow">
+          <div class="cr-top"><span class="cr-k">Постъпили</span>
+            <span class="cr-v"><b style="color:var(--green)">+${r.acquiredCount}</b> · ${mny(r.acquiredValue)}</span></div>
+          <div class="chartTrack"><div class="chartFill g" style="width:${r.fundCount ? Math.min(100, Math.max(2, r.acquiredCount / r.fundCount * 100)) : 0}%"></div></div>
+        </div>
+        <div class="chartRow">
+          <div class="cr-top"><span class="cr-k">Отчислени</span>
+            <span class="cr-v"><b style="color:var(--red)">−${r.deaccessionedCount}</b> · ${mny(r.deaccessionedValue)}</span></div>
+          <div class="chartTrack"><div class="chartFill r" style="width:${r.fundCount ? Math.min(100, Math.max(2, r.deaccessionedCount / r.fundCount * 100)) : 0}%"></div></div>
+        </div>
+        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
+        <div class="statRows">
+          <div><span>Чист прираст</span><b style="color:${r.acquiredCount - r.deaccessionedCount >= 0 ? 'var(--green)' : 'var(--red)'}">
+            ${r.acquiredCount - r.deaccessionedCount >= 0 ? '+' : ''}${r.acquiredCount - r.deaccessionedCount}</b></div>
+        </div>
+      </div>
+
+      <div class="card"><h3 style="margin-top:0">Спазване на сроковете</h3>
+        ${totalReturned ? `
+          ${ringSvg(onTimePct)}
+          <div class="statRows" style="margin-top:12px">
+            <div><span>Върнати в срок</span><b style="color:var(--green)">${r.returnedOnTime}</b></div>
+            <div><span>Върнати със забава</span><b style="color:var(--red)">${r.returnedLate}</b></div>
+            <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
+          </div>`
+        : '<span class="hint">Няма върнати документи през периода.</span>'}
+      </div>
+
       <div class="card"><h3 style="margin-top:0">Най-търсени документи</h3>
-        ${r.topLoans.length ? r.topLoans.map((t, i) => `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--rule)">
-        <span style="color:var(--brass);width:20px">${i + 1}</span><span style="flex:1">${esc(t.title)}</span><b>${t.n}</b></div>`).join('')
+        ${r.topLoans.length ? r.topLoans.map((t, i) => `<div class="rankRow">
+          <span class="rankNo">${i + 1}</span>
+          <span class="rankTitle" title="${esc(t.title)}">${esc(t.title)}</span>
+          <span class="rankVal">${t.n}</span></div>`).join('')
         : '<span class="hint">няма данни</span>'}
       </div>
     </div>`;
+}
+/* Пръстеновидна диаграма за процент — чист SVG, без външни библиотеки. */
+function ringSvg(pct, label) {
+  const R = 34, C = 2 * Math.PI * R;
+  const on = Math.max(0, Math.min(100, pct));
+  const col = on >= 90 ? 'var(--green)' : on >= 70 ? 'var(--brass)' : 'var(--red)';
+  return `<div class="ring">
+    <svg class="ringSvg" width="86" height="86" viewBox="0 0 86 86">
+      <circle cx="43" cy="43" r="${R}" fill="none" stroke="var(--paper3)" stroke-width="10"/>
+      <circle cx="43" cy="43" r="${R}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="${(C * on / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 43 43)"/>
+      <text x="43" y="48" text-anchor="middle" font-size="18" font-weight="700" fill="var(--brassD)"
+        font-family="Georgia,serif">${on}%</text>
+    </svg>
+    <div class="ringTxt"><div class="rt-n">${on}%</div>
+      <div class="rt-l">${esc(label || 'върнати в срок')}</div></div>
+  </div>`;
 }
 function addVisits() {
   modal('Вписване на посещения', `
@@ -1975,7 +2202,8 @@ async function renderLabels() {
 
     <div class="grid g2" style="margin-top:16px">
       <div class="card"><h3 style="margin-top:0">Баркод етикети за фонда</h3>
-        <p class="hint" style="margin-top:0">Всеки етикет съдържа името на библиотеката, баркод и инвентарен номер.</p>
+        <p class="hint" style="margin-top:0">Всеки етикет съдържа името на библиотеката, населеното място,
+        баркод (Code&nbsp;39) и инвентарния номер под баркода.</p>
         <div class="grid g2">
           ${fld('От инвентарен №', 'lblFrom', {})}
           ${fld('До инвентарен №', 'lblTo', {})}
@@ -1993,7 +2221,7 @@ async function renderLabels() {
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Етикети за сигнатура (за гръбчето на книгата)</h3>
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Етикети за сигнатура за гръбчето на книгата</h3>
       <div class="note" style="margin-top:0">Само УДК на първия ред и авторски знак под него — без баркод, име на
       библиотеката или инвентарен номер.</div>
       <div class="grid g2">
