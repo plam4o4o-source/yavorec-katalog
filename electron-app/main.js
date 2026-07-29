@@ -81,6 +81,11 @@ function initDb() {
     limit_readers: 'INTEGER DEFAULT 0'
   });
 
+  // Яворец е в община Севлиево, област Габрово — старата стойност по подразбиране беше
+  // сгрешена. Поправя се само ако полето още е точно тя (т.е. никой не я е променял ръчно),
+  // за да не се презапише населено място, въведено от библиотекаря.
+  db.prepare("UPDATE settings SET place = 'с. Яворец, обл. Габрово' WHERE id = 1 AND place = 'с. Яворец, общ. Габрово'").run();
+
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
 }
 
@@ -1016,7 +1021,12 @@ ipcMain.handle('dashboard:full', () =>
 
 /* ---------------- Инвентаризация ---------------- */
 ipcMain.handle('inventorySessions:list', () =>
-  run(() => db.prepare('SELECT * FROM inventory_sessions ORDER BY date DESC').all())
+  run(() => db.prepare(`
+    SELECT s.*,
+           (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id) AS scanned,
+           (SELECT COUNT(*) FROM inventory_session_missing m WHERE m.session_id = s.id) AS missing
+    FROM inventory_sessions s ORDER BY s.date DESC
+  `).all())
 );
 ipcMain.handle('inventorySessions:requirement', () =>
   run(() => {

@@ -4,3 +4,4 @@ db/library.db
 db/library.db-wal
 db/library.db-shm
 *.log
+db/backups/
