@@ -2,7 +2,10 @@
 <html lang="bg">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<!-- img-src допуска data: заради логото на организацията, което се пази в базата
+     данни като data URI. Външни адреси нарочно не се допускат — програмата не
+     зарежда изображения от интернет. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 <title>Инвентар · Библиотечна система</title>
 <link rel="stylesheet" href="style.css">
 </head>

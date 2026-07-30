@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld('api', {
     get: invoke('settings:get'),
     update: invoke('settings:update'),
     updateLabelFormat: invoke('settings:updateLabelFormat'),
-    updateTheme: invoke('settings:updateTheme')
+    updateTheme: invoke('settings:updateTheme'),
+    chooseLogo: invoke('settings:chooseLogo'),
+    clearLogo: invoke('settings:clearLogo')
   },
   dbLocation: {
     get: invoke('dbLocation:get'),
