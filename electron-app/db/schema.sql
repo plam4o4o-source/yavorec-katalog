@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS settings (
   id                INTEGER PRIMARY KEY CHECK (id = 1),
   org               TEXT DEFAULT 'Народно читалище „Васил Левски – 1922“',
   lib_name          TEXT DEFAULT 'Библиотека при НЧ „Васил Левски – 1922“',
-  place             TEXT DEFAULT 'с. Яворец, обл. Габрово',
+  place             TEXT DEFAULT 'с. Яворец, общ. Габрово',
   bulstat           TEXT,
   reg_no            TEXT,
   director          TEXT,
