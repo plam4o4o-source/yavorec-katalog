@@ -218,6 +218,18 @@ function applyTheme() {
 // Заглавната част на всеки официален документ за печат. Празните полета отпадат,
 // вместо да оставят празни редове — така документът изглежда правилно и при
 // библиотека, която не попълва всичко (напр. няма отделен регистрационен номер).
+/* Плочка с показател — ползва се от Таблото, Справките и краеведските раздели. */
+function kpi(icon, num, lbl, extra, cls) {
+  return `<div class="kpi ${cls || ''}">
+    <div class="kpi-ico">${icon}</div>
+    <div class="kpi-body">
+      <div class="kpi-num">${num}</div>
+      <div class="kpi-lbl">${lbl}</div>
+      ${extra ? `<div class="kpi-extra">${extra}</div>` : ''}
+    </div>
+  </div>`;
+}
+
 function shead() {
   const s = SETTINGS_CACHE || {};
   const lines = [];
@@ -333,6 +345,7 @@ const NAV = [
     ['auth', 'Авторитетни данни']] },
   { g: 'Читатели', items: [['readers', 'Читатели'], ['circ', 'Заемане и връщане'], ['over', 'Просрочени']] },
   { g: 'Други регистри', items: [['periodika', 'Периодика'], ['mzs', 'МЗС'], ['dnevnik', 'Дневник']] },
+  { g: 'Краезнание', items: [['analytics', 'Аналитично описание'], ['persons', 'Персоналии'], ['chronicle', 'Летопис']] },
   { g: 'Отчети', items: [['stats', 'Справки и статистика'], ['catalog', 'Онлайн каталог'], ['labels', 'Баркод етикети'], ['odit', 'Одитна следа']] },
   { g: 'Настройки', items: [['setup', 'Настройки']] }
 ];
@@ -351,6 +364,9 @@ const TITLES = {
   periodika: ['Периодика', 'картотека на постъпилите броеве'],
   mzs: ['Междубиблиотечно заемане', 'заявки от и към други библиотеки'],
   dnevnik: ['Дневник на библиотеката', 'месечен статистически дневник — Раздел А и Раздел Б'],
+  analytics: ['Аналитично описание', 'статии в периодични издания и части от книги'],
+  persons: ['Персоналии', 'видни местни жители и дейци'],
+  chronicle: ['Летопис', 'хронология на читалищната дейност'],
   stats: ['Справки и статистика', 'годишен отчет и показатели'],
   catalog: ['Онлайн каталог', 'публикуване в интернет'],
   labels: ['Баркод етикети', 'печат на етикети Code 39'],
@@ -375,6 +391,7 @@ const RENDERERS = {
   kdbf: renderKdbf, acq: renderAcq, acts: renderActs, invent: renderInvent,
   auth: renderAuth, readers: renderReaders, circ: renderCirc, over: renderOver,
   periodika: renderPeriodika, mzs: renderMzs, dnevnik: renderDnevnik,
+  analytics: renderAnalytics, persons: renderPersons, chronicle: renderChronicle,
   stats: renderStats, catalog: renderCatalog, labels: renderLabels, odit: renderOdit, setup: renderSetup
 };
 
@@ -469,15 +486,6 @@ async function renderDash() {
   const r = await call(window.api.dashboard.full());
   if (!r) return;
   const pct = r.inventoryTarget ? Math.min(100, Math.round(r.inventoryScannedYear / r.inventoryTarget * 100)) : 0;
-  const kpi = (icon, num, lbl, extra, cls) => `
-    <div class="kpi ${cls || ''}">
-      <div class="kpi-ico">${icon}</div>
-      <div class="kpi-body">
-        <div class="kpi-num">${num}</div>
-        <div class="kpi-lbl">${lbl}</div>
-        ${extra ? `<div class="kpi-extra">${extra}</div>` : ''}
-      </div>
-    </div>`;
   $('#view').innerHTML = `
     <div class="card dashScan">
       <div class="dashScan-l">
@@ -871,7 +879,7 @@ async function renderAuth() {
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Всички стойности в полето</h3>
       <div class="hint" style="margin-top:0">Подредени по брой документи. Този списък се предлага
       за автодовършване при въвеждане на нова книга.</div>
-      <table class="tbl" style="margin-top:8px"><thead><tr><th>Стойност</th><th style="width:120px">Документи</th></tr></thead>
+      <table class="ledger" style="margin-top:8px"><thead><tr><th>Стойност</th><th style="width:120px">Документи</th></tr></thead>
         <tbody>${(values || []).slice(0, 300).map(v => `<tr>
           <td>${esc(v.value)}</td><td class="num">${v.n}</td></tr>`).join('')}</tbody></table>
       ${total > 300 ? `<div class="hint">Показани са първите 300 от ${total}.</div>` : ''}
@@ -3232,3 +3240,518 @@ loadSettingsCache().then(s => {
   if (needsSetup(s) && !location.hash) location.hash = '#setup';
   route();
 });
+
+/* ============================================================================
+   КРАЕЗНАНИЕ: аналитично описание, персоналии, летопис
+   Тези три раздела съдържат данните, които се създават в самата библиотека и не
+   могат да бъдат получени отвън — статии за селото, сведения за местни дейци и
+   хронология на читалищната дейност.
+   ============================================================================ */
+
+/* ---------------- Аналитично описание ---------------- */
+let ANL_Q = '', ANL_YEAR = '', ANL_LOCAL = false;
+async function renderAnalytics() {
+  const [rows, years] = await Promise.all([
+    call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL })),
+    call(window.api.analytics.years())
+  ]);
+  if (!rows) return;
+  const total = rows.length, local = rows.filter(r => r.is_local).length;
+  $('#view').innerHTML = `
+    <div class="note"><b>Аналитично описание.</b> Описват се отделни статии от вестници и списания и
+    части от книги — това, което не се вижда в обикновения каталог. За малката библиотека тук се
+    натрупва краеведският масив: материали за селото, за читалището и за местните хора, които не
+    съществуват описани никъде другаде.</div>
+
+    <div class="toolbar">
+      <button class="btn pri" onclick="analyticForm()">+ Ново описание</button>
+      <input type="search" id="anlQ" placeholder="Търсене по заглавие, автор, ключови думи, източник…"
+        value="${esc(ANL_Q)}" oninput="anlSearch(this.value)">
+      <select onchange="anlYear(this.value)">
+        <option value="">— всички години —</option>
+        ${(years || []).map(y => `<option value="${esc(y.year)}" ${ANL_YEAR === y.year ? 'selected' : ''}>
+          ${esc(y.year)} (${y.n})</option>`).join('')}
+      </select>
+      <label class="chk" style="margin:0"><input type="checkbox" ${ANL_LOCAL ? 'checked' : ''}
+        onchange="anlLocal(this.checked)"> само краеведски</label>
+    </div>
+
+    <div class="kpis">
+      ${kpi('📰', total, 'Описани статии', ANL_YEAR ? 'за ' + ANL_YEAR + ' г.' : 'общо в базата')}
+      ${kpi('🏡', local, 'Краеведски', 'за селото и района')}
+    </div>
+
+    ${rows.length ? `<div class="wrap"><table class="ledger"><thead><tr>
+      <th>Автор и заглавие</th><th style="width:30%">Източник</th><th style="width:70px">Год.</th>
+      <th style="width:90px">Стр.</th><th style="width:130px"></th></tr></thead><tbody>
+      ${rows.map(a => `<tr>
+        <td><b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}
+          ${a.author ? `<br><span class="hint">${esc(a.author)}</span>` : ''}
+          ${a.is_local ? '<span class="tag tagLocal">краеведски</span>' : ''}</td>
+        <td class="hint">${esc(analyticSource(a))}</td>
+        <td class="num">${esc(a.year || '')}</td>
+        <td class="num">${esc(a.pages || '')}</td>
+        <td><button class="btn sm" onclick="analyticForm(${a.id})">Редакция</button>
+            <button class="btn sm dgr" onclick="analyticDelete(${a.id})">Изтрий</button></td></tr>`).join('')}
+      </tbody></table></div>`
+    : `<div class="empty"><h3>Няма описани статии</h3>
+        <p>Започнете от най-близкото: статии за селото в областния вестник, материали в читалищни
+        сборници, глави от краеведски книги.</p></div>`}`;
+}
+function analyticSource(a) {
+  if (a.source_kind === 'периодика' && a.periodical_title) {
+    return a.periodical_title + (a.issue ? ', бр. ' + a.issue : '') + (a.issue_date ? ' от ' + bg(a.issue_date) : '');
+  }
+  if (a.source_kind === 'книга' && a.book_title) {
+    return [a.book_author, a.book_title].filter(Boolean).join('. ') +
+      (a.book_inv ? ' (инв. № ' + a.book_inv + ')' : '');
+  }
+  return a.source_text || '—';
+}
+function anlSearch(v) { ANL_Q = v; clearTimeout(window._anlT); window._anlT = setTimeout(renderAnalytics, 300); }
+window.anlSearch = anlSearch;
+function anlYear(v) { ANL_YEAR = v; renderAnalytics(); }
+window.anlYear = anlYear;
+function anlLocal(v) { ANL_LOCAL = v; renderAnalytics(); }
+window.anlLocal = anlLocal;
+
+async function analyticForm(id) {
+  const [a, pers, sug] = await Promise.all([
+    id ? call(window.api.analytics.get(id)) : null,
+    call(window.api.periodicals.list()),
+    loadAuthSuggest()
+  ]);
+  const v = a || { source_kind: 'периодика', is_local: 1, year: String(new Date().getFullYear()) };
+  const perOpts = (pers || []).map(p => ({ v: p.id, t: p.title }));
+  modal(id ? 'Редакция на описание' : 'Ново аналитично описание', `
+    <form id="anlF" onsubmit="return false">
+    <fieldset><legend>Статията</legend>
+      <div class="grid g2">
+        ${fld('Заглавие на статията', 'title', { val: v.title || '', req: 1 })}
+        ${fld('Автор', 'author', { val: v.author || '', list: 'author' })}
+      </div>
+      <div class="grid g4">
+        ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
+        ${fld('Година', 'year', { val: v.year || '' })}
+        ${fld('Страници', 'pages', { val: v.pages || '', hint: 'напр. „12 – 14“' })}
+        ${fld('УДК', 'udk', { val: v.udk || '', list: 'udk' })}
+      </div>
+    </fieldset>
+    <fieldset><legend>Източник</legend>
+      ${fld('Вид източник', 'source_kind', { type: 'select', allowEmpty: false, val: v.source_kind,
+        opts: ['периодика', 'книга', 'друго'] })}
+      <div class="grid g3">
+        ${fld('Периодично издание', 'periodical_id', { type: 'select', val: v.periodical_id,
+          opts: perOpts, emptyLabel: '— изберете —' })}
+        ${fld('Брой', 'issue', { val: v.issue || '' })}
+        ${fld('Дата на броя', 'issue_date', { val: v.issue_date || '', type: 'date' })}
+      </div>
+      ${fld('Книга от фонда (инв. № или заглавие)', 'book_pick', { val: v.book_id ? (v.book_author ? v.book_author + '. ' : '') + (v.book_title || '') : '',
+        hint: 'попълва се само при вид „книга“ — изберете от списъка' , list: 'anlBooks' })}
+      <input type="hidden" name="book_id" value="${esc(v.book_id || '')}">
+      ${fld('Описание на източника със свободен текст', 'source_text', { val: v.source_text || '',
+        hint: 'когато изданието не е във фонда — напр. „100 вести, бр. 145 от 12.07.2019“' })}
+    </fieldset>
+    <fieldset><legend>Съдържание</legend>
+      <div class="grid g2">
+        ${fld('Ключови думи', 'keywords', { val: v.keywords || '', list: 'keywords', hint: 'през запетая' })}
+        ${fld('Забележка', 'note', { val: v.note || '' })}
+      </div>
+      ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 3 })}
+      <label class="chk"><input type="checkbox" name="is_local" ${v.is_local ? 'checked' : ''}>
+        <span>Краеведски материал — за селото, читалището или местни хора</span></label>
+    </fieldset>
+    </form>
+    ${datalistsHtml(sug || {})}
+    <datalist id="dl_anlBooks"></datalist>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="saveAnalytic(${id || 'null'})">Запиши</button>`);
+  // Списъкът с книги се пълни при писане, за да не се зареждат хиляди записи наведнъж.
+  const bp = $('#anlF [name=book_pick]');
+  if (bp) bp.addEventListener('input', async () => {
+    const q = bp.value.trim();
+    const hidden = $('#anlF [name=book_id]');
+    if (q.length < 2) { hidden.value = ''; return; }
+    const found = await call(window.api.links.search({ kind: 'книга', q }));
+    const dl = $('#dl_anlBooks');
+    dl.innerHTML = (found || []).map(f => `<option value="${esc(f.label)}"></option>`).join('');
+    const exact = (found || []).find(f => f.label === q);
+    hidden.value = exact ? exact.id : '';
+  });
+}
+window.analyticForm = analyticForm;
+async function saveAnalytic(id) {
+  const d = formData('#anlF');
+  if (!d.title.trim()) return toast('Заглавието на статията е задължително.', 'err');
+  delete d.book_pick;
+  d.id = id;
+  if (id) await call(window.api.analytics.update(d), 'Описанието е обновено.');
+  else await call(window.api.analytics.create(d), 'Описанието е добавено.');
+  closeModal(); renderAnalytics(); markSaved();
+}
+window.saveAnalytic = saveAnalytic;
+async function analyticDelete(id) {
+  if (!confirm('Изтриване на това аналитично описание?')) return;
+  await call(window.api.analytics.delete(id), 'Описанието е изтрито.');
+  renderAnalytics();
+}
+window.analyticDelete = analyticDelete;
+
+/* ---------------- Персоналии ---------------- */
+let PRS_Q = '';
+async function renderPersons() {
+  const rows = await call(window.api.persons.list(PRS_Q));
+  if (!rows) return;
+  $('#view').innerHTML = `
+    <div class="note"><b>Персоналии.</b> Картотека на видни местни жители и дейци — родени в селото,
+    работили тук или свързани с читалището. Всяка персоналия събира на едно място сведенията за
+    човека и връзките към материалите за него във фонда.</div>
+
+    <div class="toolbar">
+      <button class="btn pri" onclick="personForm()">+ Нова персоналия</button>
+      <input type="search" placeholder="Търсене по име, дейност, биография…"
+        value="${esc(PRS_Q)}" oninput="prsSearch(this.value)">
+    </div>
+
+    ${rows.length ? `<div class="cardGrid">
+      ${rows.map(p => `<div class="prsCard" onclick="personView(${p.id})">
+        <div class="prsPhoto">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<span>без снимка</span>'}</div>
+        <div class="prsBody">
+          <div class="prsName">${esc(p.name)}</div>
+          <div class="prsDates">${esc(personDates(p))}</div>
+          ${p.activity ? `<div class="prsAct">${esc(p.activity)}</div>` : ''}
+          <div class="prsLinks">${p.links ? p.links + ' свързани материала' : 'няма свързани материали'}</div>
+        </div>
+      </div>`).join('')}
+    </div>`
+    : `<div class="empty"><h3>Няма вписани персоналии</h3>
+        <p>Започнете от хората, за които читалището вече пази сведения на хартия.</p></div>`}`;
+}
+function personDates(p) {
+  const b = p.birth_date ? bg(p.birth_date) : '';
+  const d = p.death_date ? bg(p.death_date) : '';
+  if (b && d) return b + ' – ' + d;
+  if (b) return 'р. ' + b;
+  if (d) return 'п. ' + d;
+  return '';
+}
+function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT); window._prsT = setTimeout(renderPersons, 300); }
+window.prsSearch = prsSearch;
+
+async function personForm(id) {
+  const p = id ? await call(window.api.persons.get(id)) : null;
+  const v = p || {};
+  modal(id ? 'Редакция — ' + (v.name || '') : 'Нова персоналия', `
+    <form id="prsF" onsubmit="return false">
+    <fieldset><legend>Самоличност</legend>
+      <div class="grid g2">
+        ${fld('Име (фамилия, име, бащино)', 'name', { val: v.name || '', req: 1, ph: 'Иванов, Петър Георгиев' })}
+        ${fld('Други изписвания и псевдоними', 'alt_names', { val: v.alt_names || '' })}
+      </div>
+      <div class="grid g4">
+        ${fld('Дата на раждане', 'birth_date', { val: v.birth_date || '', type: 'date' })}
+        ${fld('Място на раждане', 'birth_place', { val: v.birth_place || '' })}
+        ${fld('Дата на смъртта', 'death_date', { val: v.death_date || '', type: 'date' })}
+        ${fld('Място на смъртта', 'death_place', { val: v.death_place || '' })}
+      </div>
+      ${fld('Дейност (накратко)', 'activity', { val: v.activity || '', hint: 'напр. „учител, читалищен деец, краевед“' })}
+    </fieldset>
+    <fieldset><legend>Сведения</legend>
+      ${fld('Биографична справка', 'bio', { type: 'textarea', val: v.bio || '', rows: 5 })}
+      <div class="grid g2">
+        ${fld('Отличия и награди', 'awards', { val: v.awards || '' })}
+        ${fld('Източници на сведенията', 'sources', { val: v.sources || '' })}
+      </div>
+      ${fld('Забележка', 'note', { val: v.note || '' })}
+    </fieldset>
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="savePerson(${id || 'null'})">Запиши</button>`);
+}
+window.personForm = personForm;
+async function savePerson(id) {
+  const d = formData('#prsF');
+  if (!d.name.trim()) return toast('Името е задължително.', 'err');
+  d.id = id;
+  if (id) await call(window.api.persons.update(d), 'Персоналията е обновена.');
+  else {
+    const newId = await call(window.api.persons.create(d), 'Персоналията е добавена.');
+    closeModal(); await renderPersons(); markSaved();
+    if (newId) personView(newId);
+    return;
+  }
+  closeModal(); renderPersons(); markSaved();
+}
+window.savePerson = savePerson;
+
+async function personView(id) {
+  const [p, links] = await Promise.all([
+    call(window.api.persons.get(id)),
+    call(window.api.links.list({ fromKind: 'персона', fromId: id }))
+  ]);
+  if (!p) return;
+  window._LINK_CTX = { kind: 'персона', id };
+  modal(p.name, `
+    <div class="prsView">
+      <div class="prsViewPhoto">
+        ${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<div class="logoEmpty">няма<br>снимка</div>'}
+        <div class="toolbar" style="margin-top:8px">
+          <button class="btn sm" onclick="localPhotoChoose('persons', ${id})">${p.photo ? 'Смени…' : 'Снимка…'}</button>
+          ${p.photo ? `<button class="btn sm dgr" onclick="localPhotoClear('persons', ${id})">Махни</button>` : ''}
+        </div>
+      </div>
+      <div class="prsViewBody">
+        <div class="prsDates">${esc(personDates(p))}${p.birth_place ? ' · ' + esc(p.birth_place) : ''}</div>
+        ${p.activity ? `<div class="prsAct" style="margin:6px 0">${esc(p.activity)}</div>` : ''}
+        ${p.alt_names ? `<div class="hint">Известен още като: ${esc(p.alt_names)}</div>` : ''}
+        ${p.bio ? `<p style="font-size:13.5px;line-height:1.6">${esc(p.bio).replace(/\n/g, '<br>')}</p>` : ''}
+        ${p.awards ? `<div class="hint"><b>Отличия:</b> ${esc(p.awards)}</div>` : ''}
+        ${p.sources ? `<div class="hint"><b>Източници:</b> ${esc(p.sources)}</div>` : ''}
+      </div>
+    </div>
+    ${linksPanelHtml('персона', id, links || [])}`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>
+     <button class="btn" onclick="closeModal();personForm(${id})">Редакция</button>
+     <button class="btn dgr" onclick="personDelete(${id})">Изтрий</button>`);
+}
+window.personView = personView;
+async function personDelete(id) {
+  if (!confirm('Изтриване на персоналията и всичките ѝ връзки?')) return;
+  await call(window.api.persons.delete(id), 'Персоналията е изтрита.');
+  closeModal(); renderPersons();
+}
+window.personDelete = personDelete;
+
+/* ---------------- Летопис ---------------- */
+let CHR_Q = '', CHR_YEAR = '';
+const CHR_CATS = ['читалище', 'библиотека', 'самодейност', 'дарение', 'строителство', 'юбилей', 'друго'];
+async function renderChronicle() {
+  const [rows, years] = await Promise.all([
+    call(window.api.chronicle.list({ q: CHR_Q, year: CHR_YEAR })),
+    call(window.api.chronicle.years())
+  ]);
+  if (!rows) return;
+  // Записите се групират по година, за да се чете като истински летопис.
+  const byYear = {};
+  for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
+  const yearsSorted = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
+  $('#view').innerHTML = `
+    <div class="note"><b>Летопис.</b> Хронология на читалищната дейност — по години и събития.
+    Това, което по традиция се води в летописната книга, тук се търси, допълва и свързва със
+    снимките и документите във фонда.</div>
+
+    <div class="toolbar">
+      <button class="btn pri" onclick="chronicleForm()">+ Нов запис</button>
+      <input type="search" placeholder="Търсене по събитие, описание, участници…"
+        value="${esc(CHR_Q)}" oninput="chrSearch(this.value)">
+      <select onchange="chrYear(this.value)">
+        <option value="">— всички години —</option>
+        ${(years || []).map(y => `<option value="${esc(y.year)}" ${CHR_YEAR === y.year ? 'selected' : ''}>
+          ${esc(y.year)} (${y.n})</option>`).join('')}
+      </select>
+      <button class="btn" onclick="printChronicle()">Печат / PDF</button>
+    </div>
+
+    ${rows.length ? yearsSorted.map(y => `
+      <div class="chrYear">
+        <div class="chrYearHead">${esc(y)}</div>
+        ${byYear[y].map(c => `<div class="chrItem" onclick="chronicleView(${c.id})">
+          ${c.photo ? `<img class="chrThumb" src="${esc(c.photo)}" alt="">` : ''}
+          <div class="chrBody">
+            <div class="chrTop">
+              <span class="chrTitle">${esc(c.title)}</span>
+              ${c.date ? `<span class="chrDate">${esc(bg(c.date))}</span>` : ''}
+              ${c.category ? `<span class="tag">${esc(c.category)}</span>` : ''}
+            </div>
+            ${c.body ? `<div class="chrText">${esc(String(c.body).slice(0, 240))}${String(c.body).length > 240 ? '…' : ''}</div>` : ''}
+            ${c.links ? `<div class="hint">${c.links} свързани материала</div>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>`).join('')
+    : `<div class="empty"><h3>Летописът е празен</h3>
+        <p>Впишете първото събитие — основаването на читалището, откриването на библиотеката,
+        юбилей, дарение, ремонт.</p></div>`}`;
+}
+function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(renderChronicle, 300); }
+window.chrSearch = chrSearch;
+function chrYear(v) { CHR_YEAR = v; renderChronicle(); }
+window.chrYear = chrYear;
+
+async function chronicleForm(id) {
+  const c = id ? await call(window.api.chronicle.get(id)) : null;
+  const v = c || { year: String(new Date().getFullYear()), category: 'читалище' };
+  modal(id ? 'Редакция на запис' : 'Нов запис в летописа', `
+    <form id="chrF" onsubmit="return false">
+    <div class="grid g4">
+      ${fld('Година', 'year', { val: v.year || '', req: 1 })}
+      ${fld('Точна дата (ако е известна)', 'date', { val: v.date || '', type: 'date' })}
+      ${fld('Раздел', 'category', { type: 'select', val: v.category, opts: CHR_CATS, allowEmpty: false })}
+      ${fld('Участници', 'participants', { val: v.participants || '' })}
+    </div>
+    ${fld('Събитие', 'title', { val: v.title || '', req: 1, hint: 'кратко заглавие на записа' })}
+    ${fld('Описание', 'body', { type: 'textarea', val: v.body || '', rows: 6 })}
+    <div class="grid g2">
+      ${fld('Източници', 'sources', { val: v.sources || '', hint: 'протокол, вестник, спомен' })}
+      ${fld('Забележка', 'note', { val: v.note || '' })}
+    </div>
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="saveChronicle(${id || 'null'})">Запиши</button>`);
+}
+window.chronicleForm = chronicleForm;
+async function saveChronicle(id) {
+  const d = formData('#chrF');
+  if (!d.title.trim()) return toast('Заглавието на събитието е задължително.', 'err');
+  if (!d.year.trim() && !d.date) return toast('Годината е задължителна.', 'err');
+  d.id = id;
+  if (id) { await call(window.api.chronicle.update(d), 'Записът е обновен.'); }
+  else {
+    const newId = await call(window.api.chronicle.create(d), 'Записът е добавен.');
+    closeModal(); await renderChronicle(); markSaved();
+    if (newId) chronicleView(newId);
+    return;
+  }
+  closeModal(); renderChronicle(); markSaved();
+}
+window.saveChronicle = saveChronicle;
+
+async function chronicleView(id) {
+  const [c, links] = await Promise.all([
+    call(window.api.chronicle.get(id)),
+    call(window.api.links.list({ fromKind: 'летопис', fromId: id }))
+  ]);
+  if (!c) return;
+  window._LINK_CTX = { kind: 'летопис', id };
+  modal(c.year + ' — ' + c.title, `
+    <div class="prsView">
+      <div class="prsViewPhoto">
+        ${c.photo ? `<img src="${esc(c.photo)}" alt="">` : '<div class="logoEmpty">няма<br>снимка</div>'}
+        <div class="toolbar" style="margin-top:8px">
+          <button class="btn sm" onclick="localPhotoChoose('chronicle', ${id})">${c.photo ? 'Смени…' : 'Снимка…'}</button>
+          ${c.photo ? `<button class="btn sm dgr" onclick="localPhotoClear('chronicle', ${id})">Махни</button>` : ''}
+        </div>
+      </div>
+      <div class="prsViewBody">
+        <div class="chrTop">
+          ${c.date ? `<span class="chrDate">${esc(bg(c.date))}</span>` : ''}
+          ${c.category ? `<span class="tag">${esc(c.category)}</span>` : ''}
+        </div>
+        ${c.body ? `<p style="font-size:13.5px;line-height:1.6">${esc(c.body).replace(/\n/g, '<br>')}</p>` : ''}
+        ${c.participants ? `<div class="hint"><b>Участници:</b> ${esc(c.participants)}</div>` : ''}
+        ${c.sources ? `<div class="hint"><b>Източници:</b> ${esc(c.sources)}</div>` : ''}
+      </div>
+    </div>
+    ${linksPanelHtml('летопис', id, links || [])}`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>
+     <button class="btn" onclick="closeModal();chronicleForm(${id})">Редакция</button>
+     <button class="btn dgr" onclick="chronicleDelete(${id})">Изтрий</button>`);
+}
+window.chronicleView = chronicleView;
+async function chronicleDelete(id) {
+  if (!confirm('Изтриване на записа от летописа?')) return;
+  await call(window.api.chronicle.delete(id), 'Записът е изтрит.');
+  closeModal(); renderChronicle();
+}
+window.chronicleDelete = chronicleDelete;
+
+async function printChronicle() {
+  const rows = await call(window.api.chronicle.list({ year: CHR_YEAR }));
+  if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
+  const byYear = {};
+  for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
+  const years = Object.keys(byYear).sort();
+  setPrintPage({ landscape: false, margin: '16mm 14mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2 class="ptitle">ЛЕТОПИС${CHR_YEAR ? ' — ' + esc(CHR_YEAR) + ' г.' : ''}</h2>
+    ${years.map(y => `<h3 style="margin:10px 0 4px">${esc(y)} г.</h3>
+      ${byYear[y].map(c => `<div style="margin-bottom:7px">
+        <b>${esc(c.title)}</b>${c.date ? ' · ' + esc(bg(c.date)) : ''}${c.category ? ' · ' + esc(c.category) : ''}
+        ${c.body ? `<div style="font-size:11pt">${esc(c.body).replace(/\n/g, '<br>')}</div>` : ''}
+        ${c.participants ? `<div style="font-size:10pt"><i>Участници: ${esc(c.participants)}</i></div>` : ''}
+      </div>`).join('')}`).join('')}
+    ${ssig(['Летописец: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
+}
+window.printChronicle = printChronicle;
+
+/* ---------------- Връзки към фонда (общи за персоналии и летопис) ---------------- */
+function linksPanelHtml(fromKind, fromId, links) {
+  return `<div class="card" style="margin-top:14px"><h3 style="margin-top:0">Свързани материали</h3>
+    <div class="note" style="margin-top:0">Документи от фонда, статии, други персоналии и записи в
+    летописа, които се отнасят до този запис.</div>
+    <div id="linkList">${linkListHtml(links)}</div>
+    <div class="grid g3" style="margin-top:10px">
+      <div class="field"><label>Вид</label>
+        <select id="lnkKind" onchange="lnkSearch()">
+          <option value="книга">Документ от фонда</option>
+          <option value="статия">Статия (аналитично описание)</option>
+          <option value="персона">Персоналия</option>
+          <option value="летопис">Запис в летописа</option>
+          <option value="периодика">Периодично издание</option>
+        </select></div>
+      <div class="field"><label>Търсене</label>
+        <input id="lnkQ" placeholder="заглавие, автор, инв. №…" oninput="lnkSearch()"></div>
+      <div class="field"><label>Намерени</label>
+        <select id="lnkPick"><option value="">— въведете търсене —</option></select></div>
+    </div>
+    <button class="btn pri" onclick="lnkAdd('${fromKind}', ${fromId})">Свържи</button>
+  </div>`;
+}
+function linkListHtml(links) {
+  if (!links.length) return '<div class="hint">Няма свързани материали.</div>';
+  return `<table class="ledger"><tbody>${links.map(l => `<tr>
+    <td style="width:110px"><span class="tag">${esc(l.to_kind)}</span></td>
+    <td>${esc(l.label)}</td>
+    <td style="width:80px"><button class="btn sm dgr" onclick="lnkDel(${l.id})">Махни</button></td>
+  </tr>`).join('')}</tbody></table>`;
+}
+async function lnkSearch() {
+  const kind = $('#lnkKind').value, q = $('#lnkQ').value.trim();
+  const sel = $('#lnkPick');
+  if (q.length < 2) { sel.innerHTML = '<option value="">— въведете поне 2 знака —</option>'; return; }
+  const rows = await call(window.api.links.search({ kind, q }));
+  sel.innerHTML = (rows || []).length
+    ? (rows || []).map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')
+    : '<option value="">— няма намерени —</option>';
+}
+window.lnkSearch = lnkSearch;
+async function lnkAdd(fromKind, fromId) {
+  const toKind = $('#lnkKind').value, toId = $('#lnkPick').value;
+  if (!toId) return toast('Изберете запис от списъка „Намерени“.', 'err');
+  const r = await call(window.api.links.add({ fromKind, fromId, toKind, toId: Number(toId) }), 'Връзката е добавена.');
+  if (r === null) return;
+  await refreshLinks(fromKind, fromId);
+  markSaved();
+}
+window.lnkAdd = lnkAdd;
+async function lnkDel(id) {
+  await call(window.api.links.delete(id), 'Връзката е премахната.');
+  const btn = event && event.target;
+  const panel = btn && btn.closest('.card');
+  // Опреснява списъка от текущия отворен запис.
+  if (window._LINK_CTX) await refreshLinks(window._LINK_CTX.kind, window._LINK_CTX.id);
+  else if (panel) panel.querySelector('#linkList').innerHTML = '<div class="hint">Няма свързани материали.</div>';
+}
+window.lnkDel = lnkDel;
+async function refreshLinks(fromKind, fromId) {
+  window._LINK_CTX = { kind: fromKind, id: fromId };
+  const links = await call(window.api.links.list({ fromKind, fromId }));
+  const box = $('#linkList');
+  if (box) box.innerHTML = linkListHtml(links || []);
+}
+
+async function localPhotoChoose(table, id) {
+  const res = await window.api.localPhoto.choose({ table, id });
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  toast('Снимката е добавена.', 'ok'); markSaved();
+  closeModal();
+  if (table === 'persons') { await renderPersons(); personView(id); }
+  else { await renderChronicle(); chronicleView(id); }
+}
+window.localPhotoChoose = localPhotoChoose;
+async function localPhotoClear(table, id) {
+  await call(window.api.localPhoto.clear({ table, id }), 'Снимката е премахната.');
+  closeModal();
+  if (table === 'persons') { await renderPersons(); personView(id); }
+  else { await renderChronicle(); chronicleView(id); }
+}
+window.localPhotoClear = localPhotoClear;

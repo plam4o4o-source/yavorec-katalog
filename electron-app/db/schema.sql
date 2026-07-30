@@ -366,3 +366,85 @@ INSERT OR IGNORE INTO categories (name) VALUES
   ('книга'), ('продължаващо издание'), ('графично издание'),
   ('картографско издание'), ('нотно издание'), ('аудиодокумент'),
   ('видеодокумент'), ('електронен документ'), ('патент/стандарт'), ('друго');
+
+/* ============================================================================
+   КРАЕВЕДСКИ МОДУЛИ
+   Аналитично описание, персоналии и летопис. Това са данните, които никоя друга
+   библиотека няма и никой не може да ги достави отвън — създават се тук.
+   ============================================================================ */
+
+-- Аналитично описание: статии в периодични издания и части от книги.
+-- Източникът може да сочи към запис във фонда (периодично издание или книга),
+-- или да е описан свободно, когато изданието не е налично в библиотеката.
+CREATE TABLE IF NOT EXISTS analytics (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  title         TEXT NOT NULL,
+  subtitle      TEXT,
+  author        TEXT,
+  source_kind   TEXT DEFAULT 'периодика',   -- периодика | книга | друго
+  periodical_id INTEGER REFERENCES periodicals(id) ON DELETE SET NULL,
+  book_id       INTEGER REFERENCES books(id) ON DELETE SET NULL,
+  source_text   TEXT,                        -- когато източникът не е във фонда
+  year          TEXT,
+  issue         TEXT,                        -- брой / № на свитъка
+  issue_date    TEXT,
+  pages         TEXT,                        -- напр. „12 – 14“
+  udk           TEXT,
+  keywords      TEXT,
+  annotation    TEXT,
+  is_local      INTEGER DEFAULT 1,           -- краеведски материал
+  note          TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_year  ON analytics(year);
+CREATE INDEX IF NOT EXISTS idx_analytics_title ON analytics(title);
+CREATE INDEX IF NOT EXISTS idx_analytics_local ON analytics(is_local);
+
+-- Персоналии: видни местни жители и дейци.
+CREATE TABLE IF NOT EXISTS persons (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL,                -- Фамилия, Име Бащино
+  alt_names    TEXT,                         -- псевдоними и други изписвания
+  birth_date   TEXT,
+  birth_place  TEXT,
+  death_date   TEXT,
+  death_place  TEXT,
+  activity     TEXT,                         -- с какво е известен, накратко
+  bio          TEXT,                         -- биографична справка
+  awards       TEXT,
+  sources      TEXT,                         -- откъде са сведенията
+  photo        TEXT,                         -- снимка, data URI
+  note         TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_persons_name ON persons(name);
+
+-- Летопис: хронологични записи за дейността на читалището.
+CREATE TABLE IF NOT EXISTS chronicle (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  year         TEXT NOT NULL,
+  date         TEXT,                         -- пълна дата, ако е известна
+  title        TEXT NOT NULL,
+  body         TEXT,
+  category     TEXT,                         -- читалище | библиотека | самодейност | дарение | строителство | друго
+  participants TEXT,
+  sources      TEXT,
+  photo        TEXT,                         -- снимка, data URI
+  note         TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chronicle_year ON chronicle(year);
+
+-- Връзки между краеведските записи и фонда. Една таблица за всички посоки:
+-- персоналия → книга/статия/летопис, летопис → книга/статия/персоналия.
+CREATE TABLE IF NOT EXISTS links (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_kind  TEXT NOT NULL,                  -- персона | летопис
+  from_id    INTEGER NOT NULL,
+  to_kind    TEXT NOT NULL,                  -- книга | статия | летопис | персона | периодика
+  to_id      INTEGER NOT NULL,
+  note       TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_kind, from_id);
+CREATE INDEX IF NOT EXISTS idx_links_to   ON links(to_kind, to_id);
