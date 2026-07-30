@@ -138,6 +138,40 @@ contextBridge.exposeInMainWorld('api', {
     update: invoke('mzs:update'),
     delete: invoke('mzs:delete')
   },
+  analytics: {
+    list: invoke('analytics:list'),
+    get: invoke('analytics:get'),
+    years: invoke('analytics:years'),
+    create: invoke('analytics:create'),
+    update: invoke('analytics:update'),
+    delete: invoke('analytics:delete')
+  },
+  persons: {
+    list: invoke('persons:list'),
+    get: invoke('persons:get'),
+    create: invoke('persons:create'),
+    update: invoke('persons:update'),
+    delete: invoke('persons:delete')
+  },
+  chronicle: {
+    list: invoke('chronicle:list'),
+    get: invoke('chronicle:get'),
+    years: invoke('chronicle:years'),
+    create: invoke('chronicle:create'),
+    update: invoke('chronicle:update'),
+    delete: invoke('chronicle:delete')
+  },
+  links: {
+    list: invoke('links:list'),
+    backlinks: invoke('links:backlinks'),
+    add: invoke('links:add'),
+    delete: invoke('links:delete'),
+    search: invoke('links:search')
+  },
+  localPhoto: {
+    choose: invoke('localPhoto:choose'),
+    clear: invoke('localPhoto:clear')
+  },
   audit: {
     list: invoke('audit:list')
   },

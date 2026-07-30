@@ -466,3 +466,62 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 }
 .toast.ok{background:var(--green)}
 .toast.err{background:var(--red)}
+
+/* ============================================================================
+   КРАЕЗНАНИЕ: аналитично описание, персоналии, летопис
+   ============================================================================ */
+
+/* Етикети за вид запис */
+.tag{
+  display:inline-block; font-size:10.5px; padding:1px 7px; border-radius:9px; margin-left:6px;
+  background:var(--paper3); color:var(--ink2); border:1px solid var(--rule2); vertical-align:middle;
+}
+.tagLocal{background:var(--brass); color:#fff; border-color:var(--brass)}
+
+/* ---------- Персоналии: картотека ---------- */
+.cardGrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; margin-top:14px}
+.prsCard{
+  display:flex; gap:11px; padding:11px; border:1px solid var(--rule2); border-radius:5px;
+  background:var(--paper); cursor:pointer; transition:border-color .15s, box-shadow .15s;
+}
+.prsCard:hover{border-color:var(--brass); box-shadow:var(--sh)}
+.prsPhoto{
+  width:64px; height:80px; flex:0 0 auto; border:1px solid var(--rule); border-radius:3px;
+  background:var(--paper3); display:flex; align-items:center; justify-content:center; overflow:hidden;
+}
+.prsPhoto img{width:100%; height:100%; object-fit:cover}
+.prsPhoto span{font-size:10px; color:var(--ink2); text-align:center; padding:4px}
+.prsBody{min-width:0; display:flex; flex-direction:column; justify-content:center}
+.prsName{font-family:var(--serif); font-size:14.5px; font-weight:700; color:var(--spine); line-height:1.25}
+.prsDates{font-family:var(--mono); font-size:11.5px; color:var(--brass); margin-top:2px}
+.prsAct{font-size:12.5px; color:var(--ink); margin-top:4px; line-height:1.35}
+.prsLinks{font-size:11px; color:var(--ink2); margin-top:5px}
+
+/* ---------- Персоналия и запис от летописа: подробен изглед ---------- */
+.prsView{display:flex; gap:18px; align-items:flex-start}
+.prsViewPhoto{flex:0 0 auto; width:150px; text-align:center}
+.prsViewPhoto img{
+  width:150px; max-height:200px; object-fit:cover; border:1px solid var(--rule2);
+  border-radius:4px; background:#fff;
+}
+.prsViewPhoto .logoEmpty{width:150px; height:150px}
+.prsViewBody{flex:1; min-width:0}
+
+/* ---------- Летопис ---------- */
+.chrYear{margin-top:16px}
+.chrYearHead{
+  font-family:var(--serif); font-size:20px; font-weight:700; color:var(--brass);
+  border-bottom:2px solid var(--brass); padding-bottom:4px; margin-bottom:9px;
+}
+.chrItem{
+  display:flex; gap:12px; padding:11px 13px; border:1px solid var(--rule2); border-left:3px solid var(--rule2);
+  border-radius:4px; background:var(--paper); margin-bottom:8px; cursor:pointer;
+  transition:border-left-color .15s, box-shadow .15s;
+}
+.chrItem:hover{border-left-color:var(--brass); box-shadow:var(--sh)}
+.chrThumb{width:74px; height:56px; object-fit:cover; border-radius:3px; border:1px solid var(--rule); flex:0 0 auto}
+.chrBody{min-width:0; flex:1}
+.chrTop{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.chrTitle{font-weight:700; font-size:13.5px; color:var(--ink)}
+.chrDate{font-family:var(--mono); font-size:11.5px; color:var(--brass)}
+.chrText{font-size:12.5px; color:var(--ink2); line-height:1.45; margin-top:4px}
