@@ -242,17 +242,45 @@ function shead() {
   return s.logo ? `<div class="pheadRow"><img class="plogo" src="${esc(s.logo)}" alt="">${text}</div>` : text;
 }
 function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
+// Името на документа се задава тук, защото всяка разпечатка минава през
+// setPrintPage непосредствено преди doPrint. Така не се променят дванайсетте
+// извиквания на doPrint, всяко от които е дълъг вложен шаблон.
+let PRINT_DOC_NAME = '';
 function setPrintPage(opts) {
   opts = opts || {};
+  PRINT_DOC_NAME = opts.name || '';
   let st = document.getElementById('dynPrintStyle');
   if (!st) { st = document.createElement('style'); st.id = 'dynPrintStyle'; document.head.appendChild(st); }
   const size = opts.widthMm ? opts.widthMm + 'mm ' + opts.heightMm + 'mm' : 'A4' + (opts.landscape ? ' landscape' : '');
   st.textContent = `@media print{ @page{size:${size};margin:${opts.margin || '14mm 12mm'}} ${opts.extraCss || ''} }`;
 }
-function doPrint(html) {
+/* Windows предлага заглавието на страницата като име на PDF файла в „Microsoft
+   Print to PDF“. Затова преди печат заглавието се сменя с името на конкретния
+   документ и се връща обратно веднага след това — иначе всяка разпечатка щеше да
+   се казва „Инвентар · Библиотечна система“. */
+const APP_TITLE = document.title;
+// Знаците, забранени в имена на файлове под Windows, плюс кавичките и тиретата от
+// оформлението, които правят името нечетимо в диалога за запис.
+function safeFileName(name) {
+  return String(name || '').trim()
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/[„“”«»]/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 120)
+    .trim();
+}
+function doPrint(html, docName) {
   $('#printArea').innerHTML = html;
-  toast('За PDF файл: в прозореца за печат изберете „Save as PDF“ / „Microsoft Print to PDF“ вместо принтер.');
-  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => window.print(), 150)));
+  const name = safeFileName(docName || PRINT_DOC_NAME);
+  if (name) document.title = name;
+  toast(name
+    ? `За PDF файл изберете „Save as PDF“ / „Microsoft Print to PDF“ — файлът ще се казва „${name}“.`
+    : 'За PDF файл: в прозореца за печат изберете „Save as PDF“ / „Microsoft Print to PDF“ вместо принтер.');
+  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
+    window.print();
+    // Връща се след диалога; в Electron window.print() блокира до затварянето му.
+    document.title = APP_TITLE;
+  }, 150)));
 }
 /* Размерите на трите вида етикети се задават в „Баркод етикети“ → „Формат на печат“.
    kind избира кой размер важи: 'fund' — етикет за фонда, 'sig' — етикет за сигнатура
@@ -263,16 +291,19 @@ function labelSize(kind) {
   if (kind === 'card') return { w: +s.card_w || 90, h: +s.card_h || 60 };
   return { w: +s.lbl_w || 40, h: +s.lbl_h || 30 };
 }
+const LABEL_DOC_NAME = { fund: 'Баркод етикети за фонда', sig: 'Етикети за сигнатура',
+  card: 'Читателски карти' };
 function printLabelSheet(cardsHtml, kind) {
   const s = SETTINGS_CACHE || {};
   const { w, h } = labelSize(kind);
+  const docName = (LABEL_DOC_NAME[kind] || 'Етикети') + ' — ' + bg(today());
   const gap = (s.lbl_gap != null ? +s.lbl_gap : 3);
   const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
   const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
   if (s.lbl_mode === 'roll') {
     // Един етикет на страница с точния размер на ролката.
     setPrintPage({
-      widthMm: w, heightMm: h, margin: marg + 'mm',
+      name: docName, widthMm: w, heightMm: h, margin: marg + 'mm',
       extraCss: `.lblsheet{display:block}` +
         `.lbl{width:${w - 2 * marg}mm;height:${h - 2 * marg}mm;box-sizing:border-box;border:none;` +
         `page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center}`
@@ -282,7 +313,7 @@ function printLabelSheet(cardsHtml, kind) {
     // получава точната си височина, за да съвпадне с готовите листове с етикети.
     const cols = Math.max(1, Math.min(8, +s.lbl_cols || 3));
     setPrintPage({
-      landscape: false, margin: marg + 'mm',
+      name: docName, landscape: false, margin: marg + 'mm',
       extraCss: `.lblsheet{display:grid;grid-template-columns:repeat(${cols},${w}mm);gap:${gap}mm;justify-content:start}` +
         `.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:${border};` +
         `display:flex;flex-direction:column;align-items:center;justify-content:center}`
@@ -1125,7 +1156,7 @@ function invBookFilter(q) {
 window.invBookFilter = invBookFilter;
 function printInvBookDoc() {
   const rows = window._INVBOOK_ROWS || [];
-  setPrintPage({ landscape: true, margin: '10mm' });
+  setPrintPage({ name: `Инвентарна книга — ${bg(today())}`, landscape: true, margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ИНВЕНТАРНА КНИГА</h2>
     <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
@@ -1251,7 +1282,7 @@ function kdbfPart2Html(r, y) {
 function printKdbfDoc() {
   const r = window._KDBF_REPORT; if (!r) return;
   const y = r.year;
-  setPrintPage({ landscape: true, margin: '10mm' });
+  setPrintPage({ name: `КДБФ ${y} г.`, landscape: true, margin: '10mm' });
   doPrint(`
     <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 1. Регистриране на постъпили книги, периодични издания и други материали</b><br>
@@ -1361,7 +1392,7 @@ async function printDonationDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
   const s = SETTINGS_CACHE || {};
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: `Акт за дарение № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за приемане на дарение на библиотечни документи</span></h2>
     <div class="pmeta">На основание чл. 6 от Наредба № 3 от 18.11.2014 г. комисия в състав
@@ -1381,7 +1412,7 @@ async function printAcqNoDocDoc(id) {
   if (!a) return;
   const s = SETTINGS_CACHE || {};
   const total = a.sum || a.items.reduce((x, i) => x + (Number(i.price) || 0), 0);
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: `Протокол за придобиване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ПРОТОКОЛ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за придобиване на библиотечни документи без съпроводителен документ</span></h2>
     <div class="pmeta">Днес, ${bg(a.date)} г., комисия в състав ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'},
@@ -1522,7 +1553,7 @@ async function printActDoc(id) {
   if (!a) return;
   const s = SETTINGS_CACHE || {};
   const total = a.items.reduce((sum, l) => sum + (Number(l.price) || 0), 0);
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: `Акт за отчисляване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за отчисляване на библиотечни документи</span></h2>
     <div class="pmeta">Днес, ${bg(a.date)} г., комисия, назначена със заповед ${a.order_no ? '№ ' + esc(a.order_no) : '№ …………'} на
@@ -2091,7 +2122,7 @@ function printMzsDoc(id) {
   const m = (window._MZS_ROWS || []).find(x => x.id === id);
   if (!m) return;
   const s = SETTINGS_CACHE || {};
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: `Заявка за МЗС № ${m.no}-${m.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ № ${m.no} / ${bg(m.date)}</h2>
     <div class="pmeta">
@@ -2349,7 +2380,7 @@ function printDnevnikDoc() {
     ? 'Б. РЕГИСТРИРАНЕ НА ЗАЕТИТЕ КНИГИ, ПЕРИОДИЧНИ ИЗДАНИЯ И ДРУГИ МАТЕРИАЛИ'
     : 'А. РЕГИСТРИРАНЕ НА ЧИТАТЕЛИТЕ И ПОСЕЩЕНИЯТА';
   const rowHtml = (label, row) => `<tr><td>${esc(label)}</td>${cols.map(([k]) => `<td>${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
-  setPrintPage({ landscape: true, margin: '8mm' });
+  setPrintPage({ name: `Дневник ${String(DNEVNIK_MONTH).padStart(2, '0')}.${DNEVNIK_YEAR}`, landscape: true, margin: '8mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">ДНЕВНИК НА БИБЛИОТЕКАТА</h2>
     <div class="pmeta"><b>${esc(sectionTitle)}</b><br>${esc(MESETSI[r.month - 1])} ${r.year} г.</div>
@@ -2845,7 +2876,7 @@ async function printReaderCard(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;
   const loans = await call(window.api.loans.byReader(id)) || [];
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: `Читателски картон — ${r.name}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ЧИТАТЕЛСКИ КАРТОН № ${esc(r.card_no || '')}</h2>
     <div class="pmeta">
@@ -2867,7 +2898,7 @@ async function printOverdueNotices() {
   const rows = await call(window.api.loans.overdueByReader());
   if (!rows || !rows.length) return toast('Няма просрочени заемания.', 'err');
   const s = SETTINGS_CACHE || {};
-  setPrintPage({ landscape: false, margin: '14mm 12mm' });
+  setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
   doPrint(rows.map(r => `<div class="pdoc">${shead()}
     <h2>НАПОМНИТЕЛНО ПИСМО</h2>
     <div class="pmeta">До: <b>${esc(r.name)}</b><br>
@@ -3679,7 +3710,7 @@ async function printChronicle() {
   const byYear = {};
   for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
   const years = Object.keys(byYear).sort();
-  setPrintPage({ landscape: false, margin: '16mm 14mm' });
+  setPrintPage({ name: (CHR_YEAR ? `Летопис ${CHR_YEAR} г.` : 'Летопис'), landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">ЛЕТОПИС${CHR_YEAR ? ' — ' + esc(CHR_YEAR) + ' г.' : ''}</h2>
     ${years.map(y => `<h3 style="margin:10px 0 4px">${esc(y)} г.</h3>
