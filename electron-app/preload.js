@@ -59,6 +59,13 @@ contextBridge.exposeInMainWorld('api', {
   isbn: {
     lookup: invoke('isbn:lookup')
   },
+  authorities: {
+    fields: invoke('authorities:fields'),
+    list: invoke('authorities:list'),
+    suggest: invoke('authorities:suggest'),
+    duplicates: invoke('authorities:duplicates'),
+    merge: invoke('authorities:merge')
+  },
   invBook: {
     list: invoke('invBook:list')
   },
@@ -97,7 +104,9 @@ contextBridge.exposeInMainWorld('api', {
     checkoutByCode: invoke('loans:checkoutByCode'),
     return: invoke('loans:return'),
     returnByCode: invoke('loans:returnByCode'),
-    extend: invoke('loans:extend')
+    extend: invoke('loans:extend'),
+    reminders: invoke('loans:reminders'),
+    mailto: invoke('loans:mailto')
   },
   dashboard: {
     stats: invoke('dashboard:stats'),
@@ -150,6 +159,8 @@ contextBridge.exposeInMainWorld('api', {
     writeNow: invoke('catalog:writeNow'),
     export: invoke('catalog:export'),
     exportCsv: invoke('catalog:exportCsv'),
+    exportMarc: invoke('catalog:exportMarc'),
+    exportDc: invoke('catalog:exportDc'),
     updateGh: invoke('catalog:updateGh'),
     gitPublishNow: invoke('catalog:gitPublishNow'),
     remoteCheck: invoke('catalog:remoteCheck')

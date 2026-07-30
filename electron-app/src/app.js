@@ -32,9 +32,24 @@ function modal(title, body, footer) {
 }
 function closeModal() { $('#veil').classList.remove('on'); $('#modal').innerHTML = ''; }
 window.closeModal = closeModal;
-// Esc затваря отворения прозорец — същото като бутона „Отказ“.
+
+/* Втори слой — за помощни прозорци върху вече отворена форма (изборът на УДК).
+   Първият слой остава непокътнат, за да не се губи попълненото. */
+function modal2(title, body, footer) {
+  $('#modal2').innerHTML =
+    `<header><h2>${esc(title)}</h2><button class="x" onclick="closeModal2()">&times;</button></header>
+     <div class="body">${body}</div>
+     ${footer ? `<footer>${footer}</footer>` : ''}`;
+  $('#veil2').classList.add('on');
+}
+function closeModal2() { $('#veil2').classList.remove('on'); $('#modal2').innerHTML = ''; }
+window.closeModal2 = closeModal2;
+
+// Esc затваря най-горния отворен прозорец.
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && $('#veil').classList.contains('on')) closeModal();
+  if (e.key !== 'Escape') return;
+  if ($('#veil2').classList.contains('on')) closeModal2();
+  else if ($('#veil').classList.contains('on')) closeModal();
 });
 
 function formData(sel) {
@@ -89,8 +104,38 @@ function fld(label, name, opts) {
     return `<label class="chk"><input type="checkbox" name="${name}" ${val ? 'checked' : ''}><span>${label}</span></label>`;
   }
   const type = opts.type || 'text';
+  // opts.list свързва полето със списък за автодовършване (<datalist>) от вече
+  // въведените стойности — контрол на авторитетните данни при въвеждане.
   return `<div class="field"><label>${esc(label)}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
-    <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''} value="${esc(val)}"></div>`;
+    <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
+      ${opts.list ? `list="dl_${opts.list}"` : ''} value="${esc(val)}"></div>`;
+}
+
+/* ---------------- Контрол на авторитетните данни ----------------
+   Стойностите, вече въведени във фонда, се предлагат при писане. Така „Вазов, Иван“
+   се избира от списъка, вместо да се напише „Иван Вазов“ и записът да се раздвои. */
+let AUTH_SUGGEST = null;
+async function loadAuthSuggest(force) {
+  if (AUTH_SUGGEST && !force) return AUTH_SUGGEST;
+  AUTH_SUGGEST = await call(window.api.authorities.suggest()) || {};
+  return AUTH_SUGGEST;
+}
+function datalistsHtml(sug) {
+  const udkAll = [];
+  for (const [, , subs] of (typeof UDK_TREE !== 'undefined' ? UDK_TREE : [])) {
+    for (const [code, label] of subs) udkAll.push({ v: code, t: `${code} — ${label}` });
+  }
+  const seen = new Set(udkAll.map(x => x.v));
+  for (const v of (sug.udk || [])) if (!seen.has(v)) udkAll.push({ v, t: v });
+  const one = (name, values) =>
+    `<datalist id="dl_${name}">` +
+    values.map(x => typeof x === 'object'
+      ? `<option value="${esc(x.v)}">${esc(x.t)}</option>`
+      : `<option value="${esc(x)}"></option>`).join('') +
+    `</datalist>`;
+  return one('author', sug.author || []) + one('publisher', sug.publisher || []) +
+         one('city', sug.city || []) + one('keywords', sug.keywords || []) +
+         one('udk', udkAll);
 }
 
 /* ---------------- Справочници ---------------- */
@@ -284,7 +329,8 @@ function sigLblCard(b) {
 const NAV = [
   { g: 'Общ преглед', items: [['dash', 'Табло']] },
   { g: 'Фонд', items: [['books', 'Книги'], ['invbook', 'Инвентарна книга'],
-    ['kdbf', 'КДБФ'], ['acq', 'Постъпления'], ['acts', 'Отчисляване'], ['invent', 'Инвентаризация']] },
+    ['kdbf', 'КДБФ'], ['acq', 'Постъпления'], ['acts', 'Отчисляване'], ['invent', 'Инвентаризация'],
+    ['auth', 'Авторитетни данни']] },
   { g: 'Читатели', items: [['readers', 'Читатели'], ['circ', 'Заемане и връщане'], ['over', 'Просрочени']] },
   { g: 'Други регистри', items: [['periodika', 'Периодика'], ['mzs', 'МЗС'], ['dnevnik', 'Дневник']] },
   { g: 'Отчети', items: [['stats', 'Справки и статистика'], ['catalog', 'Онлайн каталог'], ['labels', 'Баркод етикети'], ['odit', 'Одитна следа']] },
@@ -298,6 +344,7 @@ const TITLES = {
   acq: ['Постъпления', 'раздел II и чл. 14 от Наредба № 3'],
   acts: ['Отчисляване', 'раздел IV, чл. 30 – 39'],
   invent: ['Инвентаризация', 'раздел V, чл. 40 – 41'],
+  auth: ['Авторитетни данни', 'единен вид на авторите, издателствата и останалите повтарящи се стойности'],
   readers: ['Читатели', 'регистър на ползвателите'],
   circ: ['Заемане и връщане', 'чл. 42 – 49'],
   over: ['Просрочени заемания', 'контрол по чл. 43 и 49'],
@@ -326,7 +373,7 @@ function drawNav() {
 const RENDERERS = {
   dash: renderDash, books: renderBooks, invbook: renderInvBook,
   kdbf: renderKdbf, acq: renderAcq, acts: renderActs, invent: renderInvent,
-  readers: renderReaders, circ: renderCirc, over: renderOver,
+  auth: renderAuth, readers: renderReaders, circ: renderCirc, over: renderOver,
   periodika: renderPeriodika, mzs: renderMzs, dnevnik: renderDnevnik,
   stats: renderStats, catalog: renderCatalog, labels: renderLabels, odit: renderOdit, setup: renderSetup
 };
@@ -622,7 +669,9 @@ async function renderBooks() {
 
 async function bookForm(id, presetAcqId) {
   const b = id ? await call(window.api.books.get(id)) : null;
-  const [cats, acqs] = await Promise.all([call(window.api.categories.list()), call(window.api.acquisitions.list())]);
+  const [cats, acqs, sug] = await Promise.all([
+    call(window.api.categories.list()), call(window.api.acquisitions.list()), loadAuthSuggest()
+  ]);
   const v = b || { register_date: today(), status: 'наличен', language: 'български', department: 'за възрастни', acquisition_id: presetAcqId || '' };
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
@@ -651,12 +700,12 @@ async function bookForm(id, presetAcqId) {
     <fieldset><legend>Библиографско описание</legend>
       <div class="grid g2">
         ${fld('Заглавие', 'title', { val: v.title || '', req: 1 })}
-        ${fld('Автор (фамилия, име)', 'author', { val: v.author || '', ph: 'Вазов, Иван' })}
+        ${fld('Автор (фамилия, име)', 'author', { val: v.author || '', list: 'author', hint: 'предлага се от вече въведените' })}
       </div>
       <div class="grid g4">
         ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
-        ${fld('Място на издаване', 'city', { val: v.city || '' })}
-        ${fld('Издателство', 'publisher', { val: v.publisher || '' })}
+        ${fld('Място на издаване', 'city', { val: v.city || '', list: 'city' })}
+        ${fld('Издателство', 'publisher', { val: v.publisher || '', list: 'publisher' })}
         ${fld('Година', 'year', { val: v.year || '' })}
       </div>
       <div class="grid g4">
@@ -673,9 +722,15 @@ async function bookForm(id, presetAcqId) {
         ${fld('Език', 'language', { type: 'select', opts: EZICI, val: v.language })}
       </div>
       <div class="grid g4">
-        ${fld('УДК', 'udk', { val: v.udk || '' })}
+        <div class="field"><label>УДК</label>
+          <div class="isbnRow">
+            <input name="udk" value="${esc(v.udk || '')}" list="dl_udk">
+            <button type="button" class="btn" onclick="udkPicker()"
+              title="Избор от таблицата на УДК">Избери…</button>
+          </div>
+        </div>
         ${fld('Авторски знак', 'author_mark', { val: v.author_mark || '', hint: 'напр. „В-15“' })}
-        ${fld('Ключови думи', 'keywords', { val: v.keywords || '', hint: 'през запетая' })}
+        ${fld('Ключови думи', 'keywords', { val: v.keywords || '', list: 'keywords', hint: 'през запетая' })}
         ${fld('Адрес на корица (URL)', 'cover_url', { val: v.cover_url || '' })}
       </div>
       <div class="grid g3">
@@ -684,7 +739,8 @@ async function bookForm(id, presetAcqId) {
         ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 2 })}
       </div>
     </fieldset>
-    </form>`,
+    </form>
+    ${datalistsHtml(sug || {})}`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
@@ -695,6 +751,228 @@ async function bookForm(id, presetAcqId) {
   }
 }
 window.bookForm = bookForm;
+
+/* ---------------- Напомняния за просрочени ----------------
+   Текстовете се готвят автоматично, но изпращането остава решение на библиотекаря:
+   отваря се пощенският клиент с попълнено писмо, или текстът се копира за SMS. */
+async function openReminders() {
+  const rows = await call(window.api.loans.reminders());
+  if (!rows) return;
+  if (!rows.length) return toast('Няма просрочени заемания.', 'ok');
+  window._REMINDERS = rows;
+  modal('Напомняния за просрочени материали', `
+    <div class="note" style="margin-top:0">Текстовете са готови. Изпращането е ръчно —
+    прегледайте и променете, ако е нужно. „Отвори в пощата“ стартира пощенския клиент
+    с попълнени получател, тема и съобщение.</div>
+    ${rows.map((r, i) => `
+      <div class="remCard">
+        <div class="remHead">
+          <span class="remName">${esc(r.name)}</span>
+          <span class="remBadge">${r.n} просрочени</span>
+          ${Number(r.fine) > 0 ? `<span class="hint">${mny(r.fine)}</span>` : ''}
+        </div>
+        <div class="remBody">
+          <div class="remMeta">
+            Имейл: <b>${r.email ? esc(r.email) : '— няма записан —'}</b> ·
+            Телефон: <b>${r.phone ? esc(r.phone) : '— няма записан —'}</b>
+          </div>
+          <label class="fh">Писмо по електронна поща</label>
+          <textarea class="remText" id="remB${i}" rows="9">${esc(r.body)}</textarea>
+          <div class="toolbar" style="margin-top:6px">
+            <button class="btn pri" onclick="remMail(${i})" ${r.email ? '' : 'disabled'}>Отвори в пощата</button>
+            <button class="btn" onclick="remCopy('remB${i}')">Копирай писмото</button>
+          </div>
+          <label class="fh" style="margin-top:10px;display:block">Кратък текст за SMS</label>
+          <textarea class="remText" id="remS${i}" rows="2">${esc(r.sms)}</textarea>
+          <div class="toolbar" style="margin-top:6px">
+            <button class="btn" onclick="remCopy('remS${i}')">Копирай SMS-а</button>
+            <span class="hint" id="remLen${i}">${r.sms.length} знака</span>
+          </div>
+        </div>
+      </div>`).join('')}`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>
+     <button class="btn" onclick="printOverdueNotices()">Печат на всички / PDF</button>`);
+  rows.forEach((r, i) => {
+    const t = $('#remS' + i);
+    if (t) t.addEventListener('input', () => {
+      const n = t.value.length;
+      $('#remLen' + i).textContent = n + ' знака' + (n > 160 ? ' — над един SMS' : '');
+    });
+  });
+}
+window.openReminders = openReminders;
+async function remMail(i) {
+  const r = (window._REMINDERS || [])[i];
+  if (!r) return;
+  const res = await window.api.loans.mailto({ email: r.email, subject: r.subject, body: $('#remB' + i).value });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Писмото е отворено в пощенския клиент.', 'ok');
+}
+window.remMail = remMail;
+async function remCopy(id) {
+  const el = $('#' + id);
+  if (!el) return;
+  try {
+    await navigator.clipboard.writeText(el.value);
+    toast('Копирано.', 'ok');
+  } catch (e) {
+    // Резервен път, ако достъпът до системния буфер е отказан.
+    el.select(); document.execCommand('copy');
+    toast('Копирано.', 'ok');
+  }
+}
+window.remCopy = remCopy;
+
+/* ---------------- Авторитетни данни: преглед и сливане на дубликати ---------------- */
+let AUTH_FIELD = 'author';
+let AUTH_LOOSE = false;
+async function renderAuth() {
+  const [fields, groups, values] = await Promise.all([
+    call(window.api.authorities.fields()),
+    call(window.api.authorities.duplicates({ field: AUTH_FIELD, loose: AUTH_LOOSE })),
+    call(window.api.authorities.list(AUTH_FIELD))
+  ]);
+  const f = fields || {};
+  const total = (values || []).length;
+  const dupes = groups || [];
+  const affected = dupes.reduce((n, g) => n + g.total, 0);
+  $('#view').innerHTML = `
+    <div class="note"><b>Едно и също име, въведено по няколко начина, разпилява записите.</b>
+    „Вазов, Иван“, „Иван Вазов“ и „И. Вазов“ са един автор, но за програмата са три различни
+    стойности — търсенето по единия вариант не намира документите, описани с другите.
+    Тук те се откриват и сливат в един вид.</div>
+
+    <div class="card">
+      <div class="grid g3">
+        ${fld('Поле', 'authField', { type: 'select', allowEmpty: false, val: AUTH_FIELD,
+          opts: Object.entries(f).map(([v, t]) => ({ v, t: t[0].toUpperCase() + t.slice(1) })) })}
+        <div class="field"><label>Как се търсят дубликати</label>
+          <select name="authLoose">
+            <option value="0" ${!AUTH_LOOSE ? 'selected' : ''}>Разместени думи („Вазов, Иван“ = „Иван Вазов“)</option>
+            <option value="1" ${AUTH_LOOSE ? 'selected' : ''}>И съкратени имена („И. Вазов“ = „Иван Вазов“)</option>
+          </select>
+        </div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="btn pri" onclick="authApply()" style="width:100%">Покажи</button></div>
+      </div>
+      <div class="hint">Различни стойности в полето: <b>${total}</b> ·
+      възможни дублети: <b>${dupes.length}</b> ${dupes.length ? `групи, засягащи <b>${affected}</b> документа` : ''}</div>
+    </div>
+
+    ${dupes.length ? `
+      <div class="hint" style="margin:14px 0 8px">Отбележете кой вид да остане и натиснете „Слей“.
+      Останалите стойности в групата се заменят с него във всички документи.</div>
+      ${dupes.map((g, i) => authGroupHtml(g, i)).join('')}
+    ` : `<div class="card" style="margin-top:16px"><div class="empty">
+        Няма открити дублети по този критерий.
+        ${!AUTH_LOOSE ? 'Опитайте и с „И съкратени имена“ — той хваща и „И. Вазов“.' : ''}
+      </div></div>`}
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Всички стойности в полето</h3>
+      <div class="hint" style="margin-top:0">Подредени по брой документи. Този списък се предлага
+      за автодовършване при въвеждане на нова книга.</div>
+      <table class="tbl" style="margin-top:8px"><thead><tr><th>Стойност</th><th style="width:120px">Документи</th></tr></thead>
+        <tbody>${(values || []).slice(0, 300).map(v => `<tr>
+          <td>${esc(v.value)}</td><td class="num">${v.n}</td></tr>`).join('')}</tbody></table>
+      ${total > 300 ? `<div class="hint">Показани са първите 300 от ${total}.</div>` : ''}
+    </div>`;
+}
+function authGroupHtml(g, i) {
+  return `<div class="authGroup" id="ag${i}">
+    ${g.items.map((it, j) => `<label class="authRow">
+      <input type="radio" name="ag${i}sel" value="${esc(it.value)}" ${j === 0 ? 'checked' : ''}>
+      <span class="authVal">${esc(it.value)}</span>
+      <span class="authN">${it.n} док.</span>
+      <span class="authTarget">${j === 0 ? 'предложено' : ''}</span>
+    </label>`).join('')}
+    <div class="toolbar" style="margin-top:8px">
+      <button class="btn pri" onclick="authMerge(${i})">Слей в отбелязаното</button>
+      <span class="hint">общо ${g.total} документа в тази група</span>
+    </div>
+  </div>`;
+}
+function authApply() {
+  AUTH_FIELD = $('[name=authField]').value;
+  AUTH_LOOSE = $('[name=authLoose]').value === '1';
+  renderAuth();
+}
+window.authApply = authApply;
+async function authMerge(i) {
+  const box = $('#ag' + i);
+  const target = box.querySelector(`input[name=ag${i}sel]:checked`);
+  if (!target) return toast('Отбележете коя стойност да остане.', 'err');
+  const all = [...box.querySelectorAll(`input[name=ag${i}sel]`)].map(x => x.value);
+  const from = all.filter(v => v !== target.value);
+  if (!from.length) return toast('Няма какво да се слее.', 'err');
+  if (!confirm(`Сливане на ${from.length} стойности в „${target.value}“?\n\n` +
+    from.map(v => '• ' + v).join('\n') + '\n\nПромяната засяга всички документи с тези стойности.')) return;
+  const r = await call(window.api.authorities.merge({ field: AUTH_FIELD, from, to: target.value }),
+    null);
+  if (!r) return;
+  toast(`Слети ${r.merged} стойности в „${target.value}“ — променени ${r.changed} документа.`, 'ok');
+  markSaved();
+  AUTH_SUGGEST = null; // списъкът за автодовършване вече е различен
+  renderAuth();
+}
+window.authMerge = authMerge;
+
+/* ---------------- Избор на УДК от таблицата ----------------
+   Прозорецът се отваря върху формата за книга. Изборът замества стойността в
+   полето, а определителите се добавят накрая — полето остава свободен текст, за
+   да не пречи на съставни кодове, каквито таблицата не покрива. */
+function udkPicker() {
+  const rows = UDK_TREE.map(([code, name, subs]) => `
+    <div class="udkGroup">
+      <div class="udkMain">${esc(code)} — ${esc(name)}</div>
+      <div class="udkSubs">
+        ${subs.map(([c, t]) => `<button type="button" class="udkItem" onclick="udkPick('${esc(c)}')">
+          <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('')}
+      </div>
+    </div>`).join('');
+  modal2('Универсална десетична класификация (УДК)', `
+    <div class="note" style="margin-top:0">Изберете раздел — кодът влиза в полето „УДК“.
+    Определителите по-долу се добавят към вече избрания код.</div>
+    <input class="udkSearch" id="udkQ" placeholder="Търсене по код или наименование…" oninput="udkFilter()">
+    <div id="udkList">${rows}</div>
+    <div class="udkGroup" style="margin-top:12px">
+      <div class="udkMain">Общи определители (добавят се накрая)</div>
+      <div class="udkSubs">
+        ${UDK_MODIFIERS.map(([c, t]) => `<button type="button" class="udkItem" onclick="udkAppend('${esc(c)}')">
+          <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('')}
+      </div>
+    </div>`,
+    `<button class="btn" onclick="closeModal2()">Затвори</button>`);
+  setTimeout(() => { const q = $('#udkQ'); if (q) q.focus(); }, 50);
+}
+window.udkPicker = udkPicker;
+function udkFilter() {
+  const q = ($('#udkQ').value || '').trim().toLowerCase();
+  document.querySelectorAll('#udkList .udkGroup').forEach(g => {
+    let shown = 0;
+    g.querySelectorAll('.udkItem').forEach(it => {
+      const hit = !q || it.textContent.toLowerCase().includes(q);
+      it.style.display = hit ? '' : 'none';
+      if (hit) shown++;
+    });
+    g.style.display = shown ? '' : 'none';
+  });
+}
+window.udkFilter = udkFilter;
+function udkTargetInput() { return $('#bookF [name=udk]'); }
+function udkPick(code) {
+  const el = udkTargetInput();
+  if (el) { el.value = code; toast('УДК ' + code, 'ok'); }
+  closeModal2();
+}
+window.udkPick = udkPick;
+function udkAppend(mod) {
+  const el = udkTargetInput();
+  if (!el) return;
+  el.value = (el.value || '').trim() + mod;
+  toast('УДК ' + el.value, 'ok');
+  closeModal2();
+}
+window.udkAppend = udkAppend;
 
 /* Търсене по ISBN в Google Books и Open Library. Попълват се само празните полета —
    вече въведеното от библиотекаря никога не се презаписва, защото данните от двете
@@ -1481,7 +1759,10 @@ async function renderOver() {
   $('#view').innerHTML = `
     <div class="note w"><b>Чл. 43, ал. 2 и чл. 49, ал. 1, т. 3</b> — библиотекарят следи сроковете при забава.
     Общо дължимо обезщетение: <b>${mny(total)}</b></div>
-    <div class="toolbar"><button class="btn" onclick="printOverdueNotices()">Печат на напомняния / PDF</button></div>
+    <div class="toolbar">
+      <button class="btn pri" onclick="openReminders()">Напомняния (имейл и SMS)</button>
+      <button class="btn" onclick="printOverdueNotices()">Печат на напомняния / PDF</button>
+    </div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Читател</th><th>Инв. №</th><th>Заглавие</th>
       <th>Срок</th><th>Дни</th><th>Обезщетение</th><th style="width:180px"></th></tr></thead><tbody>
     ${rows.map(l => {
@@ -2281,8 +2562,38 @@ async function renderCatalog() {
         <button class="btn" onclick="exportCatalog()">Каталог (JSON)…</button>
         <button class="btn" onclick="exportCatalogCsv()">Целия фонд (CSV)…</button>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Библиотечни формати за обмен</h3>
+      <p style="font-size:13.5px;margin-top:0">Изнася целия фонд в стандартните формати, които други
+      библиотечни системи разпознават. Смисълът е данните да не са заключени в тази програма: при
+      преминаване към <b>COBISS</b> или включване в сводния каталог се подава един файл, вместо да
+      се преписват записите на ръка.</p>
+      <div class="toolbar">
+        <button class="btn" onclick="exportMarc()">UNIMARC / MARCXML…</button>
+        <button class="btn" onclick="exportDc()">Dublin Core…</button>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        <b>UNIMARC</b> носи пълното библиографско описание — полета 200 (заглавие и автор),
+        210 (издателски данни), 215 (обем), 606 (предметни рубрики), 675 (УДК), 700 (автор с
+        разделени фамилия и име) и 995 (данни за екземпляра: инвентарен номер, отдел, сигнатура).<br>
+        <b>Dublin Core</b> е по-простият формат, който приемат хранилищата на цифрово съдържание
+        и агрегаторите.
+      </div>
     </div>`;
 }
+async function exportMarc() {
+  const res = await window.api.catalog.exportMarc();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  toast(`Изнесени ${res.data.count} записа в UNIMARC: ${res.data.path}`, 'ok');
+}
+window.exportMarc = exportMarc;
+async function exportDc() {
+  const res = await window.api.catalog.exportDc();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  toast(`Изнесени ${res.data.count} записа в Dublin Core: ${res.data.path}`, 'ok');
+}
+window.exportDc = exportDc;
 async function catalogChooseFolder() {
   const res = await window.api.catalog.chooseFolder();
   if (!res.ok) return toast(res.error, 'err');
