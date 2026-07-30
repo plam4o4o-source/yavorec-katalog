@@ -1,10 +1,10 @@
 {
   "name": "inventar-desktop",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
-    "name": "Пламен Христов"
+    "name": "Пламен Боянов Христов"
   },
   "license": "SEE LICENSE IN ../LICENSE",
   "private": true,
@@ -26,7 +26,7 @@
   "build": {
     "appId": "org.chyavorec.inventar",
     "productName": "Инвентар",
-    "copyright": "Copyright © 2026 Пламен Христов. Всички права запазени.",
+    "copyright": "Copyright © 2026 Пламен Боянов Христов. Всички права запазени.",
     "publish": [
       {
         "provider": "github",
@@ -49,8 +49,8 @@
     "win": {
       "target": "nsis",
       "icon": "icon.ico",
-      "legalTrademarks": "Инвентар © Пламен Христов",
-      "publisherName": "Plamen Hristov",
+      "legalTrademarks": "Инвентар © Пламен Боянов Христов",
+      "publisherName": "Plamen Boyanov Hristov",
       "verifyUpdateCodeSignature": false,
       "signingHashAlgorithms": [
         "sha256"
