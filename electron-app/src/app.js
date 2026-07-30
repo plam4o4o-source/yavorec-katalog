@@ -157,16 +157,30 @@ async function loadSettingsCache() {
   applyTheme();
   return SETTINGS_CACHE;
 }
+// Библиотеката, която ползва програмата, се описва само в „Настройки“. Всичко останало
+// (лентата вляво, заглавията на документите за печат, етикетите, читателските карти)
+// чете оттам, за да не се налага една и съща промяна да се прави на две места.
+function needsSetup(s) { return !(s && (s.org || s.lib_name)); }
 function updateBrandSub() {
   const el = $('#brandSub'); if (!el || !SETTINGS_CACHE) return;
-  el.textContent = [SETTINGS_CACHE.org, SETTINGS_CACHE.place].filter(Boolean).join(' · ');
+  const txt = [SETTINGS_CACHE.org, SETTINGS_CACHE.place].filter(Boolean).join(' · ');
+  el.textContent = txt || 'Попълнете данните в „Настройки“';
+  el.classList.toggle('brandSubEmpty', !txt);
 }
 function applyTheme() {
   document.documentElement.dataset.theme = (SETTINGS_CACHE && SETTINGS_CACHE.theme) || '1';
 }
+// Заглавната част на всеки официален документ за печат. Празните полета отпадат,
+// вместо да оставят празни редове — така документът изглежда правилно и при
+// библиотека, която не попълва всичко (напр. няма отделен регистрационен номер).
 function shead() {
   const s = SETTINGS_CACHE || {};
-  return `<div class="porg"><b>${esc(s.org || '')}</b><br>${esc(s.lib_name || '')}<br>${esc(s.place || '')}${s.bulstat ? ' · ЕИК ' + esc(s.bulstat) : ''}</div>`;
+  const lines = [];
+  if (s.org) lines.push(`<b>${esc(s.org)}</b>`);
+  if (s.lib_name) lines.push(esc(s.lib_name));
+  const place = [s.place ? esc(s.place) : '', s.bulstat ? 'ЕИК ' + esc(s.bulstat) : ''].filter(Boolean).join(' · ');
+  if (place) lines.push(place);
+  return `<div class="porg">${lines.join('<br>')}</div>`;
 }
 function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
 function setPrintPage(opts) {
@@ -199,9 +213,10 @@ function printLabelSheet(cardsHtml) {
    и инвентарният номер под баркода. */
 function lblCard(b) {
   const s = SETTINGS_CACHE || {};
+  const name = s.lib_name || s.org || '';
   return `<div class="lbl">
-    <div class="l1">${esc(s.lib_name || s.org || '')}</div>
-    <div class="l2">${esc(s.place || '')}</div>
+    ${name ? `<div class="l1">${esc(name)}</div>` : ''}
+    ${s.place ? `<div class="l2">${esc(s.place)}</div>` : ''}
     ${code39svg(b.barcode || String(b.inv_number), 150, 40)}
     <div class="l3">${esc(b.inv_number ?? b.barcode ?? '')}</div></div>`;
 }
@@ -2081,7 +2096,8 @@ async function renderCatalog() {
   $('#view').innerHTML = `
     <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
     Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл. Каталогът се
-    публикува през <b>GitHub</b> — сайтът chyavorec.org чете файла на живо от там, без нужда от друг сървър.</div>
+    публикува през <b>GitHub</b> — ${s && s.cat_url ? `сайтът <b>${esc(s.cat_url)}</b> чете` : 'сайтът на библиотеката чете'}
+    файла на живо от там, без нужда от друг сървър.</div>
 
     <div class="card"><h3 style="margin-top:0">Работна папка (git clone на хранилището)</h3>
       ${status.folder ? `
@@ -2099,7 +2115,8 @@ async function renderCatalog() {
         </div>`
       : `
         <div class="note">Едно и само веднъж — на този компютър направете <code>git clone</code> на хранилището
-        (напр. <code>git clone https://github.com/${esc(status.ghUser || 'plam4o4o-source')}/${esc(status.ghRepo || 'yavorec-katalog')}.git</code>),
+        (<code>git clone https://github.com/${esc(status.ghUser || 'ПОТРЕБИТЕЛ')}/${esc(status.ghRepo || 'ХРАНИЛИЩЕ')}.git</code>
+        — попълнете полетата по-долу, за да се сглоби точната команда),
         после изберете тук получената папка. Програмата ще записва <code>katalog.json</code> там автоматично при
         всяка промяна във фонда, и ще го публикува в GitHub сама (git add/commit/push) — не е нужен друг скрипт или
         планирана задача.</div>
@@ -2112,8 +2129,8 @@ async function renderCatalog() {
       <div class="note" style="margin-top:0">Адресът, който сайтът ползва, се сглобява сам от потребителя,
       хранилището и клона в GitHub. Сменяйте ги само ако направите ново хранилище.</div>
       <form id="ghF" onsubmit="return false"><div class="grid g3">
-        ${fld('Потребител в GitHub', 'gh_user', { val: status.ghUser || '', hint: 'напр. plam4o4o-source' })}
-        ${fld('Хранилище', 'gh_repo', { val: status.ghRepo || '', hint: 'напр. yavorec-katalog' })}
+        ${fld('Потребител в GitHub', 'gh_user', { val: status.ghUser || '', hint: 'потребителското име в GitHub' })}
+        ${fld('Хранилище', 'gh_repo', { val: status.ghRepo || '', hint: 'името на хранилището с каталога' })}
         ${fld('Клон', 'gh_branch', { val: status.ghBranch || 'main', hint: 'обикновено main' })}
       </div></form>
       <div class="toolbar"><button class="btn pri" onclick="saveGhSettings()">Запиши и сглоби адреса</button></div>
@@ -2298,8 +2315,9 @@ async function printCardsAll() {
   const rows = (readers || []).filter(r => r.status !== 'прекратен');
   if (!rows.length) return toast('Няма активни читатели.', 'err');
   const s = SETTINGS_CACHE || {};
+  const cardName = s.lib_name || s.org || '';
   printLabelSheet(rows.map(r => `<div class="lbl">
-    <div class="l1">${esc(s.lib_name || '')}</div>${code39svg(r.card_no || String(r.id), 150, 40)}
+    ${cardName ? `<div class="l1">${esc(cardName)}</div>` : ''}${code39svg(r.card_no || String(r.id), 150, 40)}
     <div class="l3">${esc(r.card_no || '')}</div>
     <div style="font-size:8pt;margin-top:1mm">${esc(r.name || '')}</div></div>`).join(''));
 }
@@ -2398,6 +2416,11 @@ async function renderSetup() {
   if (!s) return;
   window._EMPLOYEES_ALL = employees || [];
   $('#view').innerHTML = `
+    ${needsSetup(s) ? `<div class="note" style="border-left-color:var(--brass)">
+      <b>Първоначална настройка.</b> Попълнете данните на библиотеката по-долу и натиснете
+      „Запиши настройките“. Те се използват автоматично навсякъде — в заглавията на актовете,
+      протоколите и регистрите за печат, в баркод етикетите и читателските карти, и в лентата
+      вляво. Променят се само тук и важат веднага за всички разпечатки.</div>` : ''}
     <form id="stF" onsubmit="return false">
     <div class="grid g2">
       <div class="card"><h3 style="margin-top:0">Библиотека</h3>
@@ -2674,6 +2697,9 @@ async function saveSetup() {
   const d = formData('#stF'); d.id = 1;
   await call(window.api.settings.update(d), 'Настройките са записани.');
   await loadSettingsCache();
+  // Пречертава текущия изглед, за да влязат новите данни веднага навсякъде, където
+  // се показват — без да се излиза и влиза наново в раздела.
+  if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.saveSetup = saveSetup;
 
@@ -2682,4 +2708,9 @@ initUserBadge();
 initAppCredit();
 initSavedIndicator();
 initAutoUpdateUI();
-loadSettingsCache().then(route);
+// При съвсем нова инсталация програмата отваря направо „Настройки“ — данните на
+// библиотеката трябва да се въведат веднъж, преди да има смисъл от останалите раздели.
+loadSettingsCache().then(s => {
+  if (needsSetup(s) && !location.hash) location.hash = '#setup';
+  route();
+});

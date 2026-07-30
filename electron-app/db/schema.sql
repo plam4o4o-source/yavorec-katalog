@@ -303,18 +303,22 @@ CREATE TABLE IF NOT EXISTS dnevnik_days (
 );
 CREATE INDEX IF NOT EXISTS idx_dnevnik_date ON dnevnik_days(date);
 
--- Настройки на библиотеката — единствен ред (id = 1)
+-- Настройки на библиотеката — единствен ред (id = 1).
+-- Полетата за самоличност на библиотеката (наименование, населено място, ЕИК,
+-- ръководител и т.н.) нарочно са празни: програмата е универсална и се попълва
+-- от всяка библиотека през „Настройки“. Стойности по подразбиране има само
+-- там, където съществува общоприета норма (срок на заемане, обезщетение и др.).
 CREATE TABLE IF NOT EXISTS settings (
   id                INTEGER PRIMARY KEY CHECK (id = 1),
-  org               TEXT DEFAULT 'Народно читалище „Васил Левски – 1922“',
-  lib_name          TEXT DEFAULT 'Библиотека при НЧ „Васил Левски – 1922“',
-  place             TEXT DEFAULT 'с. Яворец, общ. Габрово',
+  org               TEXT,
+  lib_name          TEXT,
+  place             TEXT,
   bulstat           TEXT,
   reg_no            TEXT,
   director          TEXT,
   director_role     TEXT DEFAULT 'Председател',
   librarian         TEXT,
-  cat_url           TEXT DEFAULT 'https://chyavorec.org',
+  cat_url           TEXT,
   loan_days         INTEGER DEFAULT 30,
   max_books         INTEGER DEFAULT 5,
   extensions_count  INTEGER DEFAULT 2,
@@ -331,8 +335,8 @@ CREATE TABLE IF NOT EXISTS settings (
   lbl_h             INTEGER DEFAULT 30,
   theme             TEXT DEFAULT '1',
   catalog_folder    TEXT,
-  gh_user           TEXT DEFAULT 'plam4o4o-source',
-  gh_repo           TEXT DEFAULT 'yavorec-katalog',
+  gh_user           TEXT,
+  gh_repo           TEXT,
   gh_branch         TEXT DEFAULT 'main',
   limit_books       INTEGER DEFAULT 0,
   limit_readers     INTEGER DEFAULT 0
