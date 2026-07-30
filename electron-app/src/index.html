@@ -19,7 +19,6 @@
       </div>
       <nav id="nav"></nav>
       <div class="railFoot">
-        <button id="userBadge" class="userBadge" onclick="chooseEmployeeModal()">Служител: (изберете)</button>
         <div id="savedIndicator" class="savedIndicator"></div>
         <div id="appCredit" class="appCredit"></div>
       </div>
@@ -30,7 +29,12 @@
           <h1 id="vTitle">Табло</h1>
           <div id="vSub" class="sub">обобщение на състоянието</div>
         </div>
-        <div id="topActions"></div>
+        <div class="topRight">
+          <div id="topActions"></div>
+          <!-- Изборът на служител стои горе вдясно: той се сменя през деня и е
+               по-подръка тук, отколкото в дъното на страничната лента. -->
+          <button id="userBadge" class="userBadge" onclick="chooseEmployeeModal()">Служител: (изберете)</button>
+        </div>
       </header>
       <section id="view"></section>
     </main>
