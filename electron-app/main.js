@@ -74,17 +74,18 @@ function initDb() {
     lbl_h: 'INTEGER DEFAULT 30',
     theme: "TEXT DEFAULT '1'",
     catalog_folder: 'TEXT',
-    gh_user: "TEXT DEFAULT 'plam4o4o-source'",
-    gh_repo: "TEXT DEFAULT 'yavorec-katalog'",
+    gh_user: 'TEXT',
+    gh_repo: 'TEXT',
     gh_branch: "TEXT DEFAULT 'main'",
     limit_books: 'INTEGER DEFAULT 0',
     limit_readers: 'INTEGER DEFAULT 0'
   });
 
-  // Връща населеното място на „с. Яворец, общ. Габрово“. Версии 1.7.0 – 1.7.3 го
-  // презаписваха на „обл. Габрово“ по погрешното допускане, че селото е в община
-  // Севлиево — то е в община Габрово (ЕКАТТЕ 87120). Поправката важи само за
-  // точно тази сгрешена стойност, за да не се пипне ръчно въведено място.
+  // Еднократна поправка на данни, внесена от версии 1.7.0 – 1.7.3: тогава миграция
+  // презаписваше населеното място на „с. Яворец, обл. Габрово“ по погрешното
+  // допускане, че селото е в община Севлиево (то е в община Габрово, ЕКАТТЕ 87120).
+  // Условието е за точно тази стойност, затова не засяга никоя друга библиотека.
+  // Може да отпадне, след като всички инсталации минат през версия 1.7.4 или по-нова.
   db.prepare("UPDATE settings SET place = 'с. Яворец, общ. Габрово' WHERE id = 1 AND place = 'с. Яворец, обл. Габрово'").run();
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
@@ -1534,7 +1535,7 @@ ipcMain.handle('catalog:updateGh', (e, { gh_user, gh_repo, gh_branch }) =>
 ipcMain.handle('catalog:chooseFolder', async () => {
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Изберете локалното работно копие (git clone) на GitHub хранилището yavorec-katalog',
+      title: 'Изберете локалното работно копие (git clone) на GitHub хранилището с каталога',
       properties: ['openDirectory', 'createDirectory']
     });
     if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };

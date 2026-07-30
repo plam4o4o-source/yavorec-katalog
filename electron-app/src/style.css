@@ -55,6 +55,8 @@ body{
 .brandTitle{font-family:var(--serif); font-size:28px; font-weight:700; color:var(--brassL); letter-spacing:.02em}
 .brandTagline{font-size:12px; color:#C9BFA0; margin-top:3px; letter-spacing:.08em; text-transform:uppercase}
 .brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
+/* Докато данните на библиотеката не са въведени — приглушено, за да личи, че е подкана */
+.brandSubEmpty{font-style:italic; opacity:.65}
 #nav{padding:12px 0 20px}
 .nav-grp{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:16px 20px 7px}
 #nav a{
