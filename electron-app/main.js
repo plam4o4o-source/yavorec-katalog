@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -453,6 +453,111 @@ ipcMain.handle('employees:delete', (e, id) =>
   run(() => { db.prepare('DELETE FROM employees WHERE id = ?').run(id); })
 );
 ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
+
+/* ---------------- Търсене по ISBN (Google Books и Open Library) ----------------
+   Заявките се правят от главния процес, а не от интерфейса, защото Content-Security-Policy
+   на страницата допуска само собствени ресурси. net.fetch минава през мрежовия стек на
+   Chromium, тоест ползва системните настройки за прокси, за разлика от обикновения https
+   модул на Node. */
+function normalizeIsbn(raw) {
+  const s = String(raw || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+  return (s.length === 10 || s.length === 13) ? s : '';
+}
+// Езиковите кодове на двете услуги са двубуквени (bg, en…), а програмата пази езика с
+// думи на български, както е в падащото меню.
+const ISBN_LANG = {
+  bg: 'български', en: 'английски', ru: 'руски', de: 'немски', fr: 'френски',
+  es: 'испански', it: 'италиански', tr: 'турски', el: 'гръцки', ro: 'румънски',
+  sr: 'сръбски', mk: 'македонски', pl: 'полски', cs: 'чешки', uk: 'украински'
+};
+// Осем секунди таван на заявка: при недостъпна услуга бутонът в интерфейса не бива да
+// стои „зает“ неопределено дълго. Двете услуги се питат едновременно, така че общото
+// изчакване също е около осем секунди.
+async function fetchJson(url) {
+  const res = await net.fetch(url, {
+    headers: { 'User-Agent': 'Inventar-Library-System' },
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!res.ok) {
+    // 4xx/5xx е отговор на услугата, а не липса на връзка — двете се разграничават,
+    // за да не се каже „няма интернет“, когато книгата просто я няма.
+    const err = new Error('HTTP ' + res.status); err.httpStatus = res.status; throw err;
+  }
+  return await res.json();
+}
+async function lookupGoogleBooks(isbn) {
+  const d = await fetchJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+  const v = d && d.items && d.items[0] && d.items[0].volumeInfo;
+  if (!v) return null;
+  const img = v.imageLinks || {};
+  return {
+    source: 'Google Books',
+    title: v.title || '',
+    subtitle: v.subtitle || '',
+    author: (v.authors || []).join(', '),
+    publisher: v.publisher || '',
+    year: (v.publishedDate || '').slice(0, 4),
+    pages: v.pageCount ? String(v.pageCount) : '',
+    language: ISBN_LANG[v.language] || '',
+    annotation: v.description || '',
+    keywords: (v.categories || []).join(', '),
+    // Изображенията идват през http; https е нужно, за да се покажат в каталога на сайта.
+    cover_url: (img.thumbnail || img.smallThumbnail || '').replace(/^http:/, 'https:'),
+    city: ''
+  };
+}
+async function lookupOpenLibrary(isbn) {
+  const d = await fetchJson(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+  const v = d && d['ISBN:' + isbn];
+  if (!v) return null;
+  const pub = (v.publish_places || [])[0];
+  return {
+    source: 'Open Library',
+    title: v.title || '',
+    subtitle: v.subtitle || '',
+    author: (v.authors || []).map(a => a.name).join(', '),
+    publisher: (v.publishers || []).map(p => p.name).join(', '),
+    year: String(v.publish_date || '').match(/\d{4}/)?.[0] || '',
+    pages: v.number_of_pages ? String(v.number_of_pages) : '',
+    language: '',
+    annotation: (v.notes && (v.notes.value || v.notes)) || '',
+    keywords: (v.subjects || []).slice(0, 8).map(s => s.name).join(', '),
+    cover_url: (v.cover && (v.cover.large || v.cover.medium || v.cover.small)) || '',
+    city: pub ? pub.name : ''
+  };
+}
+ipcMain.handle('isbn:lookup', async (e, raw) => {
+  const isbn = normalizeIsbn(raw);
+  if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
+  // Двете услуги се питат заедно и се допълват: Google Books обикновено дава език и
+  // анотация, Open Library — място на издаване и предметни рубрики.
+  const [rg, ro] = await Promise.allSettled([lookupGoogleBooks(isbn), lookupOpenLibrary(isbn)]);
+  const g = rg.status === 'fulfilled' ? rg.value : null;
+  const o = ro.status === 'fulfilled' ? ro.value : null;
+  if (!g && !o) {
+    // Ако и двете услуги са се провалили с изключение, проблемът е във връзката, а не в
+    // това, че книгата липсва — съобщението трябва да казва правилното нещо.
+    const bothFailed = rg.status === 'rejected' && ro.status === 'rejected';
+    return {
+      ok: false,
+      error: bothFailed
+        ? 'Няма връзка с Google Books и Open Library. Проверете интернет връзката и опитайте пак.'
+        : 'Няма намерено заглавие с този ISBN в Google Books и Open Library.'
+    };
+  }
+  const pick = (k) => (g && g[k]) || (o && o[k]) || '';
+  const sources = [g && g.source, o && o.source].filter(Boolean);
+  return {
+    ok: true, data: {
+      isbn,
+      title: pick('title'), subtitle: pick('subtitle'), author: pick('author'),
+      publisher: pick('publisher'), city: pick('city'), year: pick('year'),
+      pages: pick('pages'), language: pick('language'), keywords: pick('keywords'),
+      annotation: pick('annotation'), cover_url: pick('cover_url'),
+      sources: sources.join(' и ')
+    }
+  };
+});
 
 /* ---------------- Настройки ---------------- */
 ipcMain.handle('settings:get', () => run(() => db.prepare('SELECT * FROM settings WHERE id = 1').get()));
@@ -1400,8 +1505,39 @@ function gitRun(folder, args) {
 function isGitRepo(folder) {
   return folder && fs.existsSync(path.join(folder, '.git'));
 }
+// Разчита "потребител/хранилище" от адреса на origin — и за https, и за ssh адрес.
+async function gitRemoteSlug(folder) {
+  if (!isGitRepo(folder)) return null;
+  // Нарочно се чете суровата стойност от конфигурацията, а не "git remote get-url":
+  // второто прилага правилата url.<база>.insteadOf и може да върне пренаписан адрес,
+  // който вече не показва към кое хранилище в GitHub сочи папката.
+  const r = await gitRun(folder, ['config', '--get', 'remote.origin.url']);
+  if (!r.ok || !r.stdout) return null;
+  const m = r.stdout.match(/github\.com[/:]([^/]+)\/([^/\s]+?)(?:\.git)?$/i);
+  return m ? { user: m[1], repo: m[2], url: r.stdout } : { user: '', repo: '', url: r.stdout };
+}
+// Пази всяка библиотека да не публикува в чуждо хранилище: сравнява къде наистина сочи
+// папката с това, което е записано в настройките. Точно това е случаят, при който един
+// каталог може да бъде презаписан с данните на друга библиотека.
+async function catalogRemoteCheck(folder, s) {
+  const slug = await gitRemoteSlug(folder);
+  const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim();
+  if (!slug || !slug.user || !u || !r) return { slug, mismatch: false };
+  const mismatch = slug.user.toLowerCase() !== u.toLowerCase() || slug.repo.toLowerCase() !== r.toLowerCase();
+  return { slug, mismatch };
+}
 async function gitPublish(folder) {
   if (!isGitRepo(folder)) return { ok: false, error: 'Папката не е git хранилище (липсва .git). Клонирайте хранилището с "git clone" веднъж, преди да я свържете тук.' };
+
+  const s = db.prepare('SELECT gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
+  const chk = await catalogRemoteCheck(folder, s);
+  if (chk.mismatch) {
+    return { ok: false, error: 'Спряно: свързаната папка сочи към хранилището ' +
+      chk.slug.user + '/' + chk.slug.repo + ', а в настройките е записано ' +
+      (s.gh_user || '—') + '/' + (s.gh_repo || '—') +
+      '. Публикуването е спряно, за да не се презапише чужд каталог. ' +
+      'Проверете дали сте клонирали собственото си хранилище.' };
+  }
 
   const branchRes = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const branch = branchRes.ok && branchRes.stdout ? branchRes.stdout : 'main';
@@ -1510,9 +1646,20 @@ function ghRawUrl(s) {
   if (!u || !r) return null;
   return `https://raw.githubusercontent.com/${u}/${r}/${b}/katalog.json`;
 }
+// Предлага име на хранилище по името на библиотеката — на латиница, с тирета, защото
+// GitHub не приема кирилица и интервали в имената на хранилища.
+const TRANSLIT = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',
+  н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sht',ъ:'a',ь:'',ю:'yu',я:'ya' };
+function suggestRepoName(s) {
+  const base = (s.lib_name || s.org || '').toLowerCase()
+    .replace(/[а-я]/g, c => (c in TRANSLIT ? TRANSLIT[c] : c))
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  const short = base.split('-').filter(w => w.length > 2).slice(0, 4).join('-');
+  return (short || 'biblioteka') + '-katalog';
+}
 ipcMain.handle('catalog:status', () =>
   run(() => {
-    const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch FROM settings WHERE id = 1').get();
+    const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch, lib_name, org FROM settings WHERE id = 1').get();
     const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND department != 'служебен'`).get().n;
     const avail = db.prepare(`
       SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND b.department != 'служебен'
@@ -1522,10 +1669,23 @@ ipcMain.handle('catalog:status', () =>
     return {
       folder: s.catalog_folder || null, total: pub, available: avail,
       isGitRepo: isGitRepo(s.catalog_folder), rawUrl: ghRawUrl(s),
-      ghUser: s.gh_user, ghRepo: s.gh_repo, ghBranch: s.gh_branch
+      ghUser: s.gh_user, ghRepo: s.gh_repo, ghBranch: s.gh_branch,
+      suggestedRepo: suggestRepoName(s), libName: s.lib_name || s.org || ''
     };
   })
 );
+// Проверява накъде наистина сочи свързаната папка. Извиква се от интерфейса, за да се
+// покаже предупреждение, преди да се стигне до публикуване.
+ipcMain.handle('catalog:remoteCheck', async () => {
+  try {
+    const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
+    if (!s.catalog_folder) return { ok: true, data: null };
+    const chk = await catalogRemoteCheck(s.catalog_folder, s);
+    return { ok: true, data: { mismatch: chk.mismatch, remote: chk.slug } };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
 ipcMain.handle('catalog:updateGh', (e, { gh_user, gh_repo, gh_branch }) =>
   run(() => {
     db.prepare('UPDATE settings SET gh_user=?, gh_repo=?, gh_branch=? WHERE id=1')
@@ -1539,10 +1699,22 @@ ipcMain.handle('catalog:chooseFolder', async () => {
       properties: ['openDirectory', 'createDirectory']
     });
     if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
-    db.prepare('UPDATE settings SET catalog_folder = ? WHERE id = 1').run(filePaths[0]);
+    const folder = filePaths[0];
+    db.prepare('UPDATE settings SET catalog_folder = ? WHERE id = 1').run(folder);
+
+    // Ако потребителят и хранилището още не са попълнени, се вземат от самата папка —
+    // така новата библиотека получава своите настройки, без да ги въвежда на ръка.
+    const s = db.prepare('SELECT gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
+    const chk = await catalogRemoteCheck(folder, s);
+    let adopted = null;
+    if (chk.slug && chk.slug.user && !(s.gh_user || '').trim() && !(s.gh_repo || '').trim()) {
+      db.prepare('UPDATE settings SET gh_user = ?, gh_repo = ? WHERE id = 1').run(chk.slug.user, chk.slug.repo);
+      adopted = chk.slug;
+    }
+
     writeCatalogIfConfigured();
-    logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + filePaths[0]);
-    return { ok: true, data: filePaths[0] };
+    logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + folder);
+    return { ok: true, data: folder, adopted, mismatch: chk.mismatch, remote: chk.slug };
   } catch (err) {
     return { ok: false, error: err.message };
   }

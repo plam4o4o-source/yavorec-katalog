@@ -608,7 +608,14 @@ async function bookForm(id, presetAcqId) {
       </div>
       <div class="grid g4">
         ${fld('Том / част', 'volume', { val: v.volume || '' })}
-        ${fld('ISBN / ISSN', 'isbn', { val: v.isbn || '' })}
+        <div class="field"><label>ISBN / ISSN</label>
+          <div class="isbnRow">
+            <input name="isbn" value="${esc(v.isbn || '')}">
+            <button type="button" class="btn" id="isbnBtn" onclick="isbnLookup()"
+              title="Изтегля данните за книгата от Google Books и Open Library">Търси</button>
+          </div>
+          <div class="hint" id="isbnHint">Въведете ISBN и натиснете „Търси“ — полетата се попълват сами.</div>
+        </div>
         ${fld('Страници', 'pages', { val: v.pages || '' })}
         ${fld('Език', 'language', { type: 'select', opts: EZICI, val: v.language })}
       </div>
@@ -635,6 +642,50 @@ async function bookForm(id, presetAcqId) {
   }
 }
 window.bookForm = bookForm;
+
+/* Търсене по ISBN в Google Books и Open Library. Попълват се само празните полета —
+   вече въведеното от библиотекаря никога не се презаписва, защото данните от двете
+   услуги не винаги са точни и описанието по Наредба № 3 е негова отговорност. */
+async function isbnLookup() {
+  const f = $('#bookF'); if (!f) return;
+  const btn = $('#isbnBtn'), hint = $('#isbnHint');
+  const isbn = (f.querySelector('[name=isbn]') || {}).value || '';
+  if (!isbn.trim()) return toast('Първо въведете ISBN.', 'err');
+  btn.disabled = true; btn.textContent = 'Търси…';
+  hint.textContent = 'Търси в Google Books и Open Library…';
+  try {
+    const r = await window.api.isbn.lookup(isbn);
+    if (!r || !r.ok) {
+      hint.textContent = (r && r.error) || 'Търсенето не успя.';
+      return toast((r && r.error) || 'Търсенето не успя.', 'err');
+    }
+    const filled = [], skipped = [];
+    const LABELS = { title: 'Заглавие', subtitle: 'Подзаглавие', author: 'Автор', publisher: 'Издателство',
+      city: 'Място на издаване', year: 'Година', pages: 'Страници', language: 'Език',
+      keywords: 'Ключови думи', annotation: 'Анотация', cover_url: 'Корица', isbn: 'ISBN' };
+    for (const [k, val] of Object.entries(r.data)) {
+      if (k === 'sources' || !val) continue;
+      const el = f.querySelector(`[name="${k}"]`);
+      if (!el) continue;
+      if (el.value && el.value.trim()) { if (k !== 'isbn') skipped.push(LABELS[k] || k); continue; }
+      el.value = val;
+      if (k !== 'isbn') filled.push(LABELS[k] || k);
+    }
+    hint.textContent = filled.length
+      ? `Попълнено от ${r.data.sources}: ${filled.join(', ')}.` +
+        (skipped.length ? ` Запазени непроменени: ${skipped.join(', ')}.` : '')
+      : `Намерено в ${r.data.sources}, но всички полета вече са попълнени.`;
+    toast(filled.length ? `Попълнени ${filled.length} полета от ${r.data.sources}.`
+                        : 'Полетата вече са попълнени.', 'ok');
+  } catch (e) {
+    hint.textContent = 'Няма връзка с интернет или услугата не отговаря.';
+    toast('Няма връзка с интернет или услугата не отговаря.', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Търси';
+  }
+}
+window.isbnLookup = isbnLookup;
+
 async function saveBook(id) {
   const d = formData('#bookF');
   if (!d.title.trim()) return toast('Заглавието е задължително.', 'err');
@@ -2091,13 +2142,40 @@ window.saveVisits = saveVisits;
 
 /* ---------------- Онлайн каталог ---------------- */
 async function renderCatalog() {
-  const [status, s] = await Promise.all([call(window.api.catalog.status()), call(window.api.settings.get())]);
+  const [status, s, rc] = await Promise.all([
+    call(window.api.catalog.status()), call(window.api.settings.get()), call(window.api.catalog.remoteCheck())
+  ]);
   if (!status) return;
+  const notSetUp = !status.ghUser || !status.ghRepo;
   $('#view').innerHTML = `
     <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
     Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл. Каталогът се
     публикува през <b>GitHub</b> — ${s && s.cat_url ? `сайтът <b>${esc(s.cat_url)}</b> чете` : 'сайтът на библиотеката чете'}
     файла на живо от там, без нужда от друг сървър.</div>
+
+    ${rc && rc.mismatch ? `<div class="note" style="border-left-color:var(--red)">
+      <b style="color:var(--red)">Внимание — папката сочи към чуждо хранилище.</b><br>
+      Свързаната папка е работно копие на <b>${esc(rc.remote.user)}/${esc(rc.remote.repo)}</b>, а в настройките
+      по-долу е записано <b>${esc(status.ghUser || '—')}/${esc(status.ghRepo || '—')}</b>. Публикуването е спряно,
+      за да не се презапише каталогът на друга библиотека. Клонирайте своето хранилище и изберете неговата папка.
+    </div>` : ''}
+
+    ${notSetUp ? `<div class="card" style="border-left:3px solid var(--brass)">
+      <h3 style="margin-top:0">Собствен каталог на ${esc(status.libName || 'библиотеката')}</h3>
+      <div class="note" style="margin-top:0">Всяка библиотека публикува своя каталог в <b>собствено</b> хранилище
+      в GitHub. Направете го веднъж:</div>
+      <ol class="steps">
+        <li>Създайте безплатен профил в <b>github.com</b>, ако нямате.</li>
+        <li>Създайте ново <b>публично</b> хранилище. Предложено име:
+            <code>${esc(status.suggestedRepo)}</code> — може и друго, само с латински букви и тирета.</li>
+        <li>На този компютър клонирайте хранилището:<br>
+            <code>git clone https://github.com/ПОТРЕБИТЕЛ/${esc(status.suggestedRepo)}.git</code></li>
+        <li>Попълнете потребителя и хранилището в полетата по-долу и запишете.</li>
+        <li>Изберете клонираната папка в „Работна папка“ — оттам нататък всичко е автоматично.</li>
+      </ol>
+      <div class="hint">Каталогът на всяка библиотека е отделен. Програмата никога не публикува в чуждо
+      хранилище — ако папката сочи другаде, публикуването се спира.</div>
+    </div>` : ''}
 
     <div class="card"><h3 style="margin-top:0">Работна папка (git clone на хранилището)</h3>
       ${status.folder ? `
@@ -2155,7 +2233,13 @@ async function renderCatalog() {
 async function catalogChooseFolder() {
   const res = await window.api.catalog.chooseFolder();
   if (!res.ok) return toast(res.error, 'err');
-  toast('Папката е свързана — katalog.json се обновява автоматично.', 'ok');
+  if (res.adopted) {
+    toast(`Папката е свързана с хранилището ${res.adopted.user}/${res.adopted.repo} — настройките са попълнени сами.`, 'ok');
+  } else if (res.mismatch) {
+    toast('Папката е свързана, но сочи към друго хранилище — вижте предупреждението по-горе.', 'err');
+  } else {
+    toast('Папката е свързана — katalog.json се обновява автоматично.', 'ok');
+  }
   renderCatalog();
 }
 window.catalogChooseFolder = catalogChooseFolder;

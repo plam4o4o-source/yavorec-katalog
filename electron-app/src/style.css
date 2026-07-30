@@ -286,6 +286,14 @@ table.ledger .num{font-family:var(--mono)}
   width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:3px;
   font-family:var(--sans); font-size:13px; background:#fff;
 }
+/* Номерирани стъпки за първоначална настройка */
+.steps{margin:10px 0 10px 18px; padding:0; font-size:13px; line-height:1.75; color:var(--ink)}
+.steps li{margin-bottom:5px}
+.steps code{word-break:break-all}
+/* ISBN + бутон за търсене на един ред; бутонът не се свива при тесни колони */
+.isbnRow{display:flex; gap:6px}
+.isbnRow input{min-width:0}
+.isbnRow .btn{flex:0 0 auto; padding:8px 10px; font-size:12px}
 .grid.g2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 .grid.g3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px}
 .grid.g4{display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px}
