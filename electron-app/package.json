@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -60,6 +60,7 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
+      "deleteAppDataOnUninstall": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

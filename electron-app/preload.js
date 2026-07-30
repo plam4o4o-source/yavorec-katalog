@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('api', {
     addCheck: invoke('books:addCheck'),
     checks: invoke('books:checks')
   },
+  isbn: {
+    lookup: invoke('isbn:lookup')
+  },
   invBook: {
     list: invoke('invBook:list')
   },
@@ -146,6 +149,7 @@ contextBridge.exposeInMainWorld('api', {
     export: invoke('catalog:export'),
     exportCsv: invoke('catalog:exportCsv'),
     updateGh: invoke('catalog:updateGh'),
-    gitPublishNow: invoke('catalog:gitPublishNow')
+    gitPublishNow: invoke('catalog:gitPublishNow'),
+    remoteCheck: invoke('catalog:remoteCheck')
   }
 });
