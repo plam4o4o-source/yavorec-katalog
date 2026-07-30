@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Инвентаризация — сканиране</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#1A1208;color:#EFE9D8;
+    font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-text-size-adjust:100%}
+  header{padding:14px 16px;background:#241809;border-bottom:2px solid #96731F}
+  h1{margin:0;font-size:17px;color:#C9A84C}
+  .sub{font-size:12px;color:#B8AF95;margin-top:2px}
+  main{padding:14px 16px 90px}
+  #cam{width:100%;border-radius:8px;background:#000;display:none;aspect-ratio:4/3;object-fit:cover}
+  .btn{display:inline-block;padding:13px 18px;border:none;border-radius:7px;background:#96731F;
+    color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin:6px 6px 0 0}
+  .btn.sec{background:#3A2A12;color:#EFE9D8}
+  .btn.dgr{background:#A32B22}
+  .btn:disabled{opacity:.45}
+  .stat{display:flex;gap:10px;margin:14px 0}
+  .box{flex:1;background:#241809;border:1px solid #3A2A12;border-radius:7px;padding:11px;text-align:center}
+  .box b{display:block;font-size:26px;color:#C9A84C}
+  .box span{font-size:11px;color:#B8AF95}
+  #manual{width:100%;padding:13px;font-size:17px;border-radius:7px;border:1px solid #3A2A12;
+    background:#120C05;color:#EFE9D8;margin-top:4px}
+  ul{list-style:none;padding:0;margin:12px 0 0}
+  li{padding:9px 11px;background:#241809;border-radius:6px;margin-bottom:5px;display:flex;
+    justify-content:space-between;align-items:center;font-size:15px}
+  li .x{color:#A32B22;font-size:20px;padding:0 6px;cursor:pointer}
+  .dup{border-left:3px solid #C98A2E}
+  #out{width:100%;height:150px;background:#120C05;color:#EFE9D8;border:1px solid #3A2A12;
+    border-radius:7px;padding:10px;font-family:monospace;font-size:13px;margin-top:8px}
+  .note{background:#241809;border-left:3px solid #96731F;padding:10px 12px;border-radius:0 6px 6px 0;
+    font-size:13px;line-height:1.5;color:#DCD4BB;margin-bottom:12px}
+  .err{background:#3A1512;border-left-color:#A32B22;color:#F0DEDA}
+  footer{position:fixed;bottom:0;left:0;right:0;background:#241809;border-top:1px solid #3A2A12;
+    padding:10px 16px;display:flex;gap:8px}
+  footer .btn{flex:1;margin:0;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Инвентаризация — сканиране</h1>
+  <div class="sub" id="libName">__LIB__</div>
+</header>
+<main>
+  <div class="note" id="hint">
+    Натиснете <b>„Пусни камерата“</b> и насочете телефона към баркода на документа.
+    Всеки разчетен номер се добавя в списъка. Когато свършите, натиснете
+    <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, имейл или както Ви е удобно) —
+    там се внася в „Инвентаризация“.
+  </div>
+  <div class="note err" id="nocam" style="display:none">
+    Този браузър не може да чете баркодове с камерата. Ползвайте <b>Chrome на Android</b>,
+    или въвеждайте номерата на ръка в полето по-долу — резултатът е същият.
+  </div>
+
+  <video id="cam" playsinline muted></video>
+  <button class="btn" id="startBtn">Пусни камерата</button>
+  <button class="btn sec" id="stopBtn" style="display:none">Спри камерата</button>
+
+  <div class="stat">
+    <div class="box"><b id="cnt">0</b><span>сканирани</span></div>
+    <div class="box"><b id="dupCnt">0</b><span>повторни</span></div>
+  </div>
+
+  <input id="manual" inputmode="numeric" placeholder="Или въведете номер и натиснете Enter">
+
+  <ul id="list"></ul>
+
+  <textarea id="out" readonly placeholder="Тук се събира списъкът за пренасяне"></textarea>
+</main>
+<footer>
+  <button class="btn" id="copyBtn">Копирай списъка</button>
+  <button class="btn sec" id="fileBtn">Запиши файл</button>
+  <button class="btn dgr" id="clearBtn">Изчисти</button>
+</footer>
+
+<script>
+/* Списъкът се пази в паметта на браузъра, за да не се загуби при заключване на
+   екрана или случайно затваряне на страницата по време на обхождането. */
+var KEY = 'inventar-scan-v1';
+var codes = [];
+var dups = 0;
+try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); codes = saved.codes || []; dups = saved.dups || 0; } catch (e) {}
+
+function persist() { try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups })); } catch (e) {} }
+function render() {
+  document.getElementById('cnt').textContent = codes.length;
+  document.getElementById('dupCnt').textContent = dups;
+  var ul = document.getElementById('list');
+  ul.innerHTML = codes.slice().reverse().map(function (c, i) {
+    var idx = codes.length - 1 - i;
+    return '<li><span>' + c + '</span><span class="x" data-i="' + idx + '">&times;</span></li>';
+  }).join('');
+  document.getElementById('out').value = codes.join('\n');
+  persist();
+}
+document.getElementById('list').addEventListener('click', function (e) {
+  var i = e.target.getAttribute('data-i');
+  if (i !== null) { codes.splice(+i, 1); render(); }
+});
+
+function beep(ok) {
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = ok ? 880 : 300;
+    g.gain.value = 0.12;
+    o.start(); setTimeout(function () { o.stop(); ctx.close(); }, ok ? 90 : 220);
+  } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate(ok ? 40 : [60, 50, 60]);
+}
+function addCode(raw) {
+  var c = String(raw || '').trim();
+  if (!c) return;
+  if (codes.indexOf(c) >= 0) { dups++; beep(false); render(); return; }
+  codes.push(c); beep(true); render();
+}
+
+document.getElementById('manual').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { addCode(this.value); this.value = ''; }
+});
+document.getElementById('copyBtn').addEventListener('click', function () {
+  var t = document.getElementById('out');
+  t.select(); t.setSelectionRange(0, 999999);
+  if (navigator.clipboard) navigator.clipboard.writeText(codes.join('\n'));
+  else document.execCommand('copy');
+  this.textContent = 'Копирано!';
+  var b = this; setTimeout(function () { b.textContent = 'Копирай списъка'; }, 1500);
+});
+document.getElementById('fileBtn').addEventListener('click', function () {
+  var blob = new Blob([codes.join('\n')], { type: 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'inventarizaciya-' + new Date().toISOString().slice(0, 10) + '.txt';
+  a.click();
+});
+document.getElementById('clearBtn').addEventListener('click', function () {
+  if (!confirm('Изчистване на целия списък?')) return;
+  codes = []; dups = 0; render();
+});
+
+/* ---- Камерата като баркод четец ----
+   BarcodeDetector е наличен в Chrome на Android. Където го няма, страницата
+   продължава да работи с ръчно въвеждане — затова не се спира с грешка. */
+var stream = null, detector = null, timer = null;
+var video = document.getElementById('cam');
+if (!('BarcodeDetector' in window)) {
+  document.getElementById('nocam').style.display = 'block';
+  document.getElementById('startBtn').disabled = true;
+}
+document.getElementById('startBtn').addEventListener('click', async function () {
+  try {
+    detector = new BarcodeDetector({
+      formats: ['code_39', 'code_128', 'ean_13', 'ean_8', 'codabar', 'itf', 'qr_code']
+    });
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 } }
+    });
+    video.srcObject = stream;
+    await video.play();
+    video.style.display = 'block';
+    this.style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'inline-block';
+    var last = '', lastAt = 0;
+    timer = setInterval(async function () {
+      try {
+        var found = await detector.detect(video);
+        if (found && found.length) {
+          var v = found[0].rawValue;
+          var now = Date.now();
+          // Един и същ баркод пред камерата се разчита многократно в секунда —
+          // приема се повторно едва след 2 секунди.
+          if (v !== last || now - lastAt > 2000) { last = v; lastAt = now; addCode(v); }
+        }
+      } catch (e) {}
+    }, 350);
+  } catch (e) {
+    document.getElementById('nocam').style.display = 'block';
+    document.getElementById('nocam').innerHTML =
+      'Камерата не се стартира: ' + (e && e.message ? e.message : e) +
+      '<br>Проверете дали сте разрешили достъп до камерата, или въвеждайте номерата на ръка.';
+  }
+});
+document.getElementById('stopBtn').addEventListener('click', function () {
+  if (timer) clearInterval(timer);
+  if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+  video.style.display = 'none';
+  this.style.display = 'none';
+  document.getElementById('startBtn').style.display = 'inline-block';
+});
+
+render();
+</script>
+</body>
+</html>

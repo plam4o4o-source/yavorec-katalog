@@ -1826,7 +1826,10 @@ async function renderInvent() {
       </div>
     </div>
 
-    <div class="toolbar"><button class="btn pri" onclick="startInventForm()">Започни нова проверка</button></div>
+    <div class="toolbar">
+      <button class="btn pri" onclick="startInventForm()">Започни нова проверка</button>
+      <button class="btn" onclick="mobileHelp()">📱 Сканиране с телефон</button>
+    </div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Обхват</th><th>В обхвата</th>
       <th>Проверени</th><th>Липсващи</th><th>Комисия</th><th>Състояние</th></tr></thead><tbody>
     ${sessions.length ? sessions.map(s => {
@@ -1893,6 +1896,7 @@ async function renderInventRun() {
       <div id="ivLog" style="margin-top:10px;max-height:230px;overflow:auto"></div>
     </div>
     <div class="toolbar">
+      <button class="btn" onclick="importScansModal(${s.id})">📱 Внеси сканирания от телефон</button>
       <button class="btn pri" onclick="closeInvent()">Приключи и състави протокол</button>
       <button class="btn" onclick="if(confirm('Прекратяване без запис?')){INVENT_SESSION=null;renderInvent()}">Прекрати</button>
     </div>`;
@@ -2984,6 +2988,17 @@ async function renderSetup() {
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
 
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Внасяне на данни от друга система</h3>
+      <div class="note" style="margin-top:0">Ако библиотеката е водила фонда в друга програма
+      (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се внасят оттам, вместо да се
+      преписват на ръка. Четат се <b>CSV</b>, <b>TXT</b>, <b>TSV</b> и <b>XLSX</b>; кирилицата в
+      стари файлове (Windows-1251) се разпознава сама.</div>
+      <div class="toolbar"><button class="btn pri" onclick="importChoose()">Избери файл за внасяне…</button></div>
+      <div class="hint" style="margin-top:8px">След избора се показва как са разпознати колоните и
+      първите редове от файла — съответствието се проверява и поправя, преди нещо да се запише.
+      <b>Направете резервно копие преди голямо внасяне.</b></div>
+    </div>
+
     ${categoriesCardHtml(cats)}
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ограничения на записите</h3>
@@ -3755,3 +3770,197 @@ async function localPhotoClear(table, id) {
   else { await renderChronicle(); chronicleView(id); }
 }
 window.localPhotoClear = localPhotoClear;
+
+/* ============================================================================
+   ПРИЕМАНЕ НА ДАННИ ОТ ДРУГИ СИСТЕМИ
+   ============================================================================ */
+let IMPORT_INFO = null;
+async function importChoose() {
+  const res = await window.api.importData.choose();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  IMPORT_INFO = res.data;
+  importMapModal();
+}
+window.importChoose = importChoose;
+
+/* Провлачване на файл върху прозореца — същият път, като през диалога. */
+document.addEventListener('dragover', e => { e.preventDefault(); });
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f || !f.path) return;
+  if (!/\.(csv|txt|tsv|xlsx)$/i.test(f.path)) {
+    return toast('Приемат се файлове CSV, TXT, TSV и XLSX.', 'err');
+  }
+  const res = await window.api.importData.load(f.path);
+  if (!res.ok) return toast(res.error, 'err');
+  IMPORT_INFO = res.data;
+  importMapModal();
+});
+
+function importMapModal() {
+  const d = IMPORT_INFO;
+  const fieldOpts = Object.entries(d.fields).map(([v, t]) => ({ v, t }));
+  modal('Внасяне на данни — съответствие на колоните', `
+    <div class="note" style="margin-top:0">
+      Файл: <b style="font-family:var(--mono)">${esc(d.path.split(/[\\/]/).pop())}</b> ·
+      кодиране <b>${esc(d.encoding)}</b>${d.delimiter ? ` · разделител <b>${esc(d.delimiter === '\t' ? 'табулация' : d.delimiter)}</b>` : ''} ·
+      редове с данни: <b>${d.total}</b><br>
+      Съответствието е разпознато по заглавията на колоните. <b>Проверете го</b> и поправете
+      каквото е нужно — колоните, оставени на „— не се внася —“, се пренебрегват.
+    </div>
+
+    <div class="wrap" style="max-height:230px">
+      <table class="ledger"><thead><tr>
+        ${d.headers.map((h, i) => `<th>${esc(h || 'колона ' + (i + 1))}</th>`).join('')}
+      </tr></thead><tbody>
+        ${d.preview.map(r => `<tr>${d.headers.map((_, i) =>
+          `<td>${esc(String(r[i] ?? '').slice(0, 40))}</td>`).join('')}</tr>`).join('')}
+      </tbody></table>
+    </div>
+    <div class="hint" style="margin:4px 0 12px">Първите ${d.preview.length} реда от файла.</div>
+
+    <form id="mapF" onsubmit="return false">
+      <div class="grid g3">
+        ${d.headers.map((h, i) => fld(h || 'колона ' + (i + 1), 'col' + i, {
+          type: 'select', val: d.mapping[i] || '', opts: fieldOpts, emptyLabel: '— не се внася —'
+        })).join('')}
+      </div>
+    </form>
+
+    <fieldset><legend>Настройки на внасянето</legend>
+      <form id="impOptF" onsubmit="return false">
+        <label class="chk"><input type="checkbox" name="skipDuplicates" checked>
+          <span>Пропускай вече съществуващите (по инвентарен номер, а при липса — по ISBN)</span></label>
+        <div class="grid g3" style="margin-top:8px">
+          ${fld('Отдел по подразбиране', 'defaultDepartment', { type: 'select', opts: OTDELI,
+            val: 'за възрастни', allowEmpty: false })}
+          ${fld('Език по подразбиране', 'defaultLanguage', { type: 'select', opts: EZICI, val: 'български' })}
+          ${fld('Вид документ по подразбиране', 'defaultCategory', { val: 'книга' })}
+        </div>
+        <div class="hint">Ползват се само за редовете, в които съответната колона липсва или е празна.</div>
+      </form>
+    </fieldset>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="importRun()">Внеси ${d.total} реда</button>`);
+}
+
+async function importRun() {
+  const d = IMPORT_INFO;
+  const mapping = {};
+  const seen = {};
+  for (let i = 0; i < d.headers.length; i++) {
+    const v = $(`#mapF [name=col${i}]`).value;
+    if (!v) continue;
+    // Едно поле не може да идва от две колони — иначе втората тихо презаписва първата.
+    if (seen[v]) return toast(`Полето „${d.fields[v]}“ е посочено два пъти — изберете само една колона за него.`, 'err');
+    seen[v] = true;
+    mapping[i] = v;
+  }
+  if (!seen.title) return toast('Посочете коя колона съдържа заглавието — без него записът е безсмислен.', 'err');
+  const options = formData('#impOptF');
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Внасяне…'; }
+  const res = await window.api.importData.run({ mapping, options });
+  if (btn) { btn.disabled = false; btn.textContent = 'Внеси'; }
+  if (!res.ok) return toast(res.error, 'err');
+  const r = res.data;
+  markSaved();
+  modal('Внасянето приключи', `
+    <div class="kpis">
+      ${kpi('✅', r.added, 'Внесени документа', 'добавени във фонда', 'ok')}
+      ${kpi('⏭️', r.skipped, 'Пропуснати', 'дубликати или редове с грешка')}
+    </div>
+    ${r.usedInv.length ? `<div class="note" style="margin-top:14px">
+      <b>${r.usedInv.length} записа получиха нов инвентарен номер</b>, защото в
+      файла нямаше номер или той вече беше зает. Инвентарният номер трябва да е
+      уникален — това е изискване на инвентарната книга.
+      <div class="hint" style="margin-top:6px">${r.usedInv.slice(0, 12).map(u =>
+        `ред ${u.line} → № ${u.inv}`).join(' · ')}${r.usedInv.length > 12 ? ' …' : ''}</div>
+    </div>` : ''}
+    ${r.errors.length ? `<div class="note" style="border-left-color:var(--red);margin-top:12px">
+      <b style="color:var(--red)">Редове с грешка: ${r.errors.length}</b>
+      <div class="hint" style="margin-top:6px">${r.errors.slice(0, 15).map(x =>
+        `ред ${x.line}: ${esc(x.error)}`).join('<br>')}${r.errors.length > 15 ? '<br>…' : ''}</div>
+    </div>` : ''}
+    <div class="hint" style="margin-top:12px">Прегледайте внесеното в „Книги“. Ако нещо не е наред,
+    възстановете резервното копие отпреди внасянето — то се прави автоматично при първото
+    стартиране за деня.</div>`,
+    `<button class="btn pri" onclick="closeModal();go('books')">Към книгите</button>`);
+}
+window.importRun = importRun;
+
+/* ============================================================================
+   МОБИЛНО СКАНИРАНЕ ПРИ ИНВЕНТАРИЗАЦИЯ
+   ============================================================================ */
+async function mobileGenerate() {
+  const res = await window.api.mobile.generate();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  toast('Страницата е записана: ' + res.data, 'ok');
+}
+window.mobileGenerate = mobileGenerate;
+
+function mobileHelp() {
+  modal('Сканиране с телефон вместо баркод четец', `
+    <div class="note" style="margin-top:0">Телефонът замества скъпия ръчен четец: камерата чете
+    баркода на документа, а списъкът се пренася в програмата. Обхождането на рафтовете става
+    за часове вместо за дни, без да се влачи компютър до стелажите.</div>
+
+    <ol class="steps">
+      <li><b>Веднъж:</b> натиснете „Запиши страницата…“ и запазете файла. Прехвърлете го на
+          телефона — с USB кабел, по Вайбър, по имейл, както Ви е удобно.</li>
+      <li>На телефона отворете файла с <b>Chrome</b> и разрешете достъп до камерата.
+          Добавете го към началния екран, за да е подръка следващия път.</li>
+      <li>При рафтовете: „Пусни камерата“ и насочвайте към баркодовете.
+          Всеки разчетен номер се добавя със звук; повторните се отбелязват отделно.</li>
+      <li>Накрая натиснете <b>„Копирай списъка“</b> и си го изпратете (Вайбър, имейл), или
+          „Запиши файл“ и го прехвърлете.</li>
+      <li>Тук отворете сесията за инвентаризация и натиснете
+          <b>„Внеси сканирания от телефон“</b> — поставяте списъка и готово.</li>
+    </ol>
+
+    <div class="hint"><b>Работи офлайн.</b> Страницата не изисква интернет и не изпраща никъде
+    данни — списъкът стои в самия телефон, докато не го прехвърлите. Ако телефонът се заключи
+    или Chrome се затвори, сканираното не се губи.</div>
+    <div class="hint" style="margin-top:8px"><b>Ако камерата не чете:</b> на iPhone и на по-стари
+    браузъри четенето на баркод от камера не се поддържа — тогава номерата се въвеждат на ръка в
+    същата страница и списъкът се пренася по същия начин.</div>`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>
+     <button class="btn pri" onclick="closeModal();mobileGenerate()">Запиши страницата…</button>`);
+}
+window.mobileHelp = mobileHelp;
+
+function importScansModal(sessionId) {
+  modal('Внасяне на сканирания от телефон', `
+    <div class="note" style="margin-top:0">Поставете списъка, копиран от телефона — по един номер
+    на ред. Приемат се и номера, разделени със запетая или интервал.</div>
+    <textarea id="scanPaste" class="remText" rows="12" placeholder="1024&#10;1025&#10;1026&#10;…"></textarea>
+    <div class="hint" style="margin-top:6px">Вече сканираните в тази сесия се пропускат, а
+    непознатите номера се изброяват отделно, за да се проверят.</div>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="importScansRun(${sessionId})">Внеси</button>`);
+  setTimeout(() => { const t = $('#scanPaste'); if (t) t.focus(); }, 60);
+}
+window.importScansModal = importScansModal;
+
+async function importScansRun(sessionId) {
+  const raw = $('#scanPaste').value || '';
+  const codes = raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  if (!codes.length) return toast('Не е поставен нито един номер.', 'err');
+  const r = await call(window.api.inventorySessions.importScans({ sessionId, codes }));
+  if (!r) return;
+  markSaved();
+  closeModal();
+  toast(`Внесени ${r.added} · повторни ${r.duplicates} · непознати ${r.unknown.length}`, r.unknown.length ? 'err' : 'ok');
+  if (r.unknown.length) {
+    modal('Непознати номера', `
+      <div class="note" style="border-left-color:var(--red);margin-top:0">
+        <b>${r.unknown.length} номера не са намерени във фонда.</b> Обикновено това са документи,
+        описани в друга библиотека, сгрешено сканиране или книги, които още не са заведени.</div>
+      <div class="hint" style="font-family:var(--mono);line-height:1.8">${r.unknown.map(esc).join(' · ')}</div>`,
+      `<button class="btn pri" onclick="closeModal();renderInventRun(${sessionId})">Разбрах</button>`);
+  } else {
+    renderInventRun(sessionId);
+  }
+}
+window.importScansRun = importScansRun;
