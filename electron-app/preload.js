@@ -118,7 +118,8 @@ contextBridge.exposeInMainWorld('api', {
     start: invoke('inventorySessions:start'),
     get: invoke('inventorySessions:get'),
     scan: invoke('inventorySessions:scan'),
-    close: invoke('inventorySessions:close')
+    close: invoke('inventorySessions:close'),
+    importScans: invoke('inventorySessions:importScans')
   },
   periodicals: {
     list: invoke('periodicals:list'),
@@ -171,6 +172,14 @@ contextBridge.exposeInMainWorld('api', {
   localPhoto: {
     choose: invoke('localPhoto:choose'),
     clear: invoke('localPhoto:clear')
+  },
+  importData: {
+    choose: invoke('import:choose'),
+    load: invoke('import:load'),
+    run: invoke('import:run')
+  },
+  mobile: {
+    generate: invoke('mobile:generate')
   },
   audit: {
     list: invoke('audit:list')
