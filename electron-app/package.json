@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -64,7 +64,16 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "Inventar-Setup-${version}.${ext}"
+      "artifactName": "Inventar-Setup-${version}.${ext}",
+      "multiLanguageInstaller": true,
+      "displayLanguageSelector": true,
+      "installerLanguages": [
+        "bg_BG",
+        "en_US"
+      ],
+      "language": "1026",
+      "include": "build/installer.nsh",
+      "warningsAsErrors": false
     }
   }
 }
