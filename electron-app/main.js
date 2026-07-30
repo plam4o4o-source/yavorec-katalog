@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -8,6 +8,9 @@ const { autoUpdater } = require('electron-updater');
 
 let db;
 let CURRENT_USER = '';
+
+// Фиксиран курс на БНБ, същият като в интерфейса.
+const EUR_RATE = 1.95583;
 
 /* ---------------- Местоположение на базата данни (за работа в мрежа) ----------------
    Малък config.json в постоянната потребителска папка сочи къде реално живее
@@ -676,6 +679,127 @@ const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitl
   'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'status', 'price',
   'description', 'acquisition_id'];
 
+/* ---------------- Контрол на авторитетните данни ----------------
+   Едно и също име се въвежда по различен начин („Вазов, Иван“, „Иван Вазов“,
+   „И. Вазов“) и записите се разпиляват. Тук се събират наличните стойности за
+   автодовършване и се откриват вероятните дублети, за да бъдат слети. */
+const AUTHORITY_FIELDS = {
+  author: 'автор', publisher: 'издателство', city: 'място на издаване',
+  language: 'език', udk: 'УДК', keywords: 'ключови думи', department: 'отдел'
+};
+// Ключ за сравнение: без пунктуация и главни букви, думите подредени по азбучен
+// ред. Така „Вазов, Иван“ и „Иван Вазов“ дават един и същ ключ.
+function authKey(v) {
+  return String(v || '').toLowerCase()
+    .replace(/[.,;:„“"'`()\[\]]/g, ' ')
+    .split(/\s+/).filter(Boolean).sort().join(' ');
+}
+function nameTokens(v) {
+  return String(v || '').toLowerCase()
+    .replace(/[.,;:„“"'`()\[\]]/g, ' ')
+    .split(/\s+/).filter(Boolean);
+}
+/* Хлабаво сравнение, което хваща и съкратените имена: „И. Вазов“ = „Иван Вазов“.
+   Правилото е по-строго, отколкото изглежда — по-късото име трябва да се съдържа
+   изцяло в по-дългото, а всяка инициала да съвпада с началото на останала дума.
+   Затова „Димитър Колев“ и „Димитър Костов“ НЕ съвпадат: втората пълна дума е
+   различна. (Първият вариант сравняваше само „най-дългата дума“ плюс инициали и
+   ги смяташе за дубликати, защото за „Димитър Колев“ приемаше „Димитър“ за
+   фамилия.) */
+function looseMatch(a, b) {
+  const A = nameTokens(a), B = nameTokens(b);
+  if (!A.length || !B.length) return false;
+  const fullA = A.filter(t => t.length > 1), fullB = B.filter(t => t.length > 1);
+  const initA = A.filter(t => t.length === 1), initB = B.filter(t => t.length === 1);
+  const aShorter = fullA.length <= fullB.length;
+  const short = aShorter ? fullA : fullB;
+  const long = (aShorter ? fullB : fullA).slice();
+  const shortInit = aShorter ? initA : initB;
+  for (const w of short) {
+    const i = long.indexOf(w);
+    if (i < 0) return false;
+    long.splice(i, 1);
+  }
+  for (const ini of shortInit) {
+    const i = long.findIndex(w => w[0] === ini);
+    if (i < 0) return false;
+    long.splice(i, 1);
+  }
+  return true;
+}
+function authorityValues(field) {
+  if (!(field in AUTHORITY_FIELDS)) throw new Error('Непознато поле: ' + field);
+  return db.prepare(
+    `SELECT ${field} AS value, COUNT(*) AS n FROM books
+     WHERE ${field} IS NOT NULL AND TRIM(${field}) <> '' GROUP BY ${field} ORDER BY n DESC, ${field}`
+  ).all();
+}
+ipcMain.handle('authorities:fields', () => run(() => AUTHORITY_FIELDS));
+ipcMain.handle('authorities:list', (e, field) => run(() => authorityValues(field)));
+// Стойностите за автодовършване във формата за книга — всички полета наведнъж.
+ipcMain.handle('authorities:suggest', () =>
+  run(() => {
+    const out = {};
+    for (const f of Object.keys(AUTHORITY_FIELDS)) out[f] = authorityValues(f).map(r => r.value);
+    return out;
+  })
+);
+// Групи вероятни дублети. strict=true сравнява само разместени думи, иначе се
+// включват и съкратените имена, което е по-широко и изисква повече внимание.
+ipcMain.handle('authorities:duplicates', (e, { field, loose }) =>
+  run(() => {
+    const rows = authorityValues(field).filter(r => authKey(r.value));
+    let buckets;
+    if (!loose) {
+      const m = new Map();
+      for (const r of rows) {
+        const k = authKey(r.value);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(r);
+      }
+      buckets = [...m.values()];
+    } else {
+      // Сравнение всеки-с-всеки през union-find. Стойностите са няколкостотин,
+      // затова цената е нищожна, а резултатът е далеч по-точен от ключ.
+      const parent = rows.map((_, i) => i);
+      const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+      for (let i = 0; i < rows.length; i++) {
+        for (let j = i + 1; j < rows.length; j++) {
+          if (looseMatch(rows[i].value, rows[j].value)) {
+            const a = find(i), b = find(j);
+            if (a !== b) parent[a] = b;
+          }
+        }
+      }
+      const m = new Map();
+      rows.forEach((r, i) => {
+        const k = find(i);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(r);
+      });
+      buckets = [...m.values()];
+    }
+    return buckets
+      .filter(g => g.length > 1)
+      .map(g => ({ items: g.sort((a, b) => b.n - a.n), total: g.reduce((s, r) => s + r.n, 0) }))
+      .sort((a, b) => b.total - a.total);
+  })
+);
+ipcMain.handle('authorities:merge', (e, { field, from, to }) =>
+  run(() => {
+    if (!(field in AUTHORITY_FIELDS)) throw new Error('Непознато поле: ' + field);
+    const target = String(to || '').trim();
+    if (!target) throw new Error('Липсва стойност, към която да се слее.');
+    const list = (from || []).map(v => String(v)).filter(v => v && v !== target);
+    if (!list.length) throw new Error('Няма избрани стойности за сливане.');
+    const stmt = db.prepare(`UPDATE books SET ${field} = ? WHERE ${field} = ?`);
+    let changed = 0;
+    db.transaction(() => { for (const v of list) changed += stmt.run(target, v).changes; })();
+    logAudit('Авторитетни данни', `${AUTHORITY_FIELDS[field]}: ${list.length} стойности слети в „${target}“ (${changed} документа)`);
+    return { changed, merged: list.length };
+  })
+);
+
 /* ---------------- Лимит на броя записи ----------------
    Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
    Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
@@ -1273,7 +1397,70 @@ ipcMain.handle('inventorySessions:close', (e, sessionId) =>
   })
 );
 
-/* ---------------- Просрочени: вижте loans:overdue по-горе ---------------- */
+/* ---------------- Просрочени: напомняния ----------------
+   Текстовете се сглобяват тук, за да са еднакви на всички работни места, а
+   изпращането остава ръчно: библиотекарят преглежда и решава. */
+function reminderTexts(r, s) {
+  const lib = s.lib_name || s.org || 'библиотеката';
+  const list = (r.loans || []).map(l =>
+    `• ${[l.author, l.title].filter(Boolean).join('. ')} (инв. № ${l.inv_number ?? '—'}), срок ${bgDate(l.date_due)}`
+  ).join('\n');
+  const fine = Number(r.fine || 0);
+  const fineLine = fine > 0
+    ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €).`
+    : '';
+  const subject = `Просрочени материали от ${lib}`;
+  const body =
+`Уважаем(а) ${r.name},
+
+Според регистъра на ${lib} при Вас има ${r.n} просрочен${r.n === 1 ? ' документ' : 'и документа'}:
+
+${list}
+${fineLine}
+Молим да ги върнете при първа възможност или да заявите удължаване на срока.
+
+С уважение,
+${s.librarian ? s.librarian + '\n' : ''}${lib}${s.place ? '\n' + s.place : ''}`;
+  // SMS-ът се плаща на 160 знака, затова е сбит до най-необходимото. Дългите
+  // наименования се съкращават, за да не изяде името целия SMS.
+  const one = r.n === 1;
+  const shortLib = lib.length > 40 ? lib.slice(0, 37).trim() + '…' : lib;
+  const sms = `${shortLib}: имате ${r.n} просрочен${one ? ' документ' : 'и документа'}` +
+    (fine > 0 ? `, обезщетение ${fine.toFixed(2)} лв` : '') +
+    `. Моля, върнете ${one ? 'го' : 'ги'}.`;
+  return { subject, body, sms };
+}
+const bgDate = (d) => d ? String(d).split('-').reverse().join('.') : '';
+ipcMain.handle('loans:reminders', () =>
+  run(() => {
+    const s = db.prepare('SELECT lib_name, org, place, librarian FROM settings WHERE id = 1').get() || {};
+    const rows = db.prepare(`
+      SELECT l.reader_id, r.name, r.phone, r.email, COUNT(*) AS n,
+             SUM((julianday('now') - julianday(l.date_due)) * st.fine_per_day) AS fine
+      FROM loans l JOIN readers r ON r.id = l.reader_id, settings st
+      WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') AND st.id = 1
+      GROUP BY l.reader_id ORDER BY r.name
+    `).all();
+    const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+    for (const r of rows) {
+      r.loans = detail.filter(d => d.reader_id === r.reader_id);
+      Object.assign(r, reminderTexts(r, s));
+    }
+    return rows;
+  })
+);
+// Отваря пощенския клиент на потребителя. Адресът се сглобява тук, за да не се
+// налага интерфейсът да навигира към mailto:, което Electron би отворил в прозореца.
+ipcMain.handle('loans:mailto', (e, { email, subject, body }) => {
+  try {
+    if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
+    const url = 'mailto:' + encodeURIComponent(email) +
+      '?subject=' + encodeURIComponent(subject || '') +
+      '&body=' + encodeURIComponent(body || '');
+    shell.openExternal(url);
+    return { ok: true };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
 
 /* ---------------- Периодика ---------------- */
 ipcMain.handle('periodicals:list', () =>
@@ -1802,6 +1989,123 @@ ipcMain.handle('catalog:writeNow', () =>
     return true;
   })
 );
+/* ---------------- Експорт в библиотечни формати ----------------
+   UNIMARC/MARCXML и Dublin Core. Целта е данните да не са заключени в тази
+   програма: при преминаване към COBISS или към сводния каталог се подава файл,
+   вместо да се преписват записите на ръка. */
+const xesc = (v) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+  // Управляващите знаци правят XML файла невалиден и някои редактори го отхвърлят
+  // изцяло; табулация, нов ред и връщане на каретката са допустими и се пазят.
+  .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+const LANG_ISO = {
+  'български': 'bul', 'английски': 'eng', 'руски': 'rus', 'немски': 'ger', 'френски': 'fre',
+  'испански': 'spa', 'италиански': 'ita', 'турски': 'tur', 'гръцки': 'gre', 'румънски': 'rum',
+  'сръбски': 'srp', 'македонски': 'mac', 'полски': 'pol', 'чешки': 'cze', 'украински': 'ukr'
+};
+// „Вазов, Иван“ → фамилия $a + име $b, както изисква UNIMARC 700.
+function splitName(name) {
+  const s = String(name || '').trim();
+  if (!s) return null;
+  const i = s.indexOf(',');
+  if (i > 0) return { a: s.slice(0, i).trim(), b: s.slice(i + 1).trim() };
+  const w = s.split(/\s+/);
+  return w.length > 1 ? { a: w[w.length - 1], b: w.slice(0, -1).join(' ') } : { a: s, b: '' };
+}
+function marcRecord(b) {
+  const df = [];
+  const add = (tag, i1, i2, subs) => {
+    const parts = subs.filter(([, v]) => String(v ?? '').trim() !== '');
+    if (!parts.length) return;
+    df.push(`    <datafield tag="${tag}" ind1="${i1}" ind2="${i2}">\n` +
+      parts.map(([c, v]) => `      <subfield code="${c}">${xesc(v)}</subfield>`).join('\n') +
+      `\n    </datafield>`);
+  };
+  if (b.isbn) add('010', ' ', ' ', [['a', b.isbn]]);
+  if (b.language) add('101', '0', ' ', [['a', LANG_ISO[b.language] || b.language]]);
+  add('200', '1', ' ', [['a', b.title], ['e', b.subtitle], ['f', b.author]]);
+  add('210', ' ', ' ', [['a', b.city], ['c', b.publisher], ['d', b.year]]);
+  add('215', ' ', ' ', [['a', b.pages]]);
+  if (b.volume) add('225', ' ', ' ', [['v', b.volume]]);
+  add('330', ' ', ' ', [['a', b.annotation]]);
+  for (const kw of String(b.keywords || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
+    add('606', ' ', ' ', [['a', kw]]);
+  }
+  add('675', ' ', ' ', [['a', b.udk]]);
+  const n = splitName(b.author);
+  if (n) add('700', ' ', '1', [['a', n.a], ['b', n.b]]);
+  // 995 е полето за екземпляри в българската практика (COMARC).
+  add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', b.call_number],
+    ['o', b.category_name], ['r', b.status]]);
+  return `  <record>\n` +
+    `    <leader>     nam  22     3a 4500</leader>\n` +
+    `    <controlfield tag="001">${xesc(b.inv_number ?? b.id)}</controlfield>\n` +
+    df.join('\n') + `\n  </record>`;
+}
+function buildMarcXml(books) {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<!-- UNIMARC в MARCXML структура. Изнесено от библиотечна система „Инвентар“. -->\n` +
+    `<collection xmlns="http://www.loc.gov/MARC21/slim">\n` +
+    books.map(marcRecord).join('\n') + `\n</collection>\n`;
+}
+function buildDublinCore(books, s) {
+  const rec = (b) => {
+    const el = [];
+    const put = (t, v) => { if (String(v ?? '').trim() !== '') el.push(`      <dc:${t}>${xesc(v)}</dc:${t}>`); };
+    put('title', [b.title, b.subtitle].filter(Boolean).join(': '));
+    put('creator', b.author);
+    put('publisher', b.publisher);
+    put('date', b.year);
+    put('language', LANG_ISO[b.language] || b.language);
+    put('description', b.annotation);
+    put('type', b.category_name || 'text');
+    put('format', b.pages);
+    put('identifier', b.isbn ? 'ISBN ' + b.isbn : '');
+    put('identifier', 'inv:' + (b.inv_number ?? b.id));
+    put('coverage', b.city);
+    put('rights', s.lib_name || s.org || '');
+    for (const kw of String(b.keywords || '').split(/[,;]/).map(x => x.trim()).filter(Boolean)) put('subject', kw);
+    if (b.udk) put('subject', 'УДК ' + b.udk);
+    return `    <record>\n${el.join('\n')}\n    </record>`;
+  };
+  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n` +
+    books.map(rec).join('\n') + `\n</metadata>\n`;
+}
+function exportBooksFor() {
+  return db.prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
+}
+ipcMain.handle('catalog:exportMarc', async () => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Експорт в UNIMARC / MARCXML',
+      defaultPath: 'fond-unimarc.xml',
+      filters: [{ name: 'MARCXML', extensions: ['xml'] }]
+    });
+    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+    const books = exportBooksFor();
+    fs.writeFileSync(filePath, buildMarcXml(books), 'utf8');
+    logAudit('Експорт UNIMARC', filePath + ' — ' + books.length + ' записа');
+    return { ok: true, data: { path: filePath, count: books.length } };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('catalog:exportDc', async () => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Експорт в Dublin Core',
+      defaultPath: 'fond-dublincore.xml',
+      filters: [{ name: 'XML', extensions: ['xml'] }]
+    });
+    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+    const books = exportBooksFor();
+    const s = db.prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
+    fs.writeFileSync(filePath, buildDublinCore(books, s), 'utf8');
+    logAudit('Експорт Dublin Core', filePath + ' — ' + books.length + ' записа');
+    return { ok: true, data: { path: filePath, count: books.length } };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 ipcMain.handle('catalog:export', async () => {
   try {
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {

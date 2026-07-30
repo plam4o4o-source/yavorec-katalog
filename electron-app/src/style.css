@@ -286,6 +286,52 @@ table.ledger .num{font-family:var(--mono)}
   width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:3px;
   font-family:var(--sans); font-size:13px; background:#fff;
 }
+/* Вторият слой прозорци стои над първия */
+.veil2{z-index:60; background:rgba(27,24,19,.35)}
+.veil2 .modal{max-width:820px}
+
+/* ---------- Избор на УДК ---------- */
+.udkSearch{
+  width:100%; padding:9px 11px; border:1px solid var(--rule2); border-radius:3px;
+  font-family:var(--sans); font-size:13px; margin-bottom:12px; background:#fff;
+}
+.udkGroup{margin-bottom:14px}
+.udkMain{
+  font-family:var(--serif); font-size:14px; font-weight:700; color:var(--spine);
+  padding-bottom:5px; border-bottom:1px solid var(--rule); margin-bottom:7px;
+}
+.udkSubs{display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:4px}
+.udkItem{
+  display:flex; gap:8px; align-items:baseline; text-align:left; width:100%;
+  background:none; border:1px solid transparent; border-radius:3px; padding:5px 7px;
+  cursor:pointer; font-family:var(--sans); font-size:12.5px; color:var(--ink);
+}
+.udkItem:hover{background:var(--paper3); border-color:var(--rule2)}
+.udkCode{font-family:var(--mono); font-weight:700; color:var(--brass); flex:0 0 auto; font-size:12px}
+.udkLbl{color:var(--ink2); line-height:1.3}
+
+/* ---------- Сливане на дубликати ---------- */
+.authGroup{border:1px solid var(--rule2); border-radius:4px; padding:12px 14px; margin-bottom:12px; background:var(--paper)}
+.authRow{display:flex; align-items:center; gap:10px; padding:5px 0; border-bottom:1px dashed var(--rule)}
+.authRow:last-child{border-bottom:none}
+.authRow input[type=radio]{width:auto; margin:0; flex:0 0 auto}
+.authVal{flex:1; font-size:13px}
+.authN{font-family:var(--mono); font-size:12px; color:var(--ink2); flex:0 0 auto}
+.authTarget{font-size:11px; color:var(--brass); flex:0 0 auto; min-width:74px; text-align:right}
+
+/* ---------- Напомняния за просрочени ---------- */
+.remCard{border:1px solid var(--rule2); border-radius:4px; margin-bottom:12px; background:var(--paper); overflow:hidden}
+.remHead{display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--paper3); border-bottom:1px solid var(--rule)}
+.remName{font-weight:700; font-size:14px; flex:1}
+.remBadge{font-size:11px; padding:2px 8px; border-radius:10px; background:var(--red); color:#fff}
+.remBody{padding:12px 14px}
+.remText{
+  width:100%; font-family:var(--mono); font-size:11.5px; line-height:1.5; padding:9px 11px;
+  border:1px solid var(--rule2); border-radius:3px; background:#fff; resize:vertical;
+}
+.remMeta{font-size:12px; color:var(--ink2); margin-bottom:8px}
+.remMeta b{color:var(--ink)}
+
 /* Номерирани стъпки за първоначална настройка */
 .steps{margin:10px 0 10px 18px; padding:0; font-size:13px; line-height:1.75; color:var(--ink)}
 .steps li{margin-bottom:5px}
