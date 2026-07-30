@@ -180,7 +180,9 @@ function shead() {
   if (s.lib_name) lines.push(esc(s.lib_name));
   const place = [s.place ? esc(s.place) : '', s.bulstat ? 'ЕИК ' + esc(s.bulstat) : ''].filter(Boolean).join(' · ');
   if (place) lines.push(place);
-  return `<div class="porg">${lines.join('<br>')}</div>`;
+  const text = `<div class="porg">${lines.join('<br>')}</div>`;
+  // Логото застава вляво от данните на организацията във всеки официален документ.
+  return s.logo ? `<div class="pheadRow"><img class="plogo" src="${esc(s.logo)}" alt="">${text}</div>` : text;
 }
 function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
 function setPrintPage(opts) {
@@ -195,17 +197,39 @@ function doPrint(html) {
   toast('За PDF файл: в прозореца за печат изберете „Save as PDF“ / „Microsoft Print to PDF“ вместо принтер.');
   requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => window.print(), 150)));
 }
-function printLabelSheet(cardsHtml) {
+/* Размерите на трите вида етикети се задават в „Баркод етикети“ → „Формат на печат“.
+   kind избира кой размер важи: 'fund' — етикет за фонда, 'sig' — етикет за сигнатура
+   (гръбче), 'card' — читателска карта. */
+function labelSize(kind) {
   const s = SETTINGS_CACHE || {};
+  if (kind === 'sig') return { w: +s.sig_w || 25, h: +s.sig_h || 35 };
+  if (kind === 'card') return { w: +s.card_w || 90, h: +s.card_h || 60 };
+  return { w: +s.lbl_w || 40, h: +s.lbl_h || 30 };
+}
+function printLabelSheet(cardsHtml, kind) {
+  const s = SETTINGS_CACHE || {};
+  const { w, h } = labelSize(kind);
+  const gap = (s.lbl_gap != null ? +s.lbl_gap : 3);
+  const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
+  const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
   if (s.lbl_mode === 'roll') {
-    const w = +s.lbl_w || 40, h = +s.lbl_h || 30;
+    // Един етикет на страница с точния размер на ролката.
     setPrintPage({
-      widthMm: w, heightMm: h, margin: '0',
-      extraCss: `.lblsheet{display:block}.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:none;` +
+      widthMm: w, heightMm: h, margin: marg + 'mm',
+      extraCss: `.lblsheet{display:block}` +
+        `.lbl{width:${w - 2 * marg}mm;height:${h - 2 * marg}mm;box-sizing:border-box;border:none;` +
         `page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center}`
     });
   } else {
-    setPrintPage({ landscape: false, margin: '10mm 8mm' });
+    // A4 лист: колоните и разстоянията се задават от настройките, а всеки етикет
+    // получава точната си височина, за да съвпадне с готовите листове с етикети.
+    const cols = Math.max(1, Math.min(8, +s.lbl_cols || 3));
+    setPrintPage({
+      landscape: false, margin: marg + 'mm',
+      extraCss: `.lblsheet{display:grid;grid-template-columns:repeat(${cols},${w}mm);gap:${gap}mm;justify-content:start}` +
+        `.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:${border};` +
+        `display:flex;flex-direction:column;align-items:center;justify-content:center}`
+    });
   }
   doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
 }
@@ -219,6 +243,35 @@ function lblCard(b) {
     ${s.place ? `<div class="l2">${esc(s.place)}</div>` : ''}
     ${code39svg(b.barcode || String(b.inv_number), 150, 40)}
     <div class="l3">${esc(b.inv_number ?? b.barcode ?? '')}</div></div>`;
+}
+/* Читателска карта, стандартен размер 90 x 60 мм. Оформена е като истинска карта:
+   заглавна лента с логото и името на библиотеката, име на читателя и данни от
+   регистрацията, баркод на номера на картата долу. */
+function readerCardHtml(r) {
+  const s = SETTINGS_CACHE || {};
+  const name = s.lib_name || s.org || '';
+  const valid = r.re_registered_at || r.registered_at || '';
+  return `<div class="lbl rcard">
+    <div class="rc-top">
+      ${s.logo ? `<img class="rc-logo" src="${esc(s.logo)}" alt="">` : ''}
+      <div class="rc-org">
+        ${name ? `<div class="rc-name">${esc(name)}</div>` : ''}
+        ${s.place ? `<div class="rc-place">${esc(s.place)}</div>` : ''}
+      </div>
+    </div>
+    <div class="rc-title">ЧИТАТЕЛСКА КАРТА</div>
+    <div class="rc-body">
+      <div class="rc-reader">${esc(r.name || '')}</div>
+      <div class="rc-meta">
+        <span>Категория: <b>${esc(r.category || '—')}</b></span>
+        <span>Рег. ${esc(bg(valid) || '—')}</span>
+      </div>
+    </div>
+    <div class="rc-bar">
+      ${code39svg(r.card_no || String(r.id), 200, 34)}
+      <div class="rc-no">№ ${esc(r.card_no || r.id)}</div>
+    </div>
+  </div>`;
 }
 function sigLblCard(b) {
   return `<div class="lbl lbl-sig">
@@ -2288,15 +2341,48 @@ async function renderLabels() {
   const s = SETTINGS_CACHE || await loadSettingsCache();
   $('#view').innerHTML = `
     <div class="note">Етикетите се печатат във формат <b>Code 39</b> — разчита се от всеки USB баркод четец без настройка.
-    Съвместимо е с обикновен принтер (A4 лист, 3 колони) и с ролкови лейбъл принтери (Zebra, Brother QL, Dymo и др.).</div>
+    Съвместимо е с обикновен принтер (A4 лист, брой колони по избор) и с ролкови лейбъл принтери
+    (Zebra, Brother QL, Dymo и др.). Размерите на трите вида етикети се задават поотделно по-долу.</div>
 
     <div class="card"><h3 style="margin-top:0">Формат на печат за етикети</h3>
       <form id="lblFmtF" onsubmit="return false">
-        <div class="grid g3">
-          ${fld('Формат', 'lbl_mode', { type: 'select', allowEmpty: false, val: s.lbl_mode, opts: [{ v: 'sheet', t: 'A4 лист (3 колони)' }, { v: 'roll', t: 'Ролков лейбъл принтер (1 етикет на страница)' }] })}
-          ${fld('Ширина на етикета (мм)', 'lbl_w', { val: s.lbl_w, type: 'number', hint: 'само за ролков принтер' })}
-          ${fld('Височина на етикета (мм)', 'lbl_h', { val: s.lbl_h, type: 'number', hint: 'само за ролков принтер' })}
-        </div>
+        <fieldset><legend>Хартия</legend>
+          <div class="grid g4">
+            ${fld('Формат', 'lbl_mode', { type: 'select', allowEmpty: false, val: s.lbl_mode, opts: [{ v: 'sheet', t: 'A4 лист (в колони)' }, { v: 'roll', t: 'Ролков лейбъл принтер' }] })}
+            ${fld('Колони на листа', 'lbl_cols', { val: s.lbl_cols ?? 3, type: 'number', hint: 'само за A4 лист' })}
+            ${fld('Разстояние между етикетите (мм)', 'lbl_gap', { val: s.lbl_gap ?? 3, type: 'number', hint: 'само за A4 лист' })}
+            ${fld('Поле на листа (мм)', 'lbl_margin', { val: s.lbl_margin ?? 8, type: 'number' })}
+          </div>
+          <label class="chk"><input type="checkbox" name="lbl_border" ${(s.lbl_border == null || +s.lbl_border) ? 'checked' : ''}>
+            Пунктирана рамка около всеки етикет (помага при рязане; изключете я при готови листове с етикети)</label>
+        </fieldset>
+        <fieldset><legend>Размери на трите вида етикети (мм)</legend>
+          <div class="grid g3">
+            <div>
+              <div class="hint" style="margin-bottom:4px"><b>Етикет за фонда</b></div>
+              <div class="grid g2">
+                ${fld('Ширина', 'lbl_w', { val: s.lbl_w ?? 40, type: 'number' })}
+                ${fld('Височина', 'lbl_h', { val: s.lbl_h ?? 30, type: 'number' })}
+              </div>
+            </div>
+            <div>
+              <div class="hint" style="margin-bottom:4px"><b>Етикет за сигнатура</b></div>
+              <div class="grid g2">
+                ${fld('Ширина', 'sig_w', { val: s.sig_w ?? 25, type: 'number' })}
+                ${fld('Височина', 'sig_h', { val: s.sig_h ?? 35, type: 'number' })}
+              </div>
+            </div>
+            <div>
+              <div class="hint" style="margin-bottom:4px"><b>Читателска карта</b></div>
+              <div class="grid g2">
+                ${fld('Ширина', 'card_w', { val: s.card_w ?? 90, type: 'number' })}
+                ${fld('Височина', 'card_h', { val: s.card_h ?? 60, type: 'number' })}
+              </div>
+            </div>
+          </div>
+          <div class="hint">Стандартният размер на читателска карта е 90 × 60 мм. Размерите важат и за двата
+          формата: при A4 лист определят големината на всяко квадратче, при ролков принтер — размера на страницата.</div>
+        </fieldset>
       </form>
       <button class="btn pri" onclick="saveLabelFormat()">Запиши формата</button>
     </div>
@@ -2317,8 +2403,16 @@ async function renderLabels() {
         <div class="hint" style="margin-top:6px">Пример за оформлението.</div>
       </div>
       <div class="card"><h3 style="margin-top:0">Читателски карти</h3>
-        <p class="hint" style="margin-top:0">Печат на баркод карти за всички активни читатели.</p>
-        <button class="btn pri" onclick="printCardsAll()">Печат на карти</button>
+        <p class="hint" style="margin-top:0">Карта с логото и името на библиотеката, името на читателя,
+        категорията, датата на регистрация и баркод на номера на картата.
+        Размер ${esc(String(s.card_w ?? 90))} × ${esc(String(s.card_h ?? 60))} мм.</p>
+        <div class="toolbar"><button class="btn pri" onclick="printCardsAll()">Печат на карти за всички</button></div>
+        <div class="cardPreview" style="--cw:${esc(String(s.card_w ?? 90))}mm;--ch:${esc(String(s.card_h ?? 60))}mm">
+          ${readerCardHtml({ name: 'Иванова, Мария Петрова', card_no: '000123', category: 'възрастен',
+            registered_at: today(), id: 1 })}
+        </div>
+        <div class="hint" style="margin-top:6px">Пример за оформлението — показан е в истинския размер.
+        ${s.logo ? '' : 'Логото се задава в „Настройки“ → „Лого на организацията“.'}</div>
       </div>
     </div>
 
@@ -2360,8 +2454,27 @@ async function saveLabelFormat() {
   const d = formData('#lblFmtF');
   await call(window.api.settings.updateLabelFormat(d), 'Форматът за печат на етикети е записан.');
   await loadSettingsCache();
+  renderLabels(); // прегледите се преначертават с новите размери
 }
 window.saveLabelFormat = saveLabelFormat;
+
+/* ---------------- Лого на организацията ---------------- */
+async function chooseLogo() {
+  const res = await window.api.settings.chooseLogo();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  toast('Логото е записано — влиза автоматично в документите и читателските карти.', 'ok');
+  markSaved();
+  await loadSettingsCache();
+  if (RENDERERS[VIEW]) RENDERERS[VIEW]();
+}
+window.chooseLogo = chooseLogo;
+async function clearLogo() {
+  if (!confirm('Премахване на логото от документите и картите?')) return;
+  await call(window.api.settings.clearLogo(), 'Логото е премахнато.');
+  await loadSettingsCache();
+  if (RENDERERS[VIEW]) RENDERERS[VIEW]();
+}
+window.clearLogo = clearLogo;
 async function activeBooks() {
   const books = await call(window.api.books.list(''));
   return (books || []).filter(b => b.status !== 'отчислен');
@@ -2371,13 +2484,13 @@ async function printLabelsRange() {
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet(rows.map(lblCard).join(''));
+  printLabelSheet(rows.map(lblCard).join(''), 'fund');
 }
 window.printLabelsRange = printLabelsRange;
 async function printLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet(rows.map(lblCard).join(''));
+  printLabelSheet(rows.map(lblCard).join(''), 'fund');
 }
 window.printLabelsAll = printLabelsAll;
 async function printSignatureLabelsRange() {
@@ -2385,25 +2498,20 @@ async function printSignatureLabelsRange() {
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet(rows.map(sigLblCard).join(''));
+  printLabelSheet(rows.map(sigLblCard).join(''), 'sig');
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
 async function printSignatureLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet(rows.map(sigLblCard).join(''));
+  printLabelSheet(rows.map(sigLblCard).join(''), 'sig');
 }
 window.printSignatureLabelsAll = printSignatureLabelsAll;
 async function printCardsAll() {
   const readers = await call(window.api.readers.list(''));
   const rows = (readers || []).filter(r => r.status !== 'прекратен');
   if (!rows.length) return toast('Няма активни читатели.', 'err');
-  const s = SETTINGS_CACHE || {};
-  const cardName = s.lib_name || s.org || '';
-  printLabelSheet(rows.map(r => `<div class="lbl">
-    ${cardName ? `<div class="l1">${esc(cardName)}</div>` : ''}${code39svg(r.card_no || String(r.id), 150, 40)}
-    <div class="l3">${esc(r.card_no || '')}</div>
-    <div style="font-size:8pt;margin-top:1mm">${esc(r.name || '')}</div></div>`).join(''));
+  printLabelSheet(rows.map(readerCardHtml).join(''), 'card');
 }
 window.printCardsAll = printCardsAll;
 async function printReaderCard(id) {
@@ -2515,6 +2623,21 @@ async function renderSetup() {
         <div class="grid g2">${fld('Ръководител', 'director', { val: s.director || '' })}${fld('Длъжност', 'director_role', { val: s.director_role || '' })}</div>
         ${fld('Библиотекар', 'librarian', { val: s.librarian || '' })}
         ${fld('Адрес на сайта', 'cat_url', { val: s.cat_url || '' })}
+        <div class="field"><label>Лого на организацията</label>
+          <div class="logoBox">
+            ${s.logo ? `<img src="${esc(s.logo)}" alt="лого">`
+                     : '<div class="logoEmpty">няма<br>лого</div>'}
+            <div>
+              <div class="toolbar" style="margin:0">
+                <button type="button" class="btn" onclick="chooseLogo()">${s.logo ? 'Смени…' : 'Избери файл…'}</button>
+                ${s.logo ? '<button type="button" class="btn dgr" onclick="clearLogo()">Премахни</button>' : ''}
+              </div>
+              <div class="hint" style="margin-top:6px">PNG, JPG, GIF, WEBP или SVG, до 512 KB.
+              Влиза автоматично в заглавната част на всички документи за печат — актове, протоколи,
+              инвентарна книга, КДБФ, картони, напомнителни писма — и в читателските карти.</div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="card"><h3 style="margin-top:0">Обслужване</h3>
         <div class="grid g2">

@@ -72,6 +72,15 @@ function initDb() {
     lbl_mode: "TEXT DEFAULT 'sheet'",
     lbl_w: 'INTEGER DEFAULT 40',
     lbl_h: 'INTEGER DEFAULT 30',
+    lbl_cols: 'INTEGER DEFAULT 3',
+    lbl_gap: 'REAL DEFAULT 3',
+    lbl_margin: 'REAL DEFAULT 8',
+    lbl_border: 'INTEGER DEFAULT 1',
+    sig_w: 'INTEGER DEFAULT 25',
+    sig_h: 'INTEGER DEFAULT 35',
+    card_w: 'INTEGER DEFAULT 90',
+    card_h: 'INTEGER DEFAULT 60',
+    logo: 'TEXT',
     theme: "TEXT DEFAULT '1'",
     catalog_folder: 'TEXT',
     gh_user: 'TEXT',
@@ -574,10 +583,63 @@ ipcMain.handle('settings:update', (e, s) =>
     logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
   })
 );
-ipcMain.handle('settings:updateLabelFormat', (e, { lbl_mode, lbl_w, lbl_h }) =>
+// Размерите се ограничават в разумни граници: под няколко милиметра етикетът е
+// безсмислен, а над размера на A4 принтерът така или иначе не го поема.
+const clampNum = (v, lo, hi, def) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
+};
+ipcMain.handle('settings:updateLabelFormat', (e, o) =>
   run(() => {
-    db.prepare('UPDATE settings SET lbl_mode=?, lbl_w=?, lbl_h=? WHERE id=1')
-      .run(lbl_mode, parseInt(lbl_w, 10) || 40, parseInt(lbl_h, 10) || 30);
+    o = o || {};
+    db.prepare(`UPDATE settings SET lbl_mode=?, lbl_w=?, lbl_h=?, lbl_cols=?, lbl_gap=?, lbl_margin=?,
+                lbl_border=?, sig_w=?, sig_h=?, card_w=?, card_h=? WHERE id=1`)
+      .run(
+        o.lbl_mode === 'roll' ? 'roll' : 'sheet',
+        clampNum(o.lbl_w, 10, 210, 40), clampNum(o.lbl_h, 8, 297, 30),
+        clampNum(o.lbl_cols, 1, 8, 3), clampNum(o.lbl_gap, 0, 30, 3), clampNum(o.lbl_margin, 0, 40, 8),
+        o.lbl_border ? 1 : 0,
+        clampNum(o.sig_w, 10, 100, 25), clampNum(o.sig_h, 10, 120, 35),
+        clampNum(o.card_w, 40, 210, 90), clampNum(o.card_h, 30, 297, 60)
+      );
+  })
+);
+/* ---------------- Лого на организацията ----------------
+   Логото се пази в самата база данни като data URI, а не като път до файл: така
+   пътува заедно с базата при резервно копие, при пренасяне на друг компютър и при
+   работа в мрежа, където другите компютри нямат достъп до локалния файл. */
+const LOGO_MAX_BYTES = 512 * 1024;
+const LOGO_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+ipcMain.handle('settings:chooseLogo', async () => {
+  try {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Изберете файл с логото на организацията',
+      properties: ['openFile'],
+      filters: [{ name: 'Изображения', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }]
+    });
+    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+    const file = filePaths[0];
+    const ext = path.extname(file).toLowerCase();
+    const mime = LOGO_MIME[ext];
+    if (!mime) return { ok: false, error: 'Неподдържан формат. Изберете PNG, JPG, GIF, WEBP или SVG.' };
+    const buf = fs.readFileSync(file);
+    if (buf.length > LOGO_MAX_BYTES) {
+      return { ok: false, error: 'Файлът е ' + Math.round(buf.length / 1024) + ' KB, а максимумът е 512 KB. ' +
+        'Смалете изображението — за печат е достатъчно около 600 пиксела ширина.' };
+    }
+    const dataUri = `data:${mime};base64,${buf.toString('base64')}`;
+    db.prepare('UPDATE settings SET logo = ? WHERE id = 1').run(dataUri);
+    logAudit('Редакция на настройки', 'зададено лого на организацията');
+    return { ok: true, data: dataUri };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('settings:clearLogo', () =>
+  run(() => {
+    db.prepare('UPDATE settings SET logo = NULL WHERE id = 1').run();
+    logAudit('Редакция на настройки', 'премахнато лого на организацията');
   })
 );
 ipcMain.handle('settings:updateTheme', (e, theme) =>

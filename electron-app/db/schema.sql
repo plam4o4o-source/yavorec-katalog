@@ -333,6 +333,15 @@ CREATE TABLE IF NOT EXISTS settings (
   lbl_mode          TEXT DEFAULT 'sheet',
   lbl_w             INTEGER DEFAULT 40,
   lbl_h             INTEGER DEFAULT 30,
+  lbl_cols          INTEGER DEFAULT 3,      -- колони при печат на A4 лист
+  lbl_gap           REAL    DEFAULT 3,      -- разстояние между етикетите, мм
+  lbl_margin        REAL    DEFAULT 8,      -- поле на листа/ролката, мм
+  lbl_border        INTEGER DEFAULT 1,      -- пунктирана рамка около етикета
+  sig_w             INTEGER DEFAULT 25,     -- етикет за сигнатура (гръбче), мм
+  sig_h             INTEGER DEFAULT 35,
+  card_w            INTEGER DEFAULT 90,     -- читателска карта, мм (стандарт 90x60)
+  card_h            INTEGER DEFAULT 60,
+  logo              TEXT,                   -- лого на организацията, data URI
   theme             TEXT DEFAULT '1',
   catalog_folder    TEXT,
   gh_user           TEXT,
