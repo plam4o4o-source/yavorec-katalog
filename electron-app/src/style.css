@@ -349,11 +349,20 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 /* ---------- Странична лента — долен колонтитул ---------- */
 #rail{display:flex; flex-direction:column}
 .railFoot{margin-top:auto; padding:16px 20px; border-top:1px solid var(--spine3)}
+
+/* ---------- Изборът на служител — горе вдясно ----------
+   Стои в горната лента, върху светъл фон, затова цветовете са различни от
+   останалите бутони там: обточен е с бронз, за да личи кой работи в момента. */
+.topRight{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end}
+#topActions{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
 .userBadge{
-  width:100%; background:var(--spine2); border:1.5px solid var(--brassD); color:#F4EFDF; padding:13px 14px;
-  border-radius:4px; font-size:14.5px; font-weight:600; cursor:pointer; text-align:left;
+  background:var(--paper); border:1.5px solid var(--brass); color:var(--spine2);
+  padding:8px 14px; border-radius:4px; font-family:var(--sans); font-size:13px; font-weight:600;
+  cursor:pointer; text-align:left; white-space:nowrap; flex:0 0 auto;
 }
-.userBadge:hover{background:var(--spine3); border-color:var(--brassL)}
+.userBadge:hover{background:var(--paper3); border-color:var(--brassD)}
+/* Докато служителят не е избран — приглушено, за да личи, че е подкана */
+.userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
 .appCredit{font-size:10px; color:#8A8168; margin-top:10px; text-align:center; line-height:1.4}
 .savedIndicator{font-size:11px; color:#8A8168; margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}
 .savedIndicator .dot{width:6px; height:6px; border-radius:50%; background:var(--green); flex:0 0 auto}

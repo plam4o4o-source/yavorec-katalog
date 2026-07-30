@@ -417,6 +417,10 @@ function renderUserBadge(name) {
   const el = $('#userBadge');
   if (!el) return;
   el.textContent = name ? 'Служител: ' + name : 'Служител: (изберете)';
+  el.classList.toggle('unset', !name);
+  el.title = name
+    ? 'Действията се вписват в одитната следа на името на този служител. Натиснете, за да смените.'
+    : 'Изберете кой служител работи в момента.';
 }
 async function chooseEmployeeModal() {
   const employees = await call(window.api.employees.list());
