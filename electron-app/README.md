@@ -8,7 +8,8 @@ Windows десктоп версия на библиотечния каталог
 Програмата е **универсална** — ползва се от всяко читалище или библиотека, без
 промяна в кода. Виж „Данни на библиотеката (универсалност)“ по-долу.
 
-Лицензирана е под **GNU General Public License v3.0** (вижте `LICENSE`).
+Copyright © 2026 Пламен Боянов Христов. Лицензирана е под
+**GNU General Public License v3.0** (вижте `LICENSE`).
 Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases);
 Windows инсталаторът се подписва безплатно чрез
 [SignPath Foundation](https://signpath.org/)-ната програма за проекти с
