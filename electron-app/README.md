@@ -331,6 +331,53 @@ Certum („Open Source Code Signing“) е най-евтиният вариан�
 GitHub Actions. В такъв случай подписването става на вашия компютър (виж
 по-долу).
 
+### Azure Trusted Signing (Artifact Signing) — стъпка по стъпка
+
+Избраният път за тази програма. Регистрацията е еднократна; след нея всяка
+нова версия излиза подписана автоматично, без никакво действие.
+
+1. **Акаунт в Azure**: <https://azure.microsoft.com> → „Start free“ / „Pay as
+   you go“. Иска банкова карта; самата услуга е ~10 USD/месец (план Basic).
+2. В <https://portal.azure.com> потърсете **„Trusted Signing accounts“**
+   (новото име е Artifact Signing) → Create: изберете абонамента, нова resource
+   group (напр. `inventar`), регион **East US**, име на акаунта (напр.
+   `inventar-signing`), SKU **Basic**.
+3. В акаунта → **Identity validation** → New → **Individual**: трите имена на
+   латиница по документ за самоличност (Plamen Boyanov Hristov), адрес, имейл.
+   Следва проверка на документ през препратка по имейла. Отнема от часове до
+   няколко дни.
+4. След одобрена самоличност → **Certificate profiles** → New: тип
+   **Public Trust**, изберете одобрената самоличност, име напр.
+   `inventar-profile`.
+5. **Достъп за GitHub** (App registration): Microsoft Entra ID → App
+   registrations → New (напр. `inventar-ci`) → в него Certificates & secrets →
+   New client secret (запишете стойността веднага — показва се еднократно).
+   После в Trusted Signing акаунта → Access control (IAM) → Add role
+   assignment → роля **Trusted Signing Certificate Profile Signer** → на
+   приложението `inventar-ci`.
+6. В GitHub хранилището → Settings → Secrets and variables → Actions добавете
+   шестте тайни:
+
+   | Тайна | Откъде |
+   |---|---|
+   | `AZURE_TENANT_ID` | App registration → Overview → Directory (tenant) ID |
+   | `AZURE_CLIENT_ID` | App registration → Overview → Application (client) ID |
+   | `AZURE_CLIENT_SECRET` | стойността на client secret от стъпка 5 |
+   | `AZURE_SIGN_ENDPOINT` | от Trusted Signing акаунта → Overview → Account URI, напр. `https://eus.codesigning.azure.net` |
+   | `AZURE_SIGN_ACCOUNT` | името на акаунта, напр. `inventar-signing` |
+   | `AZURE_SIGN_PROFILE` | името на профила, напр. `inventar-profile` |
+
+От следващото изграждане нататък инсталаторът излиза подписан — стъпката
+„Показва дали инсталаторът е подписан“ в Actions ще изпише издателя. Подписването
+става **по време на изграждането** (кука `tools/azure-sign.js` през
+`win.sign`), преди изчисляването на хешовете, затова `latest.yml` остава верен
+и автоматичното обновяване работи.
+
+**След първата подписана версия**: `win.publisherName` трябва да съвпадне
+буква по буква с CN на издадения сертификат, а `win.verifyUpdateCodeSignature`
+се връща на `true`, за да проверява обновяването и подписа. И двете са една
+промяна в `package.json`.
+
 ### Какви данни иска сертифициращият орган
 
 Проверката е на самоличността, не на програмата — кодът не се преглежда и не

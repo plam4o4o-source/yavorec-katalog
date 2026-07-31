@@ -54,11 +54,39 @@ jobs:
             Write-Host 'Сертификатът е зареден — инсталаторът ще бъде подписан.'
           }
 
+      # Azure Trusted Signing (Artifact Signing) — включва се сам, щом в
+      # хранилището бъдат добавени шестте тайни (Settings → Secrets → Actions):
+      #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET  — App registration
+      #   AZURE_SIGN_ENDPOINT  — напр. https://eus.codesigning.azure.net
+      #   AZURE_SIGN_ACCOUNT   — името на Trusted Signing акаунта
+      #   AZURE_SIGN_PROFILE   — името на сертификатния профил (Public Trust)
+      # Куката tools/azure-sign.js се подава на electron-builder само тогава,
+      # за да не измести подписването с .pfx (CSC_LINK), ако някога се ползва то.
+      - name: Подготвя Azure Trusted Signing (ако е настроен)
+        shell: pwsh
+        env:
+          AZ_EP: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:AZ_EP)) {
+            Write-Host 'Няма Azure Trusted Signing — инсталаторът ще бъде без облачен подпис.'
+          } else {
+            Install-Module -Name TrustedSigning -Force -Scope CurrentUser -Repository PSGallery
+            "SIGN_ARG=--config.win.sign=tools/azure-sign.js" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host 'Trusted Signing е настроен — инсталаторът ще бъде подписан.'
+          }
+
       - name: Build and publish release
-        run: npm run build -- --publish always
+        shell: pwsh
+        run: npm run build -- --publish always $env:SIGN_ARG
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
 
       - name: Показва дали инсталаторът е подписан
         shell: pwsh
