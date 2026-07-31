@@ -8,6 +8,13 @@ Windows десктоп версия на библиотечния каталог
 Програмата е **универсална** — ползва се от всяко читалище или библиотека, без
 промяна в кода. Виж „Данни на библиотеката (универсалност)“ по-долу.
 
+Copyright © 2026 Пламен Боянов Христов. Лицензирана е под
+**GNU General Public License v3.0** (вижте `LICENSE`).
+Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases);
+Windows инсталаторът се подписва безплатно чрез
+[SignPath Foundation](https://signpath.org/)-ната програма за проекти с
+отворен код.
+
 ## Структура на проекта
 
 ```
@@ -94,7 +101,7 @@ npm run build
 - долу вляво в страничното меню (под индикатора за последния запис)
 - в „Настройки“, най-долу на страницата
 
-Текстът е: „Създадено от Пламен Боянов Христов · Всички права запазени © &lt;година(и)&gt; · v&lt;версия&gt;“
+Текстът е: „Създадено от Пламен Боянов Христов · GPL-3.0 © &lt;година(и)&gt; · v&lt;версия&gt;“
 — годината се изчислява автоматично (напр. „2026–2027“, ако програмата се ползва
 и следващата година), версията идва директно от `package.json`, без да се пипа
 ръчно другаде.
@@ -316,14 +323,16 @@ Microsoft — купува се от сертифициращ орган. Въз
 
 | Вариант | Цена | Кога SmartScreen спира да пита |
 |---|---|---|
-| **Azure Trusted Signing** (Microsoft) | ~10 USD/месец | веднага — Microsoft се доверява на собствената си услуга |
+| **SignPath Foundation** (за проекти с отворен код) | безплатно | веднага — доверен сертификат, автоматично подписване в CI |
 | **EV сертификат** (DigiCert, Sectigo, GlobalSign) | ~400 – 600 EUR/година | веднага |
 | **OV сертификат** (Certum, Sectigo) | ~200 – 400 EUR/година; Certum има поевтинял вариант за физически лица | след няколко седмици и няколкостотин изтегляния |
 | Самоподписан сертификат | безплатно | **никога** — не помага, дори влошава положението |
 
-Certum („Open Source Code Signing“) е най-евтиният вариант за физическо лице в
-България. Azure Trusted Signing е най-евтиният като цяло, но изисква
-регистрация в Azure.
+Проектът е с отворен код (GPL-3.0), затова е избран **SignPath Foundation** —
+единственият напълно безплатен вариант, без месечна такса и без нуждата от
+организационна проверка пред сертифициращ орган. Certum („Open Source Code
+Signing“) е най-евтиният платен вариант за физическо лице в България, ако
+SignPath не одобри заявката.
 
 От юни 2023 г. частният ключ по правило се пази на **хардуерен токен или в
 облачен HSM** — не е обикновен файл. Това е важно за автоматичния build:
@@ -331,52 +340,34 @@ Certum („Open Source Code Signing“) е най-евтиният вариан�
 GitHub Actions. В такъв случай подписването става на вашия компютър (виж
 по-долу).
 
-### Azure Trusted Signing (Artifact Signing) — стъпка по стъпка
+### SignPath Foundation — безплатно за проекти с отворен код
 
-Избраният път за тази програма. Регистрацията е еднократна; след нея всяка
-нова версия излиза подписана автоматично, без никакво действие.
+Избраният път за тази програма. Безплатно е завинаги, но изисква проектът да е
+с отворен код (условие, изпълнено от лиценза GPL-3.0) и одобрение от екипа на
+SignPath, което може да отнеме дни до седмици — и може да бъде отказано, ако
+проектът е сметнат за твърде малко разпространен.
 
-1. **Акаунт в Azure**: <https://azure.microsoft.com> → „Start free“ / „Pay as
-   you go“. Иска банкова карта; самата услуга е ~10 USD/месец (план Basic).
-2. В <https://portal.azure.com> потърсете **„Trusted Signing accounts“**
-   (новото име е Artifact Signing) → Create: изберете абонамента, нова resource
-   group (напр. `inventar`), регион **East US**, име на акаунта (напр.
-   `inventar-signing`), SKU **Basic**.
-3. В акаунта → **Identity validation** → New → **Individual**: трите имена на
-   латиница по документ за самоличност (Plamen Boyanov Hristov), адрес, имейл.
-   Следва проверка на документ през препратка по имейла. Отнема от часове до
-   няколко дни.
-4. След одобрена самоличност → **Certificate profiles** → New: тип
-   **Public Trust**, изберете одобрената самоличност, име напр.
-   `inventar-profile`.
-5. **Достъп за GitHub** (App registration): Microsoft Entra ID → App
-   registrations → New (напр. `inventar-ci`) → в него Certificates & secrets →
-   New client secret (запишете стойността веднага — показва се еднократно).
-   После в Trusted Signing акаунта → Access control (IAM) → Add role
-   assignment → роля **Trusted Signing Certificate Profile Signer** → на
-   приложението `inventar-ci`.
-6. В GitHub хранилището → Settings → Secrets and variables → Actions добавете
-   шестте тайни:
+1. Хранилището в GitHub трябва да е **публично** (Settings → General → Danger
+   Zone → Change repository visibility).
+2. Кандидатствайте на <https://signpath.io/solutions/open-source-community> →
+   бутон „Apply“ → формуляр на <https://signpath.org/apply>. Основни полета:
+   Repository URL (`https://github.com/plam4o4o-source/yavorec-katalog`),
+   Homepage URL, Download URL (страница, която споменава SignPath — вече е в
+   този README), Build System (**GitHub Actions**), име и имейл за акаунта.
+3. След одобрение: влизате в таблото на SignPath, създавате **Project** и
+   **Signing Policy**, вземате идентификатори (Organization ID, Project Slug,
+   Signing Policy Slug) и API токен.
+4. В GitHub хранилището → Settings → Secrets and variables → Actions добавяте
+   тайните, които SignPath изисква (обичайно `SIGNPATH_API_TOKEN` и
+   идентификаторите на организацията/проекта/политиката).
+5. Workflow-ът в `.github/workflows/release-electron.yml` се допълва със
+   стъпка, която праща build артефакта към SignPath (чрез техния GitHub Action
+   `signpath/github-action-submit-signing-request`) и изчаква подписания файл
+   обратно, преди да го публикува в release-а.
 
-   | Тайна | Откъде |
-   |---|---|
-   | `AZURE_TENANT_ID` | App registration → Overview → Directory (tenant) ID |
-   | `AZURE_CLIENT_ID` | App registration → Overview → Application (client) ID |
-   | `AZURE_CLIENT_SECRET` | стойността на client secret от стъпка 5 |
-   | `AZURE_SIGN_ENDPOINT` | от Trusted Signing акаунта → Overview → Account URI, напр. `https://eus.codesigning.azure.net` |
-   | `AZURE_SIGN_ACCOUNT` | името на акаунта, напр. `inventar-signing` |
-   | `AZURE_SIGN_PROFILE` | името на профила, напр. `inventar-profile` |
-
-От следващото изграждане нататък инсталаторът излиза подписан — стъпката
-„Показва дали инсталаторът е подписан“ в Actions ще изпише издателя. Подписването
-става **по време на изграждането** (кука `tools/azure-sign.js` през
-`win.sign`), преди изчисляването на хешовете, затова `latest.yml` остава верен
-и автоматичното обновяване работи.
-
-**След първата подписана версия**: `win.publisherName` трябва да съвпадне
-буква по буква с CN на издадения сертификат, а `win.verifyUpdateCodeSignature`
-се връща на `true`, за да проверява обновяването и подписа. И двете са една
-промяна в `package.json`.
+Ако SignPath откаже заявката (напр. поради ограничена публична употреба),
+следващата опция по цена е Certum („Open Source Code Signing“) — вижте
+таблицата по-горе.
 
 ### Какви данни иска сертифициращият орган
 
@@ -429,7 +420,7 @@ GitHub Actions. В такъв случай подписването става �
   българска транслитерация; ако в личната карта е изписано другояче (напр.
   `Plamen Boianov Christov`), в `package.json` се записва точно това от
   документа, не транслитерацията.
-- `LICENSE` в корена на хранилището — авторството и запазените права.
+- `LICENSE` в корена на хранилището — пълният текст на GPL-3.0.
 - Инсталацията е **за текущия потребител** (`perMachine: false`), затова
   не иска администраторски права. Един прозорец на UAC по-малко.
 - Стъпката за подпис в `.github/workflows/release-electron.yml` е готова и се
@@ -479,7 +470,7 @@ Get-ChildItem Cert:\CurrentUser\My |
 - Ако има само `Client Authentication`, `Secure Email`, `Document Signing` —
   това е КЕП за документи. `signtool` ще откаже да подпише с него, а и Windows
   не би признал такъв подпис. За програмата остават вариантите от таблицата
-  по-горе (Azure Trusted Signing е най-евтиният).
+  по-горе (SignPath Foundation е безплатен, ако проектът бъде одобрен).
 
 ### Подписване на вашия компютър (при хардуерен токен)
 

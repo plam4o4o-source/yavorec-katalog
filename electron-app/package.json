@@ -6,7 +6,7 @@
   "author": {
     "name": "Пламен Боянов Христов"
   },
-  "license": "SEE LICENSE IN ../LICENSE",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3",
@@ -26,7 +26,7 @@
   "build": {
     "appId": "org.chyavorec.inventar",
     "productName": "Инвентар",
-    "copyright": "Copyright © 2026 Пламен Боянов Христов. Всички права запазени.",
+    "copyright": "Copyright © 2026 Пламен Боянов Христов. Свободен софтуер под GNU GPL-3.0.",
     "publish": [
       {
         "provider": "github",

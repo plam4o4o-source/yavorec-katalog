@@ -485,7 +485,7 @@ function appYears() {
 let APP_CREDIT_TEXT = '';
 async function initAppCredit() {
   const version = await call(window.api.app.getVersion());
-  APP_CREDIT_TEXT = 'Създадено от Пламен Боянов Христов · Всички права запазени © ' + appYears() + (version ? ' · v' + version : '');
+  APP_CREDIT_TEXT = 'Създадено от Пламен Боянов Христов · GPL-3.0 © ' + appYears() + (version ? ' · v' + version : '');
   const el = $('#appCredit');
   if (el) el.textContent = APP_CREDIT_TEXT;
 }
