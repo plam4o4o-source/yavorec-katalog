@@ -6,7 +6,7 @@
   "author": {
     "name": "Пламен Боянов Христов"
   },
-  "license": "SEE LICENSE IN ../LICENSE",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3",
