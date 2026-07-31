@@ -323,16 +323,15 @@ Microsoft — купува се от сертифициращ орган. Въз
 | Вариант | Цена | Кога SmartScreen спира да пита |
 |---|---|---|
 | **SignPath Foundation** (за проекти с отворен код) | безплатно | веднага — доверен сертификат, автоматично подписване в CI |
-| **Azure Trusted Signing** (Microsoft) | ~10 USD/месец | веднага — Microsoft се доверява на собствената си услуга |
 | **EV сертификат** (DigiCert, Sectigo, GlobalSign) | ~400 – 600 EUR/година | веднага |
 | **OV сертификат** (Certum, Sectigo) | ~200 – 400 EUR/година; Certum има поевтинял вариант за физически лица | след няколко седмици и няколкостотин изтегляния |
 | Самоподписан сертификат | безплатно | **никога** — не помага, дори влошава положението |
 
 Проектът е с отворен код (GPL-3.0), затова е избран **SignPath Foundation** —
 единственият напълно безплатен вариант, без месечна такса и без нуждата от
-организационна проверка в Azure. Certum („Open Source Code Signing“) е
-най-евтиният платен вариант за физическо лице в България, ако SignPath не
-одобри заявката.
+организационна проверка пред сертифициращ орган. Certum („Open Source Code
+Signing“) е най-евтиният платен вариант за физическо лице в България, ако
+SignPath не одобри заявката.
 
 От юни 2023 г. частният ключ по правило се пази на **хардуерен токен или в
 облачен HSM** — не е обикновен файл. Това е важно за автоматичния build:
@@ -366,55 +365,8 @@ SignPath, което може да отнеме дни до седмици — �
    обратно, преди да го публикува в release-а.
 
 Ако SignPath откаже заявката (напр. поради ограничена публична употреба),
-следващата опция по цена е Azure Trusted Signing по-долу.
-
-### Azure Trusted Signing (Artifact Signing) — стъпка по стъпка
-
-Резервен път, ако SignPath Foundation откаже заявката. Месечна такса, но
-регистрацията е еднократна; след нея всяка нова версия излиза подписана
-автоматично, без никакво действие.
-
-1. **Акаунт в Azure**: <https://azure.microsoft.com> → „Start free“ / „Pay as
-   you go“. Иска банкова карта; самата услуга е ~10 USD/месец (план Basic).
-2. В <https://portal.azure.com> потърсете **„Trusted Signing accounts“**
-   (новото име е Artifact Signing) → Create: изберете абонамента, нова resource
-   group (напр. `inventar`), регион **East US**, име на акаунта (напр.
-   `inventar-signing`), SKU **Basic**.
-3. В акаунта → **Identity validation** → New → **Individual**: трите имена на
-   латиница по документ за самоличност (Plamen Boyanov Hristov), адрес, имейл.
-   Следва проверка на документ през препратка по имейла. Отнема от часове до
-   няколко дни.
-4. След одобрена самоличност → **Certificate profiles** → New: тип
-   **Public Trust**, изберете одобрената самоличност, име напр.
-   `inventar-profile`.
-5. **Достъп за GitHub** (App registration): Microsoft Entra ID → App
-   registrations → New (напр. `inventar-ci`) → в него Certificates & secrets →
-   New client secret (запишете стойността веднага — показва се еднократно).
-   После в Trusted Signing акаунта → Access control (IAM) → Add role
-   assignment → роля **Trusted Signing Certificate Profile Signer** → на
-   приложението `inventar-ci`.
-6. В GitHub хранилището → Settings → Secrets and variables → Actions добавете
-   шестте тайни:
-
-   | Тайна | Откъде |
-   |---|---|
-   | `AZURE_TENANT_ID` | App registration → Overview → Directory (tenant) ID |
-   | `AZURE_CLIENT_ID` | App registration → Overview → Application (client) ID |
-   | `AZURE_CLIENT_SECRET` | стойността на client secret от стъпка 5 |
-   | `AZURE_SIGN_ENDPOINT` | от Trusted Signing акаунта → Overview → Account URI, напр. `https://eus.codesigning.azure.net` |
-   | `AZURE_SIGN_ACCOUNT` | името на акаунта, напр. `inventar-signing` |
-   | `AZURE_SIGN_PROFILE` | името на профила, напр. `inventar-profile` |
-
-От следващото изграждане нататък инсталаторът излиза подписан — стъпката
-„Показва дали инсталаторът е подписан“ в Actions ще изпише издателя. Подписването
-става **по време на изграждането** (кука `tools/azure-sign.js` през
-`win.sign`), преди изчисляването на хешовете, затова `latest.yml` остава верен
-и автоматичното обновяване работи.
-
-**След първата подписана версия**: `win.publisherName` трябва да съвпадне
-буква по буква с CN на издадения сертификат, а `win.verifyUpdateCodeSignature`
-се връща на `true`, за да проверява обновяването и подписа. И двете са една
-промяна в `package.json`.
+следващата опция по цена е Certum („Open Source Code Signing“) — вижте
+таблицата по-горе.
 
 ### Какви данни иска сертифициращият орган
 
@@ -517,7 +469,7 @@ Get-ChildItem Cert:\CurrentUser\My |
 - Ако има само `Client Authentication`, `Secure Email`, `Document Signing` —
   това е КЕП за документи. `signtool` ще откаже да подпише с него, а и Windows
   не би признал такъв подпис. За програмата остават вариантите от таблицата
-  по-горе (Azure Trusted Signing е най-евтиният).
+  по-горе (SignPath Foundation е безплатен, ако проектът бъде одобрен).
 
 ### Подписване на вашия компютър (при хардуерен токен)
 
