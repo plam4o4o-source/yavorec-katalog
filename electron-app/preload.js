@@ -181,6 +181,10 @@ contextBridge.exposeInMainWorld('api', {
   mobile: {
     generate: invoke('mobile:generate')
   },
+  security: {
+    exclusionInfo: invoke('security:exclusionInfo'),
+    writeExclusionScript: invoke('security:writeExclusionScript')
+  },
   audit: {
     list: invoke('audit:list')
   },

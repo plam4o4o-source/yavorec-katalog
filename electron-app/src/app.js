@@ -3023,6 +3023,20 @@ async function renderSetup() {
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
 
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Антивирусна защита</h3>
+      <div class="note" style="margin-top:0">Докато инсталаторът е без закупен цифров подпис, Windows
+      Defender и други антивирусни може да спират инсталирането или да заключват файловете на
+      програмата — базата данни, резервните копия, папката на каталога. Това е <b>фалшива
+      тревога</b> заради липсващия подпис, не признак за зловреден код.</div>
+      <div class="toolbar">
+        <button class="btn pri" onclick="avScript()">Създай скрипт за изключения…</button>
+        <button class="btn" onclick="avHelp()">Какво да направя?</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Скриптът добавя папките на програмата в изключенията
+      на Windows Defender и я разрешава през „Защита от рансъмуер“. Записва се като файл, който се
+      изпълнява <b>веднъж, като администратор</b> (десен бутон → „Изпълни като администратор“).</div>
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Внасяне на данни от друга система</h3>
       <div class="note" style="margin-top:0">Ако библиотеката е водила фонда в друга програма
       (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се внасят оттам, вместо да се
@@ -3809,6 +3823,56 @@ window.localPhotoClear = localPhotoClear;
 /* ============================================================================
    ПРИЕМАНЕ НА ДАННИ ОТ ДРУГИ СИСТЕМИ
    ============================================================================ */
+/* ---------------- Антивирусна защита ---------------- */
+async function avScript() {
+  const info = await call(window.api.security.exclusionInfo());
+  if (!info) return;
+  modal('Скрипт за изключения в Windows Defender', `
+    <div class="note" style="margin-top:0">Скриптът ще добави следните папки в изключенията на
+    Defender и ще разреши програмата през „Защита от рансъмуер“. Прегледайте списъка, преди да
+    го запишете:</div>
+    <ul class="steps" style="list-style:disc">
+      ${info.dirs.map(d => `<li style="font-family:var(--mono);font-size:12px">${esc(d)}</li>`).join('')}
+      <li style="font-family:var(--mono);font-size:12px">${esc(info.exe)} <span class="hint">(разрешено приложение)</span></li>
+    </ul>
+    <div class="hint">След записване: намерете файла, десен бутон → <b>„Изпълни като
+    администратор“</b>. Прави се веднъж на всеки компютър и важи и за бъдещите обновявания.
+    При друга антивирусна (Avast, ESET…) добавете същите папки в нейните настройки.</div>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="avScriptWrite()">Запиши скрипта…</button>`);
+}
+window.avScript = avScript;
+async function avScriptWrite() {
+  const res = await window.api.security.writeExclusionScript();
+  if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
+  closeModal();
+  toast('Скриптът е записан: ' + res.data + ' — изпълнете го като администратор.', 'ok');
+}
+window.avScriptWrite = avScriptWrite;
+function avHelp() {
+  modal('Антивирусната блокира програмата — какво да направя?', `
+    <div class="note" style="margin-top:0"><b>Причината:</b> инсталаторът още няма закупен цифров
+    подпис, а Windows преценява файловете по издателя им. Файл без подпис се третира като непознат
+    и антивирусните го спират „за всеки случай“. Кодът на програмата е публичен и може да бъде
+    проверен от всекиго в GitHub хранилището.</div>
+    <ol class="steps">
+      <li><b>При инсталиране</b> — ако SmartScreen покаже „Windows protected your PC“:
+          натиснете „More info“ → „Run anyway“. Ако Defender изтрие сваления файл:
+          Windows Security → „Protection history“ → намерете файла → „Restore“.</li>
+      <li><b>След инсталиране</b> — ако програмата не тръгва или файловете ѝ се заключват:
+          бутонът „Създай скрипт за изключения…“ тук прави готов скрипт, който се изпълнява
+          веднъж като администратор.</li>
+      <li><b>Трайно, безплатно</b> — подайте файла като фалшива тревога към Microsoft:
+          <span style="font-family:var(--mono);font-size:12px">microsoft.com/wdsi/filesubmission</span>
+          → „Software developer“. Обработва се за 1 – 3 работни дни и след това Defender спира да
+          блокира програмата при всички, не само при вас.</li>
+      <li><b>Окончателно</b> — сертификат за подпис на код (виж README, раздел „Цифров подпис“).
+          След него предупрежденията изчезват навсякъде.</li>
+    </ol>`,
+    `<button class="btn pri" onclick="closeModal()">Разбрах</button>`);
+}
+window.avHelp = avHelp;
+
 let IMPORT_INFO = null;
 async function importChoose() {
   const res = await window.api.importData.choose();
