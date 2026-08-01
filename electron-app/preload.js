@@ -99,7 +99,30 @@ contextBridge.exposeInMainWorld('api', {
     byCard: invoke('readers:byCard'),
     create: invoke('readers:create'),
     update: invoke('readers:update'),
-    delete: invoke('readers:delete')
+    delete: invoke('readers:delete'),
+    clearSuspension: invoke('readers:clearSuspension')
+  },
+  housebound: {
+    get: invoke('housebound:get'),
+    save: invoke('housebound:save'),
+    remove: invoke('housebound:remove'),
+    addVisit: invoke('housebound:addVisit'),
+    list: invoke('housebound:list')
+  },
+  gdpr: {
+    candidates: invoke('gdpr:candidates'),
+    anonymize: invoke('gdpr:anonymize')
+  },
+  av: {
+    categories: invoke('av:categories'),
+    options: invoke('av:options'),
+    save: invoke('av:save')
+  },
+  events: {
+    localuse: invoke('events:localuse')
+  },
+  notices: {
+    log: invoke('notices:log')
   },
   loans: {
     list: invoke('loans:list'),
@@ -202,6 +225,7 @@ contextBridge.exposeInMainWorld('api', {
   dnevnik: {
     getMonth: invoke('dnevnik:getMonth'),
     saveDay: invoke('dnevnik:saveDay'),
+    suggest: invoke('dnevnik:suggest'),
     exportCsv: invoke('dnevnik:exportCsv')
   },
   visits: {

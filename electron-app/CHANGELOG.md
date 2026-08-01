@@ -11,6 +11,79 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.15.0
+
+**Промени — голяма партида подобрения по модела на Koha ILS:**
+- **Желязна защита срещу двойно заемане** — правилото „активните заемания не
+  надвишават наличните бройки" вече се пази на ниво база данни (тригер), а не
+  само в интерфейса. Отчита правилно заглавия с няколко екземпляра.
+- **Поток от събития** — всяко заемане, връщане, подновяване, ползване в
+  читалня и посещение по домовете се записва в регистър на събитията. Нов
+  бутон „⚡ Предложи от регистрите" във формуляра за ден от Дневника попълва
+  празните полета (Раздел Б по вид/език/съдържание, посещения) с изведени от
+  регистрите числа — ръчно въведеното никога не се презаписва, официалният
+  формуляр остава меродавен. Нов бутон „📖 Читалня +1" в „Заемане и връщане"
+  отбелязва ползване на място.
+- **Три степени на напомнянията + наказание в дни** — степента (1/2/3) расте
+  с давността на просрочието (прагове в Настройки), текстът се покачва по тон,
+  а всяко отпечатано/копирано/изпратено напомняне се регистрира, за да се
+  вижда „последно: № 2 · 12.05". По желание: N дни без право на заемане за
+  всеки ден забава (с таван) — по-приложимо за читалищна библиотека от глоба
+  в стотинки; наказанието се вижда и се сваля от картона на читателя.
+- **Номенклатури** — контролирани списъци за отдел, език и постоянно място
+  (Настройки → „Номенклатури"), с незадължителен публичен надпис за онлайн
+  каталога (вътрешно „краеведски", публично „Краезнание").
+- **Правилно сортиране на сигнатури** — „Ч-9" вече се нарежда преди „Ч-84";
+  нов избор на подредба (заглавие/сигнатура/инв. №) в „Книги".
+- **Датирани статуси и „последно видяна"** — смяната на състояние помни
+  датата си; сканирането при инвентаризация попълва „последно видяна" за
+  всеки екземпляр (заварените данни се пренасят от минали инвентаризации).
+  Ново поле „Постоянно място" пази рафта при временно преместване на витрина.
+- **Лични данни (ЗЗЛД/GDPR)** — съгласията на читателите вече са с дата;
+  върнати заемания, по-стари от зададен срок, се анонимизират с бутон
+  (остава „категория · година", името изчезва). Изключено по подразбиране.
+- **Обслужване по домовете** — график (ден/честота) и дневник на посещенията
+  за читатели, които не могат да идват сами; посещенията влизат автоматично
+  в предложенията за колоната „В заемна за дома" на Дневника.
+- **„За днес" на таблото** — работният списък на библиотекаря: наближаващи
+  падежи, дължими пререгистрации, просрочия над 60 дни (кандидати за
+  „липсваща"), читатели с наказание, записи за анонимизиране.
+
+**Changes — a large batch of Koha-ILS-inspired improvements:**
+- **Hard double-checkout protection** — "active loans never exceed available
+  copies" is now enforced at the database level (trigger), not just in the
+  UI. Correctly handles multi-copy titles.
+- **Event stream** — every checkout, return, renewal, reading-room use and
+  home visit is recorded in an append-only event log. A new "⚡ Suggest from
+  records" button in the daily journal form fills empty fields (Section B by
+  type/language/content, visits) with derived numbers — manually entered
+  values are never overwritten. A new "📖 Reading room +1" button logs
+  on-site use.
+- **Three-level notices + suspension days** — the notice level (1/2/3) grows
+  with the age of the overdue (thresholds in Settings), the tone escalates,
+  and every printed/copied/emailed notice is logged so you can see
+  "last: #2 · 12.05". Optional: N days of suspended borrowing per day late
+  (capped) — more practical for a village library than tiny fines; the
+  suspension is visible and removable from the reader's record.
+- **Authorised values** — controlled lists for department, language and
+  permanent location (Settings → "Nomenclatures"), with an optional public
+  label used by the online catalog.
+- **Proper call-number sorting** — "Ч-9" now sorts before "Ч-84"; new sort
+  selector (title/call number/inv. no.) in "Books".
+- **Dated statuses and "last seen"** — status changes remember their date;
+  inventory scanning stamps "last seen" per copy (backfilled from past
+  inventory sessions). New "permanent location" field preserves the shelf
+  during temporary display moves.
+- **Personal data (GDPR)** — reader consents now carry dates; returned loans
+  older than a configurable threshold can be anonymized with a button
+  (leaving "category · year", the name disappears). Off by default.
+- **Housebound service** — a schedule (day/frequency) and visit log for
+  readers who cannot come in person; visits feed the journal's
+  "home lending" column suggestions automatically.
+- **"For today" on the dashboard** — the librarian's working list: upcoming
+  due dates, re-registrations due, 60+ day overdues (candidates for "lost"),
+  currently suspended readers, records awaiting anonymization.
+
 ## v1.14.3
 
 **Промени:**
