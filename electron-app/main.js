@@ -94,6 +94,10 @@ function initDb() {
     limit_readers: 'INTEGER DEFAULT 0'
   });
 
+  ensureColumns('loans', {
+    renewals: 'INTEGER DEFAULT 0'
+  });
+
   // Еднократна поправка на данни, внесена от версии 1.7.0 – 1.7.3: тогава миграция
   // презаписваше населеното място на „с. Яворец, обл. Габрово“ по погрешното
   // допускане, че селото е в община Севлиево (то е в община Габрово, ЕКАТТЕ 87120).
@@ -1160,6 +1164,74 @@ const LOAN_SELECT = `
   JOIN books b ON b.id = l.book_id
   JOIN readers r ON r.id = l.reader_id
 `;
+
+/* ---------------- Резервации ---------------- */
+const HOLD_ACTIVE = "('чака','заделена')";
+const HOLD_SELECT = `
+  SELECT h.*, b.title, b.author, b.inv_number, b.barcode,
+         r.name AS reader_name, r.card_no, r.phone
+  FROM holds h
+  JOIN books b ON b.id = h.book_id
+  JOIN readers r ON r.id = h.reader_id
+`;
+// Най-старата активна резервация за книгата — тя определя кой е „наред“.
+function firstActiveHold(bookId) {
+  return db.prepare(`${HOLD_SELECT} WHERE h.book_id = ? AND h.status IN ${HOLD_ACTIVE} ORDER BY h.placed_at, h.id`).get(bookId);
+}
+// При заемане: читателят, който е наред, минава (резервацията му се изпълнява);
+// всеки друг се отказва, докато резервацията стои — иначе заделената книга
+// тихо заминава при трети човек.
+function consumeHoldOnCheckout(bookId, readerId) {
+  const h = firstActiveHold(bookId);
+  if (!h) return;
+  if (h.reader_id !== readerId) {
+    throw new Error('Книгата е резервирана за ' + h.reader_name +
+      (h.status === 'заделена' ? ' (заделена, чака взимане)' : '') +
+      '. Откажете резервацията, ако все пак трябва да я заемете другиму.');
+  }
+  db.prepare("UPDATE holds SET status = 'изпълнена', resolved_at = datetime('now') WHERE id = ?").run(h.id);
+}
+// При връщане: най-старата чакаща резервация става „заделена“, за да не се
+// върне книгата на рафта. Връща резервацията, за да я покаже екранът.
+function activateHoldOnReturn(bookId) {
+  const h = firstActiveHold(bookId);
+  if (!h) return null;
+  if (h.status === 'чака') {
+    db.prepare("UPDATE holds SET status = 'заделена', ready_at = datetime('now') WHERE id = ?").run(h.id);
+    h.status = 'заделена';
+    logAudit('Заделена книга', 'инв. № ' + h.inv_number + ' — ' + h.title + ' за ' + h.reader_name);
+  }
+  return h;
+}
+
+ipcMain.handle('holds:list', () =>
+  run(() => db.prepare(`${HOLD_SELECT} WHERE h.status IN ${HOLD_ACTIVE}
+    ORDER BY CASE h.status WHEN 'заделена' THEN 0 ELSE 1 END, h.placed_at, h.id`).all())
+);
+ipcMain.handle('holds:add', (e, { reader_id, code }) =>
+  run(() => {
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
+    if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
+    const openLoan = db.prepare('SELECT reader_id FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id);
+    if (!openLoan) throw new Error('Инв. № ' + b.inv_number + ' е свободен — заемете го направо, без резервация.');
+    if (openLoan.reader_id === reader_id) throw new Error('Читателят в момента държи тази книга.');
+    const dup = db.prepare(`SELECT 1 FROM holds WHERE book_id = ? AND reader_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id, reader_id);
+    if (dup) throw new Error('Този читател вече има резервация за книгата.');
+    const info = db.prepare('INSERT INTO holds (book_id, reader_id) VALUES (?, ?)').run(b.id, reader_id);
+    const queue = db.prepare(`SELECT COUNT(*) AS n FROM holds WHERE book_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id).n;
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+    logAudit('Резервация', 'инв. № ' + b.inv_number + ' — ' + b.title + ' за ' + (r ? r.name : reader_id));
+    return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, queue };
+  })
+);
+ipcMain.handle('holds:cancel', (e, id) =>
+  run(() => {
+    const h = db.prepare(`${HOLD_SELECT} WHERE h.id = ?`).get(id);
+    db.prepare("UPDATE holds SET status = 'отказана', resolved_at = datetime('now') WHERE id = ?").run(id);
+    if (h) logAudit('Отказана резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' (' + h.reader_name + ')');
+  })
+);
 ipcMain.handle('loans:list', (e, { onlyOpen } = {}) =>
   run(() => {
     if (onlyOpen) return db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL ORDER BY l.date_due`).all();
@@ -1193,6 +1265,7 @@ ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due })
       const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(book_id).n;
       const qty = inv ? inv.quantity : 0;
       if (outCount >= qty) throw new Error('Няма свободни бройки от тази книга.');
+      consumeHoldOnCheckout(book_id, reader_id);
       const info = db.prepare(`
         INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)
       `).run(reader_id, book_id, date_out, date_due || null);
@@ -1210,19 +1283,30 @@ ipcMain.handle('loans:return', (e, { id, date_in }) =>
     db.prepare('UPDATE loans SET date_in = ? WHERE id = ?').run(date_in, id);
     const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
     if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title);
+    const hold = l ? activateHoldOnReturn(l.book_id) : null;
     writeCatalogIfConfigured();
+    return { hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null };
   })
 );
-ipcMain.handle('loans:extend', (e, { id, days }) =>
+ipcMain.handle('loans:extend', (e, { id }) =>
   run(() => {
-    const l = db.prepare('SELECT date_due FROM loans WHERE id = ?').get(id);
-    const base = l && l.date_due ? l.date_due : today();
+    const l = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
+    if (!l || l.date_in) throw new Error('Заемането не е активно.');
+    const s = db.prepare('SELECT extensions_count, extension_days FROM settings WHERE id = 1').get();
+    const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
+    const used = l.renewals || 0;
+    if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
+    const h = firstActiveHold(l.book_id);
+    if (h && h.reader_id !== l.reader_id) {
+      throw new Error('Книгата е резервирана от ' + h.reader_name + ' — срокът не може да се продължи.');
+    }
+    const base = l.date_due || today();
     const next = new Date(base);
-    next.setDate(next.getDate() + (days || 30));
+    next.setDate(next.getDate() + (s.extension_days || 30));
     const newDue = next.toISOString().slice(0, 10);
-    db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(newDue, id);
-    logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue);
-    return newDue;
+    db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
+    logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
+    return { date_due: newDue, renewals: used + 1, max };
   })
 );
 
@@ -1239,6 +1323,7 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
       const s = db.prepare('SELECT max_books, loan_days FROM settings WHERE id = 1').get();
       const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
       if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
+      consumeHoldOnCheckout(b.id, reader_id);
       const out = date_out || today();
       const due = new Date(out); due.setDate(due.getDate() + (s.loan_days || 30));
       const dueStr = due.toISOString().slice(0, 10);
@@ -1263,8 +1348,12 @@ ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     const fine = daysLate * (s.fine_per_day || 0);
     db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
     logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+    const hold = activateHoldOnReturn(b.id);
     writeCatalogIfConfigured();
-    return { title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine };
+    return {
+      title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine,
+      hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null
+    };
   })
 );
 
@@ -1306,11 +1395,13 @@ ipcMain.handle('dashboard:full', () =>
       AND l.date_due >= date('now') AND julianday(l.date_due) - julianday('now') <= 3
       ORDER BY l.date_due
     `).all();
+    const holdsReady = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'заделена'").get().n;
+    const holdsWaiting = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'чака'").get().n;
     return {
       fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
       year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
       inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
-      upcoming
+      upcoming, holdsReady, holdsWaiting
     };
   })
 );

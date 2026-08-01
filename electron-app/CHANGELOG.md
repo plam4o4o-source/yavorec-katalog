@@ -11,6 +11,34 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.14.1
+
+**Промени:**
+- **Резервации на заети книги** — читател чака книга, която в момента е заета:
+  „Заемане и връщане" → „Резервирай заета книга…". При връщането ѝ програмата
+  предупреждава изрично „НЕ връщайте на рафта" и показва за кого е заделена;
+  екземплярът не се предлага за ново заемане, докато чакащият не я вземе или
+  резервацията не бъде отказана. Нов раздел „Резервации" в „Заемане и
+  връщане" показва цялата опашка; ново поле на таблото при активни
+  резервации.
+- **Подновяване с брояч и лимит** — заемането пази колко пъти е продължавано;
+  настройката „Брой удължавания" в Настройки (вече съществуваше) сега реално
+  ограничава бутона „Продължи", вместо да е без значение. Продължение е
+  невъзможно, ако книгата е резервирана от друг читател.
+
+**Changes:**
+- **Holds on checked-out books** — a reader can wait for a book that is
+  currently on loan: "Circulation" → "Reserve a checked-out book…". On
+  return, the app explicitly warns "DO NOT reshelve" and names who it's
+  held for; the copy isn't offered for checkout again until the waiting
+  reader picks it up or the hold is cancelled. A new "Holds" tab under
+  "Circulation" lists the full queue; a new dashboard tile appears when
+  holds are active.
+- **Renewals with a counter and a cap** — a loan now tracks how many times
+  it has been renewed; the existing "renewal count" setting now actually
+  limits the "Renew" button instead of being ignored. Renewal is blocked if
+  the book is held for another reader.
+
 ## v1.14.0
 
 **Промени — цялостно графично освежаване:**
