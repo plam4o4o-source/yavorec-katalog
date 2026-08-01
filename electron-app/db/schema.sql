@@ -132,8 +132,26 @@ CREATE TABLE IF NOT EXISTS loans (
   date_out    TEXT NOT NULL,
   date_due    TEXT,
   date_in     TEXT,
-  fine        REAL DEFAULT 0
+  fine        REAL DEFAULT 0,
+  renewals    INTEGER DEFAULT 0
 );
+
+-- Резервации: читател чака заета книга. Опашката е по реда на заявяване.
+-- status: чака (книгата е още у друг) → заделена (върната е и стои настрана
+-- за читателя, не се връща на рафта) → изпълнена (той я е заел) / отказана.
+-- Приключените резервации остават като история.
+CREATE TABLE IF NOT EXISTS holds (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id     INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  reader_id   INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+  placed_at   TEXT DEFAULT (datetime('now')),
+  status      TEXT DEFAULT 'чака',
+  ready_at    TEXT,
+  resolved_at TEXT,
+  note        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_holds_book   ON holds(book_id, status);
+CREATE INDEX IF NOT EXISTS idx_holds_reader ON holds(reader_id, status);
 
 -- Инвентаризации по репрезентативния метод (чл. 40 – 41)
 CREATE TABLE IF NOT EXISTS inventory_sessions (

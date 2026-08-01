@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('api', {
     reminders: invoke('loans:reminders'),
     mailto: invoke('loans:mailto')
   },
+  holds: {
+    list: invoke('holds:list'),
+    add: invoke('holds:add'),
+    cancel: invoke('holds:cancel')
+  },
   dashboard: {
     stats: invoke('dashboard:stats'),
     full: invoke('dashboard:full')

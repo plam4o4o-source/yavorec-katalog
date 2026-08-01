@@ -544,6 +544,11 @@ async function renderDash() {
       ${kpi('📖', r.loansOpen, 'Заети в момента', 'при ' + r.activeReaders + ' активни читатели')}
       ${kpi('⏰', r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
       ${kpi('📅', r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
+      ${r.holdsReady || r.holdsWaiting
+        ? kpi('📌', r.holdsReady, 'Заделени за читатели', r.holdsReady
+            ? 'чакат да бъдат взети' + (r.holdsWaiting ? ' · ' + r.holdsWaiting + ' в опашка' : '')
+            : r.holdsWaiting + ' в опашка за заета книга', r.holdsReady ? 'warn' : '')
+        : ''}
     </div>
 
     <div class="grid g3" style="margin-top:16px">
@@ -1680,7 +1685,10 @@ async function renderCirc() {
   const tabs = `<div class="toolbar">
     <button class="btn ${CIRC.mode === 'out' ? 'pri' : ''}" onclick="CIRC.mode='out';renderCirc()">Заемане</button>
     <button class="btn ${CIRC.mode === 'in' ? 'pri' : ''}" onclick="CIRC.mode='in';renderCirc()">Връщане</button>
+    <button class="btn ${CIRC.mode === 'holds' ? 'pri' : ''}" onclick="CIRC.mode='holds';renderCirc()">Резервации</button>
   </div>`;
+
+  if (CIRC.mode === 'holds') { await renderHolds(tabs); return; }
 
   if (CIRC.mode === 'in') {
     $('#view').innerHTML = tabs + `
@@ -1701,7 +1709,13 @@ async function renderCirc() {
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
         ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
-      toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')' : 'Приета обратно: инв. № ' + r.inv_number, r.daysLate ? 'err' : 'ok');
+      if (r.hold) {
+        log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">📌 <b>НЕ връщайте на рафта</b> — заделена за
+          <b>${esc(r.hold.reader_name)}</b> (карта ${esc(r.hold.card_no || '—')}${r.hold.phone ? ', тел. ' + esc(r.hold.phone) : ''})</div>`);
+        toast('📌 Заделена за ' + r.hold.reader_name + ' — не се връща на рафта!', 'err');
+      } else {
+        toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')' : 'Приета обратно: инв. № ' + r.inv_number, r.daysLate ? 'err' : 'ok');
+      }
       markSaved();
     });
     return;
@@ -1718,18 +1732,34 @@ async function renderCirc() {
       <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${s.max_books ? ' / ' + s.max_books : ''}</div></div>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
+    const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
+    const maxRenew = s.extensions_count == null ? 2 : s.extensions_count;
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
-      <div class="hint" style="margin-top:6px">Срок за заемане: ${s.loan_days} дни</div>
+      <div class="hint" style="margin-top:6px">Срок за заемане: ${s.loan_days} дни${maxRenew ? ' · до ' + maxRenew + ' продължения' : ''}</div>
+      <div class="toolbar" style="margin:10px 0 0">
+        <button class="btn sm" onclick="holdPrompt()">📌 Резервирай заета книга…</button>
+      </div>
       <div id="outLog" style="margin-top:12px"></div>`;
-    if (openMine.length) {
-      table = `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Заети от този читател</h3>
+    if (myHolds.length) {
+      table += `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Резервации на този читател</h3>
         <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th style="width:160px"></th></tr></thead><tbody>
+        <th>Инв. №</th><th>Заглавие</th><th>Заявена</th><th>Състояние</th><th style="width:110px"></th></tr></thead><tbody>
+        ${myHolds.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
+          <td class="num">${bg((h.placed_at || '').slice(0, 10))}</td>
+          <td>${h.status === 'заделена' ? '<span class="badge ok">заделена — чака взимане</span>' : '<span class="badge">чака</span>'}</td>
+          <td><button class="btn sm" onclick="cancelHold(${h.id})">Откажи</button></td></tr>`).join('')}
+        </tbody></table></div></div>`;
+    }
+    if (openMine.length) {
+      table += `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Заети от този читател</h3>
+        <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th>Продължения</th><th style="width:160px"></th></tr></thead><tbody>
         ${openMine.map(l => `<tr><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
           <td class="num">${bg(l.date_out)}</td>
           <td class="num ${l.date_due && l.date_due < today() ? 'warn' : ''}">${bg(l.date_due) || '—'}</td>
+          <td class="num">${l.renewals || 0}${maxRenew ? ' / ' + maxRenew : ''}</td>
           <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
-              <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button></td></tr>`).join('')}
+              <button class="btn sm" onclick="extendLoan(${l.id})"${maxRenew && (l.renewals || 0) >= maxRenew ? ' disabled title="Достигнат лимит на продълженията"' : ''}>Продължи</button></td></tr>`).join('')}
         </tbody></table></div></div>`;
     }
   } else {
@@ -1783,18 +1813,73 @@ window.selectCircReader = selectCircReader;
 async function returnBook(id) {
   const res = await window.api.loans.return({ id, date_in: today() });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Книгата е върната.', 'ok'); markSaved();
+  if (res.data && res.data.hold) {
+    const h = res.data.hold;
+    toast('📌 Заделена за ' + h.reader_name + (h.phone ? ' (тел. ' + h.phone + ')' : '') + ' — не се връща на рафта!', 'err');
+  } else {
+    toast('Книгата е върната.', 'ok');
+  }
+  markSaved();
   if (VIEW === 'over') renderOver(); else renderCirc();
 }
 window.returnBook = returnBook;
 async function extendLoan(id) {
-  const s = SETTINGS_CACHE || { extension_days: 30 };
-  const res = await window.api.loans.extend({ id, days: s.extension_days || 30 });
+  const res = await window.api.loans.extend({ id });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Срокът е продължен до ' + bg(res.data) + '.', 'ok'); markSaved();
+  const { date_due, renewals, max } = res.data;
+  toast('Срокът е продължен до ' + bg(date_due) + ' (продължение ' + renewals + (max ? '/' + max : '') + ').', 'ok');
+  markSaved();
   if (VIEW === 'over') renderOver(); else renderCirc();
 }
 window.extendLoan = extendLoan;
+
+/* ---------------- Резервации ---------------- */
+async function renderHolds(tabs) {
+  const rows = await call(window.api.holds.list());
+  if (!rows) return;
+  $('#view').innerHTML = tabs + `
+    <div class="toolbar"><button class="btn pri" onclick="holdPrompt()">+ Нова резервация</button></div>
+    ${!rows.length ? '<div class="empty"><h3>Няма активни резервации</h3><p>Резервирайте заета книга, докато читателят чака за нея.</p></div>' : `
+    <div class="wrap"><table class="ledger"><thead><tr>
+      <th>Инв. №</th><th>Заглавие</th><th>Читател</th><th>Заявена</th><th>Състояние</th><th style="width:110px"></th>
+    </tr></thead><tbody>
+      ${rows.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
+        <td>${esc(h.reader_name)} <span class="hint">(${esc(h.card_no || '')})</span></td>
+        <td class="num">${bg((h.placed_at || '').slice(0, 10))}</td>
+        <td>${h.status === 'заделена' ? '<span class="badge ok">заделена — чака взимане</span>' : '<span class="badge">чака в опашка</span>'}</td>
+        <td><button class="btn sm" onclick="cancelHold(${h.id})">Откажи</button></td></tr>`).join('')}
+    </tbody></table></div>`}`;
+}
+async function holdPrompt() {
+  let readerId = CIRC.readerId;
+  if (!readerId) {
+    const cardOrName = prompt('Карта или име на читателя, за когото е резервацията:');
+    if (!cardOrName) return;
+    const byCard = await call(window.api.readers.byCard(cardOrName.trim()));
+    if (byCard) { readerId = byCard.id; }
+    else {
+      const found = (await call(window.api.readers.list(cardOrName.trim())) || [])[0];
+      if (!found) return toast('Няма такъв читател.', 'err');
+      readerId = found.id;
+    }
+  }
+  const code = prompt('Баркод или инв. № на заетата книга за резервиране:');
+  if (!code) return;
+  const res = await window.api.holds.add({ reader_id: readerId, code: code.trim() });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Резервирана: инв. № ' + res.data.inv_number + ' — на опашката е ' + res.data.queue + '-ри.', 'ok');
+  markSaved();
+  renderCirc();
+}
+window.holdPrompt = holdPrompt;
+async function cancelHold(id) {
+  if (!confirm('Отказ от резервацията?')) return;
+  const res = await window.api.holds.cancel(id);
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Резервацията е отказана.', 'ok'); markSaved();
+  renderCirc();
+}
+window.cancelHold = cancelHold;
 
 /* ---------------- Просрочени ---------------- */
 async function renderOver() {
