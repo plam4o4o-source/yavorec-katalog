@@ -11,6 +11,38 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.14.3
+
+**Промени:**
+- **Групова редакция на книги** — в „Книги" вече може да маркирате няколко записа
+  (отметки в първата колона, „избери всички" в заглавието) и да смените едно поле
+  (отдел/местонахождение, състояние, категория или език) на всички едновременно —
+  вместо да отваряте всеки запис поотделно. Изрично изключено от груповата редакция:
+  смяна на състояние на „отчислен" — отчисляването минава само през формален акт
+  (раздел „Отчисляване"), а вече отчислени документи не се засягат от груповата
+  редакция дори да са маркирани.
+- **Готови справки** — нов раздел „Готови справки" в „Отчети": списък с
+  предварително подготвени, избираеми от падащо меню отчети, всеки готов за печат/PDF —
+  годишен статистически отчет (Раздел А и Б, обобщение на дневника на библиотеката),
+  фонд по отдели/категории/езици, читатели по възрастови категории, движение на фонда
+  (постъпления и отчисления по вид/причина) и обобщение на междубиблиотечното заемане.
+  Отчетите съответстват на данните, които читалищна библиотека реално подава към
+  регионалната библиотека и Министерството на културата.
+
+**Changes:**
+- **Batch book editing** — "Books" now supports selecting multiple records (checkboxes
+  in the first column, a "select all" box in the header) and changing one field
+  (department/location, status, category, or language) on all of them at once, instead
+  of opening each record individually. Deliberately excluded from batch editing: setting
+  status to "written off" — write-offs go through a formal act only (the "Deaccession"
+  section), and already written-off items are skipped by batch edits even if selected.
+- **Ready-made reports** — a new "Ready-made reports" section under "Reports": a
+  dropdown-selectable list of pre-built, print/PDF-ready reports — the annual statistical
+  report (Sections A and B, aggregated from the library's daily journal), fund breakdown
+  by department/category/language, readers by age category, fund movement (acquisitions
+  and write-offs by type/reason), and an inter-library loan summary. These match what a
+  library actually submits to the regional library and the Ministry of Culture.
+
 ## v1.14.2
 
 **Промени:**

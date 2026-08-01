@@ -56,7 +56,8 @@ contextBridge.exposeInMainWorld('api', {
     update: invoke('books:update'),
     delete: invoke('books:delete'),
     addCheck: invoke('books:addCheck'),
-    checks: invoke('books:checks')
+    checks: invoke('books:checks'),
+    bulkUpdate: invoke('books:bulkUpdate')
   },
   isbn: {
     lookup: invoke('isbn:lookup')
@@ -208,6 +209,10 @@ contextBridge.exposeInMainWorld('api', {
   },
   stats: {
     report: invoke('stats:report')
+  },
+  reports: {
+    list: invoke('reports:list'),
+    run: invoke('reports:run')
   },
   catalog: {
     status: invoke('catalog:status'),

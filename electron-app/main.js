@@ -1052,6 +1052,32 @@ ipcMain.handle('books:delete', (e, id) =>
     writeCatalogIfConfigured();
   })
 );
+/* Групова редакция — смяна на едно поле на много документи наведнъж (Koha: "batch item
+   modification"). Полето идва от списък с изрично позволени имена (никога суров SQL
+   от renderer-а), а „отчислен“ е нарочно изваден от позволените стойности за „status“:
+   отчисляването минава единствено през формален акт (раздел „Отчисляване“, чл. 30–39),
+   не бива да е на един клик разстояние от таблицата с книги. По същата причина вече
+   отчислени документи не се пипат от груповата редакция, дори да са били маркирани. */
+const BULK_EDIT_FIELDS = ['department', 'status', 'category_id', 'language'];
+const BULK_EDIT_STATUS_VALUES = ['наличен', 'липсващ', 'за реставрация'];
+ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
+  run(() => {
+    if (!BULK_EDIT_FIELDS.includes(field)) throw new Error('Непозволено поле за групова редакция.');
+    if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
+    if (field === 'status' && !BULK_EDIT_STATUS_VALUES.includes(value)) {
+      throw new Error('Отчисляването на документи минава само през акт за отчисляване (раздел „Отчисляване“), не и през групова редакция.');
+    }
+    const v = field === 'category_id' ? (value ? parseInt(value, 10) : null) : (value || null);
+    const placeholders = ids.map(() => '?').join(',');
+    const tx = db.transaction(() => db.prepare(
+      `UPDATE books SET ${field} = ? WHERE id IN (${placeholders}) AND status != 'отчислен'`
+    ).run(v, ...ids).changes);
+    const changes = tx();
+    logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
+    writeCatalogIfConfigured();
+    return changes;
+  })
+);
 ipcMain.handle('books:addCheck', (e, { bookId, date }) =>
   run(() => db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(bookId, date || today()))
 );
@@ -2569,6 +2595,93 @@ ipcMain.handle('stats:report', (e, year) =>
       fundByCategory,
       topLoans
     };
+  })
+);
+
+/* ---------------- Готови справки ----------------
+   Koha предлага споделена библиотека от стотици готови отчети. Тукашният аналог е малък
+   и фиксиран набор от справки, всяка от които съответства на нещо, което читалищна
+   библиотека реално подава към регионалната библиотека/Министерството на културата —
+   не общи "конструктор на справки" възможности, а точно тези таблици, готови за печат.
+   REPORTS_CATALOG описва какво се показва в списъка за избор; reports:run връща данните. */
+const REPORTS_CATALOG = [
+  { id: 'annual_ab', title: 'Годишен статистически отчет — Раздел А и Б', needsYear: true,
+    hint: 'Обобщение на дневника на библиотеката за цялата година — по образеца, подаван към регионалната библиотека.' },
+  { id: 'fund_breakdown', title: 'Библиотечен фонд по отдели, категории и езици', needsYear: true,
+    hint: 'Състояние на фонда към 31.12. на избраната година — таблици вместо диаграми, за прилагане към отчета.' },
+  { id: 'readers_by_category', title: 'Читатели по възрастови категории', needsYear: true,
+    hint: 'Брой активни читатели по категория и новорегистрирани през годината.' },
+  { id: 'fund_movement', title: 'Движение на фонда — постъпления и отчисления', needsYear: true,
+    hint: 'Обобщено по начин на придобиване/причина за отчисляване — извадка от КДБФ за прилагане към годишния отчет.' },
+  { id: 'mzs_annual', title: 'Междубиблиотечно заемане (МЗС) — обобщение', needsYear: true,
+    hint: 'Брой заявки по посока и състояние през годината.' }
+];
+ipcMain.handle('reports:list', () => run(() => REPORTS_CATALOG));
+ipcMain.handle('reports:run', (e, { id, year }) =>
+  run(() => {
+    const y = String(year || yearOf());
+    if (id === 'annual_ab') {
+      const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ?').all(`${y}-01-01`, `${y}-12-31`);
+      return { id, year: y, totals: dnevnikSumRow(rows), daysRecorded: rows.length };
+    }
+    if (id === 'fund_breakdown') {
+      const end = y + '-12-31';
+      const fund = db.prepare(`
+        SELECT * FROM books WHERE register_date <= ? AND (deaccession_date IS NULL OR deaccession_date > ?)
+      `).all(end, end);
+      const byGroup = (rows, field) => {
+        const m = {};
+        rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + 1; });
+        return Object.entries(m).sort((a, b) => b[1] - a[1]);
+      };
+      const byCategory = db.prepare(`
+        SELECT COALESCE(c.name,'—') AS k, COUNT(*) AS n FROM books b LEFT JOIN categories c ON c.id=b.category_id
+        WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        GROUP BY k ORDER BY n DESC
+      `).all(end, end).map(r => [r.k, r.n]);
+      return {
+        id, year: y, fundCount: fund.length, fundValue: value(fund),
+        byDepartment: byGroup(fund, 'department'), byLanguage: byGroup(fund, 'language'), byCategory
+      };
+    }
+    if (id === 'readers_by_category') {
+      const byCategory = db.prepare(`
+        SELECT COALESCE(category,'—') AS k, COUNT(*) AS n FROM readers WHERE status != 'прекратен' GROUP BY k ORDER BY n DESC
+      `).all().map(r => [r.k, r.n]);
+      const total = byCategory.reduce((s, [, n]) => s + n, 0);
+      const newThisYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ?`).get(y).n;
+      return { id, year: y, total, byCategory, newThisYear };
+    }
+    if (id === 'fund_movement') {
+      const acquired = db.prepare(`
+        SELECT COALESCE(how,'—') AS k, COUNT(*) AS n, COALESCE(SUM(total_count),0) AS cnt, COALESCE(SUM(sum),0) AS val
+        FROM acquisitions WHERE year = ? GROUP BY k ORDER BY cnt DESC
+      `).all(y);
+      const deaccessioned = db.prepare(`
+        SELECT COALESCE(d.reason_text,'—') AS k, COUNT(*) AS cnt, COALESCE(SUM(i.price),0) AS val
+        FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? GROUP BY k ORDER BY cnt DESC
+      `).all(y);
+      return {
+        id, year: y,
+        acquired: acquired.map(r => [r.k, r.cnt, r.val]),
+        acquiredTotal: acquired.reduce((s, r) => s + r.cnt, 0),
+        acquiredValue: acquired.reduce((s, r) => s + r.val, 0),
+        deaccessioned: deaccessioned.map(r => [r.k, r.cnt, r.val]),
+        deaccessionedTotal: deaccessioned.reduce((s, r) => s + r.cnt, 0),
+        deaccessionedValue: deaccessioned.reduce((s, r) => s + r.val, 0)
+      };
+    }
+    if (id === 'mzs_annual') {
+      const byDirection = db.prepare(`
+        SELECT direction AS k, COUNT(*) AS n FROM mzs_requests WHERE year = ? GROUP BY direction ORDER BY k
+      `).all(y).map(r => [r.k, r.n]);
+      const byStatus = db.prepare(`
+        SELECT COALESCE(status,'—') AS k, COUNT(*) AS n FROM mzs_requests WHERE year = ? GROUP BY k ORDER BY n DESC
+      `).all(y).map(r => [r.k, r.n]);
+      const total = byDirection.reduce((s, [, n]) => s + n, 0);
+      return { id, year: y, total, byDirection, byStatus };
+    }
+    throw new Error('Непозната справка.');
   })
 );
 
