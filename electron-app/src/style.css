@@ -74,15 +74,38 @@ body{
 .brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
 /* Докато данните на библиотеката не са въведени — приглушено, за да личи, че е подкана */
 .brandSubEmpty{font-style:italic; opacity:.65}
-#nav{padding:12px 0 20px}
-.nav-grp{font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:#8A8168; padding:16px 20px 7px}
-#nav a{
-  display:flex; justify-content:space-between; align-items:center;
-  padding:10px 20px; color:#DCD4BB; text-decoration:none; font-size:14.5px;
+#nav{padding:10px 0 20px}
+/* Тънка линия след заглавието на групата запълва остатъка от реда */
+.nav-grp{
+  display:flex; align-items:center; gap:9px;
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:#8A8168;
+  padding:17px 20px 8px;
 }
-#nav a:hover{background:var(--spine2)}
-#nav a.on{background:var(--spine3); color:#fff; font-weight:600; border-left:3px solid var(--brassL)}
-#nav a .n{background:var(--brassD); color:#F4EFDF; font-size:12px; padding:2px 8px; border-radius:10px}
+.nav-grp::after{content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--spine3),transparent)}
+/* Лявата ивица е винаги заделена (прозрачна извън активния ред), за да не
+   подскача текстът при смяна на раздел. */
+#nav a{
+  display:flex; align-items:center; gap:10px;
+  margin:1px 10px; padding:8px 10px; border-radius:5px;
+  border-left:3px solid transparent;
+  color:#DCD4BB; text-decoration:none; font-size:13.5px;
+  transition:background .12s, color .12s, border-color .12s;
+}
+#nav a .ic{flex:0 0 21px; text-align:center; font-size:15px; line-height:1; opacity:.8; filter:grayscale(.3)}
+#nav a .tx{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+#nav a:hover{background:var(--spine2); color:#fff}
+#nav a:hover .ic{opacity:1; filter:none}
+#nav a.on{
+  background:linear-gradient(90deg,var(--spine3),var(--spine2));
+  color:#fff; font-weight:600; border-left-color:var(--brassL);
+}
+#nav a.on .ic{opacity:1; filter:none}
+#nav a .n{margin-left:auto; background:var(--brassD); color:#F4EFDF; font-size:11px; padding:1px 7px; border-radius:9px; flex:0 0 auto}
+/* Скролбарът на тъмната лента — тънък и в нейните цветове, вместо системния сив */
+#rail::-webkit-scrollbar{width:9px}
+#rail::-webkit-scrollbar-track{background:transparent}
+#rail::-webkit-scrollbar-thumb{background:var(--spine3); border-radius:5px; border:2px solid var(--spine)}
+#rail::-webkit-scrollbar-thumb:hover{background:var(--brassD)}
 
 /* ---------- Main ---------- */
 #main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
