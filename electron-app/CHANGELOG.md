@@ -11,7 +11,17 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
-## v1.13.7
+## v1.13.8
+
+_(Тагът `v1.13.7` остана със заклещено празно издание в GitHub заради
+надпревара между два едновременни build-а и не може да бъде презаписан от
+тази сесия — вижте бележката по-долу. Съдържанието по-долу е идентично с
+това, което трябваше да излезе като 1.13.7.)_
+
+_(The `v1.13.7` tag ended up with a stuck empty GitHub Release due to a race
+between two simultaneous builds, and this session cannot overwrite it — see
+note below. The content below is identical to what was meant to ship as
+1.13.7.)_
 
 **Промени:**
 - Общ преглед на README вече и на английски език, в допълнение към
