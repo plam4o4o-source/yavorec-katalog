@@ -94,7 +94,7 @@ function fld(label, name, opts) {
       const v = typeof o === 'object' ? o.v : o, t = typeof o === 'object' ? o.t : o;
       return `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(t)}</option>`;
     }).join('');
-    return `<div class="field"><label>${esc(label)}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
+    return `<div class="field"><label>${esc(label)}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
       ${opts.allowEmpty !== false ? `<option value="">${esc(opts.emptyLabel || '—')}</option>` : ''}${options}</select></div>`;
   }
   if (opts.type === 'textarea') {
@@ -577,7 +577,7 @@ async function renderDash() {
       </div>
     </div>
 
-    <div class="grid g2" style="margin-top:16px">
+    <div class="grid g3" style="margin-top:16px">
       <div class="card"><h3 style="margin-top:0">Бързи действия</h3>
         <div class="quickGrid">
           <button class="quickBtn" onclick="bookForm()"><span>➕</span>Нов документ</button>
@@ -594,6 +594,22 @@ async function renderDash() {
           <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
           <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
         </div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">📋 За днес</h3>
+        <div class="statRows">
+          <div><span>Връщания до 3 дни — напомнете <b>преди</b> срока</span>
+            <b>${r.upcoming.length ? `<a href="#circ">${r.upcoming.length}</a>` : '0'}</b></div>
+          <div><span>Просрочени за напомняне</span>
+            <b>${r.overdueCount ? `<a href="#over">${r.overdueCount}</a>` : '0'}</b></div>
+          <div><span>Дължими пререгистрации (до 14 дни)</span>
+            <b>${r.today.reregDue ? `<a href="#readers">${r.today.reregDue}</a>` : '0'}</b></div>
+          <div><span>Просрочие над 60 дни — преценете „липсваща“</span>
+            <b>${r.today.longOverdue ? `<a href="#over">${r.today.longOverdue}</a>` : '0'}</b></div>
+          ${r.today.suspendedNow ? `<div><span>Читатели с наказание в момента</span><b>${r.today.suspendedNow}</b></div>` : ''}
+          ${r.today.anonCandidates ? `<div><span>Стари заемания за анонимизиране</span>
+            <b><a href="#setup">${r.today.anonCandidates}</a></b></div>` : ''}
+        </div>
+        <div class="hint" style="margin-top:8px">Пререгистрацията е дължима една година след последното записване.</div>
       </div>
     </div>
 
@@ -697,8 +713,9 @@ let BOOKS_QUERY = '';
    (напр. след прилагане на промяна), но се изчистват при нова търсачка, защото видимият
    набор от записи вече е друг и старият избор губи смисъл. */
 let BOOKS_SELECTED = new Set();
+let BOOKS_SORT = 'title';
 async function renderBooks() {
-  const [books, cats] = await Promise.all([call(window.api.books.list(BOOKS_QUERY)), call(window.api.categories.list())]);
+  const [books, cats] = await Promise.all([call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT)), call(window.api.categories.list())]);
   if (!books) return;
   window._CATS = cats || [];
   window._BOOKS_LIST = books;
@@ -708,6 +725,11 @@ async function renderBooks() {
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="bSearch" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
+      <select onchange="BOOKS_SORT=this.value;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
+        <option value="title" ${BOOKS_SORT === 'title' ? 'selected' : ''}>По заглавие</option>
+        <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
+        <option value="inv" ${BOOKS_SORT === 'inv' ? 'selected' : ''}>По инв. №</option>
+      </select>
       <span class="hint" id="bulkCount" ${n ? '' : 'style="display:none"'}>${n} избрани</span>
       <button class="btn" id="bulkBtn" onclick="openBulkEdit()" ${n ? '' : 'disabled'}>Групова редакция…</button>
       <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
@@ -806,12 +828,22 @@ async function applyBulkEdit() {
 }
 window.applyBulkEdit = applyBulkEdit;
 
+/* Опции за падащо меню от номенклатура: списъкът от Настройки → „Номенклатури";
+   стойност, която вече стои в записа, но е извадена от списъка, се добавя накрая,
+   за да не се загуби мълчаливо при следващото записване на формата. */
+function avSelectOpts(avList, fallback, current) {
+  const vals = (avList && avList.length) ? avList.map(o => o.value) : fallback.slice();
+  if (current && !vals.includes(current)) vals.push(current);
+  return vals;
+}
 async function bookForm(id, presetAcqId) {
   const b = id ? await call(window.api.books.get(id)) : null;
-  const [cats, acqs, sug] = await Promise.all([
-    call(window.api.categories.list()), call(window.api.acquisitions.list()), loadAuthSuggest()
+  const [cats, acqs, sug, av] = await Promise.all([
+    call(window.api.categories.list()), call(window.api.acquisitions.list()), loadAuthSuggest(),
+    call(window.api.av.options())
   ]);
   const v = b || { register_date: today(), status: 'наличен', language: 'български', department: 'за възрастни', acquisition_id: presetAcqId || '' };
+  const AV = av || {};
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
   modal(id ? 'Инв. № ' + v.inv_number + ' — редакция' : 'Нов документ във фонда', `
@@ -832,9 +864,20 @@ async function bookForm(id, presetAcqId) {
       <div class="grid g4">
         ${fld('Цена (лв.)', 'price', { val: v.price ?? 0, type: 'number', step: '0.01', req: 1 })}
         ${fld('Цена (€)', 'price_eur', { val: eur(v.price || 0), type: 'number', step: '0.01', hint: 'автоматично при промяна' })}
-        ${fld('Отдел / местонахождение', 'department', { type: 'select', opts: OTDELI, val: v.department })}
+        ${fld('Отдел / местонахождение', 'department', { type: 'select', opts: avSelectOpts(AV.department, OTDELI, v.department), val: v.department })}
         ${fld('Налични бройки', 'quantity', { val: v.quantity ?? 1, type: 'number', min: 0 })}
       </div>
+      <div class="grid g4">
+        ${fld('Постоянно място', 'permanent_location', { type: 'select',
+          opts: avSelectOpts(AV.location, [], v.permanent_location), val: v.permanent_location || '',
+          emptyLabel: '— без отбелязване —' })}
+        <div class="field"><label>Последно видяна</label>
+          <input value="${v.datelastseen ? esc(bg(String(v.datelastseen).slice(0, 10))) : '—'}" disabled
+            title="Попълва се само от сканиране при инвентаризация"></div>
+      </div>
+      <div class="hint" style="margin-top:-4px">„Постоянно място“ пази рафта/шкафа, докато документът е временно
+      на витрина или изложба (сменя се само „Отдел / местонахождение“). Списъкът с местата се води в
+      Настройки → „Номенклатури“.</div>
     </fieldset>
     <fieldset><legend>Библиографско описание</legend>
       <div class="grid g2">
@@ -860,7 +903,7 @@ async function bookForm(id, presetAcqId) {
           <div class="hint" id="isbnHint">Въведете ISBN и натиснете „Търси“ (търговски данни) или „SRU…“ (библиотечен MARC запис) — полетата се попълват сами.</div>
         </div>
         ${fld('Страници', 'pages', { val: v.pages || '' })}
-        ${fld('Език', 'language', { type: 'select', opts: EZICI, val: v.language })}
+        ${fld('Език', 'language', { type: 'select', opts: avSelectOpts(AV.language, EZICI, v.language), val: v.language })}
       </div>
       <div class="grid g4">
         <div class="field"><label>УДК</label>
@@ -875,7 +918,8 @@ async function bookForm(id, presetAcqId) {
         ${fld('Адрес на корица (URL)', 'cover_url', { val: v.cover_url || '' })}
       </div>
       <div class="grid g3">
-        ${fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'за реставрация', 'отчислен'], val: v.status, allowEmpty: false })}
+        ${fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'за реставрация', 'отчислен'], val: v.status, allowEmpty: false,
+          hint: v.status_date ? 'от ' + bg(v.status_date) : '' })}
         ${fld('Забележка', 'description', { val: v.description || '', hint: 'поправки не се допускат — чл. 17, ал. 2' })}
         ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 2 })}
       </div>
@@ -910,6 +954,8 @@ async function openReminders() {
         <div class="remHead">
           <span class="remName">${esc(r.name)}</span>
           <span class="remBadge">${r.n} просрочени</span>
+          <span class="badge ${r.level >= 3 ? 'warn' : ''}" title="Степента расте с давността на най-старото просрочие (праговете са в Настройки)">Напомняне № ${r.level}</span>
+          ${r.lastNotice ? `<span class="hint" title="Последно регистрирано напомняне по това просрочие">последно: № ${r.lastNotice.level} · ${bg(String(r.lastNotice.ts).slice(0, 10))}</span>` : '<span class="hint">няма пращано досега</span>'}
           ${Number(r.fine) > 0 ? `<span class="hint">${mny(r.fine)}</span>` : ''}
         </div>
         <div class="remBody">
@@ -921,12 +967,12 @@ async function openReminders() {
           <textarea class="remText" id="remB${i}" rows="9">${esc(r.body)}</textarea>
           <div class="toolbar" style="margin-top:6px">
             <button class="btn pri" onclick="remMail(${i})" ${r.email ? '' : 'disabled'}>Отвори в пощата</button>
-            <button class="btn" onclick="remCopy('remB${i}')">Копирай писмото</button>
+            <button class="btn" onclick="remCopy('remB${i}', ${i}, 'копиране')">Копирай писмото</button>
           </div>
           <label class="fh" style="margin-top:10px;display:block">Кратък текст за SMS</label>
           <textarea class="remText" id="remS${i}" rows="2">${esc(r.sms)}</textarea>
           <div class="toolbar" style="margin-top:6px">
-            <button class="btn" onclick="remCopy('remS${i}')">Копирай SMS-а</button>
+            <button class="btn" onclick="remCopy('remS${i}', ${i}, 'SMS')">Копирай SMS-а</button>
             <span class="hint" id="remLen${i}">${r.sms.length} знака</span>
           </div>
         </div>
@@ -942,25 +988,33 @@ async function openReminders() {
   });
 }
 window.openReminders = openReminders;
+/* Отбелязва в регистъра (notice_log), че напомнянето реално е минало към читателя.
+   Така списъкът показва „последно: № 2 · 12.05" и повторните не се пращат на сляпо. */
+function remLog(i, channel) {
+  const r = (window._REMINDERS || [])[i];
+  if (!r) return;
+  window.api.notices.log({ reader_id: r.reader_id, level: r.level || 1, channel, loans_count: r.n });
+}
 async function remMail(i) {
   const r = (window._REMINDERS || [])[i];
   if (!r) return;
   const res = await window.api.loans.mailto({ email: r.email, subject: r.subject, body: $('#remB' + i).value });
   if (!res.ok) return toast(res.error, 'err');
+  remLog(i, 'имейл');
   toast('Писмото е отворено в пощенския клиент.', 'ok');
 }
 window.remMail = remMail;
-async function remCopy(id) {
+async function remCopy(id, i, channel) {
   const el = $('#' + id);
   if (!el) return;
   try {
     await navigator.clipboard.writeText(el.value);
-    toast('Копирано.', 'ok');
   } catch (e) {
     // Резервен път, ако достъпът до системния буфер е отказан.
     el.select(); document.execCommand('copy');
-    toast('Копирано.', 'ok');
   }
+  if (i != null) remLog(i, channel || 'копиране');
+  toast('Копирано.', 'ok');
 }
 window.remCopy = remCopy;
 
@@ -1776,8 +1830,16 @@ async function readerForm(id) {
         ${fld('Състояние', 'status', { type: 'select', opts: ['активен', 'прекратен'], val: v.status, allowEmpty: false })}
         ${fld('Забележка', 'note', { val: v.note || '' })}
       </div>
-      ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.', 'gdpr_consent', { type: 'checkbox', val: v.gdpr_consent })}
-      ${fld('За читатели под 14 г. — налице е съгласие на родител/настойник.', 'parent_consent', { type: 'checkbox', val: v.parent_consent })}
+      ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.'
+        + (v.gdpr_consent_date ? ' <span class="fh">(дадено на ' + bg(v.gdpr_consent_date) + ')</span>' : ''),
+        'gdpr_consent', { type: 'checkbox', val: v.gdpr_consent })}
+      ${fld('За читатели под 14 г. — налице е съгласие на родител/настойник.'
+        + (v.parent_consent_date ? ' <span class="fh">(дадено на ' + bg(v.parent_consent_date) + ')</span>' : ''),
+        'parent_consent', { type: 'checkbox', val: v.parent_consent })}
+      ${v.suspended_until && v.suspended_until > today() ? `
+        <div class="note w" style="margin-top:10px">⛔ Заемането е преустановено до <b>${bg(v.suspended_until)}</b>
+        (наказание за просрочени връщания).
+        <button type="button" class="btn sm" style="margin-left:8px" onclick="clearSuspension(${id})">Снеми наказанието</button></div>` : ''}
     </fieldset>
     <fieldset id="guarantorFs" style="${needsGuarantor ? '' : 'display:none'}">
       <legend>Родител / настойник (гарант)</legend>
@@ -1800,6 +1862,13 @@ function toggleGuarantorFields(category) {
   if (fs) fs.style.display = GUARANTOR_CATS.includes(category) ? '' : 'none';
 }
 window.toggleGuarantorFields = toggleGuarantorFields;
+async function clearSuspension(id) {
+  if (!id) return;
+  if (!confirm('Снемане на наказанието „преустановено заемане“ за този читател?')) return;
+  const ok = await call(window.api.readers.clearSuspension(id), 'Наказанието е снето.');
+  if (ok !== null) { closeModal(); if (VIEW === 'circ') renderCirc(); else renderReaders(); }
+}
+window.clearSuspension = clearSuspension;
 async function saveReader(id) {
   const d = formData('#readerF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
@@ -1833,6 +1902,9 @@ async function renderCirc() {
     <button class="btn ${CIRC.mode === 'out' ? 'pri' : ''}" onclick="CIRC.mode='out';renderCirc()">Заемане</button>
     <button class="btn ${CIRC.mode === 'in' ? 'pri' : ''}" onclick="CIRC.mode='in';renderCirc()">Връщане</button>
     <button class="btn ${CIRC.mode === 'holds' ? 'pri' : ''}" onclick="CIRC.mode='holds';renderCirc()">Резервации</button>
+    <span style="flex:1"></span>
+    <button class="btn sm" onclick="logLocaluse()"
+      title="Отбелязва едно ползване на място в читалнята — влиза в предложенията за дневника (колона „В читалня“)">📖 Читалня +1</button>
   </div>`;
 
   if (CIRC.mode === 'holds') { await renderHolds(tabs); return; }
@@ -1856,6 +1928,10 @@ async function renderCirc() {
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
         ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
+      if (r.suspendedUntil) {
+        log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">⛔ Наложено наказание: заемането за
+          <b>${esc(r.reader_name)}</b> е преустановено до <b>${bg(r.suspendedUntil)}</b>.</div>`);
+      }
       if (r.hold) {
         log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">📌 <b>НЕ връщайте на рафта</b> — заделена за
           <b>${esc(r.hold.reader_name)}</b> (карта ${esc(r.hold.card_no || '—')}${r.hold.phone ? ', тел. ' + esc(r.hold.phone) : ''})</div>`);
@@ -1877,8 +1953,11 @@ async function renderCirc() {
     col1 = `<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1">
       <b style="font-size:17px">${esc(r.name)}</b>
       <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${s.max_books ? ' / ' + s.max_books : ''}</div></div>
+      <button class="btn sm" onclick="houseboundModal(${r.id})" title="Обслужване по домовете — график и посещения">🏠</button>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
       ${r.guarantor_name ? `<div class="hint">👪 Родител/настойник: <b>${esc(r.guarantor_name)}</b>${r.guarantor_phone ? ' · тел. ' + esc(r.guarantor_phone) : ''}</div>` : ''}
+      ${r.suspended_until && r.suspended_until > today() ? `<div class="note w">⛔ Заемането е преустановено до <b>${bg(r.suspended_until)}</b>.
+        <button class="btn sm" style="margin-left:8px" onclick="clearSuspension(${r.id})">Снеми</button></div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
     const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
     const maxRenew = s.extensions_count == null ? 2 : s.extensions_count;
@@ -1967,10 +2046,70 @@ async function returnBook(id) {
   } else {
     toast('Книгата е върната.', 'ok');
   }
+  if (res.data && res.data.suspendedUntil) {
+    toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(res.data.suspendedUntil) + '.', 'err');
+  }
   markSaved();
   if (VIEW === 'over') renderOver(); else renderCirc();
 }
 window.returnBook = returnBook;
+/* Брояч „читалня" — едно натискане = едно ползване на място. Влиза в потока от
+   събития и оттам в предложенията за дневника (a_visit_reading). */
+async function logLocaluse() {
+  const ok = await call(window.api.events.localuse({}));
+  if (ok !== null) toast('📖 Отбелязано ползване в читалнята за днес.', 'ok');
+}
+window.logLocaluse = logLocaluse;
+
+/* ---------------- Обслужване по домовете ---------------- */
+async function houseboundModal(readerId) {
+  const [r, hb] = await Promise.all([
+    call(window.api.readers.get(readerId)), call(window.api.housebound.get(readerId))
+  ]);
+  if (!r || !hb) return;
+  const p = hb.profile || {};
+  modal('🏠 Обслужване по домовете — ' + r.name, `
+    <div class="note" style="margin-top:0">За читатели, които не могат да идват до библиотеката.
+    Всяко вписано посещение влиза автоматично в предложенията за дневника
+    (колона „В заемна за дома“). Самите заемания се оформят по обичайния ред.</div>
+    <form id="hbF" onsubmit="return false">
+      <div class="grid g3">
+        ${fld('Предпочитан ден', 'day', { type: 'select', opts: ['понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'], val: p.day || '' })}
+        ${fld('Честота', 'frequency', { type: 'select', opts: ['седмично', 'двуседмично', 'месечно'], val: p.frequency || '' })}
+        ${fld('Бележка', 'note', { val: p.note || '', hint: 'адрес за посещение, особености' })}
+      </div>
+    </form>
+    <div class="toolbar">
+      <button class="btn pri" onclick="saveHousebound(${readerId})">${hb.profile ? 'Запиши графика' : 'Включи в обслужване по домовете'}</button>
+      ${hb.profile ? `<button class="btn" onclick="addHouseboundVisit(${readerId})">+ Посещение днес</button>
+      <button class="btn dgr" onclick="removeHousebound(${readerId})">Изключи от списъка</button>` : ''}
+    </div>
+    ${hb.visits.length ? `<h3 style="font-size:14px;margin-bottom:6px">Последни посещения</h3>
+      <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><tbody>
+      ${hb.visits.map(v2 => `<tr><td class="num">${bg(v2.date)}</td><td>${esc(v2.note || '')}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>`);
+}
+window.houseboundModal = houseboundModal;
+async function saveHousebound(readerId) {
+  const d = formData('#hbF');
+  const ok = await call(window.api.housebound.save({ reader_id: readerId, day: d.day, frequency: d.frequency, note: d.note }),
+    'Графикът е записан.');
+  if (ok !== null) houseboundModal(readerId);
+}
+window.saveHousebound = saveHousebound;
+async function addHouseboundVisit(readerId) {
+  const note = prompt('Бележка към посещението (по желание):') || '';
+  const ok = await call(window.api.housebound.addVisit({ reader_id: readerId, note }), 'Посещението е вписано.');
+  if (ok !== null) houseboundModal(readerId);
+}
+window.addHouseboundVisit = addHouseboundVisit;
+async function removeHousebound(readerId) {
+  if (!confirm('Изключване на читателя от обслужване по домовете? Историята на посещенията се пази.')) return;
+  const ok = await call(window.api.housebound.remove(readerId), 'Изключен от списъка.');
+  if (ok !== null) closeModal();
+}
+window.removeHousebound = removeHousebound;
 async function extendLoan(id) {
   const res = await window.api.loans.extend({ id });
   if (!res.ok) return toast(res.error, 'err');
@@ -2551,6 +2690,11 @@ async function dnevnikDayForm(date) {
   const row = days.find(d => d.date === date) || { date };
   modal('Дневник — ' + bg(date), `
     <form id="dnvF" onsubmit="return false">
+    <div class="toolbar" style="margin:0 0 10px">
+      <button type="button" class="btn sm" onclick="dnevnikSuggest('${date}')"
+        title="Попълва празните полета от регистрите на програмата (заемания, читалня, посещения по домовете). Ръчно въведените числа не се пипат — официалният формуляр остава меродавен.">⚡ Предложи от регистрите</button>
+      <span class="hint" id="dnvSugHint"></span>
+    </div>
     <div class="cards" id="dnvPreview" style="margin-bottom:12px"></div>
     <h3 style="font-size:14px">Раздел А — читатели и посещения</h3>
     <fieldset><legend>Часове на обслужване</legend>
@@ -2590,6 +2734,32 @@ async function dnevnikDayForm(date) {
   dnevnikPreview();
 }
 window.dnevnikDayForm = dnevnikDayForm;
+/* Предложенията от потока събития попълват САМО празни/нулеви полета — ръчно
+   въведеното от библиотекаря никога не се презаписва, защото официалният
+   формуляр е меродавен, а програмата вижда само каквото е минало през нея. */
+async function dnevnikSuggest(date) {
+  const res = await call(window.api.dnevnik.suggest({ date }));
+  if (!res) return;
+  const f = $('#dnvF'); if (!f) return;
+  const sug = res.suggestions || {};
+  const keys = Object.keys(sug);
+  if (!keys.length) {
+    $('#dnvSugHint').textContent = 'Няма записани събития за този ден — нищо за предлагане.';
+    return;
+  }
+  let filled = 0, kept = 0;
+  for (const k of keys) {
+    const el = f.querySelector(`[name=${k}]`);
+    if (!el) continue;
+    if (parseInt(el.value, 10) > 0) { kept++; continue; }
+    el.value = sug[k]; filled++;
+  }
+  dnevnikPreview();
+  $('#dnvSugHint').textContent = `Предложени ${filled} стойности от ${res.eventsCount} събития` +
+    (kept ? ` (${kept} ръчно въведени са запазени)` : '') + ' — прегледайте и поправете преди запис.';
+  toast('⚡ Попълнени ' + filled + ' полета — прегледайте преди „Запиши деня“.', 'ok');
+}
+window.dnevnikSuggest = dnevnikSuggest;
 function dnevnikPreview() {
   const f = $('#dnvF'); if (!f) return;
   const num = (n) => { const el = f.querySelector(`[name=${n}]`); return el ? (parseInt(el.value, 10) || 0) : 0; };
@@ -3288,6 +3458,13 @@ async function printOverdueNotices() {
   const rows = await call(window.api.loans.overdueByReader());
   if (!rows || !rows.length) return toast('Няма просрочени заемания.', 'err');
   const s = SETTINGS_CACHE || {};
+  // Отпечатаното писмо е реално напомняне — регистрира се за всеки читател,
+  // със степента от подготвените текстове (ако прозорецът с тях е отворен).
+  const levels = {};
+  for (const r of (window._REMINDERS || [])) levels[r.reader_id] = r.level || 1;
+  rows.forEach(r => window.api.notices.log({
+    reader_id: r.reader_id, level: levels[r.reader_id] || 1, channel: 'печат', loans_count: r.n
+  }));
   setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
   doPrint(rows.map(r => `<div class="pdoc">${shead()}
     <h2>НАПОМНИТЕЛНО ПИСМО</h2>
@@ -3403,6 +3580,15 @@ async function renderSetup() {
           ${fld('Фонд на свободен достъп (%)', 'free_access_pct', { val: s.free_access_pct, type: 'number' })}
           ${fld('Следващ инвентарен номер', 'next_inv_number', { val: s.next_inv_number, type: 'number' })}
         </div>
+        <div class="grid g2">
+          ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
+            { val: s.suspend_per_day ?? 0, type: 'number', step: '0.5', hint: '0 = изключено. По-приложимо от глоба в стотинки.' })}
+          ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number' })}
+        </div>
+        <div class="grid g2">
+          ${fld('2-ро напомняне след (дни просрочие)', 'remind2_days', { val: s.remind2_days ?? 14, type: 'number' })}
+          ${fld('3-то напомняне след (дни просрочие)', 'remind3_days', { val: s.remind3_days ?? 30, type: 'number' })}
+        </div>
       </div>
     </div>
     <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Постоянна комисия</h3>
@@ -3413,8 +3599,31 @@ async function renderSetup() {
       </div>
       <div class="hint">Комисията се назначава със заповед на ръководителя; участието на библиотекар и счетоводител е задължително (чл. 35, ал. 1).</div>
     </div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Лични данни (ЗЗЛД / GDPR)</h3>
+      <div class="note" style="margin-top:0">Върнати заемания, по-стари от зададения срок, могат да се
+      <b>анонимизират</b>: името на читателя изчезва от историята, а за статистиката остава само
+      „категория · година“ (напр. „дете до 14 г. · 2024“). Действието е <b>необратимо</b> и се
+      изпълнява само с бутона по-долу — никога автоматично. Съгласията на читателите вече се
+      записват с дата (вижда се във формата на всеки читател).</div>
+      <div class="grid g2">
+        ${fld('Анонимизиране на заемания, по-стари от (години)', 'anonymize_years',
+          { val: s.anonymize_years ?? 0, type: 'number', hint: '0 = изключено' })}
+        <div class="field"><label>&nbsp;</label>
+          <button type="button" class="btn" onclick="runAnonymize()" style="width:100%">Анонимизирай сега…</button></div>
+      </div>
+      <div class="hint" id="anonHint">зареждане…</div>
+    </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Номенклатури</h3>
+      <div class="note" style="margin-top:0">Контролирани списъци за полетата с избор — така „худ. л-ра“ и
+      „художествена литература“ не се разпиляват като различни стойности. Вторият (незадължителен) надпис на
+      реда е <b>публичният</b> — той се показва в онлайн каталога вместо вътрешния (напр. вътрешно
+      „краеведски“, публично „Краезнание“). Записва се по един ред за стойност:
+      <code>стойност | публичен надпис</code>.</div>
+      <div id="avEditors">зареждане…</div>
+    </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Шаблони за напомняния</h3>
       <div class="note" style="margin-top:0">Текстовете за писмо, SMS и заглавие на напомнянията за
@@ -3551,7 +3760,61 @@ async function renderSetup() {
     </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
   loadNoticePlaceholders();
+  loadAvEditors();
+  loadAnonHint();
 }
+/* ---------------- Номенклатури (редактор) ---------------- */
+async function loadAvEditors() {
+  const box = $('#avEditors'); if (!box) return;
+  const [cats, opts] = await Promise.all([call(window.api.av.categories()), call(window.api.av.options())]);
+  if (!cats || !opts) { box.textContent = 'Номенклатурите не се заредиха.'; return; }
+  box.innerHTML = Object.entries(cats).map(([key, label]) => `
+    <div class="field" style="margin-top:10px"><label>${esc(label)}</label>
+      <textarea id="av_${key}" rows="${Math.max(3, (opts[key] || []).length + 1)}" spellcheck="false"
+        style="font-family:var(--mono);font-size:12.5px">${esc((opts[key] || [])
+          .map(o => o.value + (o.opac_label ? ' | ' + o.opac_label : '')).join('\n'))}</textarea>
+      <div class="toolbar" style="margin-top:6px">
+        <button class="btn sm" onclick="saveAv('${key}')">Запиши списъка</button>
+      </div>
+    </div>`).join('');
+}
+async function saveAv(category) {
+  const el = $('#av_' + category); if (!el) return;
+  const values = el.value.split('\n').map(line => {
+    const [value, opac_label] = line.split('|').map(x => (x || '').trim());
+    return { value, opac_label };
+  }).filter(v => v.value);
+  const n = await call(window.api.av.save({ category, values }), null);
+  if (n == null) return;
+  toast('Списъкът е записан (' + n + ' стойности). Менютата го ползват веднага.', 'ok');
+  markSaved();
+}
+window.saveAv = saveAv;
+/* ---------------- Лични данни ---------------- */
+async function loadAnonHint() {
+  const el = $('#anonHint'); if (!el) return;
+  const r = await call(window.api.gdpr.candidates());
+  if (!r) { el.textContent = ''; return; }
+  el.textContent = !r.years
+    ? 'Анонимизирането е изключено (0 години).'
+    : (r.count
+        ? `Готови за анонимизиране: ${r.count} върнати заемания отпреди ${bg(r.cutoff)}.`
+        : `Няма върнати заемания отпреди ${bg(r.cutoff)} — нищо за анонимизиране.`);
+}
+async function runAnonymize() {
+  const r = await call(window.api.gdpr.candidates());
+  if (!r) return;
+  if (!r.years) return toast('Първо задайте срок в години (и запишете настройките).', 'err');
+  if (!r.count) return toast('Няма заемания за анонимизиране.', 'ok');
+  if (!confirm(`НЕОБРАТИМО: ${r.count} върнати заемания отпреди ${bg(r.cutoff)} ще загубят връзката с имената ` +
+    'на читателите (остава само „категория · година“). Да продължа?')) return;
+  const res = await call(window.api.gdpr.anonymize());
+  if (!res) return;
+  toast('Анонимизирани ' + res.anonymized + ' заемания.', 'ok');
+  markSaved();
+  loadAnonHint();
+}
+window.runAnonymize = runAnonymize;
 function employeeForm(id) {
   const emp = id ? (window._EMPLOYEES_ALL || []).find(x => x.id === id) : null;
   modal(emp ? 'Редакция на служител' : 'Нов служител', `

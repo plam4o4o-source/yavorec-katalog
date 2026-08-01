@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS books (
   cover_url         TEXT,
   department        TEXT,
   status            TEXT DEFAULT 'наличен',
+  status_date       TEXT,               -- кога статусът е получил тази стойност (Koha: датирани статуси)
+  datelastseen      TEXT,               -- последно физически видян (сканиране при инвентаризация)
+  permanent_location TEXT,              -- постоянно място; department може временно да е "витрина/изложба"
+  cn_sort           TEXT,               -- сигнатура, нормализирана за правилно сортиране („Ч-9" преди „Ч-84")
   price             REAL DEFAULT 0,
   description       TEXT,
   acquisition_id    INTEGER REFERENCES acquisitions(id) ON DELETE SET NULL,
@@ -120,7 +124,10 @@ CREATE TABLE IF NOT EXISTS readers (
   re_registered_at  TEXT,
   status            TEXT DEFAULT 'активен',
   gdpr_consent      INTEGER DEFAULT 0,
+  gdpr_consent_date TEXT,               -- датирано съгласие — голият флаг е слаба защита при проверка
   parent_consent    INTEGER DEFAULT 0,
+  parent_consent_date TEXT,
+  suspended_until   TEXT,               -- преустановено заемане до дата (наказание в дни вместо глоба)
   guarantor_name     TEXT,   -- родител/настойник за читатели под 14 г. (Koha: "guarantor")
   guarantor_relation TEXT,   -- родител | настойник | друго
   guarantor_phone    TEXT,   -- контакт и отговорност носи гарантът, не детето
@@ -136,8 +143,81 @@ CREATE TABLE IF NOT EXISTS loans (
   date_due    TEXT,
   date_in     TEXT,
   fine        REAL DEFAULT 0,
-  renewals    INTEGER DEFAULT 0
+  renewals    INTEGER DEFAULT 0,
+  anon_category TEXT                    -- след анонимизиране: „категория · година" вместо име
 );
+
+-- Желязна гаранция срещу двойно заемане на ниво база данни (Koha пази това с
+-- UNIQUE(itemnumber); тук екземплярите на едно заглавие са books + inventory.quantity,
+-- затова правилото е "активните заемания не надвишават бройките", проверено с тригер,
+-- а не с уникален индекс — индекс би забранил легитимните втори бройки).
+CREATE TRIGGER IF NOT EXISTS trg_loans_capacity BEFORE INSERT ON loans
+WHEN NEW.date_in IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'Няма свободен екземпляр от този документ — всички бройки са заети.')
+  WHERE COALESCE((SELECT quantity FROM inventory WHERE book_id = NEW.book_id), 0)
+        <= (SELECT COUNT(*) FROM loans WHERE book_id = NEW.book_id AND date_in IS NULL);
+END;
+
+-- Поток от събития (Koha: statistics) — append-only регистър на случилото се, от който
+-- дневникът и годишният отчет се смятат със заявки, вместо с ръчни броячи. Нарочно БЕЗ
+-- външни ключове: събитието е историческо и остава валидно и след изтриване/анонимизиране
+-- на книгата или читателя. Категорията/езикът/УДК се снимат към момента на събитието.
+CREATE TABLE IF NOT EXISTS events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts              TEXT DEFAULT (datetime('now')),
+  date            TEXT NOT NULL,
+  kind            TEXT NOT NULL,        -- заемане | връщане | подновяване | читалня | дома
+  book_id         INTEGER,
+  reader_id       INTEGER,
+  reader_category TEXT,
+  book_language   TEXT,
+  book_udk        TEXT,
+  book_category   TEXT,
+  note            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_date ON events(date, kind);
+
+-- Регистър на изпратените/отпечатаните напомняния (Koha: message_queue) — за да се
+-- вижда кой читател на коя степен напомняне е и кога е получил последното.
+CREATE TABLE IF NOT EXISTS notice_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts          TEXT DEFAULT (datetime('now')),
+  reader_id   INTEGER NOT NULL,
+  level       INTEGER DEFAULT 1,        -- 1, 2 или 3 (степен на напомнянето)
+  channel     TEXT,                     -- имейл | печат | копиране | SMS
+  loans_count INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notice_reader ON notice_log(reader_id, ts);
+
+-- Контролирани номенклатури (Koha: authorised_values) — един източник на истина за
+-- стойностите на отдел, език, местоположение и др., вместо свободен текст, разпилян
+-- по таблиците. opac_label е публичният надпис за онлайн каталога (празно = value).
+CREATE TABLE IF NOT EXISTS authorised_values (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  category   TEXT NOT NULL,             -- department | language | location
+  value      TEXT NOT NULL,
+  opac_label TEXT,
+  sort       INTEGER DEFAULT 0,
+  UNIQUE(category, value)
+);
+
+-- Обслужване по домовете (Koha: housebound) — график и дневник на посещенията при
+-- читатели, които не могат да идват до библиотеката. Посещенията влизат и в
+-- колоната a_visit_home на месечния дневник (чрез events kind='дома').
+CREATE TABLE IF NOT EXISTS housebound_profiles (
+  reader_id  INTEGER PRIMARY KEY REFERENCES readers(id) ON DELETE CASCADE,
+  day        TEXT,                      -- предпочитан ден от седмицата
+  frequency  TEXT,                      -- седмично | двуседмично | месечно
+  note       TEXT
+);
+CREATE TABLE IF NOT EXISTS housebound_visits (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  reader_id  INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+  date       TEXT NOT NULL,
+  note       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hb_visits ON housebound_visits(reader_id, date);
 
 -- Резервации: читател чака заета книга. Опашката е по реда на заявяване.
 -- status: чака (книгата е още у друг) → заделена (върната е и стои настрана
@@ -366,6 +446,11 @@ CREATE TABLE IF NOT EXISTS settings (
   theme             TEXT DEFAULT '1',
   catalog_folder    TEXT,
   sru_endpoint      TEXT,     -- SRU каталог за внасяне на записи; празно = LOC по подразбиране
+  suspend_per_day   REAL DEFAULT 0,     -- дни преустановено заемане за всеки ден забава; 0 = изключено
+  suspend_max       INTEGER DEFAULT 90, -- таван на наказанието в дни
+  remind2_days      INTEGER DEFAULT 14, -- след толкова дни просрочие напомнянето става 2-ра степен
+  remind3_days      INTEGER DEFAULT 30, -- ... и 3-та степен
+  anonymize_years   INTEGER DEFAULT 0,  -- анонимизиране на върнати заемания, по-стари от N години; 0 = изключено
   gh_user           TEXT,
   gh_repo           TEXT,
   gh_branch         TEXT DEFAULT 'main',

@@ -54,6 +54,26 @@ function ensureColumns(table, columns) {
   }
 }
 
+/* Ключ за сортиране на сигнатури: числата се допълват с нули отпред, така че
+   „Ч-9" да се нареди преди „Ч-84" (като числа), а не след него (като текст). */
+function cnSortKey(s) {
+  return String(s || '').toUpperCase().trim().replace(/\d+/g, m => m.padStart(6, '0'));
+}
+/* Засява номенклатура (authorised_values), ако категорията е празна: първо
+   стандартният списък, после и стойностите, които вече се срещат в books —
+   така падащото меню не губи нищо от съществуващите данни. */
+function seedAuthorisedValues(category, defaults) {
+  const n = db.prepare('SELECT COUNT(*) AS n FROM authorised_values WHERE category = ?').get(category).n;
+  if (n > 0) return;
+  const field = { department: 'department', language: 'language', location: 'department' }[category];
+  const existing = category === 'location' ? [] :
+    db.prepare(`SELECT DISTINCT ${field} AS v FROM books WHERE ${field} IS NOT NULL AND TRIM(${field}) <> ''`).all().map(r => r.v);
+  const values = [...defaults];
+  for (const v of existing) if (!values.includes(v)) values.push(v);
+  const ins = db.prepare('INSERT OR IGNORE INTO authorised_values (category, value, sort) VALUES (?, ?, ?)');
+  db.transaction(() => values.forEach((v, i) => ins.run(category, v, i)))();
+}
+
 function initDb() {
   const dbPath = resolveDbPath();
   const isNew = !fs.existsSync(dbPath);
@@ -108,8 +128,56 @@ function initDb() {
     notice_subject: 'TEXT',
     notice_body: 'TEXT',
     notice_sms: 'TEXT',
-    sru_endpoint: 'TEXT'
+    sru_endpoint: 'TEXT',
+    suspend_per_day: 'REAL DEFAULT 0',
+    suspend_max: 'INTEGER DEFAULT 90',
+    remind2_days: 'INTEGER DEFAULT 14',
+    remind3_days: 'INTEGER DEFAULT 30',
+    anonymize_years: 'INTEGER DEFAULT 0'
   });
+
+  ensureColumns('books', {
+    status_date: 'TEXT',
+    datelastseen: 'TEXT',
+    permanent_location: 'TEXT',
+    cn_sort: 'TEXT'
+  });
+
+  ensureColumns('readers', {
+    gdpr_consent_date: 'TEXT',
+    parent_consent_date: 'TEXT',
+    suspended_until: 'TEXT'
+  });
+
+  ensureColumns('loans', {
+    anon_category: 'TEXT'
+  });
+
+  // Еднократни попълвания на новите колони от вече наличните данни. Условието
+  // "IS NULL" ги прави безвредни при всяко следващо стартиране.
+  // datelastseen — от сканиранията на минали инвентаризации (сурови данни има отдавна).
+  db.exec(`UPDATE books SET datelastseen = (
+    SELECT MAX(sc.scanned_at) FROM inventory_session_scans sc WHERE sc.book_id = books.id
+  ) WHERE datelastseen IS NULL AND EXISTS (
+    SELECT 1 FROM inventory_session_scans sc WHERE sc.book_id = books.id)`);
+  // cn_sort — от съществуващите сигнатури.
+  const noCn = db.prepare(`SELECT id, call_number FROM books
+    WHERE cn_sort IS NULL AND call_number IS NOT NULL AND TRIM(call_number) <> ''`).all();
+  if (noCn.length) {
+    const upd = db.prepare('UPDATE books SET cn_sort = ? WHERE id = ?');
+    db.transaction(() => noCn.forEach(b => upd.run(cnSortKey(b.call_number), b.id)))();
+  }
+  // Датирани съгласия — при вече отбелязано съгласие без дата се записва датата на
+  // регистрация: най-добрата налична долна граница, по-честна от днешната дата.
+  db.exec(`UPDATE readers SET gdpr_consent_date = COALESCE(registered_at, date('now'))
+    WHERE gdpr_consent = 1 AND gdpr_consent_date IS NULL`);
+  db.exec(`UPDATE readers SET parent_consent_date = COALESCE(registered_at, date('now'))
+    WHERE parent_consent = 1 AND parent_consent_date IS NULL`);
+  // Номенклатури — при празна категория се засява от познатите списъци плюс
+  // стойностите, които вече се срещат из фонда (за да не изчезне нищо от менютата).
+  seedAuthorisedValues('department', ['за възрастни', 'за деца', 'краеведски', 'справочен', 'периодика', 'служебен']);
+  seedAuthorisedValues('language', ['български', 'руски', 'английски', 'немски', 'френски', 'друг']);
+  seedAuthorisedValues('location', []);
 
   // Еднократна поправка на данни, внесена от версии 1.7.0 – 1.7.3: тогава миграция
   // презаписваше населеното място на „с. Яворец, обл. Габрово“ по погрешното
@@ -700,7 +768,8 @@ ipcMain.handle('settings:update', (e, s) =>
         loan_days=@loan_days, max_books=@max_books, extensions_count=@extensions_count, extension_days=@extension_days,
         fine_per_day=@fine_per_day, annual_fee=@annual_fee, free_access_pct=@free_access_pct,
         next_inv_number=@next_inv_number, committee1=@committee1, committee2=@committee2, committee3=@committee3,
-        sru_endpoint=@sru_endpoint
+        sru_endpoint=@sru_endpoint, suspend_per_day=@suspend_per_day, suspend_max=@suspend_max,
+        remind2_days=@remind2_days, remind3_days=@remind3_days, anonymize_years=@anonymize_years
       WHERE id = 1
     `).run(s);
     logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
@@ -815,8 +884,8 @@ const BOOK_SELECT = `
 `;
 const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
   'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
-  'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'status', 'price',
-  'description', 'acquisition_id'];
+  'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
+  'status', 'status_date', 'price', 'description', 'acquisition_id', 'cn_sort'];
 
 /* ---------------- Контрол на авторитетните данни ----------------
    Едно и също име се въвежда по различен начин („Вазов, Иван“, „Иван Вазов“,
@@ -939,6 +1008,47 @@ ipcMain.handle('authorities:merge', (e, { field, from, to }) =>
   })
 );
 
+/* ---------------- Контролирани номенклатури (Koha: authorised_values) ----------------
+   Един източник на истина за списъчните стойности. Категориите са фиксирани тук;
+   стойностите се редактират в Настройки → „Номенклатури". opac_label е публичният
+   надпис за онлайн каталога — навън не трябва да личи вътрешният жаргон. */
+const AV_CATEGORIES = {
+  department: 'Отдел / местонахождение',
+  language: 'Език',
+  location: 'Постоянно място (рафт, витрина, шкаф)'
+};
+function avOptions() {
+  const out = {};
+  for (const c of Object.keys(AV_CATEGORIES)) {
+    out[c] = db.prepare('SELECT value, opac_label FROM authorised_values WHERE category = ? ORDER BY sort, value').all(c);
+  }
+  return out;
+}
+ipcMain.handle('av:categories', () => run(() => AV_CATEGORIES));
+ipcMain.handle('av:options', () => run(() => avOptions()));
+// Замества целия списък на една категория наведнъж — редакторът в Настройки подава
+// пълния нов ред на стойностите (ред по ред), затова частични UPDATE-и не са нужни.
+ipcMain.handle('av:save', (e, { category, values }) =>
+  run(() => {
+    if (!(category in AV_CATEGORIES)) throw new Error('Непозната номенклатура.');
+    const list = (values || [])
+      .map(v => ({ value: String(v.value || '').trim(), opac_label: String(v.opac_label || '').trim() || null }))
+      .filter(v => v.value);
+    const seen = new Set();
+    for (const v of list) {
+      if (seen.has(v.value)) throw new Error('Стойността „' + v.value + '“ се повтаря в списъка.');
+      seen.add(v.value);
+    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM authorised_values WHERE category = ?').run(category);
+      const ins = db.prepare('INSERT INTO authorised_values (category, value, opac_label, sort) VALUES (?, ?, ?, ?)');
+      list.forEach((v, i) => ins.run(category, v.value, v.opac_label, i));
+    })();
+    logAudit('Номенклатури', AV_CATEGORIES[category] + ': ' + list.length + ' стойности');
+    return list.length;
+  })
+);
+
 /* ---------------- Лимит на броя записи ----------------
    Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
    Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
@@ -975,7 +1085,9 @@ ipcMain.handle('limits:update', (e, { limit_books, limit_readers }) =>
   })
 );
 
-function bookPayload(b) {
+/* prev — досегашният ред от базата (при редакция): status_date се обновява само
+   когато статусът реално се променя, а не при всяко записване на формата. */
+function bookPayload(b, prev) {
   const out = {};
   BOOK_FIELDS.forEach(f => { out[f] = b[f] === undefined || b[f] === '' ? null : b[f]; });
   if (out.inv_number != null) out.inv_number = parseInt(out.inv_number, 10);
@@ -984,18 +1096,26 @@ function bookPayload(b) {
   out.price = b.price ? parseFloat(b.price) : 0;
   out.status = b.status || 'наличен';
   out.register_date = b.register_date || today();
+  out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
+  out.status_date = !prev ? today()
+    : (prev.status !== out.status ? today() : (prev.status_date || null));
   return out;
 }
 
-ipcMain.handle('books:list', (e, query) =>
+// sort: 'title' (по подразбиране), 'cn' (по сигнатура — cn_sort нарежда „Ч-9" преди
+// „Ч-84", виж cnSortKey) или 'inv' (по инвентарен номер). Изборът е от фиксиран
+// списък тук, никога суров SQL от интерфейса.
+const BOOK_ORDERS = { title: 'b.title', cn: "b.cn_sort IS NULL, b.cn_sort, b.title", inv: 'b.inv_number' };
+ipcMain.handle('books:list', (e, query, sort) =>
   run(() => {
+    const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
     if (query && query.trim()) {
       const q = `%${query.trim()}%`;
       return db.prepare(`${BOOK_SELECT}
         WHERE b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
-        ORDER BY b.title`).all(q, q, q, q, q);
+        ORDER BY ${order}`).all(q, q, q, q, q);
     }
-    return db.prepare(`${BOOK_SELECT} ORDER BY b.title`).all();
+    return db.prepare(`${BOOK_SELECT} ORDER BY ${order}`).all();
   })
 );
 ipcMain.handle('books:get', (e, id) => run(() => db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
@@ -1032,7 +1152,8 @@ ipcMain.handle('books:create', (e, book) =>
 ipcMain.handle('books:update', (e, book) =>
   run(() => {
     const tx = db.transaction((b) => {
-      const payload = bookPayload(b);
+      const prev = db.prepare('SELECT status, status_date FROM books WHERE id = ?').get(b.id);
+      const payload = bookPayload(b, prev);
       db.prepare(`
         UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
       `).run(Object.assign({ id: b.id }, payload));
@@ -1069,8 +1190,11 @@ ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
     }
     const v = field === 'category_id' ? (value ? parseInt(value, 10) : null) : (value || null);
     const placeholders = ids.map(() => '?').join(',');
+    // Смяната на статус носи и датата си (Koha: датирани статуси) — иначе справката
+    // „кога стана липсваща" няма отговор.
+    const extra = field === 'status' ? ", status_date = date('now')" : '';
     const tx = db.transaction(() => db.prepare(
-      `UPDATE books SET ${field} = ? WHERE id IN (${placeholders}) AND status != 'отчислен'`
+      `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND status != 'отчислен'`
     ).run(v, ...ids).changes);
     const changes = tx();
     logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
@@ -1204,8 +1328,8 @@ ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
           volume: b.volume, year: b.year, price: b.price, udk: b.udk,
           category: b.category_name, language: b.language
         });
-        db.prepare('UPDATE books SET status = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
-          .run('отчислен', actId, act.date, b.id);
+        db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
+          .run('отчислен', act.date, actId, act.date, b.id);
         closeLoans.run(act.date, b.id);
       });
       db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
@@ -1224,7 +1348,7 @@ ipcMain.handle('deaccessionActs:revoke', (e, id) =>
       const items = db.prepare('SELECT book_id FROM deaccession_items WHERE act_id = ?').all(id);
       items.forEach(it => {
         if (it.book_id) {
-          db.prepare(`UPDATE books SET status='наличен', deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
+          db.prepare(`UPDATE books SET status='наличен', status_date=date('now'), deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
             .run(it.book_id);
         }
       });
@@ -1270,13 +1394,18 @@ ipcMain.handle('kdbf:report', (e, year) =>
 /* ---------------- Читатели ---------------- */
 const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
   'id_card_no', 'id_card_date', 'id_card_issuer', 'birth_date', 'category', 'registered_at',
-  're_registered_at', 'status', 'gdpr_consent', 'parent_consent',
-  'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note'];
-function readerPayload(r) {
+  're_registered_at', 'status', 'gdpr_consent', 'gdpr_consent_date', 'parent_consent',
+  'parent_consent_date', 'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note'];
+/* prev — досегашният ред (при редакция). Датата на съгласието се записва в момента
+   на отбелязване и се пази при следващи записи; голият флаг 0/1 без дата е слаба
+   защита при проверка по ЗЗЛД/GDPR. Сваленото съгласие сваля и датата. */
+function readerPayload(r, prev) {
   const out = {};
   READER_FIELDS.forEach(f => { out[f] = r[f] === undefined || r[f] === '' ? null : r[f]; });
   out.gdpr_consent = r.gdpr_consent ? 1 : 0;
   out.parent_consent = r.parent_consent ? 1 : 0;
+  out.gdpr_consent_date = out.gdpr_consent ? ((prev && prev.gdpr_consent_date) || today()) : null;
+  out.parent_consent_date = out.parent_consent ? ((prev && prev.parent_consent_date) || today()) : null;
   out.category = r.category || 'възрастен';
   out.status = r.status || 'активен';
   out.registered_at = r.registered_at || today();
@@ -1308,10 +1437,111 @@ ipcMain.handle('readers:create', (e, r) =>
 );
 ipcMain.handle('readers:update', (e, r) =>
   run(() => {
-    const payload = readerPayload(r);
+    const prev = db.prepare('SELECT gdpr_consent_date, parent_consent_date FROM readers WHERE id = ?').get(r.id);
+    const payload = readerPayload(r, prev);
     db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
       .run(Object.assign({ id: r.id }, payload));
     logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name);
+  })
+);
+// Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
+ipcMain.handle('readers:clearSuspension', (e, id) =>
+  run(() => {
+    db.prepare('UPDATE readers SET suspended_until = NULL WHERE id = ?').run(id);
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(id);
+    logAudit('Снето наказание', r ? r.name : ('читател № ' + id));
+  })
+);
+
+/* ---------------- Обслужване по домовете (Koha: housebound) ----------------
+   График и дневник на посещенията при читатели, които не могат да идват сами.
+   Всяко посещение влиза в потока от събития (kind='дома') и оттам дневникът
+   предлага стойността за колоната a_visit_home („В заемна за дома"). */
+ipcMain.handle('housebound:get', (e, readerId) =>
+  run(() => {
+    const p = db.prepare('SELECT * FROM housebound_profiles WHERE reader_id = ?').get(readerId) || null;
+    const visits = db.prepare('SELECT * FROM housebound_visits WHERE reader_id = ? ORDER BY date DESC LIMIT 30').all(readerId);
+    return { profile: p, visits };
+  })
+);
+ipcMain.handle('housebound:save', (e, { reader_id, day, frequency, note }) =>
+  run(() => {
+    db.prepare(`INSERT INTO housebound_profiles (reader_id, day, frequency, note) VALUES (?, ?, ?, ?)
+      ON CONFLICT(reader_id) DO UPDATE SET day=excluded.day, frequency=excluded.frequency, note=excluded.note`)
+      .run(reader_id, day || null, frequency || null, note || null);
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+    logAudit('Обслужване по домовете', 'график за ' + (r ? r.name : reader_id));
+  })
+);
+ipcMain.handle('housebound:remove', (e, readerId) =>
+  run(() => { db.prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId); })
+);
+ipcMain.handle('housebound:addVisit', (e, { reader_id, date, note }) =>
+  run(() => {
+    const d = date || today();
+    const info = db.prepare('INSERT INTO housebound_visits (reader_id, date, note) VALUES (?, ?, ?)').run(reader_id, d, note || null);
+    logEvent('дома', { readerId: reader_id, date: d, note });
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+    logAudit('Посещение по домовете', (r ? r.name : reader_id) + ' — ' + d);
+    return info.lastInsertRowid;
+  })
+);
+ipcMain.handle('housebound:list', () =>
+  run(() => db.prepare(`
+    SELECT p.*, r.name, r.phone, r.address, r.address2,
+           (SELECT MAX(v.date) FROM housebound_visits v WHERE v.reader_id = p.reader_id) AS last_visit
+    FROM housebound_profiles p JOIN readers r ON r.id = p.reader_id ORDER BY r.name
+  `).all())
+);
+
+/* ---------------- Лични данни: анонимизиране (Koha: pseudonymization) ----------------
+   Върнати заемания, по-стари от N години, губят връзката с името: закачат се за
+   служебния запис „— анонимизирани заемания —", а категорията и годината се снимат в
+   anon_category — статистиката остава вярна („дете, 2024 г."), името изчезва.
+   Настройка anonymize_years = 0 изключва всичко. Необратимо е — затова е ръчен бутон. */
+function anonReaderId() {
+  const NAME = '— анонимизирани заемания —';
+  const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
+  if (r) return r.id;
+  return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
+    VALUES (?, '—', 'прекратен', date('now'), 0)`).run(NAME).lastInsertRowid;
+}
+function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
+ipcMain.handle('gdpr:candidates', () =>
+  run(() => {
+    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
+    const years = parseInt(s.anonymize_years, 10) || 0;
+    if (!years) return { years: 0, count: 0 };
+    const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get('— анонимизирани заемания —');
+    const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
+      WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
+      .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;
+    return { years, count, cutoff: anonCutoff(years) };
+  })
+);
+ipcMain.handle('gdpr:anonymize', () =>
+  run(() => {
+    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
+    const years = parseInt(s.anonymize_years, 10) || 0;
+    if (!years) throw new Error('Първо задайте срок в „Настройки“ → „Лични данни“ (0 = изключено).');
+    const cutoff = anonCutoff(years);
+    const anonId = anonReaderId();
+    const tx = db.transaction(() => {
+      const n = db.prepare(`
+        UPDATE loans SET
+          anon_category = COALESCE((SELECT r.category FROM readers r WHERE r.id = loans.reader_id), '—')
+                          || ' · ' || substr(loans.date_out, 1, 4),
+          reader_id = ?
+        WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL AND reader_id != ?
+      `).run(anonId, cutoff, anonId).changes;
+      // Събитията също губят връзката с читателя; категорията им е снимана още при записа.
+      db.prepare('UPDATE events SET reader_id = NULL WHERE date < ? AND reader_id IS NOT NULL AND reader_id != ?')
+        .run(cutoff, anonId);
+      return n;
+    });
+    const n = tx();
+    logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани');
+    return { anonymized: n, cutoff };
   })
 );
 ipcMain.handle('readers:delete', (e, id) => run(() => db.prepare('DELETE FROM readers WHERE id = ?').run(id)));
@@ -1323,6 +1553,57 @@ const LOAN_SELECT = `
   JOIN books b ON b.id = l.book_id
   JOIN readers r ON r.id = l.reader_id
 `;
+
+/* ---------------- Поток от събития ----------------
+   Всяко заемане/връщане/подновяване/ползване в читалня/посещение по домовете оставя
+   ред в events — със снимка на категорията на читателя и езика/УДК/вида на документа
+   към момента. От тези редове дневникът предлага попълнени стойности (dnevnik:suggest),
+   а справките се смятат със заявки. Грешка тук никога не проваля самата операция. */
+function logEvent(kind, opts) {
+  try {
+    const o = opts || {};
+    let bk = null, rd = null;
+    if (o.bookId) {
+      bk = db.prepare(`SELECT b.language, b.udk, c.name AS category_name
+        FROM books b LEFT JOIN categories c ON c.id = b.category_id WHERE b.id = ?`).get(o.bookId);
+    }
+    if (o.readerId) rd = db.prepare('SELECT category FROM readers WHERE id = ?').get(o.readerId);
+    db.prepare(`INSERT INTO events (date, kind, book_id, reader_id, reader_category, book_language, book_udk, book_category, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(o.date || today(), kind, o.bookId || null, o.readerId || null,
+        rd ? rd.category : null, bk ? bk.language : null, bk ? bk.udk : null,
+        bk ? bk.category_name : null, o.note || null);
+  } catch (err) { console.error('Регистър на събитията:', err.message); }
+}
+// Ползване в читалня — бърз брояч от „Заемане и връщане"; читателят е незадължителен.
+ipcMain.handle('events:localuse', (e, { date } = {}) =>
+  run(() => { logEvent('читалня', { date }); return true; })
+);
+
+/* Наказание в дни (Koha: finedays) — за селска библиотека N дни без право на заемане
+   е по-приложимо от глоба в стотинки, която никой не събира. Смята се при връщане
+   със забава; натрупва се върху вече наложено наказание, но не надхвърля тавана. */
+function applySuspension(readerId, daysLate) {
+  const s = db.prepare('SELECT suspend_per_day, suspend_max FROM settings WHERE id = 1').get() || {};
+  const per = Number(s.suspend_per_day) || 0;
+  if (per <= 0 || daysLate <= 0) return null;
+  const penalty = Math.min(Math.ceil(daysLate * per), s.suspend_max || 90);
+  const r = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(readerId);
+  const base = (r && r.suspended_until && r.suspended_until > today()) ? r.suspended_until : today();
+  const until = new Date(base);
+  until.setDate(until.getDate() + penalty);
+  const untilStr = until.toISOString().slice(0, 10);
+  db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run(untilStr, readerId);
+  logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + daysLate + ' дни забава)');
+  return untilStr;
+}
+function checkSuspended(readerId) {
+  const r = db.prepare('SELECT name, suspended_until FROM readers WHERE id = ?').get(readerId);
+  if (r && r.suspended_until && r.suspended_until > today()) {
+    throw new Error('Заемането за ' + r.name + ' е преустановено до ' + r.suspended_until.split('-').reverse().join('.') +
+      ' заради просрочени връщания. Наказанието се сваля от картона на читателя.');
+  }
+}
 
 /* ---------------- Резервации ---------------- */
 const HOLD_ACTIVE = "('чака','заделена')";
@@ -1424,12 +1705,14 @@ ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due })
       const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(book_id).n;
       const qty = inv ? inv.quantity : 0;
       if (outCount >= qty) throw new Error('Няма свободни бройки от тази книга.');
+      checkSuspended(reader_id);
       consumeHoldOnCheckout(book_id, reader_id);
       const info = db.prepare(`
         INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)
       `).run(reader_id, book_id, date_out, date_due || null);
       const b = db.prepare('SELECT title, inv_number FROM books WHERE id = ?').get(book_id);
       logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : ''));
+      logEvent('заемане', { bookId: book_id, readerId: reader_id, date: date_out });
       return info.lastInsertRowid;
     });
     const id = tx();
@@ -1443,8 +1726,17 @@ ipcMain.handle('loans:return', (e, { id, date_in }) =>
     const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
     if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title);
     const hold = l ? activateHoldOnReturn(l.book_id) : null;
+    let suspendedUntil = null;
+    if (l) {
+      logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: date_in });
+      const daysLate = l.date_due ? Math.max(0, Math.round((new Date(date_in) - new Date(l.date_due)) / 864e5)) : 0;
+      suspendedUntil = applySuspension(l.reader_id, daysLate);
+    }
     writeCatalogIfConfigured();
-    return { hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null };
+    return {
+      hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
+      suspendedUntil
+    };
   })
 );
 ipcMain.handle('loans:extend', (e, { id }) =>
@@ -1465,6 +1757,7 @@ ipcMain.handle('loans:extend', (e, { id }) =>
     const newDue = next.toISOString().slice(0, 10);
     db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
     logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
+    logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
     return { date_due: newDue, renewals: used + 1, max };
   })
 );
@@ -1482,12 +1775,14 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
       const s = db.prepare('SELECT max_books, loan_days FROM settings WHERE id = 1').get();
       const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
       if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
+      checkSuspended(reader_id);
       consumeHoldOnCheckout(b.id, reader_id);
       const out = date_out || today();
       const due = new Date(out); due.setDate(due.getDate() + (s.loan_days || 30));
       const dueStr = due.toISOString().slice(0, 10);
       const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
       logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
+      logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
       return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
     });
     const result = tx();
@@ -1507,10 +1802,12 @@ ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     const fine = daysLate * (s.fine_per_day || 0);
     db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
     logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+    logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
+    const suspendedUntil = applySuspension(loan.reader_id, daysLate);
     const hold = activateHoldOnReturn(b.id);
     writeCatalogIfConfigured();
     return {
-      title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine,
+      title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine, suspendedUntil,
       hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null
     };
   })
@@ -1556,11 +1853,33 @@ ipcMain.handle('dashboard:full', () =>
     `).all();
     const holdsReady = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'заделена'").get().n;
     const holdsWaiting = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'чака'").get().n;
+    /* „За днес" — работният списък на библиотекаря (десктоп-аналог на cron задачите
+       на Koha): наближаващи падежи, дължими пререгистрации, много дълги просрочия
+       (кандидати за „липсваща"), записи за анонимизиране. */
+    const reregDue = db.prepare(`
+      SELECT COUNT(*) AS n FROM readers
+      WHERE status = 'активен' AND name != '— анонимизирани заемания —'
+        AND date(COALESCE(re_registered_at, registered_at), '+1 year') <= date('now', '+14 days')
+    `).get().n;
+    const longOverdue = db.prepare(`
+      SELECT COUNT(*) AS n FROM loans
+      WHERE date_in IS NULL AND date_due IS NOT NULL AND julianday('now') - julianday(date_due) > 60
+    `).get().n;
+    const sAnon = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
+    const anonYears = parseInt(sAnon.anonymize_years, 10) || 0;
+    let anonCandidates = 0;
+    if (anonYears) {
+      anonCandidates = db.prepare(`SELECT COUNT(*) AS n FROM loans
+        WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL`)
+        .get(`${new Date().getFullYear() - anonYears}-01-01`).n;
+    }
+    const suspendedNow = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE suspended_until > date('now')`).get().n;
     return {
       fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
       year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
       inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
-      upcoming, holdsReady, holdsWaiting
+      upcoming, holdsReady, holdsWaiting,
+      today: { reregDue, longOverdue, anonCandidates, suspendedNow }
     };
   })
 );
@@ -1615,7 +1934,8 @@ ipcMain.handle('inventorySessions:scan', (e, { sessionId, code }) =>
     if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
     db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(sessionId, b.id);
     db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(b.id, s.date);
-    if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен' WHERE id=?").run(b.id);
+    db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
+    if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
     return { inv_number: b.inv_number, title: b.title };
   })
 );
@@ -1636,7 +1956,7 @@ ipcMain.handle('inventorySessions:close', (e, sessionId) =>
       `);
       missing.forEach(b => {
         insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price);
-        if (b.status !== 'отчислен') db.prepare("UPDATE books SET status='липсващ' WHERE id=?").run(b.id);
+        if (b.status !== 'отчислен') db.prepare("UPDATE books SET status='липсващ', status_date=date('now') WHERE id=?").run(b.id);
       });
       db.prepare('UPDATE inventory_sessions SET closed = 1 WHERE id = ?').run(sessionId);
       logAudit('Инвентаризация', 'проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
@@ -1664,7 +1984,7 @@ const DEFAULT_NOTICE_BODY =
 
 {list}
 {fine_line}
-Молим да ги върнете при първа възможност или да заявите удължаване на срока.
+{level_line}Молим да ги върнете при първа възможност или да заявите удължаване на срока.
 
 С уважение,
 {librarian_line}{library}{place_line}`;
@@ -1681,8 +2001,18 @@ const NOTICE_PLACEHOLDERS = [
   ['fine_sms', ', обезщетение ... лв (или празно, ако е 0)'],
   ['librarian', 'име на библиотекаря'], ['librarian_line', 'библиотекар + нов ред (или празно)'],
   ['place', 'населено място'], ['place_line', 'нов ред + място (или празно)'],
-  ['date', 'днешна дата']
+  ['date', 'днешна дата'],
+  ['level', 'степен на напомнянето: 1, 2 или 3'],
+  ['level_line', 'ред „Това е ВТОРО/ТРЕТО напомняне…“ (празно при първо)']
 ];
+/* Тонът се покачва със степента: първото напомняне е любезна подкана, третото
+   предупреждава за преустановяване на заемането. Степента идва от давността на
+   най-старото просрочие (праговете remind2_days/remind3_days в Настройки). */
+const LEVEL_LINES = {
+  1: '',
+  2: 'Това е ВТОРО напомняне.\n\n',
+  3: 'Това е ТРЕТО напомняне. При ново неизпълнение достъпът до заемане ще бъде временно преустановен.\n\n'
+};
 function fillTemplate(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 }
@@ -1703,7 +2033,8 @@ function reminderTexts(r, s) {
     fine_sms: fine > 0 ? `, обезщетение ${fine.toFixed(2)} лв` : '',
     librarian: s.librarian || '', librarian_line: s.librarian ? s.librarian + '\n' : '',
     place: s.place || '', place_line: s.place ? '\n' + s.place : '',
-    date: bgDate(today())
+    date: bgDate(today()),
+    level: r.level || 1, level_line: LEVEL_LINES[r.level] || ''
   };
   return {
     subject: fillTemplate(s.notice_subject || DEFAULT_NOTICE_SUBJECT, vars),
@@ -1714,20 +2045,38 @@ function reminderTexts(r, s) {
 const bgDate = (d) => d ? String(d).split('-').reverse().join('.') : '';
 ipcMain.handle('loans:reminders', () =>
   run(() => {
-    const s = db.prepare('SELECT lib_name, org, place, librarian, notice_subject, notice_body, notice_sms FROM settings WHERE id = 1').get() || {};
+    const s = db.prepare(`SELECT lib_name, org, place, librarian, notice_subject, notice_body, notice_sms,
+      remind2_days, remind3_days FROM settings WHERE id = 1`).get() || {};
     const rows = db.prepare(`
       SELECT l.reader_id, r.name, r.phone, r.email, COUNT(*) AS n,
+             MIN(l.date_due) AS oldest_due,
              SUM((julianday('now') - julianday(l.date_due)) * st.fine_per_day) AS fine
       FROM loans l JOIN readers r ON r.id = l.reader_id, settings st
       WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') AND st.id = 1
       GROUP BY l.reader_id ORDER BY r.name
     `).all();
     const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+    const d2 = s.remind2_days == null ? 14 : s.remind2_days, d3 = s.remind3_days == null ? 30 : s.remind3_days;
+    const lastNoticeQ = db.prepare(`SELECT level, ts FROM notice_log WHERE reader_id = ? ORDER BY ts DESC LIMIT 1`);
     for (const r of rows) {
       r.loans = detail.filter(d => d.reader_id === r.reader_id);
+      const overdueDays = Math.round((new Date(today()) - new Date(r.oldest_due)) / 864e5);
+      r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
+      const last = lastNoticeQ.get(r.reader_id);
+      // Показва се само напомняне, изпратено ПО ТЕКУЩОТО просрочие — старите не броят.
+      r.lastNotice = (last && last.ts >= r.oldest_due) ? { level: last.level, ts: last.ts } : null;
       Object.assign(r, reminderTexts(r, s));
     }
     return rows;
+  })
+);
+/* Отбелязва, че напомняне е реално минало към читателя (печат/копиране/поща) —
+   така се вижда кой на коя степен е и повторните не се дублират на сляпо. */
+ipcMain.handle('notices:log', (e, { reader_id, level, channel, loans_count }) =>
+  run(() => {
+    db.prepare('INSERT INTO notice_log (reader_id, level, channel, loans_count) VALUES (?, ?, ?, ?)')
+      .run(reader_id, level || 1, channel || null, loans_count || 0);
+    return true;
   })
 );
 // Отваря пощенския клиент на потребителя. Адресът се сглобява тук, за да не се
@@ -1910,6 +2259,59 @@ ipcMain.handle('dnevnik:saveDay', (e, d) =>
         ${DNEVNIK_FIELDS.map(f => f + '=excluded.' + f).join(',')}, note=excluded.note
     `).run(payload);
     logAudit('Дневник', 'вписан ден ' + d.date);
+  })
+);
+/* Предложени стойности за един ден на дневника, изведени от потока събития (events).
+   Ръчното въвеждане ОСТАВА меродавно — официалният формуляр се потвърждава от
+   библиотекаря; тук програмата само предлага числата, които може да изведе сама:
+   Раздел Б по вид/език/съдържание от заеманията, посещенията в читалня и по домовете,
+   и разпределението на читателите по възрастови категории. */
+const DNEVNIK_TYPE_MAP = {
+  'книга': 'b_type_books', 'продължаващо издание': 'b_type_period', 'графично издание': 'b_type_graphic',
+  'картографско издание': 'b_type_carto', 'нотно издание': 'b_type_music', 'аудиодокумент': 'b_type_audio',
+  'видеодокумент': 'b_type_video', 'електронен документ': 'b_type_electronic'
+};
+const DNEVNIK_LANG_MAP = {
+  'български': 'b_lang_bg', 'руски': 'b_lang_ru', 'английски': 'b_lang_en',
+  'немски': 'b_lang_de', 'френски': 'b_lang_fr'
+};
+// Проверява се от най-дългия префикс към най-късия — иначе „793" би хванало „7".
+const DNEVNIK_UDK_PREFIXES = [
+  ['793', 'b_cat_793'], ['799', 'b_cat_793'], ['91', 'b_cat_91'], ['80', 'b_cat_80'],
+  ['82', 'b_cat_82'], ['61', 'b_cat_61'], ['62', 'b_cat_62'], ['63', 'b_cat_63'],
+  ['64', 'b_cat_62'], ['69', 'b_cat_62'], ['0', 'b_cat_0'], ['1', 'b_cat_1'], ['2', 'b_cat_2'],
+  ['3', 'b_cat_3'], ['5', 'b_cat_5'], ['7', 'b_cat_7'], ['9', 'b_cat_9']
+];
+const DNEVNIK_AGE_MAP = {
+  'дете до 14 г.': 'a_age_u14', 'ученик': 'a_age_15_18', 'студент': 'a_age_19_28'
+};
+ipcMain.handle('dnevnik:suggest', (e, { date }) =>
+  run(() => {
+    const events = db.prepare('SELECT * FROM events WHERE date = ?').all(date);
+    const out = {};
+    const add = (k, n) => { if (k) out[k] = (out[k] || 0) + (n == null ? 1 : n); };
+    const seenReaders = new Set();
+    for (const ev of events) {
+      if (ev.kind === 'читалня') { add('a_visit_reading'); continue; }
+      if (ev.kind === 'дома') { add('a_visit_home'); continue; }
+      if (ev.kind !== 'заемане') continue;
+      // Раздел Б — по вид, език и съдържание, само за реално заетите този ден.
+      add(DNEVNIK_TYPE_MAP[ev.book_category] || 'b_type_books');
+      add(DNEVNIK_LANG_MAP[ev.book_language] || 'b_lang_other');
+      const udk = String(ev.book_udk || '').trim();
+      if (udk) {
+        const hit = DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p));
+        if (hit) add(hit[1]);
+      }
+      // Раздел А — всеки читател се брои веднъж на ден, по категорията му към момента.
+      const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
+      if (!seenReaders.has(rk)) {
+        seenReaders.add(rk);
+        add(DNEVNIK_AGE_MAP[ev.reader_category] || 'a_age_o28');
+        if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
+      }
+    }
+    return { date, suggestions: out, eventsCount: events.length };
   })
 );
 ipcMain.handle('dnevnik:exportCsv', async (e, { year, month }) => {
@@ -2516,7 +2918,8 @@ ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
         if (already.get(sessionId, b.id)) { res.duplicates++; continue; }
         addScan.run(sessionId, b.id);
         addCheck.run(b.id, s.date);
-        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен' WHERE id=?").run(b.id);
+        db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
+        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
         res.added++;
       }
     })();
@@ -2793,21 +3196,29 @@ function startAutoPushTimer() {
 // формàта, който `inventar-biblioteka.html` и страницата page-katalog.html на сайта вече
 // очакват (кратки ключове inv/a/t/s/c/p/y/v/l/u/g/o/k/n/cv/av) — сайтът чете това по
 // живо от GitHub и не знае нищо за схемата на Electron версията.
-function publicBookFields(b) {
+/* opacMap: вътрешна стойност → публичен надпис от номенклатурите (opac_label).
+   Навън не трябва да се вижда вътрешният жаргон — затова отделът и езикът минават
+   през превода, ако библиотекарят е задал публичен надпис. */
+function publicBookFields(b, opacMap) {
+  const pub = (cat, v) => (opacMap && opacMap[cat] && opacMap[cat][v]) || v || '';
   return {
     inv: b.inv_number, a: b.author || '', t: b.title || '', s: b.subtitle || '',
     c: b.city || '', p: b.publisher || '', y: b.year || '', v: b.category_name || '',
-    l: b.language || '', u: b.udk || '', g: b.call_number || '', o: b.department || '',
+    l: pub('language', b.language), u: b.udk || '', g: b.call_number || '', o: pub('department', b.department),
     k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '', av: b.available > 0 ? 1 : 0
   };
 }
 function buildCatalogPayload() {
   const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND b.department != 'служебен' ORDER BY b.title`).all();
   const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
+  const opacMap = {};
+  for (const r of db.prepare(`SELECT category, value, opac_label FROM authorised_values WHERE opac_label IS NOT NULL AND TRIM(opac_label) <> ''`).all()) {
+    (opacMap[r.category] = opacMap[r.category] || {})[r.value] = r.opac_label;
+  }
   return {
     library: s.lib_name || '', place: s.place || '',
     generated: new Date().toISOString().slice(0, 10),
-    items: books.map(publicBookFields)
+    items: books.map(b => publicBookFields(b, opacMap))
   };
 }
 function catalogPayloadItemCount(payload) {
