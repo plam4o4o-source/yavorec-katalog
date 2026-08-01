@@ -11,6 +11,20 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.13.9
+
+**Промени:**
+- Обновено странично меню: икона пред всеки раздел, заоблени редове с
+  плавен преход при посочване, по-отчетлив активен раздел с бронзов кант,
+  разделителна линия след заглавието на всяка група и дискретен тъмен
+  скролбар в лентата. Работи и в шестте цветови теми.
+
+**Changes:**
+- Refreshed sidebar menu: an icon for every section, rounded rows with a
+  smooth hover transition, a clearer active item with a brass accent,
+  a divider line after each group heading, and a subtle dark scrollbar in
+  the rail. Works across all six color themes.
+
 ## v1.13.8
 
 _(Тагът `v1.13.7` остана със заклещено празно издание в GitHub заради

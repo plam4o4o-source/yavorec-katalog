@@ -380,6 +380,12 @@ const NAV = [
   { g: 'Отчети', items: [['stats', 'Справки и статистика'], ['catalog', 'Онлайн каталог'], ['labels', 'Баркод етикети'], ['odit', 'Одитна следа']] },
   { g: 'Настройки', items: [['setup', 'Настройки']] }
 ];
+const NAV_ICONS = {
+  dash: '📊', books: '📚', invbook: '📖', kdbf: '📒', acq: '📥', acts: '📤',
+  invent: '🗃️', auth: '🗂️', readers: '👥', circ: '🔄', over: '⏰',
+  periodika: '📰', mzs: '🤝', dnevnik: '📅', analytics: '📑', persons: '👤',
+  chronicle: '🕰️', stats: '📈', catalog: '🌐', labels: '🏷️', odit: '🧾', setup: '⚙️'
+};
 const TITLES = {
   dash: ['Табло', 'обобщение на състоянието'],
   books: ['Библиотечен фонд', 'каталогизация и издирване'],
@@ -413,7 +419,9 @@ window.addEventListener('hashchange', route);
 function drawNav() {
   $('#nav').innerHTML = NAV.map(g =>
     `<div class="nav-grp">${esc(g.g)}</div>` +
-    g.items.map(([k, t]) => `<a href="#${k}" class="${VIEW === k ? 'on' : ''}">${esc(t)}</a>`).join('')
+    g.items.map(([k, t]) =>
+      `<a href="#${k}" class="${VIEW === k ? 'on' : ''}"><span class="ic">${NAV_ICONS[k] || '•'}</span><span class="tx">${esc(t)}</span></a>`
+    ).join('')
   ).join('');
 }
 
