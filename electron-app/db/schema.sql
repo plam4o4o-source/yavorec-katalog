@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS readers (
   status            TEXT DEFAULT 'активен',
   gdpr_consent      INTEGER DEFAULT 0,
   parent_consent    INTEGER DEFAULT 0,
+  guarantor_name     TEXT,   -- родител/настойник за читатели под 14 г. (Koha: "guarantor")
+  guarantor_relation TEXT,   -- родител | настойник | друго
+  guarantor_phone    TEXT,   -- контакт и отговорност носи гарантът, не детето
   note              TEXT,
   created_at        TEXT DEFAULT (datetime('now'))
 );
@@ -362,6 +365,7 @@ CREATE TABLE IF NOT EXISTS settings (
   logo              TEXT,                   -- лого на организацията, data URI
   theme             TEXT DEFAULT '1',
   catalog_folder    TEXT,
+  sru_endpoint      TEXT,     -- SRU каталог за внасяне на записи; празно = LOC по подразбиране
   gh_user           TEXT,
   gh_repo           TEXT,
   gh_branch         TEXT DEFAULT 'main',

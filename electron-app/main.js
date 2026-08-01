@@ -98,6 +98,19 @@ function initDb() {
     renewals: 'INTEGER DEFAULT 0'
   });
 
+  ensureColumns('readers', {
+    guarantor_name: 'TEXT',
+    guarantor_relation: 'TEXT',
+    guarantor_phone: 'TEXT'
+  });
+
+  ensureColumns('settings', {
+    notice_subject: 'TEXT',
+    notice_body: 'TEXT',
+    notice_sms: 'TEXT',
+    sru_endpoint: 'TEXT'
+  });
+
   // Еднократна поправка на данни, внесена от версии 1.7.0 – 1.7.3: тогава миграция
   // презаписваше населеното място на „с. Яворец, обл. Габрово“ по погрешното
   // допускане, че селото е в община Севлиево (то е в община Габрово, ЕКАТТЕ 87120).
@@ -543,6 +556,107 @@ async function lookupOpenLibrary(isbn) {
     city: pub ? pub.name : ''
   };
 }
+/* ---------------- SRU (Search/Retrieve via URL) — внасяне на MARC записи ----------------
+   За разлика от Google Books/Open Library (търговски метаданни), SRU носи истински
+   библиотечни MARC записи. НБКМ и COBISS изискват подписано споразумение за достъп до
+   техните SRU/Z39.50 сървъри, затова по подразбиране се ползва каталогът на Library of
+   Congress — публичен, безплатен, без регистрация. Адресът е сменяем от Настройки, за
+   да проработи веднага, ако библиотеката получи достъп до българско хранилище. */
+const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
+const MARC_LANG = {
+  bul: 'български', eng: 'английски', rus: 'руски', ger: 'немски', deu: 'немски',
+  gre: 'гръцки', ell: 'гръцки', fre: 'френски', fra: 'френски', spa: 'испански',
+  ita: 'италиански', tur: 'турски', rum: 'румънски', ron: 'румънски',
+  scr: 'сръбски', srp: 'сръбски', mac: 'македонски', mkd: 'македонски',
+  pol: 'полски', cze: 'чешки', ces: 'чешки', ukr: 'украински'
+};
+function xmlUnescape(str) {
+  return String(str || '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&amp;/g, '&');
+}
+// Целенасочен парсер само за MARCXML структурата (leader/controlfield/datafield/subfield),
+// не общ XML парсер — MARCXML е достатъчно регулярен формат за това. Записите се
+// разпознават по <leader>, който е уникален за всеки MARC запис в отговора.
+function parseMarcXml(xml) {
+  const records = [];
+  const parts = String(xml || '').split(/<leader>/i).slice(1);
+  for (const part of parts) {
+    const endIdx = part.search(/<\/record>/i);
+    const chunk = endIdx >= 0 ? part.slice(0, endIdx) : part;
+    const fields = {};
+    const dfRe = /<datafield\s+tag="(\d{3})"[^>]*>([\s\S]*?)<\/datafield>/gi;
+    let m;
+    while ((m = dfRe.exec(chunk))) {
+      const subs = [];
+      const sfRe = /<subfield\s+code="([^"]*)"\s*>([\s\S]*?)<\/subfield>/gi;
+      let sm;
+      while ((sm = sfRe.exec(m[2]))) subs.push({ code: sm[1], text: xmlUnescape(sm[2]).trim() });
+      (fields[m[1]] = fields[m[1]] || []).push(subs);
+    }
+    records.push(fields);
+  }
+  return records;
+}
+function subVal(subs, code) {
+  const s = (subs || []).find(x => x.code === code);
+  return s ? s.text : '';
+}
+// MARC подполетата свършват с ISBD пунктуация (" /", " :", " ,"...), която тук не ни
+// трябва — маха се последната пунктуационна group заедно с празнините около нея.
+const trimMarcPunct = (s) => String(s || '').replace(/\s*[:;,./]+\s*$/, '').trim();
+function marcToBook(fields) {
+  const f245 = (fields['245'] || [])[0] || [];
+  const title = trimMarcPunct(subVal(f245, 'a'));
+  const subtitle = trimMarcPunct(subVal(f245, 'b'));
+  const authorSubs = (fields['100'] || [])[0] || (fields['700'] || [])[0] || [];
+  const author = trimMarcPunct(subVal(authorSubs, 'a'));
+  const fPub = (fields['264'] || [])[0] || (fields['260'] || [])[0] || [];
+  const city = trimMarcPunct(subVal(fPub, 'a'));
+  const publisher = trimMarcPunct(subVal(fPub, 'b'));
+  const year = (subVal(fPub, 'c').match(/\d{4}/) || [])[0] || '';
+  const f300 = (fields['300'] || [])[0] || [];
+  const pages = (subVal(f300, 'a').match(/\d+/) || [])[0] || '';
+  const langCode = subVal((fields['041'] || [])[0] || [], 'a').toLowerCase();
+  const keywords = (fields['650'] || [])
+    .map(s => trimMarcPunct(subVal(s, 'a'))).filter(Boolean).join(', ');
+  const isbn = subVal((fields['020'] || [])[0] || [], 'a').replace(/\s*\(.*\)\s*$/, '').trim();
+  return {
+    source: 'SRU (MARC)', title, subtitle, author, publisher, city, year, pages,
+    language: MARC_LANG[langCode] || '', keywords, annotation: '', cover_url: '', isbn
+  };
+}
+async function sruLookupIsbn(isbn, endpoint) {
+  const url = `${endpoint}?version=1.1&operation=searchRetrieve&recordSchema=marcxml&maximumRecords=1` +
+    `&query=${encodeURIComponent('bath.isbn=' + isbn)}`;
+  const res = await net.fetch(url, {
+    headers: { 'User-Agent': 'Inventar-Library-System' },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!res.ok) { const err = new Error('HTTP ' + res.status); err.httpStatus = res.status; throw err; }
+  const xml = await res.text();
+  if (/<numberOfRecords>0<\/numberOfRecords>/i.test(xml)) return null;
+  const records = parseMarcXml(xml);
+  if (!records.length) return null;
+  const book = marcToBook(records[0]);
+  return book.title ? book : null;
+}
+ipcMain.handle('sru:lookup', async (e, raw) => {
+  const isbn = normalizeIsbn(raw);
+  if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
+  const s = db.prepare('SELECT sru_endpoint FROM settings WHERE id = 1').get() || {};
+  const endpoint = (s.sru_endpoint || '').trim() || SRU_ENDPOINT_DEFAULT;
+  try {
+    const data = await sruLookupIsbn(isbn, endpoint);
+    if (!data) return { ok: false, error: 'Няма намерен MARC запис с този ISBN в „' + endpoint + '“.' };
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: 'Няма връзка със SRU сървъра (' + endpoint + ') или той не отговаря.' };
+  }
+});
+
 ipcMain.handle('isbn:lookup', async (e, raw) => {
   const isbn = normalizeIsbn(raw);
   if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
@@ -585,11 +699,29 @@ ipcMain.handle('settings:update', (e, s) =>
         director=@director, director_role=@director_role, librarian=@librarian, cat_url=@cat_url,
         loan_days=@loan_days, max_books=@max_books, extensions_count=@extensions_count, extension_days=@extension_days,
         fine_per_day=@fine_per_day, annual_fee=@annual_fee, free_access_pct=@free_access_pct,
-        next_inv_number=@next_inv_number, committee1=@committee1, committee2=@committee2, committee3=@committee3
+        next_inv_number=@next_inv_number, committee1=@committee1, committee2=@committee2, committee3=@committee3,
+        sru_endpoint=@sru_endpoint
       WHERE id = 1
     `).run(s);
     logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
   })
+);
+// Шаблоните за напомняния — отделен формуляр, за да не се засяга основният
+// (better-sqlite3 изисква всички именувани параметри на UPDATE-а да присъстват
+// в подадения обект). Празен низ = "по подразбиране", виж reminderTexts().
+ipcMain.handle('settings:updateNotices', (e, o) =>
+  run(() => {
+    o = o || {};
+    db.prepare('UPDATE settings SET notice_subject=?, notice_body=?, notice_sms=? WHERE id=1')
+      .run(o.notice_subject || null, o.notice_body || null, o.notice_sms || null);
+    logAudit('Редакция на шаблони', 'шаблоните за напомняния са обновени');
+  })
+);
+ipcMain.handle('settings:noticeDefaults', () =>
+  run(() => ({
+    subject: DEFAULT_NOTICE_SUBJECT, body: DEFAULT_NOTICE_BODY, sms: DEFAULT_NOTICE_SMS,
+    placeholders: NOTICE_PLACEHOLDERS
+  }))
 );
 // Размерите се ограничават в разумни граници: под няколко милиметра етикетът е
 // безсмислен, а над размера на A4 принтерът така или иначе не го поема.
@@ -1112,7 +1244,8 @@ ipcMain.handle('kdbf:report', (e, year) =>
 /* ---------------- Читатели ---------------- */
 const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
   'id_card_no', 'id_card_date', 'id_card_issuer', 'birth_date', 'category', 'registered_at',
-  're_registered_at', 'status', 'gdpr_consent', 'parent_consent', 'note'];
+  're_registered_at', 'status', 'gdpr_consent', 'parent_consent',
+  'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note'];
 function readerPayload(r) {
   const out = {};
   READER_FIELDS.forEach(f => { out[f] = r[f] === undefined || r[f] === '' ? null : r[f]; });
@@ -1493,41 +1626,69 @@ ipcMain.handle('inventorySessions:close', (e, sessionId) =>
 
 /* ---------------- Просрочени: напомняния ----------------
    Текстовете се сглобяват тук, за да са еднакви на всички работни места, а
-   изпращането остава ръчно: библиотекарят преглежда и решава. */
+   изпращането остава ръчно: библиотекарят преглежда и решава. Шаблоните
+   (subject/body/sms) се редактират в Настройки — плейсхолдъри във фигурни
+   скоби, вижте DEFAULT_NOTICE_*. Празна настройка = стойността по подразбиране,
+   затова нищо не се променя за инсталации, които не са пипали шаблона. */
+const DEFAULT_NOTICE_SUBJECT = 'Просрочени материали от {library}';
+const DEFAULT_NOTICE_BODY =
+`Уважаем(а) {reader},
+
+Според регистъра на {library} при Вас има {count_phrase}:
+
+{list}
+{fine_line}
+Молим да ги върнете при първа възможност или да заявите удължаване на срока.
+
+С уважение,
+{librarian_line}{library}{place_line}`;
+const DEFAULT_NOTICE_SMS = '{library_short}: имате {count_phrase}{fine_sms}. Моля, върнете {it_them}.';
+const NOTICE_PLACEHOLDERS = [
+  ['reader', 'име на читателя'], ['library', 'име на библиотеката'],
+  ['library_short', 'скъсено име (за SMS, до 40 знака)'],
+  ['count', 'брой просрочени (само числото)'],
+  ['count_phrase', 'напр. „3 просрочени документа“'],
+  ['it_them', '„го“ или „ги“, според броя'],
+  ['list', 'списък на просрочените документи'],
+  ['fine', 'сума на обезщетението, напр. „1.23 лв. (0.63 €)“'],
+  ['fine_line', 'ред с обезщетението (или празно, ако е 0)'],
+  ['fine_sms', ', обезщетение ... лв (или празно, ако е 0)'],
+  ['librarian', 'име на библиотекаря'], ['librarian_line', 'библиотекар + нов ред (или празно)'],
+  ['place', 'населено място'], ['place_line', 'нов ред + място (или празно)'],
+  ['date', 'днешна дата']
+];
+function fillTemplate(tpl, vars) {
+  return tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+}
 function reminderTexts(r, s) {
   const lib = s.lib_name || s.org || 'библиотеката';
   const list = (r.loans || []).map(l =>
     `• ${[l.author, l.title].filter(Boolean).join('. ')} (инв. № ${l.inv_number ?? '—'}), срок ${bgDate(l.date_due)}`
   ).join('\n');
   const fine = Number(r.fine || 0);
-  const fineLine = fine > 0
-    ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €).`
-    : '';
-  const subject = `Просрочени материали от ${lib}`;
-  const body =
-`Уважаем(а) ${r.name},
-
-Според регистъра на ${lib} при Вас има ${r.n} просрочен${r.n === 1 ? ' документ' : 'и документа'}:
-
-${list}
-${fineLine}
-Молим да ги върнете при първа възможност или да заявите удължаване на срока.
-
-С уважение,
-${s.librarian ? s.librarian + '\n' : ''}${lib}${s.place ? '\n' + s.place : ''}`;
-  // SMS-ът се плаща на 160 знака, затова е сбит до най-необходимото. Дългите
-  // наименования се съкращават, за да не изяде името целия SMS.
   const one = r.n === 1;
   const shortLib = lib.length > 40 ? lib.slice(0, 37).trim() + '…' : lib;
-  const sms = `${shortLib}: имате ${r.n} просрочен${one ? ' документ' : 'и документа'}` +
-    (fine > 0 ? `, обезщетение ${fine.toFixed(2)} лв` : '') +
-    `. Моля, върнете ${one ? 'го' : 'ги'}.`;
-  return { subject, body, sms };
+  const vars = {
+    reader: r.name, library: lib, library_short: shortLib,
+    count: r.n, count_phrase: `${r.n} просрочен${one ? ' документ' : 'и документа'}`,
+    it_them: one ? 'го' : 'ги', list,
+    fine: fine > 0 ? `${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €)` : '',
+    fine_line: fine > 0 ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €).` : '',
+    fine_sms: fine > 0 ? `, обезщетение ${fine.toFixed(2)} лв` : '',
+    librarian: s.librarian || '', librarian_line: s.librarian ? s.librarian + '\n' : '',
+    place: s.place || '', place_line: s.place ? '\n' + s.place : '',
+    date: bgDate(today())
+  };
+  return {
+    subject: fillTemplate(s.notice_subject || DEFAULT_NOTICE_SUBJECT, vars),
+    body: fillTemplate(s.notice_body || DEFAULT_NOTICE_BODY, vars),
+    sms: fillTemplate(s.notice_sms || DEFAULT_NOTICE_SMS, vars)
+  };
 }
 const bgDate = (d) => d ? String(d).split('-').reverse().join('.') : '';
 ipcMain.handle('loans:reminders', () =>
   run(() => {
-    const s = db.prepare('SELECT lib_name, org, place, librarian FROM settings WHERE id = 1').get() || {};
+    const s = db.prepare('SELECT lib_name, org, place, librarian, notice_subject, notice_body, notice_sms FROM settings WHERE id = 1').get() || {};
     const rows = db.prepare(`
       SELECT l.reader_id, r.name, r.phone, r.email, COUNT(*) AS n,
              SUM((julianday('now') - julianday(l.date_due)) * st.fine_per_day) AS fine

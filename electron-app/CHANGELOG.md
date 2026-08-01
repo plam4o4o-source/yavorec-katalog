@@ -11,6 +11,46 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.14.2
+
+**Промени:**
+- **Гарант за читатели под 14 г.** — формулярът за читател показва поле за
+  родител/настойник (име, отношение, телефон) при избрана категория
+  „дете до 14 г.“; задължително при запис. Гарантът се вижда в „Заемане и
+  връщане“ до името на детето и на разпечатания читателски картон.
+- **Редактируеми шаблони за напомняния** — писмото, темата и SMS текстът за
+  просрочени материали вече се редактират в Настройки → „Шаблони за
+  напомняния“, с плейсхолдъри като `{reader}`, `{library}`, `{list}`,
+  `{fine_line}`. Празен шаблон = текстът по подразбиране (без промяна за
+  инсталации, които не са го пипали); бутон връща стойностите по подразбиране.
+- **Внасяне на MARC записи през SRU** — нов бутон „SRU…“ до търсенето по
+  ISBN в „Книги“ изтегля истински библиотечен MARC запис (заглавие, автор,
+  издателство, година, страници, език, предметни рубрики) вместо търговски
+  метаданни. По подразбиране ползва публичния каталог на Library of
+  Congress (без регистрация); адресът на SRU сървъра се сменя в Настройки
+  — готово да проработи веднага, ако библиотеката получи достъп до
+  SRU/Z39.50 на НБКМ или COBISS (изискват подписано споразумение,
+  недостъпно засега за автоматично внасяне).
+
+**Changes:**
+- **Guarantor for readers under 14** — the reader form shows a
+  parent/guardian field (name, relation, phone) when category "child under
+  14" is selected; required on save. The guarantor shows up in
+  "Circulation" next to the child's name and on the printed reader card.
+- **Editable notice templates** — the overdue-notice email subject, body,
+  and SMS text are now editable under Settings → "Notice templates", with
+  placeholders like `{reader}`, `{library}`, `{list}`, `{fine_line}`. An
+  empty template falls back to the previous default text (no change for
+  installs that never touch it); a button resets to defaults.
+- **MARC record import via SRU** — a new "SRU…" button next to the ISBN
+  search in "Books" imports a real library MARC record (title, author,
+  publisher, year, pages, language, subject headings) instead of
+  commercial metadata. Defaults to the public Library of Congress catalog
+  (no signup); the SRU server address is configurable in Settings — ready
+  to work immediately if the library gets SRU/Z39.50 access to the
+  Bulgarian national library or COBISS (both require a signed agreement,
+  not available for automatic import yet).
+
 ## v1.14.1
 
 **Промени:**
