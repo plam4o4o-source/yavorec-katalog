@@ -11,6 +11,37 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.14.0
+
+**Промени — цялостно графично освежаване:**
+- Горната лента със заглавието остава залепена при превъртане, с бронзова
+  чертица под заглавието на раздела.
+- Единен бронзов фокус за всички полета за писане и клавиатурна навигация.
+- Плавни преходи и леко „повдигане“ при посочване на бутони, бързи
+  действия и картички; натиснатият бутон реагира осезаемо.
+- Таблиците с леки редуващи се редове („зебра“) за по-лесно четене на
+  дългите регистри, заоблена рамка и мека сянка.
+- Прозорците се отварят с кратка анимация, имат бронзов кант отгоре и
+  замъглен фон зад себе си; бутонът за затваряне е с ясно поле.
+- Известията се появяват с плъзгане и имат цветен кант по вида си.
+- Стилизирани скролбари и в светлата част (тъмните в менюто са от 1.13.9).
+- Заглавията на картичките в таблото с малък бронзов маркер.
+- Всичко стъпва на цветовите променливи — важи за шестте теми.
+
+**Changes — app-wide visual refresh:**
+- Sticky top bar with a brass underline beneath the section title.
+- Unified brass focus ring for all text inputs and keyboard navigation.
+- Smooth transitions and a subtle hover lift on buttons, quick actions and
+  cards; pressed buttons respond tactilely.
+- Tables get zebra striping for long registers, rounded borders and a soft
+  shadow.
+- Modals open with a short animation, carry a brass top accent and blur
+  the background; the close button has a clear hit area.
+- Toasts slide in and carry a colored accent per type.
+- Styled scrollbars in the light area too (dark rail ones shipped in 1.13.9).
+- Dashboard card headings get a small brass marker.
+- Everything uses the theme variables — consistent across all six themes.
+
 ## v1.13.9
 
 **Промени:**

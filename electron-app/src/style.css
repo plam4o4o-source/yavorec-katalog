@@ -43,8 +43,19 @@ html,body{margin:0;padding:0;height:100%}
 body{
   font-family:var(--sans); font-size:14px; color:var(--ink);
   background:var(--paper);
+  -webkit-font-smoothing:antialiased;
 }
 #app{display:flex;height:100vh}
+::selection{background:var(--brassL); color:var(--spine)}
+/* Единен фокус за клавиатурна навигация — само при :focus-visible, за да не
+   се появява рамка при обикновено кликане с мишката. */
+:where(button,a,select):focus-visible{outline:2px solid var(--brassL); outline-offset:1px}
+/* Светлите скролбари на основната част; тъмните на страничната лента са
+   зададени отделно при #rail и надделяват по специфичност. */
+::-webkit-scrollbar{width:11px; height:11px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--rule2); border-radius:6px; border:3px solid var(--paper)}
+::-webkit-scrollbar-thumb:hover{background:var(--brass)}
 
 /* ---------- Sidebar ---------- */
 #rail{
@@ -109,17 +120,25 @@ body{
 
 /* ---------- Main ---------- */
 #main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
+/* Лентата остава залепена отгоре при превъртане — дългите регистри иначе
+   оставят потребителя без заглавие и без бутоните за действия. */
 #topbar{
+  position:sticky; top:0; z-index:10;
   display:flex; justify-content:space-between; align-items:flex-start;
-  padding:22px 30px 14px; border-bottom:1px solid var(--rule); background:var(--paper2);
+  padding:20px 30px 14px; border-bottom:1px solid var(--rule); background:var(--paper2);
+  box-shadow:0 6px 16px -14px rgba(27,24,19,.4);
 }
 #topbar h1{font-family:var(--serif); font-size:26px; margin:0; color:var(--spine2)}
+#topbar h1::after{
+  content:''; display:block; width:36px; height:3px; border-radius:2px;
+  background:linear-gradient(90deg,var(--brass),var(--brassL)); margin-top:5px;
+}
 .sub{font-size:12px; color:var(--ink3); margin-top:2px}
 #view{padding:22px 30px 40px}
 
 /* ---------- Cards / dashboard ---------- */
 .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:20px}
-.card{background:var(--paper2); border:1px solid var(--rule); border-radius:4px; padding:16px 18px; box-shadow:var(--sh)}
+.card{background:var(--paper2); border:1px solid var(--rule); border-radius:6px; padding:16px 18px; box-shadow:var(--sh)}
 .card .num{font-family:var(--serif); font-size:32px; font-weight:700; color:var(--brassD)}
 .card .lbl{font-size:12px; color:var(--ink2); margin-top:2px}
 
@@ -135,7 +154,7 @@ body{
 .kpi{
   display:flex; align-items:center; gap:14px; padding:16px 18px;
   background:var(--paper2); border:1px solid var(--rule); border-left:4px solid var(--brass);
-  border-radius:4px; box-shadow:var(--sh);
+  border-radius:6px; box-shadow:var(--sh);
 }
 .kpi.warn{border-left-color:var(--red)}
 .kpi.ok{border-left-color:var(--green)}
@@ -159,11 +178,13 @@ body{
 .quickGrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:9px}
 .quickBtn{
   display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 8px;
-  background:var(--paper); border:1px solid var(--rule2); border-radius:4px;
+  background:var(--paper); border:1px solid var(--rule2); border-radius:5px;
   font-family:var(--sans); font-size:12.5px; color:var(--ink); cursor:pointer; text-align:center;
+  transition:background .12s, border-color .12s, box-shadow .12s, transform .12s;
 }
 .quickBtn span{font-size:20px; line-height:1}
-.quickBtn:hover{background:var(--paper3); border-color:var(--brass)}
+.quickBtn:hover{background:var(--paper3); border-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
+.quickBtn:active{transform:none; box-shadow:none}
 
 .upcomingRow{display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--rule)}
 .upcomingRow:last-child{border-bottom:0}
@@ -243,8 +264,9 @@ body{
 /* ---------- Toolbar / search ---------- */
 .toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center}
 .toolbar input[type=text], .toolbar input[type=search]{
-  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:3px;
+  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
+  transition:border-color .12s, box-shadow .12s;
 }
 
 /* ---------- Сканиране на баркод (заемане/връщане, инвентаризация, отчисляване) ---------- */
@@ -259,47 +281,64 @@ body{
 /* ---------- Buttons ---------- */
 .btn{
   border:1px solid var(--rule2); background:var(--paper2); color:var(--ink);
-  padding:8px 14px; border-radius:3px; font-size:13px; cursor:pointer;
+  padding:8px 14px; border-radius:4px; font-size:13px; cursor:pointer;
+  transition:background .12s, border-color .12s, box-shadow .12s;
 }
-.btn:hover{background:var(--paper3)}
-.btn.pri{background:var(--brass); border-color:var(--brassD); color:#fff}
-.btn.pri:hover{background:var(--brassD)}
-.btn.dgr{background:var(--red); border-color:#7C1F18; color:#fff}
-.btn.dgr:hover{background:#7C1F18}
+.btn:hover{background:var(--paper3); border-color:var(--brass)}
+.btn:active{transform:translateY(1px)}
+/* Лек светъл кант отгоре придава обем на бронзовия бутон, без втори цвят */
+.btn.pri{
+  background:var(--brass); border-color:var(--brassD); color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22);
+}
+.btn.pri:hover{background:var(--brassD); border-color:var(--brassD)}
+.btn.dgr{background:var(--red); border-color:#7C1F18; color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+.btn.dgr:hover{background:#7C1F18; border-color:#7C1F18}
 .btn.sm{padding:4px 9px; font-size:12px}
 
 /* ---------- Ledger table ---------- */
-.wrap{overflow-x:auto; border:1px solid var(--rule); border-radius:4px; background:var(--paper2)}
+.wrap{overflow-x:auto; border:1px solid var(--rule); border-radius:6px; background:var(--paper2); box-shadow:var(--sh)}
 table.ledger{width:100%; border-collapse:collapse; font-size:13px}
 table.ledger th{
   text-align:left; padding:9px 12px; background:var(--paper3); color:var(--ink2);
   font-size:11px; text-transform:uppercase; letter-spacing:.06em; border-bottom:1px solid var(--rule2);
 }
 table.ledger td{padding:8px 12px; border-bottom:1px solid var(--rule)}
+/* Лека „зебра“ подложка — дългите регистри се четат ред по ред по-лесно */
+table.ledger tbody tr:nth-child(even){background:color-mix(in srgb, var(--paper3) 38%, transparent)}
 table.ledger tbody tr:hover{background:var(--paper3)}
 table.ledger .num{font-family:var(--mono)}
 .badge{padding:2px 8px; border-radius:10px; font-size:11px}
 .badge.ok{background:var(--greenL); color:var(--green)}
 .badge.warn{background:var(--redL); color:var(--red)}
-.empty{padding:30px; text-align:center; color:var(--ink3)}
+.empty{padding:36px 30px; text-align:center; color:var(--ink3)}
+.empty::before{content:'📄'; display:block; font-size:26px; opacity:.55; margin-bottom:6px; filter:grayscale(.4)}
 
 /* ---------- Modal ---------- */
 .veil{
   position:fixed; inset:0; background:rgba(27,24,19,.45); display:none;
   align-items:flex-start; justify-content:center; padding:18px; overflow-y:auto; z-index:50;
+  backdrop-filter:blur(1.5px);
 }
 .veil.on{display:flex}
 /* Широки прозорци, за да се побират формите наведнъж, без превъртане надолу. */
 .modal{
-  background:var(--paper2); border-radius:6px; width:100%; max-width:1080px;
+  background:var(--paper2); border-radius:8px; width:100%; max-width:1080px;
   box-shadow:0 20px 60px rgba(0,0,0,.35); overflow:hidden;
+  border-top:3px solid var(--brass);
 }
+@keyframes modalIn{from{opacity:0; transform:translateY(10px) scale(.985)} to{opacity:1; transform:none}}
+.veil.on .modal{animation:modalIn .16s ease-out}
 .modal header{
   display:flex; justify-content:space-between; align-items:center;
   padding:16px 20px; border-bottom:1px solid var(--rule); background:var(--paper3);
 }
 .modal header h2{font-family:var(--serif); font-size:19px; margin:0}
-.modal .x{background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink2)}
+.modal .x{
+  background:none; border:none; font-size:20px; cursor:pointer; color:var(--ink2);
+  width:30px; height:30px; line-height:1; border-radius:5px; transition:background .12s, color .12s;
+}
+.modal .x:hover{background:var(--rule); color:var(--ink)}
 .modal .body{padding:16px 22px; max-height:80vh; overflow-y:auto}
 /* По-плътни отстояния в прозорците, за да се побират дългите форми наведнъж */
 .modal .body .field{margin-bottom:9px}
@@ -323,8 +362,16 @@ table.ledger .num{font-family:var(--mono)}
 .field{margin-bottom:12px}
 .field label{display:block; font-size:12px; color:var(--ink2); margin-bottom:4px}
 .field input, .field select, .field textarea{
-  width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:3px;
+  width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
+  transition:border-color .12s, box-shadow .12s;
+}
+/* Единен фокус за всички полета за писане — бронзов кант с мек ореол */
+.field input:focus, .field select:focus, .field textarea:focus,
+.toolbar input[type=text]:focus, .toolbar input[type=search]:focus,
+.udkSearch:focus, .scan:focus, .remText:focus{
+  border-color:var(--brass); outline:none;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--brass) 16%, transparent);
 }
 /* Вторият слой прозорци стои над първия */
 .veil2{z-index:60; background:rgba(27,24,19,.35)}
@@ -397,10 +444,11 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 #topActions{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
 .userBadge{
   background:var(--paper); border:1.5px solid var(--brass); color:var(--spine2);
-  padding:8px 14px; border-radius:4px; font-family:var(--sans); font-size:13px; font-weight:600;
+  padding:8px 14px; border-radius:5px; font-family:var(--sans); font-size:13px; font-weight:600;
   cursor:pointer; text-align:left; white-space:nowrap; flex:0 0 auto;
+  transition:background .12s, border-color .12s, box-shadow .12s;
 }
-.userBadge:hover{background:var(--paper3); border-color:var(--brassD)}
+.userBadge:hover{background:var(--paper3); border-color:var(--brassD); box-shadow:var(--sh)}
 /* Докато служителят не е избран — приглушено, за да личи, че е подкана */
 .userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
 .appCredit{font-size:10px; color:#8A8168; margin-top:10px; text-align:center; line-height:1.4}
@@ -419,7 +467,11 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .num.warn{color:var(--red); font-weight:700}
 
 /* ---------- Карти (табло, справки) ---------- */
-.card h3{font-family:var(--serif); font-size:16px; margin:0 0 10px}
+.card h3{display:flex; align-items:center; gap:8px; font-family:var(--serif); font-size:16px; margin:0 0 10px}
+.card h3::before{
+  content:''; flex:0 0 4px; width:4px; height:15px; border-radius:2px;
+  background:linear-gradient(180deg,var(--brassL),var(--brass));
+}
 
 /* ---------- Печат на етикети ---------- */
 .lblsheet{display:grid; grid-template-columns:repeat(3,1fr); gap:3mm}
@@ -509,12 +561,14 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 
 /* ---------- Toasts ---------- */
 #toasts{position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:100}
+@keyframes toastIn{from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none}}
 .toast{
-  background:var(--spine2); color:#F4EFDF; padding:10px 16px; border-radius:4px;
-  font-size:13px; box-shadow:var(--sh); transition:opacity .3s;
+  background:var(--spine2); color:#F4EFDF; padding:10px 16px; border-radius:6px;
+  font-size:13px; box-shadow:0 6px 20px -6px rgba(0,0,0,.45); transition:opacity .3s;
+  border-left:3px solid var(--brassL); animation:toastIn .18s ease-out;
 }
-.toast.ok{background:var(--green)}
-.toast.err{background:var(--red)}
+.toast.ok{background:var(--green); border-left-color:#B9D8C2}
+.toast.err{background:var(--red); border-left-color:#F0C4BF}
 
 /* ============================================================================
    КРАЕЗНАНИЕ: аналитично описание, персоналии, летопис
@@ -530,10 +584,10 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 /* ---------- Персоналии: картотека ---------- */
 .cardGrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; margin-top:14px}
 .prsCard{
-  display:flex; gap:11px; padding:11px; border:1px solid var(--rule2); border-radius:5px;
-  background:var(--paper); cursor:pointer; transition:border-color .15s, box-shadow .15s;
+  display:flex; gap:11px; padding:11px; border:1px solid var(--rule2); border-radius:6px;
+  background:var(--paper); cursor:pointer; transition:border-color .15s, box-shadow .15s, transform .15s;
 }
-.prsCard:hover{border-color:var(--brass); box-shadow:var(--sh)}
+.prsCard:hover{border-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
 .prsPhoto{
   width:64px; height:80px; flex:0 0 auto; border:1px solid var(--rule); border-radius:3px;
   background:var(--paper3); display:flex; align-items:center; justify-content:center; overflow:hidden;
@@ -564,10 +618,10 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 }
 .chrItem{
   display:flex; gap:12px; padding:11px 13px; border:1px solid var(--rule2); border-left:3px solid var(--rule2);
-  border-radius:4px; background:var(--paper); margin-bottom:8px; cursor:pointer;
-  transition:border-left-color .15s, box-shadow .15s;
+  border-radius:5px; background:var(--paper); margin-bottom:8px; cursor:pointer;
+  transition:border-left-color .15s, box-shadow .15s, transform .15s;
 }
-.chrItem:hover{border-left-color:var(--brass); box-shadow:var(--sh)}
+.chrItem:hover{border-left-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
 .chrThumb{width:74px; height:56px; object-fit:cover; border-radius:3px; border:1px solid var(--rule); flex:0 0 auto}
 .chrBody{min-width:0; flex:1}
 .chrTop{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
