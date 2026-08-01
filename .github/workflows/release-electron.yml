@@ -74,3 +74,39 @@ jobs:
           } else {
             Write-Host 'Инсталаторът е НЕПОДПИСАН — виж README, раздел „Цифров подпис“.'
           }
+
+      # Взима раздела "## vX.Y.Z" от CHANGELOG.md (ако съществува) и го
+      # записва като описание на вече публикуваното GitHub Release, вместо
+      # то да остава празно. Не проваля build-а, ако секция липсва.
+      - name: Попълва описанието на изданието от CHANGELOG.md
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $changelogPath = 'CHANGELOG.md'
+          if (-not (Test-Path $changelogPath)) {
+            Write-Host 'Няма CHANGELOG.md — пропуска се.'
+            exit 0
+          }
+          $lines = Get-Content $changelogPath
+          $matches = $lines | Select-String -Pattern "^## $([regex]::Escape($tag))(\s|$)"
+          if (-not $matches) {
+            Write-Host "Няма раздел за $tag в CHANGELOG.md — пропуска се."
+            exit 0
+          }
+          $startIdx = $matches[0].LineNumber
+          $endIdx = $lines.Length - 1
+          for ($i = $startIdx; $i -lt $lines.Length; $i++) {
+            if ($lines[$i] -match '^## ') { $endIdx = $i - 1; break }
+          }
+          $section = ($lines[$startIdx..$endIdx] -join "`n").Trim()
+          if ([string]::IsNullOrWhiteSpace($section)) {
+            Write-Host 'Раздел без съдържание — пропуска се.'
+            exit 0
+          }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          $bodyJson = @{ body = $section } | ConvertTo-Json
+          Invoke-RestMethod -Headers $headers -Method Patch -ContentType 'application/json' -Body $bodyJson -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+          Write-Host 'Описанието на изданието е обновено от CHANGELOG.md.'

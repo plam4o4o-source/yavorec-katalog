@@ -9,11 +9,51 @@ Windows десктоп версия на библиотечния каталог
 промяна в кода. Виж „Данни на библиотеката (универсалност)“ по-долу.
 
 Copyright © 2026 Пламен Боянов Христов. Лицензирана е под
-**GNU General Public License v3.0** (вижте `LICENSE`).
+**GNU General Public License v3.0** (вижте `LICENSE`; неофициален превод на
+български език — `LICENSE.bg.md`).
 Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases);
 Windows инсталаторът се подписва безплатно чрез
 [SignPath Foundation](https://signpath.org/)-ната програма за проекти с
 отворен код.
+
+## Общ преглед / Overview
+
+**Български:** „Инвентар“ е Windows десктоп приложение за управление на фонда
+на малка библиотека — читалищна или общинска. Включва пълен инвентар и
+каталог на книгите, контрол на авторитетните данни (автори/заглавия), УДК
+класификация, читателски карти и заемане, напомняния за просрочени книги,
+износ в библиотечни формати (UNIMARC/MARCXML, Dublin Core), внасяне на данни
+от друга система, мобилно сканиране с баркод при инвентаризация, собствен
+онлайн каталог през GitHub, работа в локална мрежа със споделена база данни,
+автоматични резервни копия и автоматично обновяване. Работи офлайн, без
+интернет връзка (освен при търсене по ISBN и онлайн каталога). Безплатна и с
+отворен код — GNU GPL-3.0.
+
+**English:** „Инвентар“ (*Inventory*) is a Windows desktop application for
+managing the collection of a small public or community library
+(*chitalishte*) in Bulgaria. It provides full book inventory and cataloging,
+authority control for authors/titles, UDC classification, reader cards and
+lending, overdue-book reminders, export to library formats
+(UNIMARC/MARCXML, Dublin Code), data import from other systems, mobile
+barcode scanning for stocktaking, a self-hosted online catalog via GitHub,
+local-network operation with a shared database, automatic backups, and
+automatic updates. It runs fully offline (except for optional ISBN lookups
+and the online catalog). Free and open source — GNU GPL-3.0.
+
+- **Download / Изтегляне:** [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases)
+- **License / Лиценз:** GNU GPL-3.0 — `LICENSE` (English, canonical) /
+  `LICENSE.bg.md` (Bulgarian, unofficial reference translation)
+- **Requirements / Изисквания:** Windows 10/11, 64-bit
+- **Code signing / Подпис на кода:** free, via [SignPath Foundation](https://signpath.org/)
+  for open-source projects (application pending / заявката е подадена)
+
+The rest of this document (build instructions, feature details, database
+schema) is written in Bulgarian, since it targets Bulgarian-speaking
+librarians and developers maintaining this specific installation.
+
+Останалата част от документа (инструкции за build, описание на функциите,
+схема на базата данни) е на български, тъй като е насочена към български
+библиотекари и разработчици, поддържащи точно тази инсталация.
 
 ## Структура на проекта
 
