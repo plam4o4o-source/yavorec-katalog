@@ -23,7 +23,9 @@ contextBridge.exposeInMainWorld('api', {
     updateLabelFormat: invoke('settings:updateLabelFormat'),
     updateTheme: invoke('settings:updateTheme'),
     chooseLogo: invoke('settings:chooseLogo'),
-    clearLogo: invoke('settings:clearLogo')
+    clearLogo: invoke('settings:clearLogo'),
+    updateNotices: invoke('settings:updateNotices'),
+    noticeDefaults: invoke('settings:noticeDefaults')
   },
   dbLocation: {
     get: invoke('dbLocation:get'),
@@ -58,6 +60,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   isbn: {
     lookup: invoke('isbn:lookup')
+  },
+  sru: {
+    lookup: invoke('sru:lookup')
   },
   authorities: {
     fields: invoke('authorities:fields'),

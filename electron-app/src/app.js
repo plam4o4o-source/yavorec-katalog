@@ -94,7 +94,7 @@ function fld(label, name, opts) {
       const v = typeof o === 'object' ? o.v : o, t = typeof o === 'object' ? o.t : o;
       return `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(t)}</option>`;
     }).join('');
-    return `<div class="field"><label>${esc(label)}</label><select name="${name}" ${opts.req ? 'required' : ''}>
+    return `<div class="field"><label>${esc(label)}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
       ${opts.allowEmpty !== false ? `<option value="">${esc(opts.emptyLabel || '—')}</option>` : ''}${options}</select></div>`;
   }
   if (opts.type === 'textarea') {
@@ -771,8 +771,10 @@ async function bookForm(id, presetAcqId) {
             <input name="isbn" value="${esc(v.isbn || '')}">
             <button type="button" class="btn" id="isbnBtn" onclick="isbnLookup()"
               title="Изтегля данните за книгата от Google Books и Open Library">Търси</button>
+            <button type="button" class="btn" id="sruBtn" onclick="sruLookup()"
+              title="Внася истински библиотечен MARC запис през SRU (по подразбиране — каталогът на Library of Congress)">SRU…</button>
           </div>
-          <div class="hint" id="isbnHint">Въведете ISBN и натиснете „Търси“ — полетата се попълват сами.</div>
+          <div class="hint" id="isbnHint">Въведете ISBN и натиснете „Търси“ (търговски данни) или „SRU…“ (библиотечен MARC запис) — полетата се попълват сами.</div>
         </div>
         ${fld('Страници', 'pages', { val: v.pages || '' })}
         ${fld('Език', 'language', { type: 'select', opts: EZICI, val: v.language })}
@@ -1072,6 +1074,48 @@ async function isbnLookup() {
   }
 }
 window.isbnLookup = isbnLookup;
+
+/* SRU (Search/Retrieve via URL) — внася истински библиотечен MARC запис вместо търговски
+   метаданни. Същото правило както при isbnLookup: попълват се само празните полета. */
+async function sruLookup() {
+  const f = $('#bookF'); if (!f) return;
+  const btn = $('#sruBtn'), hint = $('#isbnHint');
+  const isbn = (f.querySelector('[name=isbn]') || {}).value || '';
+  if (!isbn.trim()) return toast('Първо въведете ISBN.', 'err');
+  btn.disabled = true; btn.textContent = 'Търси…';
+  hint.textContent = 'Търси в SRU каталога…';
+  try {
+    const r = await window.api.sru.lookup(isbn);
+    if (!r || !r.ok) {
+      hint.textContent = (r && r.error) || 'Търсенето не успя.';
+      return toast((r && r.error) || 'Търсенето не успя.', 'err');
+    }
+    const filled = [], skipped = [];
+    const LABELS = { title: 'Заглавие', subtitle: 'Подзаглавие', author: 'Автор', publisher: 'Издателство',
+      city: 'Място на издаване', year: 'Година', pages: 'Страници', language: 'Език',
+      keywords: 'Ключови думи', isbn: 'ISBN' };
+    for (const [k, val] of Object.entries(r.data)) {
+      if (k === 'source' || k === 'annotation' || k === 'cover_url' || !val) continue;
+      const el = f.querySelector(`[name="${k}"]`);
+      if (!el) continue;
+      if (el.value && el.value.trim()) { if (k !== 'isbn') skipped.push(LABELS[k] || k); continue; }
+      el.value = val;
+      if (k !== 'isbn') filled.push(LABELS[k] || k);
+    }
+    hint.textContent = filled.length
+      ? `Попълнено от ${r.data.source}: ${filled.join(', ')}.` +
+        (skipped.length ? ` Запазени непроменени: ${skipped.join(', ')}.` : '')
+      : `Намерено в ${r.data.source}, но всички полета вече са попълнени.`;
+    toast(filled.length ? `Попълнени ${filled.length} полета от ${r.data.source}.`
+                        : 'Полетата вече са попълнени.', 'ok');
+  } catch (e) {
+    hint.textContent = 'Няма връзка с интернет или SRU сървърът не отговаря.';
+    toast('Няма връзка с интернет или SRU сървърът не отговаря.', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'SRU…';
+  }
+}
+window.sruLookup = sruLookup;
 
 async function saveBook(id) {
   const d = formData('#bookF');
@@ -1616,9 +1660,11 @@ async function renderReaders() {
     </table></div>`;
   $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; renderReaders(); }, 300));
 }
+const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
 async function readerForm(id) {
   const r = id ? await call(window.api.readers.get(id)) : null;
   const v = r || { registered_at: today(), category: 'възрастен', status: 'активен' };
+  const needsGuarantor = GUARANTOR_CATS.includes(v.category);
   modal(id ? 'Читател ' + (v.card_no || '') : 'Записване на читател', `
     <form id="readerF" onsubmit="return false">
     <fieldset><legend>Лични данни — чл. 42, ал. 3</legend>
@@ -1639,7 +1685,7 @@ async function readerForm(id) {
     <fieldset><legend>Регистрация</legend>
       <div class="grid g4">
         ${fld('Читателска карта №', 'card_no', { val: v.card_no || '', hint: 'използва се като баркод' })}
-        ${fld('Категория', 'category', { type: 'select', opts: KATEG, val: v.category })}
+        ${fld('Категория', 'category', { type: 'select', opts: KATEG, val: v.category, onchange: 'toggleGuarantorFields(this.value)' })}
         ${fld('Дата на записване', 'registered_at', { val: v.registered_at, type: 'date' })}
         ${fld('Пререгистрация', 're_registered_at', { val: v.re_registered_at || '', type: 'date' })}
       </div>
@@ -1650,16 +1696,34 @@ async function readerForm(id) {
       ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.', 'gdpr_consent', { type: 'checkbox', val: v.gdpr_consent })}
       ${fld('За читатели под 14 г. — налице е съгласие на родител/настойник.', 'parent_consent', { type: 'checkbox', val: v.parent_consent })}
     </fieldset>
+    <fieldset id="guarantorFs" style="${needsGuarantor ? '' : 'display:none'}">
+      <legend>Родител / настойник (гарант)</legend>
+      <div class="note" style="margin-top:0">За читатели под 14 г. отговорността за връщане на заетите документи и
+      контактът при просрочие са на родителя/настойника, не на детето.</div>
+      <div class="grid g3">
+        ${fld('Име на родител/настойник', 'guarantor_name', { val: v.guarantor_name || '' })}
+        ${fld('Отношение', 'guarantor_relation', { type: 'select', opts: ['родител', 'настойник', 'друго'], val: v.guarantor_relation || 'родител' })}
+        ${fld('Телефон на родител/настойник', 'guarantor_phone', { val: v.guarantor_phone || '' })}
+      </div>
+    </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveReader(${id || 'null'})">Запиши</button>`);
   if (id) $('#readerF').dataset.id = id;
 }
 window.readerForm = readerForm;
+function toggleGuarantorFields(category) {
+  const fs = $('#guarantorFs');
+  if (fs) fs.style.display = GUARANTOR_CATS.includes(category) ? '' : 'none';
+}
+window.toggleGuarantorFields = toggleGuarantorFields;
 async function saveReader(id) {
   const d = formData('#readerF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
   if (!d.gdpr_consent) return toast('Отбележете съгласието по чл. 47 и ОРЗД.', 'err');
+  if (GUARANTOR_CATS.includes(d.category) && !(d.guarantor_name || '').trim()) {
+    return toast('За читател под 14 г. посочете родител/настойник (гарант).', 'err');
+  }
   d.id = id;
   if (id) await call(window.api.readers.update(d), 'Читателят е обновен.');
   else await call(window.api.readers.create(d), 'Читателят е добавен.');
@@ -1731,6 +1795,7 @@ async function renderCirc() {
       <b style="font-size:17px">${esc(r.name)}</b>
       <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${s.max_books ? ' / ' + s.max_books : ''}</div></div>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
+      ${r.guarantor_name ? `<div class="hint">👪 Родител/настойник: <b>${esc(r.guarantor_name)}</b>${r.guarantor_phone ? ' · тел. ' + esc(r.guarantor_phone) : ''}</div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
     const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
     const maxRenew = s.extensions_count == null ? 2 : s.extensions_count;
@@ -2977,7 +3042,8 @@ async function printReaderCard(id) {
     <b>ЕГН:</b> ${esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
     <b>Постоянен адрес:</b> ${esc(r.address || '…')}<br>
     <b>Телефон:</b> ${esc(r.phone || '…')} &nbsp; <b>Имейл:</b> ${esc(r.email || '…')}<br>
-    <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}</div>
+    <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}
+    ${r.guarantor_name ? `<br><b>Родител/настойник:</b> ${esc(r.guarantor_name)} (${esc(r.guarantor_relation || 'родител')}) — тел. ${esc(r.guarantor_phone || '…')}` : ''}</div>
     <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
       ${code39svg(r.card_no || String(r.id), 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no || '')}</div></div>
     <table><thead><tr><th>Дата на заемане</th><th>Инв. №</th><th>Заглавие</th><th>Срок</th><th>Върнат на</th></tr></thead><tbody>
@@ -3074,6 +3140,9 @@ async function renderSetup() {
         <div class="grid g2">${fld('Ръководител', 'director', { val: s.director || '' })}${fld('Длъжност', 'director_role', { val: s.director_role || '' })}</div>
         ${fld('Библиотекар', 'librarian', { val: s.librarian || '' })}
         ${fld('Адрес на сайта', 'cat_url', { val: s.cat_url || '' })}
+        ${fld('SRU сървър за внасяне на записи', 'sru_endpoint', { val: s.sru_endpoint || '',
+          hint: 'по подразбиране: каталогът на Library of Congress (безплатен, без договор). ' +
+                'Ако библиотеката получи достъп до SRU на НБКМ/COBISS, адресът се сменя тук.' })}
         <div class="field"><label>Лого на организацията</label>
           <div class="logoBox">
             ${s.logo ? `<img src="${esc(s.logo)}" alt="лого">`
@@ -3115,6 +3184,23 @@ async function renderSetup() {
     </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Шаблони за напомняния</h3>
+      <div class="note" style="margin-top:0">Текстовете за писмо, SMS и заглавие на напомнянията за
+      просрочени материали (раздел „Просрочени“) се редактират тук. Плейсхолдър във фигурни скоби,
+      напр. <code>{reader}</code>, се заменя автоматично при подготовката на всяко напомняне.
+      Оставете поле празно, за да ползвате текста по подразбиране.</div>
+      <div class="hint" id="noticePh" style="margin:6px 0 10px;line-height:1.7">зареждане на плейсхолдъри…</div>
+      <form id="noticesF" onsubmit="return false">
+        ${fld('Тема на писмото', 'notice_subject', { val: s.notice_subject || '', hint: 'използва се само за имейл' })}
+        ${fld('Текст на писмото', 'notice_body', { type: 'textarea', rows: 9, val: s.notice_body || '' })}
+        ${fld('Кратък текст за SMS', 'notice_sms', { type: 'textarea', rows: 2, val: s.notice_sms || '' })}
+      </form>
+      <div class="toolbar">
+        <button class="btn pri" onclick="saveNotices()">Запиши шаблоните</button>
+        <button class="btn" onclick="resetNoticeTemplates()">Възстанови по подразбиране</button>
+      </div>
+    </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Антивирусна защита</h3>
       <div class="note" style="margin-top:0">Докато инсталаторът е без закупен цифров подпис, Windows
@@ -3233,6 +3319,7 @@ async function renderSetup() {
       ${updateStatusHtml()}
     </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
+  loadNoticePlaceholders();
 }
 function employeeForm(id) {
   const emp = id ? (window._EMPLOYEES_ALL || []).find(x => x.id === id) : null;
@@ -3386,6 +3473,30 @@ async function saveSetup() {
   if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.saveSetup = saveSetup;
+async function loadNoticePlaceholders() {
+  const d = await call(window.api.settings.noticeDefaults());
+  const el = $('#noticePh');
+  if (!el) return;
+  if (!d) { el.textContent = ''; return; }
+  el.innerHTML = 'Налични: ' + d.placeholders.map(([k, t]) => `<code>{${k}}</code> — ${esc(t)}`).join(' &nbsp;·&nbsp; ');
+}
+async function saveNotices() {
+  const d = formData('#noticesF');
+  await call(window.api.settings.updateNotices(d), 'Шаблоните са записани.');
+  await loadSettingsCache();
+}
+window.saveNotices = saveNotices;
+async function resetNoticeTemplates() {
+  if (!confirm('Връщане на трите шаблона към текста по подразбиране?')) return;
+  const d = await call(window.api.settings.noticeDefaults());
+  if (!d) return;
+  $('[name=notice_subject]').value = '';
+  $('[name=notice_body]').value = '';
+  $('[name=notice_sms]').value = '';
+  await call(window.api.settings.updateNotices({ notice_subject: '', notice_body: '', notice_sms: '' }), 'Върнати към стойностите по подразбиране.');
+  await loadSettingsCache();
+}
+window.resetNoticeTemplates = resetNoticeTemplates;
 
 /* ---------------- Старт ---------------- */
 initUserBadge();
