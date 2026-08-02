@@ -11,6 +11,52 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.20.0
+
+**Промени — защита на ЕГН и № на лична карта на читателите:**
+- **Криптиране на лични данни в базата данни** — ЕГН и № на лична карта на
+  читателите вече се съхраняват криптирани (AES-256-GCM) в базата данни,
+  вместо в чист текст, съгласно чл. 32 от GDPR и изискванията на ЗЗЛД.
+- **Обща парола за защита** — защитата се задава от „Настройки → Защита на
+  ЕГН / № лична карта" с една обща парола, която работи еднакво на всички
+  компютри, споделящи една и съща мрежова база данни (без обвързване с
+  конкретен компютър).
+- **„Защитени данни" при заключена защита** — докато защитата е заключена
+  (или паролата не е въведена на този компютър), екраните на читателите
+  показват „Защитени данни" вместо действителното ЕГН/№ ЛК; данните остават
+  непроменени в базата, докато не отключите защитата отново с правилната
+  парола.
+- **Съществуващи записи** — при първото задаване на парола всички вече
+  въведени ЕГН/№ ЛК на читатели се криптират автоматично; при смяна на
+  паролата всички записи се прекриптират наново, а старата парола спира
+  да важи.
+- **Важно** — паролата не се съхранява никъде в четим вид и не може да бъде
+  възстановена от екипа на програмата; ако бъде забравена, криптираните
+  ЕГН/№ ЛК на читателите не могат да бъдат прочетени отново (останалите
+  данни за читателя не се засягат).
+
+**Changes — encryption of readers' national ID (ЕГН) and ID card number:**
+- **PII encryption at rest** — readers' national ID number (ЕГН) and ID
+  card number are now stored encrypted (AES-256-GCM) in the database
+  instead of in plain text, per GDPR Article 32 and Bulgarian data
+  protection law (ЗЗЛД).
+- **Shared password** — protection is enabled from „Settings → Защита на
+  ЕГН / № лична карта" with one shared password that works identically on
+  every computer sharing the same network database (not tied to a single
+  machine).
+- **"Protected data" placeholder while locked** — while protection is
+  locked (or the password hasn't been entered on this computer), reader
+  screens show "Защитени данни" instead of the actual ЕГН/ID card number;
+  the underlying data is left untouched until protection is unlocked again
+  with the correct password.
+- **Existing records** — the first time a password is set, all readers'
+  existing ЕГН/ID card numbers are encrypted automatically; changing the
+  password re-encrypts every record and invalidates the old password.
+- **Important** — the password is not stored anywhere in readable form and
+  cannot be recovered by the program's authors; if it is forgotten, readers'
+  encrypted ЕГН/ID card numbers cannot be read again (the rest of the
+  reader's data is unaffected).
+
 ## v1.19.0
 
 **Промени — основи за надеждност (без видими промени в екрана):**

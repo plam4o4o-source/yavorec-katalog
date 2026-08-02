@@ -50,3 +50,59 @@ test('foreign_keys enforcement is on and loans capacity trigger exists', () => {
   assert.ok(trg, 'expected trg_loans_capacity trigger to exist');
   db.close();
 });
+
+// Мигрира db-init.test.js-версия на runMigrations() (main.js не може да се
+// require-не директно тук — той е Electron main процес). Проверява точно
+// сценария от main.js: schema.sql сам по себе си НЕ декларира pdp_salt/
+// pdp_verifier (нарочно, per дизайна "MIGRATIONS е източникът на истина за
+// нови промени по схемата отсега нататък") — те трябва да пристигнат само
+// през миграцията, независимо дали базата е чисто нова или "стара".
+function ensureColumns(db, table, columns) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
+  for (const [name, ddl] of Object.entries(columns)) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  }
+}
+function runMigrationsLike(db, migrations, currentVersion) {
+  const from = db.pragma('user_version', { simple: true });
+  const pending = migrations.filter(m => m.version > from).sort((a, b) => a.version - b.version);
+  for (const m of pending) {
+    db.transaction(() => { m.run(); db.pragma('user_version = ' + m.version); })();
+  }
+  const finalVersion = pending.length ? pending[pending.length - 1].version : from;
+  if (finalVersion < currentVersion) db.pragma('user_version = ' + currentVersion);
+}
+
+test('schema.sql alone does NOT declare pdp_salt/pdp_verifier (must come from the migration)', () => {
+  const db = freshDb();
+  const cols = new Set(db.prepare('PRAGMA table_info(settings)').all().map(r => r.name));
+  assert.equal(cols.has('pdp_salt'), false);
+  assert.equal(cols.has('pdp_verifier'), false);
+  db.close();
+});
+
+test('migration v2 adds pdp_salt/pdp_verifier and advances user_version, for both fresh and already-versioned DBs', () => {
+  const MIGRATIONS = [
+    { version: 2, run: (db) => ensureColumns(db, 'settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }) }
+  ];
+  // "Fresh" DB (user_version starts at 0, same as any brand-new install).
+  const dbA = freshDb();
+  runMigrationsLike(dbA, MIGRATIONS.map(m => ({ version: m.version, run: () => m.run(dbA) })), 2);
+  let cols = new Set(dbA.prepare('PRAGMA table_info(settings)').all().map(r => r.name));
+  assert.ok(cols.has('pdp_salt') && cols.has('pdp_verifier'));
+  assert.equal(dbA.pragma('user_version', { simple: true }), 2);
+  dbA.close();
+
+  // "Old" DB already at user_version 1 (simulating a real install that already
+  // ran through the Phase 0 migration) — must still pick up v2 correctly and
+  // must not lose existing data (a settings row already present).
+  const dbB = freshDb();
+  dbB.pragma('user_version = 1');
+  dbB.prepare("UPDATE settings SET lib_name = 'Читалище Тест' WHERE id = 1").run();
+  runMigrationsLike(dbB, MIGRATIONS.map(m => ({ version: m.version, run: () => m.run(dbB) })), 2);
+  cols = new Set(dbB.prepare('PRAGMA table_info(settings)').all().map(r => r.name));
+  assert.ok(cols.has('pdp_salt') && cols.has('pdp_verifier'));
+  assert.equal(dbB.pragma('user_version', { simple: true }), 2);
+  assert.equal(dbB.prepare('SELECT lib_name FROM settings WHERE id = 1').get().lib_name, 'Читалище Тест');
+  dbB.close();
+});
