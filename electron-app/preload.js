@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
     getVersion: invoke('app:getVersion'),
     checkForUpdates: invoke('app:checkForUpdates'),
     installUpdate: invoke('app:installUpdate'),
+    openLogsFolder: invoke('app:openLogsFolder'),
     onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data))
   },
   employees: {
