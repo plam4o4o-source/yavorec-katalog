@@ -378,8 +378,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ts      TEXT DEFAULT (datetime('now')),
   user    TEXT,
   action  TEXT NOT NULL,
-  detail  TEXT
+  detail  TEXT,
+  diff    TEXT   -- JSON [{field, before, after}] — само за редакции; кои полета реално са се променили
 );
+
+-- История на търсенията (Koha: search_history) — какво е търсено, кога и от кого;
+-- захранва предложенията за скорошни търсения в полетата за търсене (без лични данни
+-- в самата заявка — самите текстове на търсенето могат да включват имена на читатели,
+-- затова таблицата не се изнася никъде извън локалната база).
+CREATE TABLE IF NOT EXISTS search_history (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts     TEXT DEFAULT (datetime('now')),
+  user   TEXT,
+  kind   TEXT NOT NULL,
+  query  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_search_history_kind ON search_history(kind, id DESC);
 
 -- Посещения (за годишния статистически отчет, БДС ISO 2789)
 CREATE TABLE IF NOT EXISTS visits (

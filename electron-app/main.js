@@ -161,6 +161,10 @@ function initDb() {
     work_days: "TEXT DEFAULT '0,1,2,3,4,5,6'"
   });
 
+  ensureColumns('audit_log', {
+    diff: 'TEXT'
+  });
+
   // Еднократни попълвания на новите колони от вече наличните данни. Условието
   // "IS NULL" ги прави безвредни при всяко следващо стартиране.
   // datelastseen — от сканиранията на минали инвентаризации (сурови данни има отдавна).
@@ -514,9 +518,22 @@ function run(fn) {
     return { ok: false, error: friendlyDbError(err) };
   }
 }
-function logAudit(action, detail) {
-  db.prepare('INSERT INTO audit_log (user, action, detail) VALUES (?, ?, ?)')
-    .run(CURRENT_USER || '', action, detail || '');
+function logAudit(action, detail, diff) {
+  db.prepare('INSERT INTO audit_log (user, action, detail, diff) VALUES (?, ?, ?, ?)')
+    .run(CURRENT_USER || '', action, detail || '', diff && diff.length ? JSON.stringify(diff) : null);
+}
+// Сравнява старите и новите стойности само на посочените полета и връща онези, които
+// реално са се променили — за одитната следа (action_logs.diff в Koha), не целия ред.
+function diffFields(oldObj, newObj, fields) {
+  const out = [];
+  for (const f of fields) {
+    const before = oldObj ? oldObj[f] : undefined;
+    const after = newObj ? newObj[f] : undefined;
+    const nb = before == null ? '' : String(before);
+    const na = after == null ? '' : String(after);
+    if (nb !== na) out.push({ field: f, before: before ?? null, after: after ?? null });
+  }
+  return out;
 }
 const today = () => new Date().toISOString().slice(0, 10);
 const yearOf = (d) => (d || today()).slice(0, 4);
@@ -1160,7 +1177,7 @@ ipcMain.handle('books:create', (e, book) =>
 ipcMain.handle('books:update', (e, book) =>
   run(() => {
     const tx = db.transaction((b) => {
-      const prev = db.prepare('SELECT status, status_date FROM books WHERE id = ?').get(b.id);
+      const prev = db.prepare('SELECT * FROM books WHERE id = ?').get(b.id);
       const payload = bookPayload(b, prev);
       db.prepare(`
         UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
@@ -1169,7 +1186,8 @@ ipcMain.handle('books:update', (e, book) =>
         INSERT INTO inventory (book_id, quantity) VALUES (?, ?)
         ON CONFLICT(book_id) DO UPDATE SET quantity = excluded.quantity
       `).run(b.id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
-      logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
+      const diff = diffFields(prev, payload, BOOK_FIELDS);
+      logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
     });
     tx(book);
     writeCatalogIfConfigured();
@@ -1445,11 +1463,14 @@ ipcMain.handle('readers:create', (e, r) =>
 );
 ipcMain.handle('readers:update', (e, r) =>
   run(() => {
-    const prev = db.prepare('SELECT gdpr_consent_date, parent_consent_date FROM readers WHERE id = ?').get(r.id);
+    const prev = db.prepare('SELECT * FROM readers WHERE id = ?').get(r.id);
     const payload = readerPayload(r, prev);
     db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
       .run(Object.assign({ id: r.id }, payload));
-    logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name);
+    // ЕГН и номер на документ за самоличност не влизат в диференца на одитната следа —
+    // тя се пази с експорт в CSV и не бива да удвоява най-чувствителните лични данни.
+    const diff = diffFields(prev, payload, READER_FIELDS.filter(f => f !== 'egn' && f !== 'id_card_no'));
+    logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name, diff);
   })
 );
 // Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
@@ -3148,6 +3169,25 @@ ipcMain.handle('audit:list', (e, query) =>
     }
     return db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500').all();
   })
+);
+
+/* ---------------- История на търсенията (Koha: search_history) ----------------
+   Записва завършени търсения (не всяко натискане на клавиш), за да предлага
+   скорошните заявки в полето за търсене — удобство при повторно търсене, не
+   пълноценна одитна следа. */
+ipcMain.handle('searchHistory:log', (e, { kind, query }) =>
+  run(() => {
+    const q = String(query || '').trim();
+    if (!kind || q.length < 2) return;
+    const last = db.prepare('SELECT query FROM search_history WHERE kind = ? ORDER BY id DESC LIMIT 1').get(kind);
+    if (last && last.query === q) return; // без дубликат на последното същото търсене
+    db.prepare('INSERT INTO search_history (user, kind, query) VALUES (?, ?, ?)').run(CURRENT_USER || '', kind, q);
+  })
+);
+ipcMain.handle('searchHistory:suggest', (e, kind) =>
+  run(() => db.prepare(`
+    SELECT query FROM search_history WHERE kind = ? GROUP BY query ORDER BY MAX(id) DESC LIMIT 10
+  `).all(kind).map(r => r.query))
 );
 
 /* ---------------- Посещения ---------------- */
