@@ -11,6 +11,50 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.17.0
+
+**Промени — правила по категория, календар, бележки, сметка, предложения:**
+- **Правила за обслужване по категория читатели** — Настройки → „Правила по
+  категория читатели": срок за заемане, максимум документи, продължения и
+  наказание в дни вече могат да са различни за дете, специалист и т.н. Празно
+  поле = общата стойност от „Обслужване"; действащото правило се вижда в
+  „Заемане и връщане" при избран читател.
+- **Календар на библиотеката** — работни дни от седмицата + конкретни
+  затворени дати (официални празници, отпуск) в Настройки. Падеж, паднал се в
+  затворен ден, се измества автоматично към следващия работен ден; затворените
+  дни вече не се броят в наказанието за забава.
+- **Бележка при заемане** — нов ред в картона на читателя, който изскача
+  открояващо се в „Заемане и връщане", щом бъде избран — напр. „носи още
+  старата книга на брат си".
+- **Читателска сметка** — начисления (годишна такса, обезщетение) и плащания
+  за всеки читател, с печат на квитанция. Нова готова справка „Приходи от
+  такси и обезщетения" за годишния отчет.
+- **Предложения за покупка от читатели** — нов раздел „Предложения за
+  покупка": заявено → одобрено → поръчано → получено (по избор — закачено към
+  партида в „Постъпления") / отказано, с незадължително уведомяване на
+  читателя по имейл при получаване.
+
+**Changes — per-category rules, calendar, patron notes, accounts, suggestions:**
+- **Circulation rules by reader category** — Settings → "Rules by reader
+  category": loan period, max items, renewals, and suspension-days penalty
+  can now differ for children, specialists, etc. An empty field falls back
+  to the "Circulation" global default; the effective rule is shown in
+  "Checkout/return" once a reader is selected.
+- **Library calendar** — weekly working days plus specific closed dates
+  (public holidays, time off) under Settings. A due date that falls on a
+  closed day is automatically shifted to the next working day; closed days
+  no longer count toward the suspension-days penalty.
+- **Checkout alert note** — a new field on the patron record that pops up
+  prominently in "Checkout/return" once that reader is selected — e.g.
+  "still holding their brother's book too".
+- **Patron account** — charges (annual fee, damages) and payments per
+  reader, with receipt printing. New ready-made report "Fee and damages
+  income" for the annual report.
+- **Reader purchase suggestions** — new "Purchase suggestions" section:
+  requested → approved → ordered → received (optionally linked to an
+  acquisitions batch) / declined, with an optional email notification to the
+  reader once received.
+
 ## v1.16.0
 
 **Промени — надграден онлайн каталог (програма + страница на сайта):**

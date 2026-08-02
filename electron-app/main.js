@@ -153,6 +153,14 @@ function initDb() {
     anon_category: 'TEXT'
   });
 
+  ensureColumns('readers', {
+    alert_note: 'TEXT'
+  });
+
+  ensureColumns('settings', {
+    work_days: "TEXT DEFAULT '0,1,2,3,4,5,6'"
+  });
+
   // Еднократни попълвания на новите колони от вече наличните данни. Условието
   // "IS NULL" ги прави безвредни при всяко следващо стартиране.
   // datelastseen — от сканиранията на минали инвентаризации (сурови данни има отдавна).
@@ -1453,6 +1461,81 @@ ipcMain.handle('readers:clearSuspension', (e, id) =>
   })
 );
 
+/* ---------------- Читателска сметка (Koha: accountlines) ----------------
+   amount > 0 = начислено (дължи се), amount < 0 = платено. Балансът е SUM(amount).
+   Не е касов модул — само дневник на движенията + квитанция за печат. */
+ipcMain.handle('account:get', (e, readerId) =>
+  run(() => {
+    const lines = db.prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY date DESC, id DESC').all(readerId);
+    const balance = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    return { lines, balance };
+  })
+);
+ipcMain.handle('account:charge', (e, { reader_id, type, amount, note, date }) =>
+  run(() => {
+    const amt = Math.abs(Number(amount) || 0);
+    if (!amt) throw new Error('Сумата трябва да е положителна.');
+    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(reader_id, date || today(), 'начисление', type || 'друго', amt, note || null);
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+    logAudit('Начисление', (r ? r.name : reader_id) + ' — ' + (type || 'друго') + ' ' + amt.toFixed(2) + ' лв.');
+    return info.lastInsertRowid;
+  })
+);
+ipcMain.handle('account:pay', (e, { reader_id, amount, note, date }) =>
+  run(() => {
+    const amt = Math.abs(Number(amount) || 0);
+    if (!amt) throw new Error('Сумата трябва да е положителна.');
+    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(reader_id, date || today(), 'плащане', 'плащане', -amt, note || null);
+    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+    logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' лв.');
+    return info.lastInsertRowid;
+  })
+);
+ipcMain.handle('account:deleteLine', (e, id) =>
+  run(() => { db.prepare('DELETE FROM account_lines WHERE id = ?').run(id); })
+);
+
+/* ---------------- Предложения за покупка от читатели (Koha: suggestions) ----------------
+   заявено → одобрено → поръчано → получено/отказано. При „получено" може да се закачи
+   към партида в Постъпления, за да остане следа откъде реално е дошла книгата. */
+ipcMain.handle('suggestions:list', (e, status) =>
+  run(() => {
+    const sql = `SELECT s.*, r.name AS reader_name_live, a.no AS acq_no, a.year AS acq_year
+      FROM suggestions s LEFT JOIN readers r ON r.id = s.reader_id
+      LEFT JOIN acquisitions a ON a.id = s.acquisition_id`;
+    const rows = status ? db.prepare(sql + ' WHERE s.status = ? ORDER BY s.date DESC').all(status)
+                         : db.prepare(sql + ' ORDER BY s.date DESC').all();
+    rows.forEach(r => { if (r.reader_name_live) r.reader_name = r.reader_name_live; });
+    return rows;
+  })
+);
+ipcMain.handle('suggestions:create', (e, sug) =>
+  run(() => {
+    if (!(sug.title || '').trim()) throw new Error('Заглавието е задължително.');
+    const info = db.prepare(`
+      INSERT INTO suggestions (date, reader_id, reader_name, author, title, note, status)
+      VALUES (?, ?, ?, ?, ?, ?, 'заявено')
+    `).run(sug.date || today(), sug.reader_id || null, sug.reader_name || null, sug.author || null, sug.title.trim(), sug.note || null);
+    logAudit('Предложение за покупка', sug.title);
+    return info.lastInsertRowid;
+  })
+);
+const SUGGESTION_STATUSES = ['заявено', 'одобрено', 'поръчано', 'получено', 'отказано'];
+ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id }) =>
+  run(() => {
+    if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
+    db.prepare('UPDATE suggestions SET status = ?, acquisition_id = ? WHERE id = ?')
+      .run(status, status === 'получено' ? (acquisition_id || null) : null, id);
+    const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
+    logAudit('Предложение за покупка', (s ? s.title : id) + ' → ' + status);
+  })
+);
+ipcMain.handle('suggestions:delete', (e, id) =>
+  run(() => { db.prepare('DELETE FROM suggestions WHERE id = ?').run(id); })
+);
+
 /* ---------------- Обслужване по домовете (Koha: housebound) ----------------
    График и дневник на посещенията при читатели, които не могат да идват сами.
    Всяко посещение влиза в потока от събития (kind='дома') и оттам дневникът
@@ -1546,6 +1629,124 @@ ipcMain.handle('gdpr:anonymize', () =>
 );
 ipcMain.handle('readers:delete', (e, id) => run(() => db.prepare('DELETE FROM readers WHERE id = ?').run(id)));
 
+/* ---------------- Календар на библиотеката ----------------
+   work_days (в settings) е CSV от номера на дни от седмицата, в които библиотеката
+   работи (0=неделя…6=събота); calendar_closed добавя конкретни затворени дати
+   (официални празници, отпуск). Използва се на две места: падеж, паднал се в затворен
+   ден, се измества към следващия работен ден; наказанието в дни не брои затворените
+   дни като забава (виж closedDaysBetween, ползвано от applySuspension). */
+function workDaysSet() {
+  const s = db.prepare('SELECT work_days FROM settings WHERE id = 1').get() || {};
+  const raw = s.work_days == null ? '0,1,2,3,4,5,6' : s.work_days;
+  const set = new Set(String(raw).split(',').map(x => parseInt(x, 10)).filter(n => !isNaN(n)));
+  return set.size ? set : new Set([0, 1, 2, 3, 4, 5, 6]); // празна/повредена настройка — не блокирай всичко
+}
+function isWorkDay(dateStr, wdSet) {
+  wdSet = wdSet || workDaysSet();
+  if (!wdSet.has(new Date(dateStr + 'T00:00:00').getDay())) return false;
+  return !db.prepare('SELECT 1 FROM calendar_closed WHERE date = ?').get(dateStr);
+}
+// Измества дата напред до първия работен ден (включително самата нея, ако вече е работен ден).
+function nextWorkDay(dateStr) {
+  const wdSet = workDaysSet();
+  const d = new Date(dateStr + 'T00:00:00');
+  for (let i = 0; i < 400; i++) {
+    const ds = d.toISOString().slice(0, 10);
+    if (isWorkDay(ds, wdSet)) return ds;
+    d.setDate(d.getDate() + 1);
+  }
+  return dateStr; // предпазна мярка — практически недостижимо
+}
+// Брой затворени дни в интервала (a, b] — денят на падежа не се брои, денят на връщане
+// се брои, за да съответства на изчислението "дни забава" на повикващия код.
+function closedDaysBetween(a, b) {
+  if (!a || !b || a >= b) return 0;
+  const wdSet = workDaysSet();
+  const closed = new Set(db.prepare('SELECT date FROM calendar_closed WHERE date > ? AND date <= ?').all(a, b).map(r => r.date));
+  let n = 0;
+  const d = new Date(a + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  const end = new Date(b + 'T00:00:00');
+  for (let i = 0; d <= end && i < 5000; i++) {
+    const ds = d.toISOString().slice(0, 10);
+    if (!wdSet.has(d.getDay()) || closed.has(ds)) n++;
+    d.setDate(d.getDate() + 1);
+  }
+  return n;
+}
+ipcMain.handle('calendar:get', () =>
+  run(() => {
+    const s = db.prepare('SELECT work_days FROM settings WHERE id = 1').get() || {};
+    const closed = db.prepare('SELECT date, reason FROM calendar_closed WHERE date >= date(\'now\',\'-30 days\') ORDER BY date').all();
+    return { workDays: [...workDaysSet()], closed };
+  })
+);
+ipcMain.handle('calendar:saveWorkDays', (e, days) =>
+  run(() => {
+    const list = (Array.isArray(days) ? days : []).map(n => parseInt(n, 10)).filter(n => n >= 0 && n <= 6);
+    db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run(list.join(','));
+    logAudit('Календар', 'работни дни: ' + (list.length ? list.join(',') : '—'));
+  })
+);
+ipcMain.handle('calendar:addClosed', (e, { date, reason }) =>
+  run(() => {
+    if (!date) throw new Error('Изберете дата.');
+    db.prepare('INSERT OR REPLACE INTO calendar_closed (date, reason) VALUES (?, ?)').run(date, reason || null);
+    logAudit('Календар', 'затворен ден: ' + date + (reason ? ' — ' + reason : ''));
+  })
+);
+ipcMain.handle('calendar:removeClosed', (e, date) =>
+  run(() => { db.prepare('DELETE FROM calendar_closed WHERE date = ?').run(date); })
+);
+
+/* ---------------- Правила за обслужване по категория читатели ----------------
+   Всяко поле в circulation_rules, оставено NULL, пада обратно към глобалната
+   настройка от settings — библиотека, която не пипа тази таблица, работи точно
+   както преди (нулев риск от регресия при първо стартиране след ъпгрейд). */
+function circRule(category) {
+  const g = db.prepare(`SELECT loan_days, max_books, extensions_count, extension_days,
+    suspend_per_day, suspend_max FROM settings WHERE id = 1`).get() || {};
+  if (!category) return g;
+  const r = db.prepare('SELECT * FROM circulation_rules WHERE category = ?').get(category);
+  if (!r) return g;
+  const pick = (k) => (r[k] != null ? r[k] : g[k]);
+  return {
+    loan_days: pick('loan_days'), max_books: pick('max_books'),
+    extensions_count: pick('extensions_count'), extension_days: pick('extension_days'),
+    suspend_per_day: pick('suspend_per_day'), suspend_max: pick('suspend_max')
+  };
+}
+function readerCategory(readerId) {
+  const r = db.prepare('SELECT category FROM readers WHERE id = ?').get(readerId);
+  return r ? r.category : null;
+}
+ipcMain.handle('circRules:list', () => run(() => db.prepare('SELECT * FROM circulation_rules ORDER BY category').all()));
+ipcMain.handle('circRules:save', (e, rule) =>
+  run(() => {
+    const category = String((rule && rule.category) || '').trim();
+    if (!category) throw new Error('Категорията е задължителна.');
+    const num = (v) => (v === '' || v == null ? null : Number(v));
+    db.prepare(`
+      INSERT INTO circulation_rules (category, loan_days, max_books, extensions_count, extension_days, suspend_per_day, suspend_max)
+      VALUES (@category, @loan_days, @max_books, @extensions_count, @extension_days, @suspend_per_day, @suspend_max)
+      ON CONFLICT(category) DO UPDATE SET
+        loan_days=excluded.loan_days, max_books=excluded.max_books, extensions_count=excluded.extensions_count,
+        extension_days=excluded.extension_days, suspend_per_day=excluded.suspend_per_day, suspend_max=excluded.suspend_max
+    `).run({
+      category, loan_days: num(rule.loan_days), max_books: num(rule.max_books),
+      extensions_count: num(rule.extensions_count), extension_days: num(rule.extension_days),
+      suspend_per_day: num(rule.suspend_per_day), suspend_max: num(rule.suspend_max)
+    });
+    logAudit('Правила за обслужване', 'категория „' + category + '“');
+  })
+);
+ipcMain.handle('circRules:delete', (e, category) =>
+  run(() => { db.prepare('DELETE FROM circulation_rules WHERE category = ?').run(category); })
+);
+// Ефективното правило (с падналите обратно към глобалните стойности) — за да показва
+// интерфейсът реалния срок/лимит на читателя, а не винаги глобалните настройки.
+ipcMain.handle('circRules:effective', (e, category) => run(() => circRule(category)));
+
 /* ---------------- Заемания ---------------- */
 const LOAN_SELECT = `
   SELECT l.*, b.title, b.author, b.inv_number, r.name AS reader_name, r.card_no
@@ -1583,18 +1784,24 @@ ipcMain.handle('events:localuse', (e, { date } = {}) =>
 /* Наказание в дни (Koha: finedays) — за селска библиотека N дни без право на заемане
    е по-приложимо от глоба в стотинки, която никой не събира. Смята се при връщане
    със забава; натрупва се върху вече наложено наказание, но не надхвърля тавана. */
-function applySuspension(readerId, daysLate) {
-  const s = db.prepare('SELECT suspend_per_day, suspend_max FROM settings WHERE id = 1').get() || {};
-  const per = Number(s.suspend_per_day) || 0;
-  if (per <= 0 || daysLate <= 0) return null;
-  const penalty = Math.min(Math.ceil(daysLate * per), s.suspend_max || 90);
+// dueDate/inDate — реалните дати (не готово число дни), защото наказанието трябва да
+// извади затворените дни от периода (виж closedDaysBetween) — календарят е по-важен
+// точно тук: несправедливо е падеж в затворен ден да носи наказание за самия него.
+function applySuspension(readerId, dueDate, inDate) {
+  const rule = circRule(readerCategory(readerId));
+  const per = Number(rule.suspend_per_day) || 0;
+  if (per <= 0 || !dueDate || !inDate || inDate <= dueDate) return null;
+  const rawDaysLate = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+  const effDaysLate = Math.max(0, rawDaysLate - closedDaysBetween(dueDate, inDate));
+  if (effDaysLate <= 0) return null;
+  const penalty = Math.min(Math.ceil(effDaysLate * per), rule.suspend_max || 90);
   const r = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(readerId);
   const base = (r && r.suspended_until && r.suspended_until > today()) ? r.suspended_until : today();
   const until = new Date(base);
   until.setDate(until.getDate() + penalty);
   const untilStr = until.toISOString().slice(0, 10);
   db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run(untilStr, readerId);
-  logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + daysLate + ' дни забава)');
+  logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + effDaysLate + ' работни дни забава)');
   return untilStr;
 }
 function checkSuspended(readerId) {
@@ -1729,8 +1936,7 @@ ipcMain.handle('loans:return', (e, { id, date_in }) =>
     let suspendedUntil = null;
     if (l) {
       logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: date_in });
-      const daysLate = l.date_due ? Math.max(0, Math.round((new Date(date_in) - new Date(l.date_due)) / 864e5)) : 0;
-      suspendedUntil = applySuspension(l.reader_id, daysLate);
+      suspendedUntil = applySuspension(l.reader_id, l.date_due, date_in);
     }
     writeCatalogIfConfigured();
     return {
@@ -1743,7 +1949,7 @@ ipcMain.handle('loans:extend', (e, { id }) =>
   run(() => {
     const l = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
     if (!l || l.date_in) throw new Error('Заемането не е активно.');
-    const s = db.prepare('SELECT extensions_count, extension_days FROM settings WHERE id = 1').get();
+    const s = circRule(readerCategory(l.reader_id));
     const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
     const used = l.renewals || 0;
     if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
@@ -1754,7 +1960,7 @@ ipcMain.handle('loans:extend', (e, { id }) =>
     const base = l.date_due || today();
     const next = new Date(base);
     next.setDate(next.getDate() + (s.extension_days || 30));
-    const newDue = next.toISOString().slice(0, 10);
+    const newDue = nextWorkDay(next.toISOString().slice(0, 10));
     db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
     logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
     logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
@@ -1772,14 +1978,14 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
       const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
       if (openLoan) throw new Error('Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + openLoan.date_due + '.');
-      const s = db.prepare('SELECT max_books, loan_days FROM settings WHERE id = 1').get();
+      const s = circRule(readerCategory(reader_id));
       const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
       if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
       checkSuspended(reader_id);
       consumeHoldOnCheckout(b.id, reader_id);
       const out = date_out || today();
       const due = new Date(out); due.setDate(due.getDate() + (s.loan_days || 30));
-      const dueStr = due.toISOString().slice(0, 10);
+      const dueStr = nextWorkDay(due.toISOString().slice(0, 10));
       const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
       logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
       logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
@@ -1803,7 +2009,7 @@ ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
     logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
     logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
-    const suspendedUntil = applySuspension(loan.reader_id, daysLate);
+    const suspendedUntil = applySuspension(loan.reader_id, loan.date_due, inDate);
     const hold = activateHoldOnReturn(b.id);
     writeCatalogIfConfigured();
     return {
@@ -1874,12 +2080,13 @@ ipcMain.handle('dashboard:full', () =>
         .get(`${new Date().getFullYear() - anonYears}-01-01`).n;
     }
     const suspendedNow = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE suspended_until > date('now')`).get().n;
+    const isTodayOpen = isWorkDay(today());
     return {
       fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
       year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
       inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
       upcoming, holdsReady, holdsWaiting,
-      today: { reregDue, longOverdue, anonCandidates, suspendedNow }
+      today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen }
     };
   })
 );
@@ -3017,7 +3224,9 @@ const REPORTS_CATALOG = [
   { id: 'fund_movement', title: 'Движение на фонда — постъпления и отчисления', needsYear: true,
     hint: 'Обобщено по начин на придобиване/причина за отчисляване — извадка от КДБФ за прилагане към годишния отчет.' },
   { id: 'mzs_annual', title: 'Междубиблиотечно заемане (МЗС) — обобщение', needsYear: true,
-    hint: 'Брой заявки по посока и състояние през годината.' }
+    hint: 'Брой заявки по посока и състояние през годината.' },
+  { id: 'fees_income', title: 'Приходи от такси и обезщетения', needsYear: true,
+    hint: 'Начислено и събрано по вид (годишна такса, обезщетения) от читателската сметка през годината.' }
 ];
 ipcMain.handle('reports:list', () => run(() => REPORTS_CATALOG));
 ipcMain.handle('reports:run', (e, { id, year }) =>
@@ -3083,6 +3292,23 @@ ipcMain.handle('reports:run', (e, { id, year }) =>
       `).all(y).map(r => [r.k, r.n]);
       const total = byDirection.reduce((s, [, n]) => s + n, 0);
       return { id, year: y, total, byDirection, byStatus };
+    }
+    if (id === 'fees_income') {
+      const charged = db.prepare(`
+        SELECT COALESCE(type,'друго') AS k, COUNT(*) AS n, COALESCE(SUM(amount),0) AS val
+        FROM account_lines WHERE kind = 'начисление' AND substr(date,1,4) = ? GROUP BY k ORDER BY val DESC
+      `).all(y);
+      const paid = db.prepare(`
+        SELECT COALESCE(SUM(-amount),0) AS val, COUNT(*) AS n FROM account_lines
+        WHERE kind = 'плащане' AND substr(date,1,4) = ?
+      `).get(y);
+      return {
+        id, year: y,
+        charged: charged.map(r => [r.k, r.n, r.val]),
+        chargedTotal: charged.reduce((s, r) => s + r.n, 0),
+        chargedValue: charged.reduce((s, r) => s + r.val, 0),
+        paidCount: paid.n, paidValue: paid.val
+      };
     }
     throw new Error('Непозната справка.');
   })

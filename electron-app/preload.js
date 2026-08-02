@@ -102,6 +102,30 @@ contextBridge.exposeInMainWorld('api', {
     delete: invoke('readers:delete'),
     clearSuspension: invoke('readers:clearSuspension')
   },
+  account: {
+    get: invoke('account:get'),
+    charge: invoke('account:charge'),
+    pay: invoke('account:pay'),
+    deleteLine: invoke('account:deleteLine')
+  },
+  suggestions: {
+    list: invoke('suggestions:list'),
+    create: invoke('suggestions:create'),
+    setStatus: invoke('suggestions:setStatus'),
+    delete: invoke('suggestions:delete')
+  },
+  circRules: {
+    list: invoke('circRules:list'),
+    save: invoke('circRules:save'),
+    delete: invoke('circRules:delete'),
+    effective: invoke('circRules:effective')
+  },
+  calendar: {
+    get: invoke('calendar:get'),
+    saveWorkDays: invoke('calendar:saveWorkDays'),
+    addClosed: invoke('calendar:addClosed'),
+    removeClosed: invoke('calendar:removeClosed')
+  },
   housebound: {
     get: invoke('housebound:get'),
     save: invoke('housebound:save'),
