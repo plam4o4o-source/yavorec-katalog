@@ -11,6 +11,35 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.55.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 33, един от
+"големите пет"): "Настройки" (без шаблоните за напомняне по подразбиране)
+е изнесено в `handlers/settings.js` — 7 handler-а: `settings:get/update/
+updateNotices/updateLabelFormat/chooseLogo/clearLogo/updateTheme`.
+`settings:noticeDefaults` умишлено ОСТАВА в `main.js`: чете
+`DEFAULT_NOTICE_*`/`NOTICE_PLACEHOLDERS`, върнати от `handlers/notices.js`,
+чийто `require()` стои по-нататък в `main.js` от мястото на
+`handlers/settings.js` — преместването му би било същият TDZ капан като при
+`logEvent`. `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` се връщат обратно към
+`main.js`, защото `handlers/local-photo.js` (require()-нат по-нататък) вече
+ги ползва по референция. IPC поведението е напълно непроменено. Нов тест:
+`test/handlers-settings.test.js` (10 теста) — общо 370 теста (бяха 360).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 33, one of the "big
+five"): the "settings" domain (excluding the default reminder templates)
+moves to `handlers/settings.js` — 7 handlers: `settings:get/update/
+updateNotices/updateLabelFormat/chooseLogo/clearLogo/updateTheme`.
+`settings:noticeDefaults` deliberately STAYS in `main.js`: it reads
+`DEFAULT_NOTICE_*`/`NOTICE_PLACEHOLDERS` returned from `handlers/notices.js`,
+whose `require()` sits further down in `main.js` than
+`handlers/settings.js` — moving it would hit the same TDZ trap as
+`logEvent`. `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` are returned back to
+`main.js` since `handlers/local-photo.js` (required further down) already
+depends on them by reference. IPC behavior is fully unchanged. New test
+file `test/handlers-settings.test.js` (10 tests) — 370 tests total (up
+from 360).
+
 ## v1.54.0
 
 **BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 32, един от
