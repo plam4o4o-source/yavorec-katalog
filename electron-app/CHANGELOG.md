@@ -11,6 +11,18 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.37.0
+
+**Промени — дванайсети извлечен домейн от main.js (Фаза 4, стъпка 13), без промяна в поведението:**
+- "Инвентарна книга" (Приложение № 4 — 1 read-only IPC канал) изведена в
+  `handlers/inv-book.js`. Само `getDb()`/`run`.
+- IPC поведението непроменено. Нов тестови файл (3 нови теста, общо 172).
+
+**Changes — twelfth domain extracted from main.js (Phase 4, step 13), no behavior change:**
+- "Inventory ledger" (Appendix No. 4 — 1 read-only IPC channel) extracted
+  into `handlers/inv-book.js`. Only `getDb()`/`run`.
+- IPC behavior unchanged. New test file (3 new tests, 172 total).
+
 ## v1.36.0
 
 **Промени — единайсети извлечен домейн от main.js (Фаза 4, стъпка 12), без промяна в поведението:**
