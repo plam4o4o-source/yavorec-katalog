@@ -11,6 +11,22 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.45.0
+
+**Промени — двайсет и втори извлечен домейн от main.js (Фаза 4, стъпка 23), без промяна в поведението:**
+- "Табло" (2 read-only IPC канала: dashboard:stats/full) изведени в
+  `handlers/dashboard.js`. Зависи от `LOAN_SELECT` (holds/loans.js),
+  `isWorkDay` (calendar.js), `pctRequired`/`yearOf` (стабилни функции/
+  конст в main.js) и `today`.
+- IPC поведението непроменено. Нов тестови файл (5 нови теста, общо 251).
+
+**Changes — twenty-second domain extracted from main.js (Phase 4, step 23), no behavior change:**
+- "Dashboard" (2 read-only IPC channels: dashboard:stats/full) extracted
+  into `handlers/dashboard.js`. Depends on `LOAN_SELECT` (from
+  loans.js), `isWorkDay` (calendar.js), `pctRequired`/`yearOf` (stable
+  functions/consts in main.js), and `today`.
+- IPC behavior unchanged. New test file (5 new tests, 251 total).
+
 ## v1.44.0
 
 **Промени — двайсет и първи извлечен домейн от main.js (Фаза 4, стъпка 22), без промяна в поведението — един от "големите пет":**
