@@ -108,7 +108,7 @@ function fld(label, name, opts) {
   // въведените стойности — контрол на авторитетните данни при въвеждане.
   return `<div class="field"><label>${esc(label)}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
-      ${opts.list ? `list="dl_${opts.list}"` : ''} value="${esc(val)}"></div>`;
+      ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''} value="${esc(val)}"></div>`;
 }
 
 /* ---------------- Контрол на авторитетните данни ----------------
@@ -1821,16 +1821,27 @@ async function renderReaders() {
 }
 const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
 async function readerForm(id) {
-  const r = id ? await call(window.api.readers.get(id)) : null;
+  const [r, pdp] = await Promise.all([
+    id ? call(window.api.readers.get(id)) : Promise.resolve(null),
+    call(window.api.pdp.status())
+  ]);
   const v = r || { registered_at: today(), category: 'възрастен', status: 'активен' };
   const needsGuarantor = GUARANTOR_CATS.includes(v.category);
+  // ЕГН/№ ЛК се показват само за четене, докато защитата е зададена, но
+  // заключена в тази сесия — самата стойност идва вече като „Защитени данни“
+  // от readers:get. Важи само при РЕДАКЦИЯ на съществуващ читател: при нов
+  // читател без предишна стойност полетата остават активни (main.js отказва
+  // запис с ЕГН, докато не отключите защитата).
+  const pdpLocked = !!(id && pdp && pdp.configured && !pdp.unlocked);
   modal(id ? 'Читател ' + (v.card_no || '') : 'Записване на читател', `
     <form id="readerF" onsubmit="return false">
     <fieldset><legend>Лични данни — чл. 42, ал. 3</legend>
       ${fld('Име и фамилия', 'name', { val: v.name || '', req: 1 })}
+      ${pdpLocked ? `<div class="note w" style="margin:0 0 8px">🔒 ЕГН и № ЛК са защитени с парола —
+        отключете защитата от „Настройки“, за да ги видите или редактирате.</div>` : ''}
       <div class="grid g3">
-        ${fld('ЕГН', 'egn', { val: v.egn || '' })}
-        ${fld('Л.К. номер', 'id_card_no', { val: v.id_card_no || '' })}
+        ${fld('ЕГН', 'egn', { val: v.egn || '', disabled: pdpLocked })}
+        ${fld('Л.К. номер', 'id_card_no', { val: v.id_card_no || '', disabled: pdpLocked })}
         ${fld('Л.К. издадена на', 'id_card_date', { val: v.id_card_date || '', type: 'date' })}
       </div>
       ${fld('Постоянен адрес', 'address', { val: v.address || '' })}
@@ -4039,6 +4050,15 @@ async function renderSetup() {
       </div>
       <div class="hint" id="anonHint">зареждане…</div>
     </div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Защита на ЕГН / № лична карта</h3>
+      <div class="note" style="margin-top:0">ЕГН и номер на лична карта на читателите могат да се пазят
+      <b>криптирани</b> в самата база данни, с обща парола за всички компютри, които ползват тази база —
+      важи и за споделена мрежова база. Останалите данни на читателя (име, адрес, телефон, история на
+      заемания) не са засегнати и работят нормално без паролата. Паролата се въвежда веднъж на всеки
+      компютър, докато програмата работи. <b>Ако паролата бъде забравена, ЕГН/№ ЛК стават
+      невъзстановими</b> — както при криптирано резервно копие.</div>
+      <div id="pdpBox">зареждане…</div>
+    </div>
     <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
 
@@ -4188,6 +4208,7 @@ async function renderSetup() {
   loadNoticePlaceholders();
   loadAvEditors();
   loadAnonHint();
+  loadPdpBox();
   loadCircRulesBox();
   loadCalendarBox();
 }
@@ -4243,6 +4264,92 @@ async function runAnonymize() {
   loadAnonHint();
 }
 window.runAnonymize = runAnonymize;
+/* ---------------- Защита на ЕГН/№ ЛК (обща парола) ---------------- */
+async function loadPdpBox() {
+  const el = $('#pdpBox'); if (!el) return;
+  const s = await call(window.api.pdp.status());
+  if (!s) { el.textContent = ''; return; }
+  if (!s.configured) {
+    el.innerHTML = `<div class="toolbar" style="margin:0">
+      <button type="button" class="btn pri" onclick="pdpSetupForm()">Задай парола за защита…</button></div>`;
+    return;
+  }
+  if (!s.unlocked) {
+    el.innerHTML = `<div class="note w" style="margin:0 0 10px">🔒 Заключено за тази сесия — ЕГН/№ ЛК се
+      показват като „Защитени данни“, докато не въведете паролата.</div>
+      <form id="pdpUnlockF" onsubmit="return false" style="max-width:320px">
+        ${fld('Парола', 'password', { type: 'password' })}
+      </form>
+      <div class="toolbar" style="margin:0"><button type="button" class="btn pri" onclick="pdpDoUnlock()">Отключи</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="note" style="margin:0 0 10px">🔓 Отключено за тази сесия.</div>
+    <div class="toolbar" style="margin:0">
+      <button type="button" class="btn" onclick="pdpDoLock()">Заключи</button>
+      <button type="button" class="btn" onclick="pdpChangePasswordForm()">Смени паролата…</button>
+    </div>`;
+}
+function pdpSetupForm() {
+  modal('Задаване на парола за защита на ЕГН/№ ЛК', `
+    <div class="note w" style="margin-top:0"><b>Пазете тази парола.</b> Ползвайте я на всеки компютър,
+    който работи със същата база данни. Ако бъде забравена, ЕГН/№ ЛК на читателите стават
+    невъзстановими.</div>
+    <form id="pdpSetupF" onsubmit="return false">
+      ${fld('Нова парола', 'password', { type: 'password' })}
+      ${fld('Повтори паролата', 'password2', { type: 'password' })}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="pdpDoSetup()">Задай паролата</button>`);
+}
+window.pdpSetupForm = pdpSetupForm;
+async function pdpDoSetup() {
+  const d = formData('#pdpSetupF');
+  if (!d.password || d.password.length < 4) return toast('Паролата трябва да е поне 4 знака.', 'err');
+  if (d.password !== d.password2) return toast('Двете пароли не съвпадат.', 'err');
+  const res = await window.api.pdp.setup(d.password);
+  if (!res.ok) return toast(res.error, 'err');
+  closeModal();
+  toast('Защитата е зададена — ЕГН/№ ЛК вече са криптирани.', 'ok');
+  loadPdpBox();
+}
+window.pdpDoSetup = pdpDoSetup;
+async function pdpDoUnlock() {
+  const d = formData('#pdpUnlockF');
+  if (!d.password) return toast('Въведете парола.', 'err');
+  const res = await window.api.pdp.unlock(d.password);
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Отключено.', 'ok');
+  loadPdpBox();
+}
+window.pdpDoUnlock = pdpDoUnlock;
+async function pdpDoLock() {
+  await window.api.pdp.lock();
+  loadPdpBox();
+}
+window.pdpDoLock = pdpDoLock;
+function pdpChangePasswordForm() {
+  modal('Смяна на паролата за защита на ЕГН/№ ЛК', `
+    <form id="pdpChangeF" onsubmit="return false">
+      ${fld('Текуща парола', 'oldPassword', { type: 'password' })}
+      ${fld('Нова парола', 'newPassword', { type: 'password' })}
+      ${fld('Повтори новата парола', 'newPassword2', { type: 'password' })}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="pdpDoChangePassword()">Смени паролата</button>`);
+}
+window.pdpChangePasswordForm = pdpChangePasswordForm;
+async function pdpDoChangePassword() {
+  const d = formData('#pdpChangeF');
+  if (!d.oldPassword) return toast('Въведете текущата парола.', 'err');
+  if (!d.newPassword || d.newPassword.length < 4) return toast('Новата парола трябва да е поне 4 знака.', 'err');
+  if (d.newPassword !== d.newPassword2) return toast('Двете нови пароли не съвпадат.', 'err');
+  const res = await window.api.pdp.changePassword({ oldPassword: d.oldPassword, newPassword: d.newPassword });
+  if (!res.ok) return toast(res.error, 'err');
+  closeModal();
+  toast('Паролата е сменена.', 'ok');
+  loadPdpBox();
+}
+window.pdpDoChangePassword = pdpDoChangePassword;
 /* ---------------- Правила за обслужване по категория ---------------- */
 const CIRC_RULE_FIELDS = [
   ['loan_days', 'Срок (дни)'], ['max_books', 'Максимум документи'],

@@ -103,6 +103,13 @@ contextBridge.exposeInMainWorld('api', {
     delete: invoke('readers:delete'),
     clearSuspension: invoke('readers:clearSuspension')
   },
+  pdp: {
+    status: invoke('pdp:status'),
+    setup: invoke('pdp:setup'),
+    unlock: invoke('pdp:unlock'),
+    lock: invoke('pdp:lock'),
+    changePassword: invoke('pdp:changePassword')
+  },
   account: {
     get: invoke('account:get'),
     charge: invoke('account:charge'),
