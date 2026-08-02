@@ -11,6 +11,26 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.33.0
+
+**Промени — осми извлечен домейн от main.js (Фаза 4, стъпка 9), без промяна в поведението:**
+- "Местоположение на базата данни" (3 IPC канала: четене, избор на нова
+  папка/мрежов диск, връщане към стандартната) е изваден в
+  `handlers/db-location.js`. Същия DI модел като `backup.js` (db/mainWindow
+  като getter/setter). `readConfig`/`writeConfig`/`resolveDbDir`/
+  `resolveDbPath` остават в main.js по референция — ползва ги и `initDb()`.
+- IPC поведението непроменено. Нов тестови файл (9 теста, общо 139),
+  включително сценария "папката вече има library.db — питай потребителя".
+
+**Changes — eighth domain extracted from main.js (Phase 4, step 9), no behavior change:**
+- "Database location" (3 IPC channels: read, choose a new/network folder,
+  reset to default) extracted into `handlers/db-location.js`. Same DI model
+  as `backup.js` (db/mainWindow as getter/setter). `readConfig`/
+  `writeConfig`/`resolveDbDir`/`resolveDbPath` stay in main.js by
+  reference — `initDb()` also uses them.
+- IPC behavior unchanged. New test file (9 tests, 139 total), including the
+  "folder already has a library.db — ask the user" scenario.
+
 ## v1.32.0
 
 **Промени — седми извлечен домейн от main.js (Фаза 4, стъпка 8), без промяна в поведението:**
