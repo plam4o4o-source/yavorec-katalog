@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
+const { BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('../search-fts');
 
 function freshDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-db-test-'));
@@ -105,4 +106,22 @@ test('migration v2 adds pdp_salt/pdp_verifier and advances user_version, for bot
   assert.equal(dbB.pragma('user_version', { simple: true }), 2);
   assert.equal(dbB.prepare('SELECT lib_name FROM settings WHERE id = 1').get().lib_name, 'Читалище Тест');
   dbB.close();
+});
+
+test('migration chain v2+v3 (PII columns + FTS5 search indexes) reaches user_version 3 from scratch', () => {
+  const MIGRATIONS = [
+    { version: 2, run: (db) => ensureColumns(db, 'settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }) },
+    { version: 3, run: (db) => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } }
+  ];
+  const db = freshDb();
+  db.prepare('INSERT INTO books (title) VALUES (?)').run('Преди миграцията вече вкаран документ');
+  runMigrationsLike(db, MIGRATIONS.map(m => ({ version: m.version, run: () => m.run(db) })), 3);
+  assert.equal(db.pragma('user_version', { simple: true }), 3);
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name));
+  assert.ok(tables.has('books_fts') && tables.has('readers_fts'));
+  // Документ, добавен ПРЕДИ миграцията, трябва да е обхванат от еднократното
+  // INSERT INTO ... SELECT в BOOKS_FTS_SETUP_SQL, не само бъдещите вмъквания.
+  const hit = db.prepare("SELECT rowid FROM books_fts WHERE books_fts MATCH '\"миграцията\"*'").all();
+  assert.equal(hit.length, 1);
+  db.close();
 });

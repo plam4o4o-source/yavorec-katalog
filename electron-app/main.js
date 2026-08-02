@@ -5,6 +5,8 @@ const { execFile } = require('child_process');
 const Database = require('better-sqlite3');
 const importers = require('./importers');
 const pii = require('./pii-crypto');
+const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
+const { createDebouncer } = require('./debounce');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -263,12 +265,17 @@ function initDb() {
    само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
    просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
    без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
   // pdp_verifier (криптиран известен низ, за проверка на паролата).
-  { version: 2, run: () => { ensureColumns('settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }); } }
+  { version: 2, run: () => { ensureColumns('settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }); } },
+  // v3 — FTS5 индекси за търсене по книги (title/subtitle/author) и читатели
+  // (name), с unicode61 токенайзер: решава едновременно пълното сканиране при
+  // всяко търсене и дефекта, че кирилицата не се сгъва по регистър в LIKE
+  // ("белият" не намираше "Белият"). Виж search-fts.js за подробности.
+  { version: 3, run: () => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
@@ -684,6 +691,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (AUTO_PUSH_TIMER) clearInterval(AUTO_PUSH_TIMER);
+  flushCatalogWrite(); // не губи последната промяна, ако насроченият (debounced) запис още не е станал
   if (db) db.close();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -1339,9 +1347,14 @@ ipcMain.handle('books:list', (e, query, sort) =>
     const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
     if (query && query.trim()) {
       const q = `%${query.trim()}%`;
+      // Заглавие/подзаглавие/автор минават през FTS5 (unicode61) — сгъва регистъра
+      // и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
+      // таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
+      // потребителите очакват "съдържа навсякъде", а не само префикс.
       return db.prepare(`${BOOK_SELECT}
-        WHERE b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
-        ORDER BY ${order}`).all(q, q, q, q, q);
+        WHERE b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
+           OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
+        ORDER BY ${order}`).all(ftsQuery(query), q, q, q);
     }
     return db.prepare(`${BOOK_SELECT} ORDER BY ${order}`).all();
   })
@@ -1373,7 +1386,7 @@ ipcMain.handle('books:create', (e, book) =>
       return id;
     });
     const id = tx(book);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return id;
   })
 );
@@ -1393,13 +1406,13 @@ ipcMain.handle('books:update', (e, book) =>
       logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
     });
     tx(book);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 ipcMain.handle('books:delete', (e, id) =>
   run(() => {
     db.prepare('DELETE FROM books WHERE id = ?').run(id);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 /* Групова редакция — смяна на едно поле на много документи наведнъж (Koha: "batch item
@@ -1427,7 +1440,7 @@ ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
     ).run(v, ...ids).changes);
     const changes = tx();
     logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return changes;
   })
 );
@@ -1567,7 +1580,7 @@ ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
       return actId;
     });
     const actId = tx();
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return actId;
   })
 );
@@ -1585,7 +1598,7 @@ ipcMain.handle('deaccessionActs:revoke', (e, id) =>
       logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда');
     });
     tx();
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 
@@ -1644,9 +1657,15 @@ ipcMain.handle('readers:list', (e, query) =>
   run(() => {
     if (query && query.trim()) {
       const q = `%${query.trim()}%`;
+      // Името минава през FTS5 (виж books:list по-горе за обяснението); телефон и
+      // карта остават LIKE — цифри, без проблем с регистъра, а "съдържа навсякъде"
+      // помага при търсене по част от номера.
       return maskReaderRows(db.prepare(`
-        SELECT * FROM readers WHERE name LIKE ? OR phone LIKE ? OR card_no LIKE ? ORDER BY name
-      `).all(q, q, q));
+        SELECT * FROM readers
+        WHERE id IN (SELECT rowid FROM readers_fts WHERE readers_fts MATCH ?)
+           OR phone LIKE ? OR card_no LIKE ?
+        ORDER BY name
+      `).all(ftsQuery(query), q, q));
     }
     return maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY name').all());
   })
@@ -2117,6 +2136,12 @@ ipcMain.handle('loans:overdue', () =>
 ipcMain.handle('loans:byReader', (e, readerId) =>
   run(() => db.prepare(`${LOAN_SELECT} WHERE l.reader_id = ? ORDER BY l.date_out DESC`).all(readerId))
 );
+// Насочена заявка за конкретна книга (напр. при сканиране на инвентарен номер
+// в таблото) — вместо да се тегли ЦЯЛАТА история на заеманията (loans:list)
+// само за да се филтрира по book_id на клиента (Фаза 2, поправка на dashLookup).
+ipcMain.handle('loans:byBook', (e, bookId) =>
+  run(() => db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? ORDER BY l.date_out DESC`).all(bookId))
+);
 ipcMain.handle('loans:overdueByReader', () =>
   run(() => {
     const rows = db.prepare(`
@@ -2149,7 +2174,7 @@ ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due })
       return info.lastInsertRowid;
     });
     const id = tx();
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return id;
   })
 );
@@ -2164,7 +2189,7 @@ ipcMain.handle('loans:return', (e, { id, date_in }) =>
       logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: date_in });
       suspendedUntil = applySuspension(l.reader_id, l.date_due, date_in);
     }
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return {
       hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
       suspendedUntil
@@ -2218,7 +2243,7 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
       return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
     });
     const result = tx();
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return result;
   })
 );
@@ -2237,7 +2262,7 @@ ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
     const suspendedUntil = applySuspension(loan.reader_id, loan.date_due, inDate);
     const hold = activateHoldOnReturn(b.id);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return {
       title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine, suspendedUntil,
       hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null
@@ -3717,6 +3742,14 @@ function catalogPayloadItemCount(payload) {
 // мярка е спряла записа (виж коментара долу), или {written:false} при обикновена грешка/
 // липсваща папка. Автоматичните извиквания (след запис на книга, заемане и т.н.) само
 // подминават резултата; ръчните бутони го ползват, за да покажат ясно съобщение.
+//
+// Декъплинг на записа при всяка мутация (Фаза 2): вместо да презаписваме
+// целия katalog.json синхронно при всяко книга/заемане (write amplification
+// — файлът може да е няколко MB при 15 000+ записа), натрупваме "мръсен"
+// флаг и записваме веднъж, известно време след последната промяна. Ръчните
+// действия (writeNow, gitPublishNow) вместо това "изпразват" веднага текущия
+// таймер и пишат синхронно, за да дадат точна обратна връзка на потребителя.
+const CATALOG_WRITE_DEBOUNCE_MS = 4000;
 function writeCatalogIfConfigured() {
   try {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
@@ -3742,6 +3775,13 @@ function writeCatalogIfConfigured() {
     return { written: false };
   }
 }
+// generic debounce/coalesce помощник (debounce.js) — schedule() слива много
+// бързи последователни мутации в един-единствен запис; flush() го изпълнява
+// веднага (използва се от ръчните действия writeNow/gitPublishNow/chooseFolder
+// и при затваряне на приложението, за да не се загуби последната промяна).
+const catalogWriteDebouncer = createDebouncer(writeCatalogIfConfigured, CATALOG_WRITE_DEBOUNCE_MS);
+function scheduleCatalogWrite() { catalogWriteDebouncer.schedule(); }
+function flushCatalogWrite() { return catalogWriteDebouncer.flush(); }
 function ghRawUrl(s) {
   const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim(), b = (s.gh_branch || 'main').trim() || 'main';
   if (!u || !r) return null;
@@ -3789,7 +3829,7 @@ ipcMain.handle('shelves:rename', (e, { id, name }) =>
     const n = String(name || '').trim();
     if (!n) throw new Error('Името на витрината е задължително.');
     db.prepare('UPDATE catalog_shelves SET name = ? WHERE id = ?').run(n, id);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 ipcMain.handle('shelves:delete', (e, id) =>
@@ -3797,7 +3837,7 @@ ipcMain.handle('shelves:delete', (e, id) =>
     const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(id);
     db.prepare('DELETE FROM catalog_shelves WHERE id = ?').run(id);
     if (sh) logAudit('Витрина в каталога', 'изтрита „' + sh.name + '“');
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
@@ -3808,7 +3848,7 @@ ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
     if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
     if (b.department === 'служебен') throw new Error('Служебните документи не се публикуват в каталога.');
     db.prepare('INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id) VALUES (?, ?)').run(shelfId, b.id);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return { inv_number: b.inv_number, title: b.title };
   })
 );
@@ -3824,14 +3864,14 @@ ipcMain.handle('shelves:addBooks', (e, { shelfId, ids }) =>
     db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; })();
     const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(shelfId);
     logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“');
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
     return added;
   })
 );
 ipcMain.handle('shelves:removeBook', (e, { shelfId, bookId }) =>
   run(() => {
     db.prepare('DELETE FROM catalog_shelf_items WHERE shelf_id = ? AND book_id = ?').run(shelfId, bookId);
-    writeCatalogIfConfigured();
+    scheduleCatalogWrite();
   })
 );
 
@@ -3890,7 +3930,7 @@ ipcMain.handle('catalog:chooseFolder', async () => {
       adopted = chk.slug;
     }
 
-    writeCatalogIfConfigured();
+    flushCatalogWrite();
     logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + folder);
     return { ok: true, data: folder, adopted, mismatch: chk.mismatch, remote: chk.slug };
   } catch (err) {
@@ -3903,7 +3943,7 @@ ipcMain.handle('catalog:disconnectFolder', () =>
 ipcMain.handle('catalog:gitPublishNow', async () => {
   const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
   if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
-  const w = writeCatalogIfConfigured();
+  const w = flushCatalogWrite();
   if (w.blocked) return { ok: false, error: 'Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.' };
   const r = await gitPublish(s.catalog_folder);
   if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
@@ -3913,7 +3953,7 @@ ipcMain.handle('catalog:writeNow', () =>
   run(() => {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
-    const w = writeCatalogIfConfigured();
+    const w = flushCatalogWrite();
     if (w.blocked) throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.');
     return true;
   })

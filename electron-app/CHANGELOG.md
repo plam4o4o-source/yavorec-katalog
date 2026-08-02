@@ -11,6 +11,45 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.21.0
+
+**Промени — по-бързо търсене и по-плавна работа при голям фонд (началото на Фаза 2):**
+- **Поправка на дефект в търсенето по кирилица** — търсенето по заглавие/автор
+  (книги) и по име (читатели) вече намира резултат независимо от регистъра —
+  напр. „белият“ вече намира „Белият вятър“. Досега търсенето пропускаше
+  такива съвпадения заради ограничение на SQLite при сравнение по регистър на
+  кирилски букви. Търсенето по баркод/ISBN/инв. № остава непроменено.
+  Причината е нов индекс за пълнотекстово търсене (FTS5), който едновременно
+  премахва пълното сканиране на фонда при всяко търсене — по-бързо е и при
+  голям брой документи/читатели.
+- **По-плавна работа при масови операции** — записът на публичния каталог
+  (`katalog.json`) вече не се пресъздава синхронно при всяка отделна промяна
+  (нова книга, заемане, връщане и т.н.), а се насрочва веднъж, кратко време
+  след последната промяна в поредица от бързи действия. Ръчните действия
+  („Публикувай сега“, свързване на папка) продължават да записват веднага.
+  Полезно най-вече при по-голям фонд, където файлът е няколко MB.
+- **По-лека проверка при сканиране от таблото** — разпознаването на сканиран
+  баркод в началния екран вече не тегли цялата история на заеманията само за
+  да провери дали конкретна книга в момента е заета.
+
+**Changes — faster search and smoother operation at scale (start of Phase 2):**
+- **Fixed a Cyrillic search bug** — searching by title/author (books) or by
+  name (readers) now finds matches regardless of letter case — e.g. "белият"
+  (lowercase) now finds "Белият вятър" (capitalized). This used to be missed
+  because of a SQLite limitation in case-comparing Cyrillic letters. Barcode/
+  ISBN/inventory-number search is unchanged. This comes from a new full-text
+  search index (FTS5), which also removes the full table scan on every
+  search — faster with a large catalog/reader list.
+- **Smoother bulk operations** — the public catalog file (`katalog.json`) is
+  no longer rewritten synchronously on every single change (new book, loan,
+  return, etc.); it's now scheduled once, shortly after the last change in a
+  burst of quick actions. Manual actions ("Publish now", connecting a folder)
+  still write immediately. Most noticeable with a larger catalog, where the
+  file is several MB.
+- **Lighter dashboard scan lookup** — recognizing a scanned barcode on the
+  home screen no longer pulls the entire loan history just to check whether
+  one particular book is currently on loan.
+
 ## v1.20.0
 
 **Промени — защита на ЕГН и № на лична карта на читателите:**

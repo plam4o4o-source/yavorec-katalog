@@ -640,8 +640,8 @@ async function dashLookup(code) {
   const b = book.ok ? book.data : null;
   const rd = reader.ok ? reader.data : null;
   if (b) {
-    const loans = await call(window.api.loans.list());
-    const open = (loans || []).filter(l => l.book_id === b.id && !l.date_in);
+    const loans = await call(window.api.loans.byBook(b.id));
+    const open = (loans || []).filter(l => !l.date_in);
     box.innerHTML = `<div class="card scanHit">
       <div class="scanHit-head"><b>Документ</b> · инв. № ${b.inv_number ?? '—'}
         <button class="btn sm" style="float:right" onclick="bookForm(${b.id})">Отвори карта</button></div>
