@@ -57,12 +57,14 @@
       "target": "nsis",
       "icon": "icon.ico",
       "legalTrademarks": "Инвентар © Пламен Христов - Пачо",
-      "publisherName": "Plamen Boyanov Hristov",
       "verifyUpdateCodeSignature": false,
-      "signingHashAlgorithms": [
-        "sha256"
-      ],
-      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      "signtoolOptions": {
+        "publisherName": "Plamen Boyanov Hristov",
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      }
     },
     "nsis": {
       "oneClick": false,
