@@ -11,6 +11,20 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.49.0
+
+**Промени — двайсет и шести извлечен домейн от main.js (Фаза 4, стъпка 27), без промяна в поведението:**
+- "МЗС" (междубиблиотечно заемане — 5 IPC канала: mzs:list/nextNo/create/
+  update/delete) изведени в `handlers/mzs.js`. Зависи само от `getDb`,
+  `run`, `logAudit`, `yearOf`.
+- IPC поведението непроменено. Нов тестови файл (6 нови теста, общо 282).
+
+**Changes — twenty-sixth domain extracted from main.js (Phase 4, step 27), no behavior change:**
+- "MZS" (inter-library loan — 5 IPC channels: mzs:list/nextNo/create/
+  update/delete) extracted into `handlers/mzs.js`. Depends only on
+  `getDb`, `run`, `logAudit`, `yearOf`.
+- IPC behavior unchanged. New test file (6 new tests, 282 total).
+
 ## v1.48.0
 
 **Промени — двайсет и пети извлечен домейн от main.js (Фаза 4, стъпка 26), без промяна в поведението:**
