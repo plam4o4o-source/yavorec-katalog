@@ -311,6 +311,10 @@ table.ledger .num{font-family:var(--mono)}
 .badge{padding:2px 8px; border-radius:10px; font-size:11px}
 .badge.ok{background:var(--greenL); color:var(--green)}
 .badge.warn{background:var(--redL); color:var(--red)}
+
+/* Одитна следа — какви полета реално са се променили при редакция (action_logs.diff) */
+.diffList{margin-top:4px; padding-left:8px; border-left:2px solid var(--rule2); font-size:11.5px; color:var(--ink2)}
+.diffList div{padding:1px 0}
 .empty{padding:36px 30px; text-align:center; color:var(--ink3)}
 .empty::before{content:'📄'; display:block; font-size:26px; opacity:.55; margin-bottom:6px; filter:grayscale(.4)}
 

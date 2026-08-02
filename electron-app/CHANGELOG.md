@@ -11,6 +11,25 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.18.0
+
+**Промени — диференца в одитната следа и история на търсенията:**
+- **Диференца в одитната следа** — при редакция на документ във фонда или на
+  читател одитната следа вече показва **точно кои полета** са се променили
+  (старата и новата стойност), не само че е имало редакция. ЕГН и номер на
+  лична карта нарочно не се показват в диференца.
+- **История на търсенията** — полетата за търсене в „Книги“ и „Читатели“ вече
+  предлагат последните завършени търсения (не всяко натискане на клавиш) за
+  бързо повторно търсене.
+
+**Changes — audit trail diffs and search history:**
+- **Audit trail diffs** — editing a book or a reader now shows **exactly which
+  fields** changed (old and new value), not just that an edit happened.
+  National ID number and ID card number are intentionally excluded from the
+  diff.
+- **Search history** — the search fields in "Books" and "Readers" now suggest
+  recent completed searches (not every keystroke) for quick re-searching.
+
 ## v1.17.1
 
 **Промени:**

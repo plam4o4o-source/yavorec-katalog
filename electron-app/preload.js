@@ -246,6 +246,10 @@ contextBridge.exposeInMainWorld('api', {
   audit: {
     list: invoke('audit:list')
   },
+  searchHistory: {
+    log: invoke('searchHistory:log'),
+    suggest: invoke('searchHistory:suggest')
+  },
   dnevnik: {
     getMonth: invoke('dnevnik:getMonth'),
     saveDay: invoke('dnevnik:saveDay'),
