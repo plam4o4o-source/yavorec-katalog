@@ -11,6 +11,38 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.53.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 31): краеведският
+клъстер "аналитично описание, персоналии, летопис, снимки, връзки" е изваден
+в пет отделни модула — `handlers/analytics.js`, `handlers/persons.js`,
+`handlers/chronicle.js`, `handlers/local-photo.js`, `handlers/links.js`.
+Всеки подмодул е самостоятелен: `linkLabel()` в `links.js` чете направо от
+съответните таблици по `getDb()`, без препратки към другите извадени
+модули. `local-photo.js` получава `mainWindow` през `getMainWindow()` getter
+(както `handlers/backup.js`) и `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` — стойности,
+дефинирани по-рано в `main.js` (при логото на читалището), подадени по
+референция. IPC поведението е напълно непроменено. Нови тестови файлове:
+`test/handlers-analytics.test.js` (6), `test/handlers-persons.test.js` (5),
+`test/handlers-chronicle.test.js` (6), `test/handlers-local-photo.test.js` (7),
+`test/handlers-links.test.js` (7) — общо 343 теста (бяха 312).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 31): the local-history
+("краеведски") cluster — analytical description, persons, chronicle,
+photos, and cross-links — moves into five separate modules —
+`handlers/analytics.js`, `handlers/persons.js`, `handlers/chronicle.js`,
+`handlers/local-photo.js`, `handlers/links.js`. Each submodule is
+self-contained: `linkLabel()` in `links.js` reads directly from the
+relevant tables via `getDb()`, with no cross-references to the other
+extracted modules. `local-photo.js` receives `mainWindow` through a
+`getMainWindow()` getter (same pattern as `handlers/backup.js`) and
+`LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` — values defined earlier in `main.js`
+(for the institution's logo) — passed by reference. IPC behavior is fully
+unchanged. New test files: `test/handlers-analytics.test.js` (6),
+`test/handlers-persons.test.js` (5), `test/handlers-chronicle.test.js` (6),
+`test/handlers-local-photo.test.js` (7), `test/handlers-links.test.js` (7) —
+343 tests total (up from 312).
+
 ## v1.52.0
 
 **BG:** Продължава разбиването на `main.js` на модули по домейн (Фаза 4,
