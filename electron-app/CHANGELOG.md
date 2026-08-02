@@ -27,6 +27,11 @@ for full detail.
   се прекомпилира без проблем — но истинската проверка е следващото реално
   издание (v1.24.0), затова инсталационния файл си заслужава по-внимателно
   ръчно изпробване преди да се разчита изцяло на автоматичното обновяване.
+- **`better-sqlite3` 11 → 12** — първият опит за Windows build с Electron 43
+  показа, че версия 11 не се компилира срещу новия V8 двигател (променени
+  `v8::External::Value` / `PropertyCallbackInfo` API-та). Версия 12.11.1
+  поддържа новите API-та; интерфейсът към базата данни е непроменен и
+  всичките 74 теста минават.
 - Задължителна проверка на подписа при автоматично обновяване
   (`verifyUpdateCodeSignature`) остава изключена, както досега — съзнателно
   решение, докато не е сигурно, че всяко бъдещо издание ще бъде подписано.
@@ -44,6 +49,11 @@ for full detail.
   `better-sqlite3` recompiled without issue — but the real test is the next
   actual release (v1.24.0), so the installer is worth a more careful manual
   try before fully trusting the auto-updater with it.
+- **`better-sqlite3` 11 → 12** — the first Windows build attempt against
+  Electron 43 showed that version 11 does not compile against the new V8
+  engine (changed `v8::External::Value` / `PropertyCallbackInfo` APIs).
+  Version 12.11.1 supports the new APIs; the database interface is unchanged
+  and all 74 tests pass.
 - Mandatory signature verification on auto-update
   (`verifyUpdateCodeSignature`) stays off, as before — a deliberate choice
   until every future release is guaranteed to be signed.
