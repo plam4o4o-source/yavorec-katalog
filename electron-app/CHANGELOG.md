@@ -11,6 +11,41 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.31.0
+
+**Промени — шести извлечен домейн от main.js (Фаза 4, стъпка 7), без промяна в поведението:**
+- Кодът за "Категории" (на книгите — 4 IPC канала: списък, добавяне,
+  редакция, изтриване) е изваден от `main.js` в нов файл
+  `handlers/categories.js`.
+- Най-простият случай досега: само `getDb()`/`run`, без `logAudit`, без
+  нито една върната функция назад. Други места в `main.js` (внос на данни,
+  справки), които четат таблицата `categories` директно през своя `db`,
+  продължават да го правят непроменено — модулът не пази състояние, само
+  регистрира IPC handler-и.
+- IPC каналите (`categories:list/create/update/delete`) и поведението им
+  са напълно непроменени.
+- Добавен нов тестови файл `test/handlers-categories.test.js` (5 нови
+  теста, общо вече 123) — покрива и 10-те начални категории, засети от
+  `schema.sql` (наред с новосъздадените, не вместо тях).
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: книги,
+  заемания, читатели, каталог/git публикуване, настройки.
+
+**Changes — sixth domain extracted from main.js (Phase 4, step 7), no behavior change:**
+- The "Categories" code (for books — 4 IPC channels: list, create, update,
+  delete) has been extracted from `main.js` into a new file
+  `handlers/categories.js`.
+- The simplest case so far: only `getDb()`/`run`, no `logAudit`, nothing
+  returned back. Other places in `main.js` (data import, reports) that read
+  the `categories` table directly through their own `db` continue to do so
+  unchanged — the module holds no state, it only registers IPC handlers.
+- The IPC channels (`categories:list/create/update/delete`) and their
+  behavior are completely unchanged.
+- Added a new test file `test/handlers-categories.test.js` (5 new tests,
+  123 total now) — covers the 10 default categories seeded by `schema.sql`
+  (alongside newly created ones, not instead of them).
+- Continuing "carefully, small step by step" — remaining: books, loans,
+  readers, catalog/git publishing, settings.
+
 ## v1.30.0
 
 **Промени — пети извлечен домейн от main.js (Фаза 4, стъпка 6), без промяна в поведението:**

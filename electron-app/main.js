@@ -962,19 +962,10 @@ ipcMain.handle('settings:updateTheme', (e, theme) =>
   run(() => { db.prepare('UPDATE settings SET theme=? WHERE id=1').run(String(theme)); })
 );
 
-/* ---------------- Категории ---------------- */
-ipcMain.handle('categories:list', () =>
-  run(() => db.prepare('SELECT * FROM categories ORDER BY name').all())
-);
-ipcMain.handle('categories:create', (e, name) =>
-  run(() => db.prepare('INSERT INTO categories (name) VALUES (?)').run(name.trim()))
-);
-ipcMain.handle('categories:update', (e, { id, name }) =>
-  run(() => db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(name.trim(), id))
-);
-ipcMain.handle('categories:delete', (e, id) =>
-  run(() => db.prepare('DELETE FROM categories WHERE id = ?').run(id))
-);
+/* ---------------- Категории ----------------
+   Извадени в handlers/categories.js (Фаза 4, стъпка 7 от разбиването на
+   монолита main.js на модули по домейн). */
+require('./handlers/categories')(ipcMain, { getDb: () => db, run });
 
 /* ---------------- Книги ---------------- */
 const BOOK_SELECT = `
