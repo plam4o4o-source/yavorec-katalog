@@ -11,6 +11,43 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.24.0
+
+**Промени — ъпгрейд на Electron (Фаза 3, втора част):**
+- **Electron 31 → 43** (и придружаващите `electron-builder` 24 → 26,
+  `@electron/rebuild` 3 → 4) — версия 31 отдавна е извън поддръжка;
+  разработчикът поддържа само последните три версии (в момента 41–43).
+  Скокът е голям (12 версии), затова тази промяна е в собствена версия,
+  отделно от останалите поправки — по-лесно за връщане назад, ако нещо
+  изненада при истинското Windows пакетиране (GitHub Actions при таг).
+  `electron-updater` остава 6.8.9 (вече беше най-новата версия).
+  Прегледът на кода не намери употреба на премахнати/остарели Electron API
+  (`remote`, `<webview>`, `protocol.registerFileProtocol` и т.н. — не се
+  ползват); `npm install` с новите версии премина чисто, а `better-sqlite3`
+  се прекомпилира без проблем — но истинската проверка е следващото реално
+  издание (v1.24.0), затова инсталационния файл си заслужава по-внимателно
+  ръчно изпробване преди да се разчита изцяло на автоматичното обновяване.
+- Задължителна проверка на подписа при автоматично обновяване
+  (`verifyUpdateCodeSignature`) остава изключена, както досега — съзнателно
+  решение, докато не е сигурно, че всяко бъдещо издание ще бъде подписано.
+
+**Changes — Electron upgrade (Phase 3, part two):**
+- **Electron 31 → 43** (with matching `electron-builder` 24 → 26,
+  `@electron/rebuild` 3 → 4) — version 31 has long been out of support; only
+  the latest three majors (currently 41–43) are maintained. This is a big
+  jump (12 majors), so it ships as its own version, separate from the other
+  fixes — easier to roll back if the real Windows packaging (GitHub Actions
+  on tag) turns up a surprise. `electron-updater` stays at 6.8.9 (already
+  current). A code review found no use of removed/deprecated Electron APIs
+  (`remote`, `<webview>`, `protocol.registerFileProtocol`, etc. — none are
+  used); `npm install` with the new versions resolved cleanly and
+  `better-sqlite3` recompiled without issue — but the real test is the next
+  actual release (v1.24.0), so the installer is worth a more careful manual
+  try before fully trusting the auto-updater with it.
+- Mandatory signature verification on auto-update
+  (`verifyUpdateCodeSignature`) stays off, as before — a deliberate choice
+  until every future release is guaranteed to be signed.
+
 ## v1.23.0
 
 **Промени — заздравяване на сигурността (Фаза 3, първа част):**

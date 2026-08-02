@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -20,9 +20,9 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
-    "electron": "^31.3.1",
-    "electron-builder": "^24.13.3"
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "org.chyavorec.inventar",
