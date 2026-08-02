@@ -536,6 +536,9 @@ CREATE TABLE IF NOT EXISTS settings (
   suspend_max       INTEGER DEFAULT 90, -- таван на наказанието в дни
   remind2_days      INTEGER DEFAULT 14, -- след толкова дни просрочие напомнянето става 2-ра степен
   remind3_days      INTEGER DEFAULT 30, -- ... и 3-та степен
+  notice_subject    TEXT,      -- шаблон за тема на имейл напомняне
+  notice_body       TEXT,      -- шаблон за текст на имейл напомняне
+  notice_sms        TEXT,      -- шаблон за SMS напомняне
   anonymize_years   INTEGER DEFAULT 0,  -- анонимизиране на върнати заемания, по-стари от N години; 0 = изключено
   work_days         TEXT DEFAULT '0,1,2,3,4,5,6',  -- работни дни от седмицата (0=нед…6=съб); по подразбиране всички — без промяна за библиотеки, които не пипат календара
   gh_user           TEXT,

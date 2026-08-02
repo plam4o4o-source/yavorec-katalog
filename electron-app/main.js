@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, dialog, net, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
-const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const importers = require('./importers');
 const { autoUpdater } = require('electron-updater');
@@ -12,6 +11,54 @@ let CURRENT_USER = '';
 
 // Фиксиран курс на БНБ, същият като в интерфейса.
 const EUR_RATE = 1.95583;
+
+/* ---------------- Постоянен дневник на грешки (за диагностика от разстояние) ----------------
+   Пакетираната програма няма видима конзола за библиотекаря — досега всяка грешка,
+   съобщена само с console.error, изчезваше безследно. Тук всичко, минало през
+   console.error/console.warn, се записва и във файл в потребителската папка, плюс
+   необработените изключения/promise-и, които иначе биха убили процеса без следа.
+   Ротация: един файл на ден (log-YYYY-MM-DD.txt), пазят се последните LOG_KEEP_DAYS. */
+const LOG_KEEP_DAYS = 30;
+function logsDir() {
+  const dir = path.join(app.getPath('userData'), 'logs');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function logToFile(level, args) {
+  try {
+    if (!app.isReady()) return; // да не пипаме fs пътища, зависещи от userData, преди 'ready'
+    const dir = logsDir();
+    const day = new Date().toISOString().slice(0, 10);
+    const file = path.join(dir, `log-${day}.txt`);
+    const text = args.map(a => {
+      if (a instanceof Error) return a.stack || a.message;
+      if (typeof a === 'string') return a;
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }).join(' ');
+    fs.appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${text}\n`, 'utf8');
+  } catch (e) { /* ако дори логът гръмне, няма какво повече да направим тук */ }
+}
+function pruneOldLogs() {
+  try {
+    const dir = logsDir();
+    const cutoff = Date.now() - LOG_KEEP_DAYS * 24 * 60 * 60 * 1000;
+    for (const name of fs.readdirSync(dir)) {
+      const m = name.match(/^log-(\d{4}-\d{2}-\d{2})\.txt$/);
+      if (!m) continue;
+      if (new Date(m[1] + 'T00:00:00Z').getTime() < cutoff) fs.unlinkSync(path.join(dir, name));
+    }
+  } catch (e) { /* почистването на стари логове никога не бива да пречи на стартирането */ }
+}
+const _origConsoleError = console.error.bind(console);
+const _origConsoleWarn = console.warn.bind(console);
+console.error = (...args) => { _origConsoleError(...args); logToFile('ERROR', args); };
+console.warn = (...args) => { _origConsoleWarn(...args); logToFile('WARN', args); };
+process.on('uncaughtException', (err) => {
+  console.error('Необработена грешка в програмата (uncaughtException):', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Необработено отхвърляне на promise (unhandledRejection):', reason);
+});
 
 /* ---------------- Местоположение на базата данни (за работа в мрежа) ----------------
    Малък config.json в постоянната потребителска папка сочи къде реално живее
@@ -198,7 +245,40 @@ function initDb() {
   // Може да отпадне, след като всички инсталации минат през версия 1.7.4 или по-нова.
   db.prepare("UPDATE settings SET place = 'с. Яворец, общ. Габрово' WHERE id = 1 AND place = 'с. Яворец, обл. Габрово'").run();
 
+  runMigrations();
+
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
+}
+
+/* ---------------- Версия на схемата (PRAGMA user_version) ----------------
+   От тук нататък всяка НОВА промяна по схемата (нова колона/таблица, еднократно
+   попълване на данни) се регистрира по-долу в MIGRATIONS вместо да се добавя
+   свободно в initDb(). Всяка миграция се изпълнява точно веднъж, в транзакция,
+   по нарастващ номер на версия; изпълнените версии се пазят в PRAGMA user_version,
+   така че при следващо стартиране да е ясно кое вече е приложено.
+
+   По-старите блокове ensureColumns()/UPDATE по-горе в initDb() НЕ са прекодирани
+   в миграции — те вече са изпълнени във всички съществуващи инсталации и остават
+   само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
+   просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
+   без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
+const CURRENT_SCHEMA_VERSION = 1;
+const MIGRATIONS = [
+  // Пример за следваща промяна:
+  // { version: 2, run: () => { ensureColumns('books', { нещоНово: 'TEXT' }); } }
+];
+function runMigrations() {
+  const from = db.pragma('user_version', { simple: true });
+  const pending = MIGRATIONS.filter(m => m.version > from).sort((a, b) => a.version - b.version);
+  for (const m of pending) {
+    db.transaction(() => {
+      m.run();
+      db.pragma('user_version = ' + m.version);
+    })();
+    console.log(`Схемата на базата данни е обновена до версия ${m.version}.`);
+  }
+  const finalVersion = pending.length ? pending[pending.length - 1].version : from;
+  if (finalVersion < CURRENT_SCHEMA_VERSION) db.pragma('user_version = ' + CURRENT_SCHEMA_VERSION);
 }
 
 ipcMain.handle('dbLocation:get', () =>
@@ -215,8 +295,28 @@ ipcMain.handle('dbLocation:choose', async () => {
     const oldPath = resolveDbPath();
     const newPath = path.join(newDir, 'library.db');
     if (path.resolve(oldPath) === path.resolve(newPath)) return { ok: false, error: 'Това е текущата папка на базата данни.' };
+
+    // В избраната папка вече може да има library.db — най-често защото това е
+    // споделена мрежова база, към която друг компютър в библиотеката вече е
+    // свързан. Копирането по подразбиране тук би я презаписало безвъзвратно
+    // с текущата (локална) база, затова питаме изрично какво иска потребителят.
+    let doCopy = true;
+    if (fs.existsSync(newPath)) {
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Отказ', 'Ползвай съществуващата база от тази папка', 'Презапиши я с моята текуща база'],
+        defaultId: 1,
+        cancelId: 0,
+        title: 'В папката вече има база данни',
+        message: 'В избраната папка вече има файл library.db.',
+        detail: 'Ако това е споделена мрежова база на библиотеката, изберете „Ползвай съществуващата база" — текущите данни в нея остават недокоснати, просто се свързвате към нея. Ако изберете „Презапиши", съществуващият файл ще бъде безвъзвратно заменен с вашата текуща база данни.'
+      });
+      if (response === 0) return { ok: false, error: 'Отказано от потребителя.' };
+      doCopy = (response === 2);
+    }
+
     if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); db.close(); }
-    if (fs.existsSync(oldPath)) fs.copyFileSync(oldPath, newPath);
+    if (doCopy && fs.existsSync(oldPath)) fs.copyFileSync(oldPath, newPath);
     const cfg = readConfig();
     cfg.dbFolder = newDir;
     writeConfig(cfg);
@@ -259,45 +359,14 @@ function backupsDir() {
    Криптират се само РЪЧНИТЕ копия (тези, които реално пътуват на USB/друг компютър).
    Автоматичните дневни копия остават некриптирани — те лежат до самата база данни,
    която също е некриптирана, така че парола там не би добавила реална защита, а
-   само риск от заключване на данните. */
-const BACKUP_MAGIC = Buffer.from('INVBAK01', 'utf8');
-function deriveBackupKey(password, salt) {
-  return crypto.scryptSync(String(password), salt, 32, { N: 16384, r: 8, p: 1 });
-}
-function isEncryptedBackup(filePath) {
-  try {
-    const fd = fs.openSync(filePath, 'r');
-    const head = Buffer.alloc(BACKUP_MAGIC.length);
-    const read = fs.readSync(fd, head, 0, BACKUP_MAGIC.length, 0);
-    fs.closeSync(fd);
-    return read === BACKUP_MAGIC.length && head.equals(BACKUP_MAGIC);
-  } catch (e) {
-    return false;
-  }
-}
-function encryptBackupFile(plainPath, destPath, password) {
-  const salt = crypto.randomBytes(16);
-  const iv = crypto.randomBytes(12);
-  const key = deriveBackupKey(password, salt);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const data = fs.readFileSync(plainPath);
-  const enc = Buffer.concat([cipher.update(data), cipher.final()]);
-  fs.writeFileSync(destPath, Buffer.concat([BACKUP_MAGIC, salt, iv, cipher.getAuthTag(), enc]));
-}
+   само риск от заключване на данните.
+
+   Самата крипто логика (без Electron-зависимости) живее в ./backup-crypto.js —
+   извадена в отделен модул, за да може да се тества директно с node:test, без
+   формата на файла или поведението да са се променили. */
+const { isEncryptedBackup, encryptBackupFile, decryptBackupBuffer } = require('./backup-crypto');
 function decryptBackupToTemp(srcPath, password) {
-  const buf = fs.readFileSync(srcPath);
-  const salt = buf.subarray(8, 24);
-  const iv = buf.subarray(24, 36);
-  const tag = buf.subarray(36, 52);
-  const enc = buf.subarray(52);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveBackupKey(password, salt), iv);
-  decipher.setAuthTag(tag);
-  let dec;
-  try {
-    dec = Buffer.concat([decipher.update(enc), decipher.final()]);
-  } catch (e) {
-    throw new Error('Грешна парола или повреден файл с резервно копие.');
-  }
+  const dec = decryptBackupBuffer(srcPath, password); // хвърля с потребителско съобщение при грешна парола/повреда
   const tmp = path.join(app.getPath('temp'), 'inventar-restore-' + Date.now() + '.db');
   fs.writeFileSync(tmp, dec);
   return tmp;
@@ -469,6 +538,7 @@ ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall
 
 let mainWindow;
 app.whenReady().then(() => {
+  pruneOldLogs();
   initDb();
   // "Кой служител работи в момента" е настройка на този компютър (не на споделената база
   // данни) — всяко работно място пази собствения си избор в локалния config.json.
@@ -576,6 +646,9 @@ ipcMain.handle('employees:delete', (e, id) =>
   run(() => { db.prepare('DELETE FROM employees WHERE id = ?').run(id); })
 );
 ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
+// Отваря папката с дневниците на грешки (logs/) в системния файлов мениджър —
+// удобно, за да прикачи librarianят файловете при заявка за поддръжка.
+ipcMain.handle('app:openLogsFolder', () => run(() => { shell.openPath(logsDir()); }));
 
 /* ---------------- Търсене по ISBN (Google Books и Open Library) ----------------
    Заявките се правят от главния процес, а не от интерфейса, защото Content-Security-Policy

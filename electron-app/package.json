@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -12,7 +12,8 @@
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "start": "electron .",
     "build": "electron-builder --win",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "test": "node --test"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
@@ -43,6 +44,7 @@
       "main.js",
       "preload.js",
       "importers.js",
+      "backup-crypto.js",
       "src/**/*",
       "db/schema.sql",
       "node_modules/**/*"
