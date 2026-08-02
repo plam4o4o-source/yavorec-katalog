@@ -1647,45 +1647,13 @@ ipcMain.handle('suggestions:delete', (e, id) =>
 );
 
 /* ---------------- Обслужване по домовете (Koha: housebound) ----------------
-   График и дневник на посещенията при читатели, които не могат да идват сами.
-   Всяко посещение влиза в потока от събития (kind='дома') и оттам дневникът
-   предлага стойността за колоната a_visit_home („В заемна за дома"). */
-ipcMain.handle('housebound:get', (e, readerId) =>
-  run(() => {
-    const p = db.prepare('SELECT * FROM housebound_profiles WHERE reader_id = ?').get(readerId) || null;
-    const visits = db.prepare('SELECT * FROM housebound_visits WHERE reader_id = ? ORDER BY date DESC LIMIT 30').all(readerId);
-    return { profile: p, visits };
-  })
-);
-ipcMain.handle('housebound:save', (e, { reader_id, day, frequency, note }) =>
-  run(() => {
-    db.prepare(`INSERT INTO housebound_profiles (reader_id, day, frequency, note) VALUES (?, ?, ?, ?)
-      ON CONFLICT(reader_id) DO UPDATE SET day=excluded.day, frequency=excluded.frequency, note=excluded.note`)
-      .run(reader_id, day || null, frequency || null, note || null);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Обслужване по домовете', 'график за ' + (r ? r.name : reader_id));
-  })
-);
-ipcMain.handle('housebound:remove', (e, readerId) =>
-  run(() => { db.prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId); })
-);
-ipcMain.handle('housebound:addVisit', (e, { reader_id, date, note }) =>
-  run(() => {
-    const d = date || today();
-    const info = db.prepare('INSERT INTO housebound_visits (reader_id, date, note) VALUES (?, ?, ?)').run(reader_id, d, note || null);
-    logEvent('дома', { readerId: reader_id, date: d, note });
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Посещение по домовете', (r ? r.name : reader_id) + ' — ' + d);
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('housebound:list', () =>
-  run(() => db.prepare(`
-    SELECT p.*, r.name, r.phone, r.address, r.address2,
-           (SELECT MAX(v.date) FROM housebound_visits v WHERE v.reader_id = p.reader_id) AS last_visit
-    FROM housebound_profiles p JOIN readers r ON r.id = p.reader_id ORDER BY r.name
-  `).all())
-);
+   Извадени в handlers/housebound.js (Фаза 4, стъпка 8 от разбиването на
+   монолита main.js на модули по домейн). logEvent се подава по референция
+   (function declaration по-долу в "Заемания" — hoisted, вече е дефинирана
+   тук). */
+require('./handlers/housebound')(ipcMain, {
+  getDb: () => db, run, logAudit, logEvent, today
+});
 
 /* ---------------- Лични данни: анонимизиране (Koha: pseudonymization) ----------------
    Върнати заемания, по-стари от N години, губят връзката с името: закачат се за

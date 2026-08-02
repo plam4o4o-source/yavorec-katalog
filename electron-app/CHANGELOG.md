@@ -11,6 +11,48 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.32.0
+
+**Промени — седми извлечен домейн от main.js (Фаза 4, стъпка 8), без промяна в поведението:**
+- Кодът за "Обслужване по домовете" (график и дневник на посещения при
+  читатели, които не могат да идват сами — 5 IPC канала) е изваден от
+  `main.js` в нов файл `handlers/housebound.js`.
+- Първи случай, в който се инжектира функция, дефинирана ПО-ДОЛУ във
+  файла: `logEvent` (в домейна "Заемания", все още неизваден) се подава по
+  референция и работи коректно, защото е `function` декларация — тя се
+  "hoist"-ва в началото на модула от JavaScript, независимо от текстовата
+  ѝ позиция във файла, така че вече е напълно дефинирана в момента, в който
+  main.js регистрира housebound handler-ите.
+- IPC каналите (`housebound:get/save/remove/addVisit/list`) и поведението
+  им са напълно непроменени.
+- Добавен нов тестови файл `test/handlers-housebound.test.js` (7 нови
+  теста, общо вече 130) — включително проверка, че `logEvent` реално се
+  извиква с правилните аргументи при добавяне на посещение (не само че
+  редът се появява в базата).
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: книги,
+  заемания, читатели, каталог/git публикуване, настройки, и няколко
+  по-малки домейна (МЗС, предложения за покупка, читателска сметка и др.).
+
+**Changes — seventh domain extracted from main.js (Phase 4, step 8), no behavior change:**
+- The "Housebound service" code (schedule and visit log for readers who
+  can't come to the library themselves — 5 IPC channels) has been
+  extracted from `main.js` into a new file `handlers/housebound.js`.
+- The first case where an injected function is defined FURTHER DOWN in the
+  file: `logEvent` (in the "Loans" domain, not yet extracted) is passed by
+  reference and works correctly because it's a `function` declaration —
+  JavaScript hoists it to the top of the module regardless of its textual
+  position, so it's already fully defined by the time main.js registers
+  the housebound handlers.
+- The IPC channels (`housebound:get/save/remove/addVisit/list`) and their
+  behavior are completely unchanged.
+- Added a new test file `test/handlers-housebound.test.js` (7 new tests,
+  130 total now) — including a check that `logEvent` is actually called
+  with the right arguments when a visit is added, not just that the row
+  appears in the database.
+- Continuing "carefully, small step by step" — remaining: books, loans,
+  readers, catalog/git publishing, settings, and a few smaller domains
+  (interlibrary loans, purchase suggestions, reader accounts, etc.).
+
 ## v1.31.0
 
 **Промени — шести извлечен домейн от main.js (Фаза 4, стъпка 7), без промяна в поведението:**
