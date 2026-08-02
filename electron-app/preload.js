@@ -161,6 +161,7 @@ contextBridge.exposeInMainWorld('api', {
     overdue: invoke('loans:overdue'),
     overdueByReader: invoke('loans:overdueByReader'),
     byReader: invoke('loans:byReader'),
+    byBook: invoke('loans:byBook'),
     checkout: invoke('loans:checkout'),
     checkoutByCode: invoke('loans:checkoutByCode'),
     return: invoke('loans:return'),

@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -46,6 +46,8 @@
       "importers.js",
       "backup-crypto.js",
       "pii-crypto.js",
+      "search-fts.js",
+      "debounce.js",
       "src/**/*",
       "db/schema.sql",
       "node_modules/**/*"
