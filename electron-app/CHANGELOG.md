@@ -11,6 +11,30 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.25.0
+
+**Промени — два нови индекса в базата данни (Фаза 4, първа част):**
+- **Индекс на баркода на документите** — сканирането на баркод (в таблото,
+  при заемане/връщане) вече използва индекс вместо пълно сканиране на фонда.
+  Нарочно БЕЗ ограничение за уникалност — съществуващи инсталации може вече
+  да имат дублирани баркодове от по-стари данни или ръчна грешка; налагането
+  на уникалност би счупило стартирането на програмата при първо обновяване,
+  без предварителна проверка от библиотекаря. Само индекс за скорост, засега.
+- **Композитен индекс за "тази книга заета ли е в момента"** — тази проверка
+  се прави за ВСЕКИ ред от списъка с книги (при всяко отваряне на „Книги“);
+  новият индекс я прави директна, вместо да сканира заеманията на книгата.
+
+**Changes — two new database indexes (Phase 4, part one):**
+- **Barcode index** — scanning a barcode (dashboard, loans/returns) now uses
+  an index instead of a full table scan. Deliberately WITHOUT a uniqueness
+  constraint — existing installations may already have duplicate barcodes
+  from older data or manual entry mistakes; enforcing uniqueness would break
+  the app's startup on first upgrade, without the librarian first checking
+  for and resolving duplicates. Index only, for speed, for now.
+- **Composite index for "is this book currently on loan"** — this check runs
+  for EVERY row of the books list (every time "Books" is opened); the new
+  index makes it direct instead of scanning that book's loan history.
+
 ## v1.24.0
 
 **Промени — ъпгрейд на Electron (Фаза 3, втора част):**
