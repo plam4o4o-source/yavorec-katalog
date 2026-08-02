@@ -11,6 +11,28 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.34.0
+
+**Промени — девети извлечен домейн от main.js (Фаза 4, стъпка 10), без промяна в поведението:**
+- "Търсене по ISBN" (Google Books + Open Library) и "SRU" (внасяне на MARC
+  записи) — 2 IPC канала, изцяло самостоятелна мрежова/парсинг логика —
+  изведени в `handlers/isbn-lookup.js`. Само `net` (Electron) и `getDb()`
+  инжектирани.
+- IPC поведението непроменено. Нов тестови файл (12 нови теста, общо 151):
+  `net.fetch` е подменен с фалшива реализация, покрива Google
+  Books/Open Library merge логиката и реален MARCXML parsing (заглавие,
+  автор, издател, година, ISBN).
+
+**Changes — ninth domain extracted from main.js (Phase 4, step 10), no behavior change:**
+- "ISBN lookup" (Google Books + Open Library) and "SRU" (MARC record
+  import) — 2 IPC channels, entirely self-contained network/parsing logic
+  — extracted into `handlers/isbn-lookup.js`. Only `net` (Electron) and
+  `getDb()` injected.
+- IPC behavior unchanged. New test file (12 new tests, 151 total):
+  `net.fetch` is replaced with a fake implementation, covering the Google
+  Books/Open Library merge logic and real MARCXML parsing (title, author,
+  publisher, year, ISBN).
+
 ## v1.33.0
 
 **Промени — осми извлечен домейн от main.js (Фаза 4, стъпка 9), без промяна в поведението:**
