@@ -11,6 +11,25 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.35.0
+
+**Промени — десети извлечен домейн от main.js (Фаза 4, стъпка 11), без промяна в поведението:**
+- "Контрол на авторитетните данни" (автодовършване + откриване/сливане на
+  дублирани стойности като автор/издателство — 5 IPC канала) изведен в
+  `handlers/authorities.js`. Само `getDb()`/`run`/`logAudit`.
+- IPC поведението непроменено. Нов тестови файл (11 нови теста, общо 162):
+  покрива и стриктния, и "хлабавия" режим на откриване на дубликати
+  (съкратени имена като „И. Вазов“ = „Иван Вазов“, но „Димитър Колев“ ≠
+  „Димитър Костов“).
+
+**Changes — tenth domain extracted from main.js (Phase 4, step 11), no behavior change:**
+- "Authority data control" (autocomplete + finding/merging duplicate
+  values like author/publisher — 5 IPC channels) extracted into
+  `handlers/authorities.js`. Only `getDb()`/`run`/`logAudit`.
+- IPC behavior unchanged. New test file (11 new tests, 162 total): covers
+  both the strict and "loose" duplicate-detection modes (abbreviated names
+  like "И. Вазов" = "Иван Вазов", but "Димитър Колев" ≠ "Димитър Костов").
+
 ## v1.34.0
 
 **Промени — девети извлечен домейн от main.js (Фаза 4, стъпка 10), без промяна в поведението:**
