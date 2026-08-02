@@ -11,6 +11,62 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.29.0
+
+**Промени — четвърти извлечен домейн от main.js (Фаза 4, стъпка 5), без промяна в поведението:**
+- Кодът за "Правила за обслужване по категория читатели" (circulation_rules
+  — 4 IPC канала) е изваден от `main.js` в нов файл
+  `handlers/circ-rules.js`, по същия модел като `handlers/calendar.js`.
+- Функциите `circRule(category)` и `readerCategory(readerId)` се връщат
+  обратно към `main.js`, защото ги ползва и домейнът "Заемания" (все още
+  неизваден) — за да изчислява реалния срок/лимит на конкретния читател,
+  вместо винаги глобалните настройки. Всяко поле в `circulation_rules`,
+  оставено `NULL`, пада обратно към глобалната стойност от `settings` —
+  логиката е напълно непроменена.
+- IPC каналите (`circRules:list/save/delete/effective`) и поведението им
+  са напълно непроменени.
+- Добавен нов тестови файл `test/handlers-circ-rules.test.js` (10 нови
+  теста, общо вече 110) — покрива и връщаните помощни функции директно,
+  включително частично `NULL` презаписване (само някои полета зададени за
+  дадена категория, останалите падат към глобалните).
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: книги,
+  заемания, читатели, каталог/git публикуване, настройки.
+
+**Забележка за синхронизацията**: тази версия е построена върху коригираната
+основа след пач `d31a64c` (реален CAST-фикс за индекса на баркода — виж
+v1.25.0 в changelog-а), приложен от другата сесия между предишната и тази
+доставка. `handlers/shelves.js` от v1.27.0 е поправен да отразява същия
+CAST-на-параметъра фикс в `shelves:addBook` (беше пропуснат при първото
+извличане, защото домейнът е бил изваден преди фикса да пристигне upstream).
+
+**Changes — fourth domain extracted from main.js (Phase 4, step 5), no behavior change:**
+- The "Circulation rules by reader category" code (circulation_rules — 4
+  IPC channels) has been extracted from `main.js` into a new file
+  `handlers/circ-rules.js`, following the same pattern as
+  `handlers/calendar.js`.
+- The functions `circRule(category)` and `readerCategory(readerId)` are
+  returned back to `main.js`, because the "Loans" domain (not yet
+  extracted) also uses them — to compute the actual loan period/limit for
+  a specific reader instead of always the global settings. Any field in
+  `circulation_rules` left `NULL` falls back to the global value in
+  `settings` — logic completely unchanged.
+- The IPC channels (`circRules:list/save/delete/effective`) and their
+  behavior are completely unchanged.
+- Added a new test file `test/handlers-circ-rules.test.js` (10 new tests,
+  110 total now) — covers the returned helper functions directly, including
+  partial `NULL` overrides (only some fields set for a category, the rest
+  falling back to global).
+- Continuing "carefully, small step by step" — remaining: books, loans,
+  readers, catalog/git publishing, settings.
+
+**Sync note**: this version is built on the corrected base after patch
+`d31a64c` (a real CAST fix for the barcode index — see v1.25.0 in this
+changelog), applied by the other session between the previous delivery and
+this one. `handlers/shelves.js` from v1.27.0 has been fixed to carry the
+same cast-the-parameter fix in `shelves:addBook` (it was missed on first
+extraction because that domain was pulled out before the fix landed
+upstream).
+
 ## v1.28.0
 
 **Промени — трети извлечен домейн от main.js (Фаза 4, стъпка 4), без промяна в поведението:**
