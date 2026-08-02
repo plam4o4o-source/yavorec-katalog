@@ -11,6 +11,23 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.38.0
+
+**Промени — тринайсети извлечен домейн от main.js (Фаза 4, стъпка 14), без промяна в поведението:**
+- "Постъпления" (партиди — 5 IPC канала) изведени в
+  `handlers/acquisitions.js`. Първи домейн, зависим от `BOOK_SELECT`
+  (споделената SQL заготовка на все още неизвадения домейн "Книги") —
+  подаден по стойност (низ, `const`, никога не се преприсвоява), не като
+  getter.
+- IPC поведението непроменено. Нов тестови файл (8 нови теста, общо 180).
+
+**Changes — thirteenth domain extracted from main.js (Phase 4, step 14), no behavior change:**
+- "Acquisitions" (batches — 5 IPC channels) extracted into
+  `handlers/acquisitions.js`. First domain depending on `BOOK_SELECT` (the
+  shared SQL fragment from the still-unextracted "Books" domain) — passed
+  by value (a `const` string, never reassigned), not as a getter.
+- IPC behavior unchanged. New test file (8 new tests, 180 total).
+
 ## v1.37.0
 
 **Промени — дванайсети извлечен домейн от main.js (Фаза 4, стъпка 13), без промяна в поведението:**
