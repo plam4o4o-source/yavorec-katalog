@@ -1049,59 +1049,7 @@ const { DEFAULT_NOTICE_SUBJECT, DEFAULT_NOTICE_BODY, DEFAULT_NOTICE_SMS, NOTICE_
   });
 
 /* ---------------- Периодика ---------------- */
-ipcMain.handle('periodicals:list', () =>
-  run(() => db.prepare(`
-    SELECT p.*, (SELECT COUNT(*) FROM periodical_issues i WHERE i.periodical_id = p.id) AS issue_count
-    FROM periodicals p ORDER BY p.title
-  `).all())
-);
-ipcMain.handle('periodicals:get', (e, id) =>
-  run(() => {
-    const p = db.prepare('SELECT * FROM periodicals WHERE id = ?').get(id);
-    if (!p) return null;
-    p.issues = db.prepare('SELECT * FROM periodical_issues WHERE periodical_id = ? ORDER BY date DESC').all(id);
-    return p;
-  })
-);
-ipcMain.handle('periodicals:create', (e, p) =>
-  run(() => {
-    const info = db.prepare(`
-      INSERT INTO periodicals (title, freq, publisher, issn, department, note)
-      VALUES (@title, @freq, @publisher, @issn, @department, @note)
-    `).run({ title: p.title, freq: p.freq || null, publisher: p.publisher || null, issn: p.issn || null, department: p.department || null, note: p.note || null });
-    logAudit('Ново периодично издание', p.title);
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('periodicals:update', (e, p) =>
-  run(() => {
-    db.prepare(`
-      UPDATE periodicals SET title=@title, freq=@freq, publisher=@publisher, issn=@issn, department=@department, note=@note
-      WHERE id=@id
-    `).run(p);
-    logAudit('Редакция на периодично издание', p.title);
-  })
-);
-ipcMain.handle('periodicals:delete', (e, id) =>
-  run(() => {
-    const cnt = db.prepare('SELECT COUNT(*) AS n FROM periodical_issues WHERE periodical_id = ?').get(id).n;
-    if (cnt > 0) throw new Error('Изданието има вписани броеве и не може да бъде изтрито.');
-    db.prepare('DELETE FROM periodicals WHERE id = ?').run(id);
-  })
-);
-ipcMain.handle('periodicalIssues:add', (e, issue) =>
-  run(() => {
-    const info = db.prepare(`
-      INSERT INTO periodical_issues (periodical_id, issue_no, date, price, note)
-      VALUES (@periodical_id, @issue_no, @date, @price, @note)
-    `).run({ periodical_id: issue.periodical_id, issue_no: issue.issue_no, date: issue.date || today(), price: issue.price ? parseFloat(issue.price) : 0, note: issue.note || null });
-    logAudit('Постъпил брой', 'бр. ' + issue.issue_no);
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('periodicalIssues:delete', (e, id) =>
-  run(() => db.prepare('DELETE FROM periodical_issues WHERE id = ?').run(id))
-);
+require('./handlers/periodicals')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- МЗС ---------------- */
 ipcMain.handle('mzs:list', () => run(() => db.prepare('SELECT * FROM mzs_requests ORDER BY date DESC, no DESC').all()));

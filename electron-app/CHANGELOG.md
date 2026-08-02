@@ -11,6 +11,21 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.48.0
+
+**Промени — двайсет и пети извлечен домейн от main.js (Фаза 4, стъпка 26), без промяна в поведението:**
+- "Периодика" (7 IPC канала: periodicals:list/get/create/update/delete,
+  periodicalIssues:add/delete) изведени в `handlers/periodicals.js`.
+  Зависи само от `getDb`, `run`, `logAudit`, `today`.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 276).
+
+**Changes — twenty-fifth domain extracted from main.js (Phase 4, step 26), no behavior change:**
+- "Periodicals" (7 IPC channels: periodicals:list/get/create/update/
+  delete, periodicalIssues:add/delete) extracted into
+  `handlers/periodicals.js`. Depends only on `getDb`, `run`, `logAudit`,
+  `today`.
+- IPC behavior unchanged. New test file (10 new tests, 276 total).
+
 ## v1.47.0
 
 **Промени — двайсет и четвърти извлечен домейн от main.js (Фаза 4, стъпка 25), без промяна в поведението:**
