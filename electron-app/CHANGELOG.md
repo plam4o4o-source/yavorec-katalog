@@ -11,6 +11,45 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.54.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 32, един от
+"големите пет"): "Онлайн каталог" (публикуване през GitHub) и "Експорт в
+библиотечни формати" (UNIMARC/MARCXML, Dublin Core) са изнесени в
+`handlers/catalog.js` — 11 handler-а: `catalog:status/remoteCheck/updateGh/
+chooseFolder/disconnectFolder/gitPublishNow/writeNow/exportMarc/exportDc/
+export/exportCsv`. `scheduleCatalogWrite`/`flushCatalogWrite`/
+`buildCatalogPayload` умишлено ОСТАВАТ hoisted в `main.js` (по същата
+причина като `logEvent`): по-рано извадени модули (`deaccession-acts.js`,
+`loans.js`) вече ги ползват по пряка референция в обект, подаден на техния
+`require()`, изпълнен преди мястото на `handlers/catalog.js` — преместването
+им би било същият TDZ капан. `startAutoPushTimer`/`stopAutoPushTimer` (нова
+функция, заменя пряката работа с `AUTO_PUSH_TIMER` в `window-all-closed`) се
+връщат обратно към `main.js`, защото се викат само вътре в отложени
+callback-и (`app.whenReady()`/`window-all-closed`) — редът там няма
+значение. IPC поведението е напълно непроменено. Нов тестов файл
+`test/handlers-catalog.test.js` (17 теста, с фалшив `execFile`, за да не
+зависи от инсталиран git/мрежа) — общо 360 теста (бяха 343).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 32, one of the "big
+five"): the "online catalog" (GitHub publishing) and "library format
+exports" (UNIMARC/MARCXML, Dublin Core) domains move to
+`handlers/catalog.js` — 11 handlers: `catalog:status/remoteCheck/updateGh/
+chooseFolder/disconnectFolder/gitPublishNow/writeNow/exportMarc/exportDc/
+export/exportCsv`. `scheduleCatalogWrite`/`flushCatalogWrite`/
+`buildCatalogPayload` deliberately STAY hoisted in `main.js` (same reason as
+`logEvent`): previously extracted modules (`deaccession-acts.js`,
+`loans.js`) already depend on them by direct reference in an object passed
+to their `require()`, which runs before `handlers/catalog.js`'s position —
+moving them would hit the same TDZ trap. `startAutoPushTimer`/
+`stopAutoPushTimer` (a new function replacing direct `AUTO_PUSH_TIMER`
+manipulation in `window-all-closed`) are returned back to `main.js`, since
+they're only invoked inside deferred callbacks (`app.whenReady()`/
+`window-all-closed`) — load order there doesn't matter. IPC behavior is
+fully unchanged. New test file `test/handlers-catalog.test.js` (17 tests,
+using a fake `execFile` so tests don't depend on installed git/network) —
+360 tests total (up from 343).
+
 ## v1.53.0
 
 **BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 31): краеведският
