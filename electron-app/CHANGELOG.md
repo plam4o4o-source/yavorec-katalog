@@ -11,6 +11,44 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.27.0
+
+**Промени — втори извлечен домейн от main.js (Фаза 4, стъпка 3), без промяна в поведението:**
+- Кодът за "Витрини в онлайн каталога" (тематични списъци като „Лято 2026",
+  показвани на сайта като бутони — 8 IPC канала) е изваден от `main.js` в нов
+  файл `handlers/shelves.js`, по същия модел като `handlers/backup.js`.
+- По-лек случай от резервните копия: тук се инжектират само `getDb()` и три
+  вече дефинирани функции от main.js по референция — `run`, `logAudit`,
+  `scheduleCatalogWrite` — без нужда от `mainWindow`/`dialog`/`app`.
+- IPC каналите (`shelves:list/items/create/rename/delete/addBook/addBooks/
+  removeBook`) и поведението им са напълно непроменени.
+- Добавен нов тестови файл `test/handlers-shelves.test.js` (8 нови теста,
+  общо вече 92) — тества директно извадения модул с реалната схема на базата
+  данни (foreign keys, отчислени/служебни документи се подминават коректно).
+- `handlers/**/*` вече беше в `package.json` → `build.files` от v1.26.0, така
+  че новият файл се пакетира автоматично.
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: книги,
+  заемания, читатели, каталог/git публикуване, настройки.
+
+**Changes — second domain extracted from main.js (Phase 4, step 3), no behavior change:**
+- The "Online catalog shelves" code (curated thematic lists like "Summer
+  2026", shown on the site as buttons — 8 IPC channels) has been extracted
+  from `main.js` into a new file `handlers/shelves.js`, following the same
+  pattern as `handlers/backup.js`.
+- A lighter case than the backups domain: only `getDb()` and three already-
+  defined functions from main.js are injected by reference — `run`,
+  `logAudit`, `scheduleCatalogWrite` — no `mainWindow`/`dialog`/`app` needed.
+- The IPC channels (`shelves:list/items/create/rename/delete/addBook/
+  addBooks/removeBook`) and their behavior are completely unchanged.
+- Added a new test file `test/handlers-shelves.test.js` (8 new tests, 92
+  total now) — tests the extracted module directly against the real
+  database schema (foreign keys, deaccessioned/staff-only books correctly
+  skipped).
+- `handlers/**/*` was already in `package.json` → `build.files` since
+  v1.26.0, so the new file is packaged automatically.
+- Continuing "carefully, small step by step" — remaining: books, loans,
+  readers, catalog/git publishing, settings.
+
 ## v1.26.0
 
 **Промени — начало на разбиването на main.js на модули (Фаза 4, стъпка 2), без промяна в поведението:**
