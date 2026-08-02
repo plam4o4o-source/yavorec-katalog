@@ -11,6 +11,30 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.46.0
+
+**Промени — двайсет и трети извлечен домейн от main.js (Фаза 4, стъпка 24), без промяна в поведението:**
+- "Инвентаризация" (6 IPC канала: inventorySessions:list/requirement/
+  start/get/scan/close) изведени в `handlers/inventory-sessions.js`.
+  Зависи от `pctRequired`/`naturalLoss` (стабилни function declarations в
+  main.js) и getDb/run/logAudit.
+- `inventorySessions:importScans` (внасяне на сканирано с телефон) остава
+  засега в main.js — физически принадлежи към отделна секция за мобилно
+  сканиране, не към основния маркер "Инвентаризация"; ще се изведе с
+  бъдещия домейн "mobile".
+- IPC поведението непроменено. Нов тестови файл (8 нови теста, общо 259).
+
+**Changes — twenty-third domain extracted from main.js (Phase 4, step 24), no behavior change:**
+- "Inventory sessions" (6 IPC channels: inventorySessions:list/
+  requirement/start/get/scan/close) extracted into
+  `handlers/inventory-sessions.js`. Depends on `pctRequired`/`naturalLoss`
+  (stable function declarations in main.js) and getDb/run/logAudit.
+- `inventorySessions:importScans` (importing phone-scanned codes) stays in
+  main.js for now — it physically belongs to a separate mobile-scanning
+  section, not the main "Инвентаризация" marker; it will move out with a
+  future "mobile" domain.
+- IPC behavior unchanged. New test file (8 new tests, 259 total).
+
 ## v1.45.0
 
 **Промени — двайсет и втори извлечен домейн от main.js (Фаза 4, стъпка 23), без промяна в поведението:**
