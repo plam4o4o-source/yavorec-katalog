@@ -11,6 +11,22 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.40.0
+
+**Промени — петнайсети извлечен домейн от main.js (Фаза 4, стъпка 16), без промяна в поведението:**
+- "КДБФ — книга за движение на фонда" (единственият справочен, read-only
+  `kdbf:report`) изведен в `handlers/kdbf.js`. Зависи само от `getDb`, `run`
+  и `yearOf` (по стойност) — не пише нищо, само агрегира постъпления,
+  отчисления и наличност към края на годината.
+- IPC поведението непроменено. Нов тестови файл (6 нови теста, общо 191).
+
+**Changes — fifteenth domain extracted from main.js (Phase 4, step 16), no behavior change:**
+- "KDBF — fund movement ledger" (a single read-only report handler,
+  `kdbf:report`) extracted into `handlers/kdbf.js`. Depends only on
+  `getDb`, `run` and `yearOf` (by value) — writes nothing, only aggregates
+  acquisitions, deaccessions, and year-end stock levels.
+- IPC behavior unchanged. New test file (6 new tests, 191 total).
+
 ## v1.39.0
 
 **Промени — четиринайсети извлечен домейн от main.js (Фаза 4, стъпка 15), без промяна в поведението:**
