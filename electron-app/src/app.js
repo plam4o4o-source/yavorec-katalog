@@ -715,6 +715,14 @@ let BOOKS_QUERY = '';
    набор от записи вече е друг и старият избор губи смисъл. */
 let BOOKS_SELECTED = new Set();
 let BOOKS_SORT = 'title';
+/* Прозоречен рендер (Фаза 2): при голям фонд (5 000–15 000+ документа) чертаенето
+   на ВСИЧКИ редове наведнъж замразява интерфейса за забележимо време. Вместо да
+   местим пагинацията в бекенда (books:list се ползва и другаде за пълен списък —
+   експорти, справки, GDPR анонимизация — където трябва целият резултат), тук само
+   ограничаваме КОЛКО реда се изчертават в таблицата наведнъж, с бутон „Покажи още“,
+   по същия установен модел като публичния каталог (site/page-katalog.html: R/P/page()). */
+const BOOKS_PAGE_SIZE = 300;
+let BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE;
 function searchListDatalist(id, values) {
   return `<datalist id="${id}">${(values || []).map(v => `<option value="${esc(v)}"></option>`).join('')}</datalist>`;
 }
@@ -733,10 +741,12 @@ async function renderBooks() {
   const visibleIds = new Set(books.map(b => b.id));
   for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
   const n = BOOKS_SELECTED.size;
+  const shown = books.slice(0, BOOKS_RENDER_LIMIT);
+  const more = books.length - shown.length;
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
-      <select onchange="BOOKS_SORT=this.value;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
+      <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
         <option value="title" ${BOOKS_SORT === 'title' ? 'selected' : ''}>По заглавие</option>
         <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
         <option value="inv" ${BOOKS_SORT === 'inv' ? 'selected' : ''}>По инв. №</option>
@@ -752,7 +762,7 @@ async function renderBooks() {
         ${books.length && books.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
         <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:160px"></th></tr></thead>
       <tbody>
-        ${books.length ? books.map(b => `
+        ${shown.length ? shown.map(b => `
           <tr>
             <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
             <td class="num">${b.inv_number ?? ''}</td>
@@ -768,9 +778,12 @@ async function renderBooks() {
           </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`}
       </tbody>
     </table></div>
+    ${more > 0 ? `<div class="toolbar" style="justify-content:center">
+      <button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooks()">Покажи още (${more} от общо ${books.length})</button>
+    </div>` : ''}
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
-  $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); renderBooks(); }, 300));
+  $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; renderBooks(); }, 300));
   $('#bSearch').addEventListener('change', e => logSearchHistory('books', e.target.value));
 }
 function toggleBookSel(id, checked) {
@@ -779,12 +792,13 @@ function toggleBookSel(id, checked) {
 }
 window.toggleBookSel = toggleBookSel;
 function toggleBookSelAll(checked) {
-  document.querySelectorAll('.bkChk').forEach(el => {
-    el.checked = checked;
-    const id = parseInt(el.dataset.id, 10);
-    if (checked) BOOKS_SELECTED.add(id); else BOOKS_SELECTED.delete(id);
-  });
-  updateBulkBar();
+  // "Избери всички" означава всички книги от текущия резултат от търсенето — не само
+  // редовете, заредени в момента в таблицата (при windowed рендер може да е само част
+  // от тях), затова минаваме по window._BOOKS_LIST, а не по DOM чек-боксовете.
+  const ids = (window._BOOKS_LIST || []).map(b => b.id);
+  if (checked) ids.forEach(id => BOOKS_SELECTED.add(id));
+  else ids.forEach(id => BOOKS_SELECTED.delete(id));
+  renderBooks();
 }
 window.toggleBookSelAll = toggleBookSelAll;
 function updateBulkBar() {
@@ -1791,11 +1805,17 @@ window.revokeAct = revokeAct;
 
 /* ---------------- Читатели ---------------- */
 let READERS_QUERY = '';
+// Прозоречен рендер (Фаза 2) — виж коментара при BOOKS_PAGE_SIZE по-горе; същото
+// съображение важи и за списъка с читатели при голяма библиотека.
+const READERS_PAGE_SIZE = 300;
+let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
 async function renderReaders() {
   const [readers, searchSuggest] = await Promise.all([
     call(window.api.readers.list(READERS_QUERY)), call(window.api.searchHistory.suggest('readers'))
   ]);
   if (!readers) return;
+  const shown = readers.slice(0, READERS_RENDER_LIMIT);
+  const more = readers.length - shown.length;
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="rSearch" list="dl_searchReaders" placeholder="Търсене по име, телефон или № карта…" value="${esc(READERS_QUERY)}">
@@ -1804,7 +1824,7 @@ async function renderReaders() {
     <div class="wrap"><table class="ledger">
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:290px"></th></tr></thead>
       <tbody>
-        ${readers.length ? readers.map(r => `
+        ${shown.length ? shown.map(r => `
           <tr><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
             <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
             <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
@@ -1815,8 +1835,11 @@ async function renderReaders() {
           : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`}
       </tbody>
     </table></div>
+    ${more > 0 ? `<div class="toolbar" style="justify-content:center">
+      <button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReaders()">Покажи още (${more} от общо ${readers.length})</button>
+    </div>` : ''}
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
-  $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; renderReaders(); }, 300));
+  $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; renderReaders(); }, 300));
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
 }
 const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
