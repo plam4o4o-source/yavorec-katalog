@@ -238,6 +238,16 @@ contextBridge.exposeInMainWorld('api', {
     list: invoke('reports:list'),
     run: invoke('reports:run')
   },
+  shelves: {
+    list: invoke('shelves:list'),
+    items: invoke('shelves:items'),
+    create: invoke('shelves:create'),
+    rename: invoke('shelves:rename'),
+    delete: invoke('shelves:delete'),
+    addBook: invoke('shelves:addBook'),
+    addBooks: invoke('shelves:addBooks'),
+    removeBook: invoke('shelves:removeBook')
+  },
   catalog: {
     status: invoke('catalog:status'),
     chooseFolder: invoke('catalog:chooseFolder'),

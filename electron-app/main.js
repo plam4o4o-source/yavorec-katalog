@@ -3205,7 +3205,10 @@ function publicBookFields(b, opacMap) {
     inv: b.inv_number, a: b.author || '', t: b.title || '', s: b.subtitle || '',
     c: b.city || '', p: b.publisher || '', y: b.year || '', v: b.category_name || '',
     l: pub('language', b.language), u: b.udk || '', g: b.call_number || '', o: pub('department', b.department),
-    k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '', av: b.available > 0 ? 1 : 0
+    k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '', av: b.available > 0 ? 1 : 0,
+    // d = дата на постъпване: страницата извежда „Нови постъпления" сама от нея.
+    // Старите версии на страницата не познават ключа и просто го подминават.
+    d: b.register_date || ''
   };
 }
 function buildCatalogPayload() {
@@ -3215,10 +3218,25 @@ function buildCatalogPayload() {
   for (const r of db.prepare(`SELECT category, value, opac_label FROM authorised_values WHERE opac_label IS NOT NULL AND TRIM(opac_label) <> ''`).all()) {
     (opacMap[r.category] = opacMap[r.category] || {})[r.value] = r.opac_label;
   }
+  // Витрините сочат книги по публичния им ключ (инв. №). Книга, която е спряла да
+  // се публикува (отчислена/служебна), отпада мълчаливо; празна витрина не се излъчва.
+  const published = new Set(books.map(b => b.inv_number));
+  const shelves = db.prepare(`
+    SELECT sh.name, b.inv_number FROM catalog_shelves sh
+    JOIN catalog_shelf_items si ON si.shelf_id = sh.id
+    JOIN books b ON b.id = si.book_id
+    ORDER BY sh.sort, sh.name, si.sort, b.title
+  `).all().reduce((m, r) => {
+    if (!published.has(r.inv_number)) return m;
+    (m[r.name] = m[r.name] || []).push(r.inv_number);
+    return m;
+  }, {});
+  const shelfList = Object.entries(shelves).map(([name, items]) => ({ name, items }));
   return {
     library: s.lib_name || '', place: s.place || '',
     generated: new Date().toISOString().slice(0, 10),
-    items: books.map(b => publicBookFields(b, opacMap))
+    items: books.map(b => publicBookFields(b, opacMap)),
+    ...(shelfList.length ? { shelves: shelfList } : {})
   };
 }
 function catalogPayloadItemCount(payload) {
@@ -3269,6 +3287,83 @@ function suggestRepoName(s) {
   const short = base.split('-').filter(w => w.length > 2).slice(0, 4).join('-');
   return (short || 'biblioteka') + '-katalog';
 }
+/* ---------------- Витрини в онлайн каталога ----------------
+   Ръчно подбрани тематични списъци, показвани от страницата на сайта като
+   бутони. Всяка промяна презаписва katalog.json веднага (writeCatalogIfConfigured),
+   за да се отрази при следващото автоматично публикуване. */
+ipcMain.handle('shelves:list', () =>
+  run(() => db.prepare(`
+    SELECT sh.*, (SELECT COUNT(*) FROM catalog_shelf_items si WHERE si.shelf_id = sh.id) AS n
+    FROM catalog_shelves sh ORDER BY sh.sort, sh.name
+  `).all())
+);
+ipcMain.handle('shelves:items', (e, shelfId) =>
+  run(() => db.prepare(`
+    SELECT b.id, b.inv_number, b.title, b.author, b.status, b.department
+    FROM catalog_shelf_items si JOIN books b ON b.id = si.book_id
+    WHERE si.shelf_id = ? ORDER BY si.sort, b.title
+  `).all(shelfId))
+);
+ipcMain.handle('shelves:create', (e, name) =>
+  run(() => {
+    const n = String(name || '').trim();
+    if (!n) throw new Error('Името на витрината е задължително.');
+    const info = db.prepare('INSERT INTO catalog_shelves (name) VALUES (?)').run(n);
+    logAudit('Витрина в каталога', 'създадена „' + n + '“');
+    return info.lastInsertRowid;
+  })
+);
+ipcMain.handle('shelves:rename', (e, { id, name }) =>
+  run(() => {
+    const n = String(name || '').trim();
+    if (!n) throw new Error('Името на витрината е задължително.');
+    db.prepare('UPDATE catalog_shelves SET name = ? WHERE id = ?').run(n, id);
+    writeCatalogIfConfigured();
+  })
+);
+ipcMain.handle('shelves:delete', (e, id) =>
+  run(() => {
+    const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(id);
+    db.prepare('DELETE FROM catalog_shelves WHERE id = ?').run(id);
+    if (sh) logAudit('Витрина в каталога', 'изтрита „' + sh.name + '“');
+    writeCatalogIfConfigured();
+  })
+);
+ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
+  run(() => {
+    const b = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?')
+      .get(code, code);
+    if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
+    if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
+    if (b.department === 'служебен') throw new Error('Служебните документи не се публикуват в каталога.');
+    db.prepare('INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id) VALUES (?, ?)').run(shelfId, b.id);
+    writeCatalogIfConfigured();
+    return { inv_number: b.inv_number, title: b.title };
+  })
+);
+// Групово добавяне — от отметките в „Книги". Отчислените/служебните се подминават тихо.
+ipcMain.handle('shelves:addBooks', (e, { shelfId, ids }) =>
+  run(() => {
+    if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
+    const ins = db.prepare(`
+      INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id)
+      SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND department != 'служебен'
+    `);
+    let added = 0;
+    db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; })();
+    const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(shelfId);
+    logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“');
+    writeCatalogIfConfigured();
+    return added;
+  })
+);
+ipcMain.handle('shelves:removeBook', (e, { shelfId, bookId }) =>
+  run(() => {
+    db.prepare('DELETE FROM catalog_shelf_items WHERE shelf_id = ? AND book_id = ?').run(shelfId, bookId);
+    writeCatalogIfConfigured();
+  })
+);
+
 ipcMain.handle('catalog:status', () =>
   run(() => {
     const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch, lib_name, org FROM settings WHERE id = 1').get();

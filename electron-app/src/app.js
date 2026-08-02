@@ -732,6 +732,8 @@ async function renderBooks() {
       </select>
       <span class="hint" id="bulkCount" ${n ? '' : 'style="display:none"'}>${n} избрани</span>
       <button class="btn" id="bulkBtn" onclick="openBulkEdit()" ${n ? '' : 'disabled'}>Групова редакция…</button>
+      <button class="btn" id="bulkShelfBtn" onclick="bulkAddToShelf()" ${n ? '' : 'disabled'}
+        title="Добавя маркираните документи в тематична витрина на онлайн каталога">Във витрина…</button>
       <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
     </div>
     <div class="wrap"><table class="ledger">
@@ -774,9 +776,10 @@ function toggleBookSelAll(checked) {
 window.toggleBookSelAll = toggleBookSelAll;
 function updateBulkBar() {
   const n = BOOKS_SELECTED.size;
-  const c = $('#bulkCount'), b = $('#bulkBtn');
+  const c = $('#bulkCount'), b = $('#bulkBtn'), sb = $('#bulkShelfBtn');
   if (c) { c.textContent = n + ' избрани'; c.style.display = n ? '' : 'none'; }
   if (b) b.disabled = !n;
+  if (sb) sb.disabled = !n;
 }
 /* Полето и допустимите му стойности за груповата редакция — списъкът и опциите
    огледално следват падащите менюта от формата за книга (bookForm), с два изключения:
@@ -3156,6 +3159,17 @@ async function renderCatalog() {
       <code style="word-break:break-all">${esc(status.rawUrl || '(попълнете потребител и хранилище)')}</code></div>
     </div>
 
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Витрини в каталога</h3>
+      <div class="note" style="margin-top:0">Ръчно подбрани тематични списъци („Лято 2026“, „Краезнание“…),
+      които страницата на сайта показва като бутони над резултатите. „Нови постъпления“ се показва
+      автоматично от датата на постъпване — не е нужна витрина за нея. Книги се добавят тук по инв. №/баркод
+      или от „Книги“ — маркирате с отметките и натискате „Във витрина…“.</div>
+      <div id="shelvesBox">зареждане…</div>
+      <div class="toolbar" style="margin-top:8px">
+        <button class="btn pri" onclick="createShelf()">+ Нова витрина</button>
+      </div>
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Публичен адрес на сайта</h3>
       <p class="hint" style="margin-top:0">Редактира се в „Настройки“ → „Библиотека“ → „Адрес на сайта“.</p>
       <div class="hint">Текущ адрес: <b>${esc(s ? s.cat_url || '—' : '—')}</b></div>
@@ -3187,7 +3201,111 @@ async function renderCatalog() {
         и агрегаторите.
       </div>
     </div>`;
+  loadShelvesBox();
 }
+/* ---------------- Витрини в каталога ---------------- */
+async function loadShelvesBox() {
+  const box = $('#shelvesBox'); if (!box) return;
+  const shelves = await call(window.api.shelves.list());
+  if (!shelves) { box.textContent = 'Витрините не се заредиха.'; return; }
+  box.innerHTML = shelves.length ? `
+    <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
+      <tr><th>Витрина</th><th>Записи</th><th style="width:230px"></th></tr></thead><tbody>
+      ${shelves.map(sh => `<tr><td><b>${esc(sh.name)}</b></td><td class="num">${sh.n}</td>
+        <td><button class="btn sm" onclick="openShelf(${sh.id})">Отвори</button>
+            <button class="btn sm" onclick="renameShelf(${sh.id}, '${esc(sh.name).replace(/'/g, '&#39;')}')">Преименувай</button>
+            <button class="btn sm dgr" onclick="deleteShelf(${sh.id})">Изтрий</button></td></tr>`).join('')}
+    </tbody></table></div>`
+    : '<div class="hint">Още няма витрини. Създайте първата — напр. „Нови български романи“ или „Краезнание“.</div>';
+}
+async function createShelf() {
+  const name = prompt('Име на витрината (вижда се на сайта):');
+  if (!name || !name.trim()) return;
+  const id = await call(window.api.shelves.create(name.trim()), 'Витрината е създадена.');
+  if (id != null) { loadShelvesBox(); openShelf(id); }
+}
+window.createShelf = createShelf;
+async function renameShelf(id, current) {
+  const name = prompt('Ново име на витрината:', current || '');
+  if (!name || !name.trim()) return;
+  const ok = await call(window.api.shelves.rename({ id, name: name.trim() }), 'Преименувана.');
+  if (ok !== null) loadShelvesBox();
+}
+window.renameShelf = renameShelf;
+async function deleteShelf(id) {
+  if (!confirm('Изтриване на витрината? Книгите в нея остават непокътнати във фонда — маха се само списъкът от сайта.')) return;
+  const ok = await call(window.api.shelves.delete(id), 'Витрината е изтрита.');
+  if (ok !== null) loadShelvesBox();
+}
+window.deleteShelf = deleteShelf;
+async function openShelf(id) {
+  const [shelves, items] = await Promise.all([call(window.api.shelves.list()), call(window.api.shelves.items(id))]);
+  if (!shelves || !items) return;
+  const sh = shelves.find(x => x.id === id);
+  if (!sh) return;
+  modal('Витрина „' + sh.name + '“', `
+    <div class="note" style="margin-top:0">Добавете книга по инвентарен номер или баркод — или маркирайте
+    няколко в „Книги“ и използвайте „Във витрина…“. Промените се публикуват при следващото автоматично
+    качване на каталога.</div>
+    <input id="shelfScan" class="scan" placeholder="Инв. № или баркод — Enter за добавяне…" autocomplete="off">
+    <div style="margin-top:12px">
+      ${items.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
+        <tr><th>Инв. №</th><th>Заглавие</th><th>Автор</th><th style="width:100px"></th></tr></thead><tbody>
+        ${items.map(b => `<tr><td class="num">${b.inv_number ?? ''}</td><td>${esc(b.title)}</td>
+          <td>${esc(b.author || '')}</td>
+          <td><button class="btn sm dgr" onclick="removeFromShelf(${id}, ${b.id})">Махни</button></td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="hint">Витрината е празна.</div>'}
+    </div>`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>`);
+  const el = $('#shelfScan');
+  if (el) {
+    el.focus();
+    el.addEventListener('keydown', async e => {
+      if (e.key !== 'Enter') return; e.preventDefault();
+      const code = el.value.trim(); el.value = ''; if (!code) return;
+      const res = await window.api.shelves.addBook({ shelfId: id, code });
+      if (!res.ok) return toast(res.error, 'err');
+      toast('Добавена: инв. № ' + res.data.inv_number + ' — ' + res.data.title, 'ok');
+      markSaved();
+      openShelf(id);
+    });
+  }
+}
+window.openShelf = openShelf;
+async function removeFromShelf(shelfId, bookId) {
+  const ok = await call(window.api.shelves.removeBook({ shelfId, bookId }), 'Махната от витрината.');
+  if (ok !== null) openShelf(shelfId);
+}
+window.removeFromShelf = removeFromShelf;
+/* Групово добавяне от отметките в „Книги" */
+async function bulkAddToShelf() {
+  const n = BOOKS_SELECTED.size;
+  if (!n) return;
+  const shelves = await call(window.api.shelves.list());
+  if (!shelves) return;
+  if (!shelves.length) {
+    toast('Още няма витрини — създайте първата в „Онлайн каталог“ → „Витрини в каталога“.', 'err');
+    return;
+  }
+  modal('Във витрина — ' + n + ' избрани документа', `
+    <form id="shelfPickF" onsubmit="return false">
+      ${fld('Витрина', 'shelfId', { type: 'select', allowEmpty: false,
+        opts: shelves.map(sh => ({ v: sh.id, t: sh.name + ' (' + sh.n + ')' })) })}
+    </form>
+    <div class="hint">Отчислени и служебни документи се подминават автоматично.</div>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="applyBulkShelf()">Добави</button>`);
+}
+window.bulkAddToShelf = bulkAddToShelf;
+async function applyBulkShelf() {
+  const d = formData('#shelfPickF');
+  const added = await call(window.api.shelves.addBooks({ shelfId: parseInt(d.shelfId, 10), ids: [...BOOKS_SELECTED] }));
+  if (added == null) return;
+  closeModal();
+  toast(added + ' документа добавени във витрината.', 'ok');
+  markSaved();
+}
+window.applyBulkShelf = applyBulkShelf;
 async function exportMarc() {
   const res = await window.api.catalog.exportMarc();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');

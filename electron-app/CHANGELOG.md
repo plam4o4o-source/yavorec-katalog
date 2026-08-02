@@ -11,6 +11,43 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.16.0
+
+**Промени — надграден онлайн каталог (програма + страница на сайта):**
+- **Витрини в каталога** — ръчно подбрани тематични списъци („Лято 2026",
+  „Краезнание"…), управлявани в „Онлайн каталог" → „Витрини в каталога".
+  Книги се добавят по инв. №/баркод или групово от „Книги" (отметките →
+  нов бутон „Във витрина…"). На сайта витрините се показват като бутони над
+  резултатите. Отчислена или служебна книга отпада от витрината автоматично.
+- **„Нови постъпления" на сайта** — всеки запис в katalog.json вече носи
+  датата си на постъпване; страницата сама показва зелен бутон
+  „✦ Нови постъпления" (последните 60 дни) и значка „нова" на скорошните
+  записи, подредени от най-новите надолу.
+- **Умни филтри на сайта** — падащите менюта „вид" и „отдел" вече се строят
+  от самите данни, а не от закован списък: публичните надписи от
+  номенклатурите (v1.15.0) и всеки бъдещ нов отдел се появяват сами, без да
+  се пипа страницата.
+- Обновената страница е в `site/page-katalog.html` в хранилището; работи и
+  със стар katalog.json (без витрини/дати) — новите елементи просто не се
+  показват, така че редът на качване няма значение.
+
+**Changes — upgraded online catalog (app + website page):**
+- **Catalog showcases** — hand-picked thematic lists ("Summer 2026", "Local
+  history"…), managed under "Online catalog" → "Showcases". Books are added
+  by inv. no./barcode or in bulk from "Books" (checkboxes → new "To
+  showcase…" button). The site shows showcases as buttons above the results.
+  Withdrawn or staff-only books drop out of showcases automatically.
+- **"New arrivals" on the site** — every katalog.json record now carries its
+  accession date; the page itself shows a green "✦ New arrivals" button
+  (last 60 days) and a "new" badge on recent records, sorted newest first.
+- **Smart site filters** — the "type" and "department" dropdowns are now
+  built from the data itself instead of a hardcoded list: public labels from
+  the authorised values (v1.15.0) and any future department appear on their
+  own, with no page edits.
+- The upgraded page lives at `site/page-katalog.html` in the repository; it
+  also works with an old katalog.json (no showcases/dates) — the new
+  elements simply stay hidden, so upload order doesn't matter.
+
 ## v1.15.0
 
 **Промени — голяма партида подобрения по модела на Koha ILS:**
