@@ -11,6 +11,22 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.17.1
+
+**Промени:**
+- **Смяна на авторското име** — навсякъде в програмата (страничното меню,
+  „Настройки“) и в придружаващите файлове вече пише „Създадено от Пламен
+  Христов - Пачо“ вместо предишното изписване. Само технически без промяна:
+  полето, което трябва да съвпада буква по буква със сертификата за подпис
+  на кода, остава непроменено.
+
+**Changes:**
+- **Author name update** — the credit shown throughout the program (side
+  menu, "Settings") and in the accompanying files now reads "Created by
+  Plamen Hristov - Pacho" instead of the previous wording. One technical
+  field is left unchanged on purpose: the one that must match the code
+  signing certificate letter-for-letter.
+
 ## v1.17.0
 
 **Промени — правила по категория, календар, бележки, сметка, предложения:**
