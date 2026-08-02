@@ -11,6 +11,30 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.47.0
+
+**Промени — двайсет и четвърти извлечен домейн от main.js (Фаза 4, стъпка 25), без промяна в поведението:**
+- "Просрочени: напомняния" (3 IPC канала: loans:reminders/mailto,
+  notices:log) изведени в `handlers/notices.js`. Зависи от `LOAN_SELECT`
+  (loans.js), `EUR_RATE` (по стойност), `isValidEmail` (стабилен модулен
+  export от `security-utils.js`), `shell` (Electron) и `today`.
+- `DEFAULT_NOTICE_SUBJECT`/`DEFAULT_NOTICE_BODY`/`DEFAULT_NOTICE_SMS`/
+  `NOTICE_PLACEHOLDERS` се връщат обратно към main.js (по същия модел като
+  LOAN_SELECT/circRule), защото ги ползва все още неизвадената "Настройки"
+  (`settings:noticeDefaults`).
+- IPC поведението непроменено. Нов тестови файл (7 нови теста, общо 266).
+
+**Changes — twenty-fourth domain extracted from main.js (Phase 4, step 25), no behavior change:**
+- "Overdue reminders" (3 IPC channels: loans:reminders/mailto,
+  notices:log) extracted into `handlers/notices.js`. Depends on
+  `LOAN_SELECT` (loans.js), `EUR_RATE` (by value), `isValidEmail` (a stable
+  module export from `security-utils.js`), `shell` (Electron), and `today`.
+- `DEFAULT_NOTICE_SUBJECT`/`DEFAULT_NOTICE_BODY`/`DEFAULT_NOTICE_SMS`/
+  `NOTICE_PLACEHOLDERS` are returned back to main.js (same pattern as
+  LOAN_SELECT/circRule), since the still-unextracted "Settings" domain
+  depends on them (`settings:noticeDefaults`).
+- IPC behavior unchanged. New test file (7 new tests, 266 total).
+
 ## v1.46.0
 
 **Промени — двайсет и трети извлечен домейн от main.js (Фаза 4, стъпка 24), без промяна в поведението:**
