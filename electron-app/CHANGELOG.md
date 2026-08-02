@@ -11,6 +11,51 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.39.0
+
+**Промени — четиринайсети извлечен домейн от main.js (Фаза 4, стъпка 15), без промяна в поведението:**
+- "Отчисляване" (актове — 6 IPC канала) изведени в
+  `handlers/deaccession-acts.js`. Зависи от `BOOK_SELECT` (по стойност) и
+  `scheduleCatalogWrite` (по референция — отчислените документи изчезват
+  от онлайн каталога).
+- IPC поведението непроменено. Нов тестови файл (5 нови теста, общо 185).
+
+**Changes — fourteenth domain extracted from main.js (Phase 4, step 15), no behavior change:**
+- "Deaccessioning" (acts — 6 IPC channels) extracted into
+  `handlers/deaccession-acts.js`. Depends on `BOOK_SELECT` (by value) and
+  `scheduleCatalogWrite` (by reference — deaccessioned books disappear
+  from the online catalog).
+- IPC behavior unchanged. New test file (5 new tests, 185 total).
+
+## v1.38.0
+
+**Промени — тринайсети извлечен домейн от main.js (Фаза 4, стъпка 14), без промяна в поведението:**
+- "Постъпления" (партиди — 5 IPC канала) изведени в
+  `handlers/acquisitions.js`. Първи домейн, зависим от `BOOK_SELECT`
+  (споделената SQL заготовка на все още неизвадения домейн "Книги") —
+  подаден по стойност (низ, `const`, никога не се преприсвоява), не като
+  getter.
+- IPC поведението непроменено. Нов тестови файл (8 нови теста, общо 180).
+
+**Changes — thirteenth domain extracted from main.js (Phase 4, step 14), no behavior change:**
+- "Acquisitions" (batches — 5 IPC channels) extracted into
+  `handlers/acquisitions.js`. First domain depending on `BOOK_SELECT` (the
+  shared SQL fragment from the still-unextracted "Books" domain) — passed
+  by value (a `const` string, never reassigned), not as a getter.
+- IPC behavior unchanged. New test file (8 new tests, 180 total).
+
+## v1.37.0
+
+**Промени — дванайсети извлечен домейн от main.js (Фаза 4, стъпка 13), без промяна в поведението:**
+- "Инвентарна книга" (Приложение № 4 — 1 read-only IPC канал) изведена в
+  `handlers/inv-book.js`. Само `getDb()`/`run`.
+- IPC поведението непроменено. Нов тестови файл (3 нови теста, общо 172).
+
+**Changes — twelfth domain extracted from main.js (Phase 4, step 13), no behavior change:**
+- "Inventory ledger" (Appendix No. 4 — 1 read-only IPC channel) extracted
+  into `handlers/inv-book.js`. Only `getDb()`/`run`.
+- IPC behavior unchanged. New test file (3 new tests, 172 total).
+
 ## v1.36.0
 
 **Промени — единайсети извлечен домейн от main.js (Фаза 4, стъпка 12), без промяна в поведението:**

@@ -918,156 +918,23 @@ ipcMain.handle('books:checks', (e, bookId) =>
   run(() => db.prepare('SELECT date FROM inventory_checks WHERE book_id = ? ORDER BY date').all(bookId))
 );
 
-/* ---------------- Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) ---------------- */
-ipcMain.handle('invBook:list', () =>
-  run(() => {
-    const rows = db.prepare(`
-      SELECT b.*, c.name AS category_name,
-             a.no AS acq_no, a.date AS acq_date,
-             d.no AS act_no, d.date AS act_date
-      FROM books b
-      LEFT JOIN categories c ON c.id = b.category_id
-      LEFT JOIN acquisitions a ON a.id = b.acquisition_id
-      LEFT JOIN deaccession_acts d ON d.id = b.deaccession_act_id
-      ORDER BY b.inv_number
-    `).all();
-    const checks = db.prepare('SELECT book_id, date FROM inventory_checks ORDER BY date').all();
-    const byBook = {};
-    checks.forEach(c => { (byBook[c.book_id] = byBook[c.book_id] || []).push(c.date); });
-    rows.forEach(r => { r.checks = byBook[r.id] || []; });
-    return rows;
-  })
-);
+/* ---------------- Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) ----------------
+   Извадени в handlers/inv-book.js (Фаза 4, стъпка 13 от разбиването на
+   монолита main.js на модули по домейн). */
+require('./handlers/inv-book')(ipcMain, { getDb: () => db, run });
 
-/* ---------------- Постъпления (партиди) ---------------- */
-ipcMain.handle('acquisitions:list', () =>
-  run(() => db.prepare(`
-    SELECT a.*, (SELECT COUNT(*) FROM books b WHERE b.acquisition_id = a.id) AS registered_count,
-           (SELECT COALESCE(SUM(price),0) FROM books b WHERE b.acquisition_id = a.id) AS registered_value
-    FROM acquisitions a ORDER BY a.date DESC, a.no DESC
-  `).all())
-);
-ipcMain.handle('acquisitions:get', (e, id) =>
-  run(() => {
-    const acq = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(id);
-    if (!acq) return null;
-    acq.items = db.prepare(`${BOOK_SELECT} WHERE b.acquisition_id = ? ORDER BY b.inv_number`).all(id);
-    return acq;
-  })
-);
-ipcMain.handle('acquisitions:nextNo', (e, year) =>
-  run(() => {
-    const y = year || yearOf();
-    const row = db.prepare('SELECT MAX(no) AS m FROM acquisitions WHERE year = ?').get(y);
-    return (row.m || 0) + 1;
-  })
-);
-ipcMain.handle('acquisitions:create', (e, a) =>
-  run(() => {
-    const info = db.prepare(`
-      INSERT INTO acquisitions (no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note)
-      VALUES (@no, @year, @date, @how, @from_source, @doc_type, @doc_no, @doc_date, @total_count, @sum, @donor_address, @note)
-    `).run({
-      no: parseInt(a.no, 10), year: yearOf(a.date), date: a.date, how: a.how || null,
-      from_source: a.from_source || null, doc_type: a.doc_type || null, doc_no: a.doc_no || null,
-      doc_date: a.doc_date || null, total_count: parseInt(a.total_count, 10) || 0,
-      sum: a.sum ? parseFloat(a.sum) : 0, donor_address: a.donor_address || null, note: a.note || null
-    });
-    logAudit('Постъпление', 'партида № ' + a.no + ' — ' + a.total_count + ' бр. от ' + a.from_source);
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('acquisitions:delete', (e, id) =>
-  run(() => {
-    const cnt = db.prepare('SELECT COUNT(*) AS n FROM books WHERE acquisition_id = ?').get(id).n;
-    if (cnt > 0) throw new Error('Партидата има инвентирани документи и не може да бъде изтрита.');
-    db.prepare('DELETE FROM acquisitions WHERE id = ?').run(id);
-  })
-);
+/* ---------------- Постъпления (партиди) ----------------
+   Извадени в handlers/acquisitions.js (Фаза 4, стъпка 14 от разбиването на
+   монолита main.js на модули по домейн). BOOK_SELECT се подава по
+   стойност (const низ, никога не се преприсвоява). */
+require('./handlers/acquisitions')(ipcMain, { getDb: () => db, run, logAudit, BOOK_SELECT, yearOf });
 
-/* ---------------- Отчисляване (актове) ---------------- */
-ipcMain.handle('deaccessionActs:list', () =>
-  run(() => db.prepare(`
-    SELECT a.*, (SELECT COUNT(*) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
-           (SELECT COALESCE(SUM(price),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_value
-    FROM deaccession_acts a ORDER BY a.date DESC, a.no DESC
-  `).all())
-);
-ipcMain.handle('deaccessionActs:get', (e, id) =>
-  run(() => {
-    const act = db.prepare('SELECT * FROM deaccession_acts WHERE id = ?').get(id);
-    if (!act) return null;
-    act.items = db.prepare('SELECT * FROM deaccession_items WHERE act_id = ? ORDER BY inv_number').all(id);
-    return act;
-  })
-);
-ipcMain.handle('deaccessionActs:nextNo', (e, year) =>
-  run(() => {
-    const y = year || yearOf();
-    const row = db.prepare('SELECT MAX(no) AS m FROM deaccession_acts WHERE year = ?').get(y);
-    return (row.m || 0) + 1;
-  })
-);
-ipcMain.handle('deaccessionActs:findBook', (e, code) =>
-  run(() => db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(code, code))
-);
-ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
-  run(() => {
-    const tx = db.transaction(() => {
-      const info = db.prepare(`
-        INSERT INTO deaccession_acts (no, year, date, order_no, reason_code, reason_text, disposal, attach, committee1, committee2, committee3)
-        VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach, @committee1, @committee2, @committee3)
-      `).run({
-        no: parseInt(act.no, 10), year: yearOf(act.date), date: act.date, order_no: act.order_no || null,
-        reason_code: parseInt(act.reason_code, 10), reason_text: act.reason_text,
-        disposal: act.disposal || null, attach: act.attach || null,
-        committee1: act.committee1 || null, committee2: act.committee2 || null, committee3: act.committee3 || null
-      });
-      const actId = info.lastInsertRowid;
-      const insItem = db.prepare(`
-        INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language)
-        VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language)
-      `);
-      const closeLoans = db.prepare(`UPDATE loans SET date_in = ? WHERE book_id = ? AND date_in IS NULL`);
-      bookIds.forEach(bookId => {
-        const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
-        if (!b) return;
-        insItem.run({
-          act_id: actId, book_id: b.id, inv_number: b.inv_number, author: b.author, title: b.title,
-          volume: b.volume, year: b.year, price: b.price, udk: b.udk,
-          category: b.category_name, language: b.language
-        });
-        db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
-          .run('отчислен', act.date, actId, act.date, b.id);
-        closeLoans.run(act.date, b.id);
-      });
-      db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
-        .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
-      logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text);
-      return actId;
-    });
-    const actId = tx();
-    scheduleCatalogWrite();
-    return actId;
-  })
-);
-ipcMain.handle('deaccessionActs:revoke', (e, id) =>
-  run(() => {
-    const tx = db.transaction(() => {
-      const items = db.prepare('SELECT book_id FROM deaccession_items WHERE act_id = ?').all(id);
-      items.forEach(it => {
-        if (it.book_id) {
-          db.prepare(`UPDATE books SET status='наличен', status_date=date('now'), deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
-            .run(it.book_id);
-        }
-      });
-      db.prepare('DELETE FROM deaccession_acts WHERE id = ?').run(id);
-      logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда');
-    });
-    tx();
-    scheduleCatalogWrite();
-  })
-);
+/* ---------------- Отчисляване (актове) ----------------
+   Извадени в handlers/deaccession-acts.js (Фаза 4, стъпка 15 от разбиването
+   на монолита main.js на модули по домейн). */
+require('./handlers/deaccession-acts')(ipcMain, {
+  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite
+});
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
 ipcMain.handle('kdbf:report', (e, year) =>
