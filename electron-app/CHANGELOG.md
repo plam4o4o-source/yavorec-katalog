@@ -11,6 +11,49 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.28.0
+
+**Промени — трети извлечен домейн от main.js (Фаза 4, стъпка 4), без промяна в поведението:**
+- Кодът за "Календар на библиотеката" (работни дни, официални/затворени
+  дати — 4 IPC канала) е изваден от `main.js` в нов файл
+  `handlers/calendar.js`.
+- По-особен случай от предишните две стъпки: функциите `workDaysSet`,
+  `isWorkDay`, `nextWorkDay`, `closedDaysBetween` се ползват и от домейна
+  "Заемания" (все още неизваден от main.js) — за изместване на падеж към
+  следващия работен ден и за изчисляване на дните закъснение без затворените
+  дни. Затова модулът ги ВРЪЩА обратно към main.js, вместо да ги пази само за
+  себе си (за разлика от `autoBackupIfNeeded`, който се ползва еднократно при
+  стартиране, тези остават в текуща активна употреба от друг код).
+- IPC каналите (`calendar:get/saveWorkDays/addClosed/removeClosed`) и
+  поведението им са напълно непроменени.
+- Добавен нов тестови файл `test/handlers-calendar.test.js` (8 нови теста,
+  общо вече 100) — покрива и четирите връщани помощни функции директно
+  (конкретни дати/уикенди/затворени дни), не само IPC каналите.
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: правила за
+  обслужване (circRules — следваща стъпка, същия модел на "връщане назад"
+  като календара), книги, заемания, читатели, каталог/git публикуване,
+  настройки.
+
+**Changes — third domain extracted from main.js (Phase 4, step 4), no behavior change:**
+- The "Library calendar" code (work days, holidays/closed dates — 4 IPC
+  channels) has been extracted from `main.js` into a new file
+  `handlers/calendar.js`.
+- A more involved case than the previous two steps: the functions
+  `workDaysSet`, `isWorkDay`, `nextWorkDay`, `closedDaysBetween` are also
+  used by the "Loans" domain (not yet extracted from main.js) — for shifting
+  a due date to the next work day and for computing days-late excluding
+  closed days. So the module RETURNS them back to main.js, rather than
+  keeping them private (unlike `autoBackupIfNeeded`, which is used once at
+  startup, these stay in active ongoing use by other code).
+- The IPC channels (`calendar:get/saveWorkDays/addClosed/removeClosed`) and
+  their behavior are completely unchanged.
+- Added a new test file `test/handlers-calendar.test.js` (8 new tests, 100
+  total now) — covers the four returned helper functions directly (specific
+  dates/weekends/closed days), not just the IPC channels.
+- Continuing "carefully, small step by step" — remaining: service rules
+  (circRules — next step, same "return functions back" pattern as calendar),
+  books, loans, readers, catalog/git publishing, settings.
+
 ## v1.27.0
 
 **Промени — втори извлечен домейн от main.js (Фаза 4, стъпка 3), без промяна в поведението:**
