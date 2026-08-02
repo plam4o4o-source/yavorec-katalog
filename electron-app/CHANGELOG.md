@@ -11,6 +11,32 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.41.0
+
+**Промени — шестнайсети извлечен домейн от main.js (Фаза 4, стъпка 17), без промяна в поведението:**
+- "Читатели" (7 IPC канала: list/get/byCard/create/update/clearSuspension/
+  delete) изведени в `handlers/readers.js`. Зависи по референция от
+  `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite` (затворени над
+  мутируемото PDP_KEY състояние за защита на ЕГН/№ ЛК), `diffFields`,
+  `checkRecordLimit`, `ftsQuery` (стабилен модулен export от
+  `search-fts.js`) и `today`/`logAudit`.
+- `readers:delete` беше физически разположен в main.js след секцията за
+  GDPR анонимизиране — преместен в `handlers/readers.js` заедно с
+  останалите читателски handlers, без промяна в поведението.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 201).
+
+**Changes — sixteenth domain extracted from main.js (Phase 4, step 17), no behavior change:**
+- "Readers" (7 IPC channels: list/get/byCard/create/update/
+  clearSuspension/delete) extracted into `handlers/readers.js`. Depends by
+  reference on `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite`
+  (closed over the mutable PDP_KEY state protecting national ID fields),
+  `diffFields`, `checkRecordLimit`, `ftsQuery` (a stable module export from
+  `search-fts.js`), and `today`/`logAudit`.
+- `readers:delete` was physically located in main.js after the GDPR
+  anonymization section — moved into `handlers/readers.js` alongside the
+  other reader handlers, with no behavior change.
+- IPC behavior unchanged. New test file (10 new tests, 201 total).
+
 ## v1.40.0
 
 **Промени — петнайсети извлечен домейн от main.js (Фаза 4, стъпка 16), без промяна в поведението:**
