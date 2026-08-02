@@ -219,6 +219,22 @@ CREATE TABLE IF NOT EXISTS housebound_visits (
 );
 CREATE INDEX IF NOT EXISTS idx_hb_visits ON housebound_visits(reader_id, date);
 
+-- Тематични витрини в онлайн каталога (Koha: virtualshelves) — ръчно подбрани
+-- списъци („Лято 2026", „Краезнание"), които страницата на сайта показва като
+-- бутони над резултатите. „Нови постъпления" НЕ е витрина — страницата я
+-- извежда сама от датата на постъпване (полето d на записите в katalog.json).
+CREATE TABLE IF NOT EXISTS catalog_shelves (
+  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  name  TEXT NOT NULL UNIQUE,
+  sort  INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS catalog_shelf_items (
+  shelf_id INTEGER NOT NULL REFERENCES catalog_shelves(id) ON DELETE CASCADE,
+  book_id  INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  sort     INTEGER DEFAULT 0,
+  PRIMARY KEY (shelf_id, book_id)
+);
+
 -- Резервации: читател чака заета книга. Опашката е по реда на заявяване.
 -- status: чака (книгата е още у друг) → заделена (върната е и стои настрана
 -- за читателя, не се връща на рафта) → изпълнена (той я е заел) / отказана.

@@ -1,0 +1,580 @@
+<title>Електронен каталог – НЧ „Васил Левски 1922“, Яворец | Онлайн библиотечни ресурси</title>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "DataCatalog",
+  "name": "Електронен каталог – НЧ „Васил Левски 1922“",
+  "url": "https://chyavorec.org/index/elektronen_katalog/0-70",
+  "description": "Онлайн електронен каталог с книги, архиви и библиотечни ресурси на НЧ „Васил Левски 1922“, Яворец.",
+  "provider": {
+    "@type": "Library",
+    "name": "НЧ „Васил Левски 1922“",
+    "url": "https://chyavorec.org/"
+  }
+}
+</script>
+<link rel="canonical" href="https://chyavorec.org/index/elektronen_katalog/0-70">
+
+
+<style>
+.kat-page{
+  font-family:'Jost','Raleway',sans-serif;font-weight:300;color:#1a1208;
+  max-width:900px;margin:6.5rem auto 5rem;padding:0 1.2rem;
+}
+@media(max-width:768px){.kat-page{margin-top:max(5.5rem,calc(4rem + env(safe-area-inset-top,0px)));}}
+
+.kat-page *{box-sizing:border-box;}
+
+/* Заглавна част — в стила на останалите подстраници */
+.kat-head{text-align:center;margin-bottom:2.4rem;}
+.kat-eyebrow{
+  font-size:.62rem;font-weight:700;letter-spacing:.28em;text-transform:uppercase;
+  color:#8b6914;margin-bottom:.6rem;
+}
+.kat-title{
+  font-family:'Cormorant Garamond',Georgia,serif;font-weight:600;
+  font-size:clamp(1.9rem,5vw,2.7rem);color:#1a1208;margin:0 0 .5rem;line-height:1.15;
+}
+.kat-title em{font-style:italic;color:#6b1f2a;}
+.kat-sub{font-size:.98rem;font-weight:300;color:#5a4d3d;max-width:520px;margin:0 auto;line-height:1.6;}
+.kat-rule{
+  width:0;height:1px;margin:1.1rem auto 0;
+  background:linear-gradient(to right,transparent,#c9a84c,transparent);
+  transition:width .8s .25s cubic-bezier(.16,1,.3,1);
+}
+.kat-head.kat-in .kat-rule{width:4.5rem;}
+
+/* Инструменти за търсене/филтриране */
+.kat-tools{display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.6rem;}
+.kat-search-wrap{flex:1;min-width:220px;position:relative;display:flex;align-items:center;}
+.kat-search-ico{
+  position:absolute;left:.95rem;width:15px;height:15px;pointer-events:none;
+  stroke:rgba(139,105,20,.5);transition:stroke .25s;
+}
+.kat-search-wrap:focus-within .kat-search-ico{stroke:#c9a84c;}
+.kat-page input{flex:1;width:100%;padding-left:2.6rem!important;}
+.kat-page input,.kat-page select{
+  background:#faf7f2;border:1px solid rgba(201,168,76,.3);color:#1a1208;
+  padding:.85rem 1rem;font:inherit;font-size:.98rem;border-radius:0;outline:0;
+  -webkit-appearance:none;appearance:none;
+  transition:border-color .25s,box-shadow .25s,background .2s;
+}
+.kat-page input{flex:1;min-width:220px;}
+.kat-page select{cursor:pointer;}
+.kat-page input:focus,.kat-page select:focus{
+  border-color:#c9a84c;background:#fff;box-shadow:0 0 0 3px rgba(201,168,76,.1);
+}
+.kat-page input::placeholder{color:rgba(90,77,61,.5);}
+
+.kat-cnt{
+  font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:#8b6914;margin-bottom:1.1rem;min-height:1em;
+  display:flex;align-items:center;gap:.5rem;
+}
+.kat-cnt::after{content:'';flex:1;height:1px;background:rgba(201,168,76,.2);}
+
+/* ── Анимация при зареждане ── */
+.kat-loading{
+  display:flex;flex-direction:column;align-items:center;padding:2.6rem 1.4rem 2.1rem;gap:1.4rem;
+  background:#fffdf6;border:1px solid rgba(201,168,76,.35);border-radius:4px;
+  box-shadow:0 6px 22px rgba(107,31,42,.08);margin-bottom:1.2rem;
+}
+.kat-shelf{display:flex;align-items:flex-end;gap:7px;height:62px;}
+.kat-spine{width:12px;height:62px;background:linear-gradient(180deg,#e8d5a3,#8b6914);border-radius:1px 1px 0 0;animation:katSpine 1.1s ease-in-out infinite;transform-origin:bottom;}
+.kat-spine:nth-child(1){animation-delay:0s;}
+.kat-spine:nth-child(2){animation-delay:.11s;}
+.kat-spine:nth-child(3){animation-delay:.22s;}
+.kat-spine:nth-child(4){animation-delay:.33s;}
+.kat-spine:nth-child(5){animation-delay:.44s;}
+.kat-spine:nth-child(6){animation-delay:.55s;}
+.kat-spine:nth-child(7){animation-delay:.66s;}
+@keyframes katSpine{0%,100%{transform:scaleY(.32);opacity:.5;}50%{transform:scaleY(1);opacity:1;}}
+.kat-loading-txt{font-family:'Cormorant Garamond',Georgia,serif;font-style:italic;font-weight:600;font-size:1.55rem;color:#6b1f2a;}
+.kat-dots span{display:inline-block;animation:katDot 1.4s infinite;opacity:.25;}
+.kat-dots span:nth-child(2){animation-delay:.2s;}
+.kat-dots span:nth-child(3){animation-delay:.4s;}
+@keyframes katDot{0%,80%,100%{opacity:.25;}40%{opacity:1;}}
+
+.kat-skel-row{display:flex;gap:1.1rem;padding:1.1rem 0;border-bottom:1px solid rgba(201,168,76,.12);}
+.kat-skel-cover,.kat-skel-line{background:#f0e9d8;position:relative;overflow:hidden;border-radius:1px;}
+.kat-skel-cover{width:72px;height:104px;flex:none;}
+.kat-skel-lines{flex:1;display:flex;flex-direction:column;gap:.55rem;justify-content:center;}
+.kat-skel-line{height:10px;}
+.kat-skel-line.w70{width:68%;height:15px;}
+.kat-skel-line.w45{width:42%;}
+.kat-skel-line.w60{width:58%;}
+.kat-skel-cover::after,.kat-skel-line::after{
+  content:'';position:absolute;inset:0;left:-120%;width:60%;
+  background:linear-gradient(90deg,transparent,rgba(201,168,76,.4),transparent);
+  animation:katShimmer 1.7s ease-in-out infinite;
+}
+.kat-skel-row:nth-child(2) .kat-skel-cover::after,.kat-skel-row:nth-child(2) .kat-skel-line::after{animation-delay:.15s;}
+.kat-skel-row:nth-child(3) .kat-skel-cover::after,.kat-skel-row:nth-child(3) .kat-skel-line::after{animation-delay:.3s;}
+@keyframes katShimmer{to{left:120%;}}
+
+@media(prefers-reduced-motion:reduce){
+  .kat-spine,.kat-dots span,.kat-skel-cover::after,.kat-skel-line::after{animation:none!important;}
+  .kat-spine{transform:scaleY(.7);opacity:.85;}
+}
+
+/* Записи */
+.kat-item{
+  display:flex;gap:1.2rem;padding:1.2rem 1rem 1.2rem .9rem;
+  border-bottom:1px solid rgba(201,168,76,.18);
+  position:relative;
+  transition:background .25s ease,border-color .25s;
+}
+.kat-item::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:#c9a84c;transform:scaleY(0);transform-origin:center;
+  transition:transform .3s cubic-bezier(.16,1,.3,1);
+}
+.kat-item:hover{background:rgba(201,168,76,.045);border-color:rgba(201,168,76,.4);}
+.kat-item:hover::before{transform:scaleY(1);}
+
+/* Корица + резервен визуален заместител, когато няма изображение —
+   така всички записи остават подравнени, а редът изглежда завършен */
+.kat-cover-box{
+  width:72px;height:104px;flex:none;position:relative;
+  border:1px solid rgba(201,168,76,.22);background:#f0e9d8;overflow:hidden;
+  transition:border-color .25s,box-shadow .3s,transform .3s cubic-bezier(.16,1,.3,1);
+}
+.kat-item:hover .kat-cover-box{border-color:#c9a84c;box-shadow:0 6px 16px rgba(26,18,8,.12);transform:translateY(-2px);}
+.kat-cover-box img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;}
+.kat-ph{
+  width:100%;height:100%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:.35rem;
+  background:linear-gradient(150deg,#f7f1e2 0%,#ece2cb 100%);
+}
+.kat-ph::before{
+  content:'';position:absolute;left:8px;top:0;bottom:0;width:1px;
+  background:rgba(139,105,20,.18);
+}
+.kat-ph-letter{
+  font-family:'Cormorant Garamond',Georgia,serif;font-size:1.9rem;font-weight:600;
+  color:rgba(139,105,20,.42);line-height:1;
+}
+.kat-ph-lbl{
+  font-size:.42rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(139,105,20,.4);
+}
+
+.kat-item-body{flex:1;min-width:0;}
+.kat-item h2{
+  font-family:'Cormorant Garamond',Georgia,serif;font-weight:600;font-size:1.45rem;
+  margin:0 0 .25rem;line-height:1.28;color:#1a1208;
+}
+.kat-item .kat-m{font-size:.95rem;color:#5a4d3d;line-height:1.6;}
+.kat-item .kat-m-author{color:#3d3028;font-weight:400;}
+.kat-item .kat-m-pub{font-size:.86rem;color:#6b6154;}
+.kat-item .kat-k{font-size:.83rem;color:#8b6914;margin-top:.4rem;letter-spacing:.03em;}
+.kat-note{
+  font-size:.82rem;color:#6b6154;line-height:1.65;margin-top:.45rem;
+  padding-left:.7rem;border-left:2px solid rgba(201,168,76,.25);
+}
+
+/* Метаданни — техническата информация, визуално отделена */
+.kat-meta-row{
+  display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .55rem;
+  margin-top:.6rem;font-size:.72rem;color:#7a6e5e;
+}
+.kat-chip{
+  display:inline-flex;align-items:center;
+  padding:.16rem .5rem;background:rgba(201,168,76,.08);
+  border:1px solid rgba(201,168,76,.2);
+  font-size:.68rem;letter-spacing:.03em;color:#7a6a4e;white-space:nowrap;
+}
+
+/* Наличност — ясен визуален знак вместо обикновен цветен текст */
+.kat-av{
+  display:inline-flex;align-items:center;gap:.32rem;
+  font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:.2rem .6rem;white-space:nowrap;
+}
+.kat-av::before{content:'';width:6px;height:6px;border-radius:50%;flex:none;}
+.kat-y{color:#1e6b42;background:rgba(46,92,68,.1);border:1px solid rgba(46,92,68,.28);}
+.kat-y::before{background:#2E5C44;}
+.kat-n{color:#8f4520;background:rgba(160,82,45,.09);border:1px solid rgba(160,82,45,.28);}
+.kat-n::before{background:#a0522d;}
+
+/* Няма намерени резултати */
+.kat-empty{
+  text-align:center;padding:3.2rem 1.5rem;color:#6b6154;
+  border:1px dashed rgba(201,168,76,.35);background:#fdfbf5;margin-top:.4rem;
+}
+.kat-empty-ico{font-size:2.2rem;opacity:.35;display:block;margin-bottom:.7rem;}
+.kat-empty-t{
+  font-family:'Cormorant Garamond',Georgia,serif;font-size:1.35rem;font-weight:600;
+  color:#1a1208;margin-bottom:.35rem;
+}
+.kat-empty-d{font-size:.88rem;line-height:1.7;max-width:400px;margin:0 auto;}
+
+/* Stagger при появата на резултатите */
+.kat-item{opacity:0;transform:translateY(12px);}
+.kat-item.kat-item-in{
+  opacity:1;transform:translateY(0);
+  transition:opacity .5s cubic-bezier(.16,1,.3,1),transform .5s cubic-bezier(.16,1,.3,1),
+             background .25s ease,border-color .25s;
+}
+
+/* Бутон „Покажи още" */
+.kat-more{
+  display:block;margin:1.8rem auto 0;background:none;border:1px solid #c9a84c;color:#8b6914;
+  padding:.9rem 2.1rem;font:inherit;letter-spacing:.12em;text-transform:uppercase;font-size:.76rem;
+  font-weight:700;cursor:pointer;border-radius:0;transition:background .25s,color .25s,transform .2s;
+}
+.kat-more:hover{background:#c9a84c;color:#fffbf0;transform:translateY(-1px);}
+.kat-more:active{transform:translateY(0);}
+
+.kat-foot{text-align:center;font-size:.82rem;color:#5a4d3d;margin-top:2.8rem;line-height:1.8;
+  padding-top:1.6rem;border-top:1px solid rgba(201,168,76,.18);}
+
+/* Reveal при поява */
+.kat-r{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1);}
+.kat-r.kat-in{opacity:1;transform:translateY(0);}
+
+@media(max-width:560px){
+  .kat-cover-box{width:54px;height:78px;}
+  .kat-ph-letter{font-size:1.4rem;}
+  .kat-ph-lbl{display:none;}
+  .kat-item{gap:.85rem;padding:1rem .6rem 1rem .7rem;}
+  .kat-item h2{font-size:1.28rem;}
+  .kat-tools{gap:.5rem;}
+  .kat-meta-row{gap:.3rem .4rem;}
+}
+@media(hover:none){.kat-item:hover{background:none;}.kat-item:hover::before{transform:scaleY(0);}}
+@media(prefers-reduced-motion:reduce){.kat-r{transition-duration:.01ms!important;}}
+
+/* ── Витрини: „Нови постъпления" + тематични списъци от библиотеката ── */
+.kat-shelves{display:flex;flex-wrap:wrap;gap:.45rem;margin:0 0 1rem;}
+.kat-shelf-btn{
+  background:none;border:1px solid rgba(201,168,76,.4);color:#7a6a4e;
+  padding:.42rem .95rem;font:inherit;font-size:.74rem;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border-radius:0;
+  transition:background .22s,color .22s,border-color .22s;white-space:nowrap;
+}
+.kat-shelf-btn:hover{border-color:#c9a84c;color:#8b6914;}
+.kat-shelf-btn.kat-shelf-on{background:#c9a84c;border-color:#c9a84c;color:#fffbf0;}
+.kat-shelf-btn .kat-shelf-n{opacity:.65;font-weight:400;margin-left:.3rem;}
+.kat-shelf-btn-new.kat-shelf-on{background:#2E5C44;border-color:#2E5C44;}
+.kat-shelf-btn-new:not(.kat-shelf-on){border-color:rgba(46,92,68,.45);color:#1e6b42;}
+.kat-shelf-btn-new:not(.kat-shelf-on):hover{border-color:#2E5C44;}
+
+/* Значка „нова" върху скорошните постъпления */
+.kat-new-badge{
+  display:inline-flex;align-items:center;gap:.28rem;
+  font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:.2rem .6rem;white-space:nowrap;
+  color:#1e6b42;background:rgba(46,92,68,.08);border:1px solid rgba(46,92,68,.3);
+}
+.kat-new-badge::before{content:'✦';font-size:.7rem;line-height:1;}
+
+/* Уголемяване на корицата на цял екран при клик */
+.kat-lightbox{
+  position:fixed;inset:0;background:rgba(20,14,7,.94);z-index:9999;
+  display:flex;align-items:center;justify-content:center;padding:2.2rem;
+  cursor:zoom-out;opacity:0;pointer-events:none;transition:opacity .25s ease;
+}
+.kat-lightbox.kat-lb-open{opacity:1;pointer-events:auto;}
+.kat-lightbox img{max-width:min(92vw,680px);max-height:88vh;object-fit:contain;box-shadow:0 20px 70px rgba(0,0,0,.55);border:4px solid #fffbf0;cursor:auto;}
+.kat-lb-close{
+  position:absolute;top:1rem;right:1.2rem;color:#fffbf0;font-size:2.2rem;line-height:1;
+  background:none;border:0;cursor:pointer;padding:.3rem .7rem;font-family:Georgia,serif;
+}
+.kat-lb-close:hover{color:#e8d5a3;}
+</style>
+
+<div class="kat-page">
+
+  <div class="kat-head kat-r">
+    <div class="kat-eyebrow">Библиотека</div>
+    <h1 class="kat-title">Електронен <em>каталог</em></h1>
+    <p class="kat-sub">Народно читалище „Васил Левски – 1922" · с. Яворец</p>
+    <div class="kat-rule"></div>
+  </div>
+
+  <div class="kat-tools kat-r">
+    <div class="kat-search-wrap">
+      <svg class="kat-search-ico" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>
+      </svg>
+      <input id="katQ" placeholder="Търсене по автор, заглавие, ключова дума, УДК…">
+    </div>
+    <select id="katF"><option value="">Всички видове</option><option>книга</option><option>продължаващо издание</option><option>графично издание</option><option>картографско издание</option><option>нотно издание</option><option>аудиодокумент</option><option>видеодокумент</option><option>електронен документ</option><option>патент/стандарт</option><option>друго</option></select>
+    <select id="katO"><option value="">Всички отдели</option><option>за възрастни</option><option>за деца</option><option>краеведски</option><option>справочен</option><option>периодика</option></select>
+  </div>
+
+  <div class="kat-shelves kat-r" id="katSh" style="display:none"></div>
+
+  <div class="kat-cnt" id="katC"></div>
+  <div id="katR"></div>
+  <button class="kat-more" id="katM" style="display:none">Покажи още</button>
+
+  <div class="kat-foot" id="katFt">Народно читалище „Васил Левски – 1922" · с. Яворец, общ. Габрово</div>
+
+</div>
+
+<script>
+(function(){
+var STATIC=[{"inv":1,"a":"Вазова, Вера","t":"Иван Вазов и неговите близки","s":"Спомени","c":"София","p":"F.P.A","y":"1994","v":"книга","l":"български","u":"886.7(092)(093.3)","g":"886.7/Г 13","o":"за възрастни","k":"","n":"Писма Стихотворения от Иван Вазов и посветени на поета","cv":"","av":1},{"inv":2,"a":"Габе, Дора Петрова; Шишкова, Магдалена","t":"Светът е тайна","s":"Поезия & проза","c":"София","p":"Унив. изд. Св. Климент Охридски","y":"1994","v":"книга","l":"български","u":"886.7-8","g":"886.7/Г 13","o":"за възрастни","k":"","n":"","cv":"","av":1},{"inv":3,"a":"Славейков, Пенчо","t":"На острова на блаженните","s":"Антология","c":"София","p":"Хемус","y":"1949","v":"книга","l":"български","u":"886.7-1","g":"886.7/С 42","o":"за възрастни","k":"","n":"","cv":"","av":1}], STATIC_GEN="25.07.2026";
+var LIVE_URL="https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/main/katalog.json";
+/* Каталогът вече идва от GitHub, качван автоматично от библиотечния компютър.
+   raw.githubusercontent.com изпраща правилното CORS заглавие сам по себе си —
+   не са нужни чужди прокита или заобикалки, каквито изискваше OneDrive.
+   jsDelivr е добавен само като независим резервен път (различна инфраструктура),
+   в случай че GitHub временно има проблем. */
+var SOURCES=[
+  {url:LIVE_URL,label:'GitHub'},
+  {url:'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@main/katalog.json',label:'jsDelivr (резервен път)'}
+];
+var FT_BASE="Народно читалище „Васил Левски – 1922\" · с. Яворец, общ. Габрово";
+var D=[],P=0,R=[],LOG=[];
+/* Витрини и нови постъпления. SHELVES идва от katalog.json (по избор на библиотекаря);
+   „Нови постъпления" се извежда тук от датата на постъпване (поле d на всеки запис,
+   добавено от програмата „Инвентар"). Стар katalog.json без тези полета работи без
+   промяна — лентата с витрини просто не се показва. */
+var SHELVES=[],SHELF='',NEW_SET=null,NEW_DAYS=60;
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function showLoading(){
+  document.getElementById('katC').textContent='';
+  var spines='';
+  for(var i=0;i<7;i++) spines+='<div class="kat-spine"></div>';
+  var skelRow='<div class="kat-skel-row"><div class="kat-skel-cover"></div><div class="kat-skel-lines">'+
+    '<div class="kat-skel-line w70"></div><div class="kat-skel-line w45"></div><div class="kat-skel-line w60"></div></div></div>';
+  document.getElementById('katR').innerHTML=
+    '<div class="kat-loading">'+
+      '<div class="kat-shelf">'+spines+'</div>'+
+      '<div class="kat-loading-txt">Разгръщаме каталога<span class="kat-dots"><span>.</span><span>.</span><span>.</span></span></div>'+
+    '</div>'+
+    skelRow+skelRow+skelRow;
+}
+/* fetch с таймаут — при мълчаливо увиснала връзка (вместо изрична грешка) не се чака безкрайно */
+function fetchTimeout(url,ms){
+  var ctl=('AbortController' in window)?new AbortController():null;
+  var t=ctl?setTimeout(function(){ctl.abort();},ms):null;
+  return fetch(url,{cache:'no-store',signal:ctl?ctl.signal:undefined}).finally(function(){ if(t)clearTimeout(t); });
+}
+async function loadLive(){
+  LOG=[];
+  for(var i=0;i<SOURCES.length;i++){
+    var src=SOURCES[i], entry={label:src.label,ok:false,detail:''};
+    try{
+      var r=await fetchTimeout(src.url,6000);
+      if(!r.ok){ entry.detail='HTTP '+r.status; LOG.push(entry); console.warn('[каталог] неуспешен източник — '+src.label+': '+entry.detail); continue; }
+      var j=await r.json();
+      if(j&&j.items){ entry.ok=true; entry.detail=j.items.length+' записа'; LOG.push(entry);
+        try{ localStorage.setItem('katalog_cache',JSON.stringify(j)); }catch(e2){}
+        return j;
+      }
+      entry.detail='отговорът не съдържа "items" (вероятно вход в OneDrive вместо самия файл)';
+      LOG.push(entry);
+    }catch(e){
+      entry.detail=(e&&e.name==='AbortError')?'изтече времето за изчакване (6 сек.)':
+        'мрежова/CORS грешка'+(e&&e.message?': '+e.message:'');
+      LOG.push(entry);
+    }
+    console.warn('[каталог] неуспешен източник — '+src.label+': '+entry.detail);
+  }
+  try{ var c=localStorage.getItem('katalog_cache'); if(c)return JSON.parse(c); }catch(e){}
+  return null;
+}
+async function boot(){
+  showLoading();
+  var j=await loadLive();
+  if(j&&j.items){ D=j.items; SHELVES=(j.shelves||[]); setupDynamic(); finish((j.generated||'').split('-').reverse().join('.'),''); }
+  else{ D=STATIC; SHELVES=[]; setupDynamic(); finish(STATIC_GEN,'<br><span style="color:#a0522d">Няма връзка към живите данни в момента — показва се последно запазено копие.</span>'+diagHtml()); }
+}
+/* Строи изгледа от самите данни: филтрите по вид/отдел се пълнят от реално
+   срещаните стойности (така публичните надписи от номенклатурите на програмата
+   и всеки нов отдел се появяват сами, без да се пипа тази страница), витрините
+   стават бутони, а „Нови постъпления" се смята от датата на постъпване. */
+function setupDynamic(){
+  function rebuild(selId,allLabel){
+    var sel=document.getElementById(selId),cur=sel.value,seen={},vals=[];
+    D.forEach(function(i){var v=(selId==='katF'?i.v:i.o)||'';if(v&&!seen[v]){seen[v]=1;vals.push(v);}});
+    vals.sort(function(a,b){return a.localeCompare(b,'bg');});
+    sel.innerHTML='<option value="">'+esc(allLabel)+'</option>'+
+      vals.map(function(v){return '<option'+(v===cur?' selected':'')+'>'+esc(v)+'</option>';}).join('');
+    if(cur&&!seen[cur])sel.value='';
+  }
+  rebuild('katF','Всички видове');
+  rebuild('katO','Всички отдели');
+
+  NEW_SET=new Set();
+  var cutoff=new Date(); cutoff.setDate(cutoff.getDate()-NEW_DAYS);
+  var cutStr=cutoff.toISOString().slice(0,10);
+  D.forEach(function(i){ if(i.d&&i.d>=cutStr)NEW_SET.add(i.inv); });
+
+  var bar=document.getElementById('katSh'),h='';
+  if(NEW_SET.size){
+    h+='<button class="kat-shelf-btn kat-shelf-btn-new" data-shelf="__new__">✦ Нови постъпления'+
+       '<span class="kat-shelf-n">'+NEW_SET.size+'</span></button>';
+  }
+  var known=new Set(D.map(function(i){return i.inv;}));
+  SHELVES.forEach(function(sh){
+    var n=(sh.items||[]).filter(function(inv){return known.has(inv);}).length;
+    if(!n)return;
+    h+='<button class="kat-shelf-btn" data-shelf="'+esc(sh.name)+'">'+esc(sh.name)+
+       '<span class="kat-shelf-n">'+n+'</span></button>';
+  });
+  if(h){
+    bar.innerHTML=h; bar.style.display='flex'; bar.classList.add('kat-in');
+    Array.prototype.forEach.call(bar.children,function(btn){
+      btn.addEventListener('click',function(){
+        var v=btn.getAttribute('data-shelf');
+        SHELF=(SHELF===v)?'':v;   /* повторен клик изключва витрината */
+        Array.prototype.forEach.call(bar.children,function(b2){
+          b2.classList.toggle('kat-shelf-on',b2.getAttribute('data-shelf')===SHELF);
+        });
+        run();
+      });
+    });
+  } else { bar.style.display='none'; SHELF=''; }
+}
+/* Малка, скрита по подразбиране диагностика — вижда се само когато нещо не е наред, за да може
+   администраторът на сайта да разбере кой източник е отказал и защо, без да отваря конзолата. */
+function diagHtml(){
+  if(!LOG.length)return '';
+  var rows=LOG.map(function(l){return '<div>'+(l.ok?'✓':'✗')+' '+esc(l.label)+' — '+esc(l.detail)+'</div>';}).join('');
+  return '<br><a href="#" id="katDiagA" style="color:#8b6914;text-decoration:underline;font-size:.68rem" '+
+    'onclick="document.getElementById(\'katDiag\').style.display=\'block\';this.style.display=\'none\';return false">Защо? (диагностика)</a>'+
+    '<div id="katDiag" style="display:none;margin-top:.5rem;font-size:.68rem;text-align:left;background:#faf7f2;'+
+    'border:1px solid rgba(201,168,76,.3);padding:.6rem .8rem;max-width:420px;margin-left:auto;margin-right:auto">'+rows+
+    '<div style="margin-top:.4rem"><a href="#" id="katRetryA" style="color:#8b6914;text-decoration:underline" '+
+    'onclick="window.katRetry();return false">Опитай отново сега</a></div></div>';
+}
+function finish(gen,note){
+  document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+gen+' · '+D.length+' записа'+note;
+  run();
+}
+function run(){
+  var q=document.getElementById('katQ').value.trim().toLowerCase(),
+      f=document.getElementById('katF').value,o=document.getElementById('katO').value;
+  var shelfSet=null;
+  if(SHELF==='__new__')shelfSet=NEW_SET;
+  else if(SHELF){
+    var sh=null;
+    for(var si=0;si<SHELVES.length;si++)if(SHELVES[si].name===SHELF){sh=SHELVES[si];break;}
+    shelfSet=new Set(sh?(sh.items||[]):[]);
+  }
+  R=D.filter(function(i){
+    if(shelfSet&&!shelfSet.has(i.inv))return false;
+    if(f&&i.v!==f)return false; if(o&&i.o!==o)return false;
+    if(!q)return true;
+    return (i.a+' '+i.t+' '+i.s+' '+i.k+' '+i.u+' '+i.p+' '+i.y+' '+i.inv).toLowerCase().indexOf(q)>-1;
+  });
+  /* В изгледа „Нови постъпления" най-скорошните застават отгоре */
+  if(SHELF==='__new__')R=R.slice().sort(function(a,b){return (b.d||'')<(a.d||'')?-1:1;});
+  P=0;document.getElementById('katR').innerHTML='';
+  document.getElementById('katC').textContent=R.length+' намерени записа'+
+    (SHELF?(' · '+(SHELF==='__new__'?'нови постъпления':'витрина „'+SHELF+'“')):'');
+
+  if(!R.length){
+    document.getElementById('katM').style.display='none';
+    document.getElementById('katR').innerHTML=
+      '<div class="kat-empty">'+
+        '<span class="kat-empty-ico">🔍</span>'+
+        '<div class="kat-empty-t">Няма намерени записи</div>'+
+        '<div class="kat-empty-d">Опитайте с друга дума, по-кратко търсене или премахнете някой от филтрите по вид и отдел.</div>'+
+      '</div>';
+    return;
+  }
+  page();
+}
+function page(){
+  var s=R.slice(P,P+50),h='';
+  s.forEach(function(i){
+    /* Корица, а при липса — визуален заместител с първата буква на заглавието,
+       за да останат всички редове подравнени и завършени на вид */
+    var cover;
+    if(i.cv){
+      cover='<div class="kat-cover-box"><img class="kat-cover" src="'+esc(i.cv)+'" alt="'+esc(i.t)+'" loading="lazy"></div>';
+    }else{
+      var letter=(String(i.t||'?').trim().charAt(0)||'?').toUpperCase();
+      cover='<div class="kat-cover-box"><div class="kat-ph">'+
+            '<span class="kat-ph-letter">'+esc(letter)+'</span>'+
+            '<span class="kat-ph-lbl">'+esc(i.v||'запис')+'</span></div></div>';
+    }
+
+    var pub=[i.c,i.p,i.y].filter(Boolean).join(', ');
+
+    var chips='';
+    chips+='<span class="kat-chip">инв. '+esc(i.inv)+'</span>';
+    if(i.u) chips+='<span class="kat-chip">УДК '+esc(i.u)+'</span>';
+    if(i.g) chips+='<span class="kat-chip">'+esc(i.g)+'</span>';
+    if(i.o) chips+='<span class="kat-chip">'+esc(i.o)+'</span>';
+
+    h+='<div class="kat-item">'+cover+
+    '<div class="kat-item-body">'+
+      '<h2>'+esc(i.t)+'</h2>'+
+      (i.a||i.s ? '<div class="kat-m kat-m-author">'+esc(i.a||'')+(i.s?' — '+esc(i.s):'')+'</div>' : '')+
+      (pub ? '<div class="kat-m kat-m-pub">'+esc(pub)+'</div>' : '')+
+      (i.n?'<div class="kat-note">'+esc(i.n).slice(0,220)+'</div>':'')+
+      '<div class="kat-meta-row">'+
+        '<span class="kat-av '+(i.av?'kat-y':'kat-n')+'">'+(i.av?'налична':'заета')+'</span>'+
+        (NEW_SET&&NEW_SET.has(i.inv)?'<span class="kat-new-badge">нова</span>':'')+
+        chips+
+      '</div>'+
+    '</div></div>';
+  });
+
+  var container=document.getElementById('katR');
+  var firstNew=container.children.length;
+  container.insertAdjacentHTML('beforeend',h);
+
+  /* Плавна поява на новодобавените редове (ограничен stagger, за да не се бави дълъг списък) */
+  var added=Array.prototype.slice.call(container.children,firstNew);
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  added.forEach(function(el,idx){
+    if(reduce){ el.classList.add('kat-item-in'); return; }
+    setTimeout(function(){ el.classList.add('kat-item-in'); }, Math.min(idx,14)*45);
+  });
+
+  P+=50;
+  document.getElementById('katM').style.display=P<R.length?'block':'none';
+}
+document.getElementById('katQ').addEventListener('input',run);
+document.getElementById('katF').addEventListener('change',run);
+document.getElementById('katO').addEventListener('change',run);
+document.getElementById('katM').addEventListener('click',page);
+
+/* Уголемяване на корицата на цял екран при клик върху нея */
+var katLb=document.createElement('div');
+katLb.className='kat-lightbox'; katLb.id='katLb';
+katLb.innerHTML='<button class="kat-lb-close" id="katLbClose" aria-label="Затвори">&times;</button><img id="katLbImg" src="" alt="">';
+document.body.appendChild(katLb);
+function katLbOpen(src,alt){
+  document.getElementById('katLbImg').src=src;
+  document.getElementById('katLbImg').alt=alt||'';
+  katLb.classList.add('kat-lb-open');
+  document.addEventListener('keydown',katLbEsc);
+}
+function katLbClose(){
+  katLb.classList.remove('kat-lb-open');
+  document.removeEventListener('keydown',katLbEsc);
+}
+function katLbEsc(e){ if(e.key==='Escape')katLbClose(); }
+katLb.addEventListener('click',function(e){ if(e.target===katLb||e.target.id==='katLbClose')katLbClose(); });
+document.getElementById('katR').addEventListener('click',function(e){
+  if(e.target&&e.target.classList&&e.target.classList.contains('kat-cover')){
+    katLbOpen(e.target.src,e.target.alt);
+  }
+});
+/* inline onclick="" в диагностиката изпълнява в глобален контекст, не вътре в тази затворена
+   функция (IIFE) — затова презареждането се излага изрично тук, вместо да разчита на локалното име. */
+window.katRetry=boot;
+boot();
+
+/* Reveal при поява — в стила на останалите страници на сайта */
+if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+  document.querySelectorAll('.kat-r').forEach(function(el){ el.classList.add('kat-in'); });
+} else if('IntersectionObserver' in window){
+  var katIo=new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('kat-in'); katIo.unobserve(e.target); } });
+  },{threshold:.12});
+  document.querySelectorAll('.kat-r').forEach(function(el){ katIo.observe(el); });
+} else {
+  document.querySelectorAll('.kat-r').forEach(function(el){ el.classList.add('kat-in'); });
+}
+})();
+</script>
