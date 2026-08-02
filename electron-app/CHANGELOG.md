@@ -11,6 +11,24 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.51.0
+
+**Промени — двайсет и девети извлечен домейн от main.js (Фаза 4, стъпка 29), без промяна в поведението:**
+- "Справки и статистика" + "Готови справки" (8 IPC канала: stats:report,
+  reports:list/run) изведени в `handlers/stats.js`. Зависи от `value`
+  (стабилна функция в main.js) и `dnevnikSumRow` (hoisted function
+  declaration от все още неизвадения домейн "Дневник на библиотеката") —
+  и двете по референция.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 304).
+
+**Changes — twenty-ninth domain extracted from main.js (Phase 4, step 29), no behavior change:**
+- "Statistics and reports" (8 IPC channels: stats:report, reports:list/run)
+  extracted into `handlers/stats.js`. Depends on `value` (a stable
+  function in main.js) and `dnevnikSumRow` (a hoisted function declaration
+  from the still-unextracted "Library journal" domain) — both by
+  reference.
+- IPC behavior unchanged. New test file (10 new tests, 304 total).
+
 ## v1.50.0
 
 **Промени — три извлечени домейна от main.js (Фаза 4, стъпка 28), без промяна в поведението:**
