@@ -11,6 +11,23 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.36.0
+
+**Промени — единайсети извлечен домейн от main.js (Фаза 4, стъпка 12), без промяна в поведението:**
+- "Контролирани номенклатури" (отдел, език, постоянно място — 3 IPC
+  канала) изведени в `handlers/av.js`. Само `getDb()`/`run`/`logAudit`.
+- IPC поведението непроменено. Нов тестови файл (7 нови теста, общо 169) —
+  включително проверка, че повторен `av:save` изцяло ЗАМЕСТВА предишния
+  списък, не добавя към него.
+
+**Changes — eleventh domain extracted from main.js (Phase 4, step 12), no behavior change:**
+- "Controlled nomenclatures" (department, language, permanent location —
+  3 IPC channels) extracted into `handlers/av.js`. Only
+  `getDb()`/`run`/`logAudit`.
+- IPC behavior unchanged. New test file (7 new tests, 169 total) —
+  including a check that a repeat `av:save` fully REPLACES the previous
+  list rather than appending to it.
+
 ## v1.35.0
 
 **Промени — десети извлечен домейн от main.js (Фаза 4, стъпка 11), без промяна в поведението:**
