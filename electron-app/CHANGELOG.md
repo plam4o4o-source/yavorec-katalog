@@ -11,6 +11,94 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.58.0
+
+**BG:** Завършва разбиването на `main.js` по домейни (Фаза 4, стъпка 36 —
+последната планирана партида): "Приемане на данни от други системи" (стар
+АБ/iLib/Excel внос) е изнесено в `handlers/data-import.js`
+(`import:load/choose/run`, вътрешно ползва `require('../importers')` пряко,
+както при `backup-crypto` в `handlers/backup.js`); "Мобилно сканиране"
+(страница за телефон вместо RFID четец) — в `handlers/mobile.js`
+(`mobile:generate`, `inventorySessions:importScans`); "Помощ срещу
+антивирусни блокировки" (генериране на `.bat` с изключения за Windows
+Defender) — в `handlers/security-exclusions.js`
+(`security:exclusionInfo/writeExclusionScript`). И трите модула четат
+`BOOK_FIELDS` по референция от по-рано извадения `handlers/books.js`. IPC
+поведението е напълно непроменено. Нови тестове:
+`test/handlers-data-import.test.js` (8), `test/handlers-mobile.test.js` (6),
+`test/handlers-security-exclusions.test.js` (6) — общо 412 теста (бяха
+392).
+
+С това `main.js` вече съдържа само трайна инфраструктура, а не отделни
+домейни: жизненият цикъл на приложението (`app.whenReady`,
+`window-all-closed`, `app:setUser/getUser/getVersion/
+checkForUpdates/installUpdate/openLogsFolder`), автообновяването,
+инициализацията/миграциите на базата данни (`initDb`, `ensureColumns`,
+`MIGRATIONS`), `createWindow()`, помощните функции `run`/`logAudit`/
+`diffFields`/`friendlyDbError`, както и вече установените изключения от
+общото правило за преместване, поддържани заради TDZ капана:
+`logEvent`, `scheduleCatalogWrite`/`flushCatalogWrite`/`buildCatalogPayload`
+и `settings:noticeDefaults`. С това Фаза 4 (разбиването на монолита
+`main.js` на модули по домейн под `handlers/`) е завършена.
+
+**ВАЖНО — открит стар бъг, НЕ въведен от това разбиване:** докато пишех
+тестовете за `import:run`, установих (и потвърдих чрез `git log -p --
+follow -S"permanent_location"`), че полето `permanent_location` е добавено
+към `BOOK_FIELDS` в по-стар commit, но обектът с данните за внос никога не
+е бил обновен да го включва. Резултатът: SQL заявката за вмъкване очаква
+именуван параметър `permanent_location`, който липсва — better-sqlite3
+хвърля грешка `Missing named parameter "permanent_location"` за ВСЕКИ ред
+при всеки внос, тихо прихваната от try/catch на реда и записана като
+грешка за него. С други думи функцията "Приемане на данни от други
+системи" не работи изобщо от момента на добавянето на това поле. По
+правилото "без промяна на поведението по време на механично изнасяне" не
+го поправих тук — запазих го точно както си е, с подробен коментар в
+`test/handlers-data-import.test.js`, документиращ бъга. Нужен е отделен,
+самостоятелен commit само за тази поправка.
+
+**EN:** Completes splitting `main.js` by domain (Phase 4, step 36 — the
+last planned batch): "data import from other systems" (legacy АБ/iLib/
+Excel import) moves to `handlers/data-import.js`
+(`import:load/choose/run`, internally `require('../importers')` directly,
+same pattern as `backup-crypto` in `handlers/backup.js`); "mobile
+scanning" (a phone page instead of an RFID reader) moves to
+`handlers/mobile.js` (`mobile:generate`, `inventorySessions:importScans`);
+"antivirus exclusion help" (generates a `.bat` with Windows Defender
+exclusions) moves to `handlers/security-exclusions.js`
+(`security:exclusionInfo/writeExclusionScript`). All three modules read
+`BOOK_FIELDS` by reference from the earlier-extracted `handlers/books.js`.
+IPC behavior is fully unchanged. New test files:
+`test/handlers-data-import.test.js` (8), `test/handlers-mobile.test.js`
+(6), `test/handlers-security-exclusions.test.js` (6) — 412 tests total (up
+from 392).
+
+With this, `main.js` now holds only permanent infrastructure, not
+individual domains: app lifecycle (`app.whenReady`, `window-all-closed`,
+`app:setUser/getUser/getVersion/checkForUpdates/installUpdate/
+openLogsFolder`), auto-update, database init/migrations (`initDb`,
+`ensureColumns`, `MIGRATIONS`), `createWindow()`, the shared helpers
+`run`/`logAudit`/`diffFields`/`friendlyDbError`, and the already-
+established exceptions to the move-everything rule kept in place because
+of the TDZ hazard: `logEvent`, `scheduleCatalogWrite`/
+`flushCatalogWrite`/`buildCatalogPayload`, and `settings:noticeDefaults`.
+With this, Phase 4 (splitting the `main.js` monolith into per-domain
+modules under `handlers/`) is complete.
+
+**IMPORTANT — pre-existing bug found, NOT introduced by this split:**
+while writing tests for `import:run`, I found (and confirmed via `git log
+-p --follow -S"permanent_location"`) that `permanent_location` was added
+to `BOOK_FIELDS` in an older commit, but the import payload object was
+never updated to include it. Result: the INSERT statement expects a named
+parameter `permanent_location` that's missing — better-sqlite3 throws
+`Missing named parameter "permanent_location"` for EVERY row on every
+import, silently caught by that row's try/catch and recorded as a
+per-line error. In other words, the "data import from other systems"
+feature has not worked at all since that field was added. Per the "no
+behavior change during mechanical extraction" rule, I did not fix it here
+— preserved exactly as-is, with a detailed comment in
+`test/handlers-data-import.test.js` documenting the bug. A separate,
+dedicated commit is needed just for that fix.
+
 ## v1.57.0
 
 **BG:** Продължава разбиването на `main.js` след "големите пет" (Фаза 4,
