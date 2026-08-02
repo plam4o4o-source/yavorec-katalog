@@ -11,6 +11,22 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.39.0
+
+**Промени — четиринайсети извлечен домейн от main.js (Фаза 4, стъпка 15), без промяна в поведението:**
+- "Отчисляване" (актове — 6 IPC канала) изведени в
+  `handlers/deaccession-acts.js`. Зависи от `BOOK_SELECT` (по стойност) и
+  `scheduleCatalogWrite` (по референция — отчислените документи изчезват
+  от онлайн каталога).
+- IPC поведението непроменено. Нов тестови файл (5 нови теста, общо 185).
+
+**Changes — fourteenth domain extracted from main.js (Phase 4, step 15), no behavior change:**
+- "Deaccessioning" (acts — 6 IPC channels) extracted into
+  `handlers/deaccession-acts.js`. Depends on `BOOK_SELECT` (by value) and
+  `scheduleCatalogWrite` (by reference — deaccessioned books disappear
+  from the online catalog).
+- IPC behavior unchanged. New test file (5 new tests, 185 total).
+
 ## v1.38.0
 
 **Промени — тринайсети извлечен домейн от main.js (Фаза 4, стъпка 14), без промяна в поведението:**
