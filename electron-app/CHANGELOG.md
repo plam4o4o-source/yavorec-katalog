@@ -11,6 +11,49 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.44.0
+
+**Промени — двайсет и първи извлечен домейн от main.js (Фаза 4, стъпка 22), без промяна в поведението — един от "големите пет":**
+- "Заемания" (10 IPC канала: list/overdue/byReader/byBook/overdueByReader/
+  checkout/return/extend/checkoutByCode/returnByCode, плюс events:localuse)
+  изведени в `handlers/loans.js`. Ползва почти всичко вече извадено:
+  `circRule`/`readerCategory` (circ-rules.js), `nextWorkDay`/
+  `closedDaysBetween` (calendar.js), `firstActiveHold`/
+  `consumeHoldOnCheckout`/`activateHoldOnReturn` (holds.js), `BOOK_SELECT`
+  (по стойност, от все още неизвадения домейн "Книги") и
+  `scheduleCatalogWrite` (по референция, hoisted по-долу в main.js).
+- `logEvent` **остава** hoisted function declaration в main.js (не се мести
+  в модула) — `handlers/housebound.js` вече го изисква по референция
+  по-рано във файла (стъпка 8); местенето му в `handlers/loans.js` би
+  минало през `const` присвояване по-късно във файла и би счупило по-ранния
+  достъп (TDZ). `applySuspension`/`checkSuspended` (вътрешни, без пряк IPC)
+  се преместиха изцяло в модула, тъй като никой друг домейн не ги ползва.
+- `LOAN_SELECT` се връща обратно към main.js (по същия модел като
+  calendar.js/circ-rules.js/holds.js), защото го ползват все още
+  неизвадените домейни "Табло" и "Просрочени: напомняния".
+- IPC поведението непроменено. Нов тестови файл (15 нови теста, общо 246).
+
+**Changes — twenty-first domain extracted from main.js (Phase 4, step 22), no behavior change — one of the "big five":**
+- "Loans" (10 IPC channels: list/overdue/byReader/byBook/overdueByReader/
+  checkout/return/extend/checkoutByCode/returnByCode, plus events:localuse)
+  extracted into `handlers/loans.js`. Consumes nearly everything extracted
+  so far: `circRule`/`readerCategory` (circ-rules.js), `nextWorkDay`/
+  `closedDaysBetween` (calendar.js), `firstActiveHold`/
+  `consumeHoldOnCheckout`/`activateHoldOnReturn` (holds.js), `BOOK_SELECT`
+  (by value, from the still-unextracted "Books" domain), and
+  `scheduleCatalogWrite` (by reference, hoisted further down in main.js).
+- `logEvent` **stays** a hoisted function declaration in main.js (not moved
+  into the module) — `handlers/housebound.js` already requires it by
+  reference earlier in the file (step 8); moving it into
+  `handlers/loans.js` would turn it into a `const` assigned later in the
+  file and break that earlier access (TDZ). `applySuspension`/
+  `checkSuspended` (internal, no direct IPC surface) moved into the module
+  entirely, since no other domain uses them.
+- `LOAN_SELECT` is returned back to main.js (same pattern as
+  calendar.js/circ-rules.js/holds.js), since the still-unextracted
+  "Dashboard" and "Overdue reminders" domains depend on it.
+- IPC behavior unchanged. New test file (15 new tests, 246 total).
+
 ## v1.43.0
 
 **Промени — двайсети извлечен домейн от main.js (Фаза 4, стъпка 21), без промяна в поведението:**
