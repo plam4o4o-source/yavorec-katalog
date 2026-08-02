@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {

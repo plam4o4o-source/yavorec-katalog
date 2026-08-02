@@ -11,6 +11,41 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.19.0
+
+**Промени — основи за надеждност (без видими промени в екрана):**
+- **Поправка на риск от загуба на данни** — при смяна на папката на базата
+  данни (`Настройки → Местоположение на базата данни`), ако избраната папка
+  вече съдържа `library.db` (обичайно споделена мрежова база от друг
+  компютър в библиотеката), програмата вече пита изрично дали да я ползва
+  непроменена, или да я презапише — вместо да я презапише мълчаливо.
+- **Постоянен дневник на грешки** — грешки, които досега се губеха безследно
+  в инсталираната програма, вече се записват във файл (папка `logs`, до 30
+  дни назад), достъпна и чрез нов бутон в настройките за прикачване при
+  заявка за поддръжка.
+- **Версия на схемата на базата данни** — въведена е рамка с номерирани
+  миграции (`PRAGMA user_version`) за по-безопасно бъдещо развитие на
+  структурата на базата данни; съществуващите инсталации не са засегнати.
+- **Тестова рамка** — добавени са автоматични тестове (криптиране на
+  резервни копия, внасяне на CSV/XLSX файлове, инициализация на базата
+  данни), които ще пазят от бъдещи регресии.
+
+**Changes — reliability foundations (no visible changes on screen):**
+- **Data-loss fix** — when changing the database location (`Settings →
+  Database location`), if the chosen folder already contains a `library.db`
+  (typically a shared network database used by another library computer),
+  the program now asks explicitly whether to use it as-is or overwrite it,
+  instead of silently overwriting it.
+- **Persistent error log** — errors that used to vanish without a trace in
+  the installed program are now written to a file (a `logs` folder, kept for
+  30 days), also reachable via a new button in Settings for attaching to a
+  support request.
+- **Database schema versioning** — a numbered migration framework
+  (`PRAGMA user_version`) was introduced for safer future schema changes;
+  existing installations are unaffected.
+- **Test suite** — automated tests were added (backup encryption, CSV/XLSX
+  import, database initialization) to guard against future regressions.
+
 ## v1.18.0
 
 **Промени — диференца в одитната следа и история на търсенията:**
