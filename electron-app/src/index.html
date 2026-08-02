@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <!-- img-src допуска data: заради логото на организацията, което се пази в базата
      данни като data URI. Външни адреси нарочно не се допускат — програмата не
-     зарежда изображения от интернет. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+     зарежда изображения от интернет.
+     script-src/style-src 'unsafe-inline' остават засега — целият интерфейс е
+     изграден с onclick="…" атрибути и style="…" в динамично генериран HTML
+     (стотици места из app.js); премахването им изисква истински рефакторинг на
+     ввръзването на събития (следваща фаза от плана), не точкова поправка тук.
+     Добавени са обаче object-src/base-uri/form-action — не изискват промяна в
+     кода (формите тук никога реално не се "submit"-ват, няма <object>/<base>),
+     а затварят реални пътища за инжекция дори без да пипаме script-src. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Инвентар · Библиотечна система</title>
 <link rel="stylesheet" href="style.css">
 </head>

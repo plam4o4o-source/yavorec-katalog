@@ -11,6 +11,51 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.23.0
+
+**Промени — заздравяване на сигурността (Фаза 3, първа част):**
+- **Прозорецът вече отказва непредвидена навигация/нови прозорци** —
+  приложението никога легитимно не отваря нов прозорец или не напуска
+  заредения екран; сега това е и наложено технически (`setWindowOpenHandler`,
+  guard за навигация), а не просто "не се случва в момента".
+- **По-стегната политика за съдържание (CSP)** — добавени `object-src`,
+  `base-uri` и `form-action`, без да се пипа нищо във визуалния интерфейс.
+- **Защита срещу CSV formula injection при експорт на фонда** — заглавие,
+  автор или друго текстово поле, започващо с `=`, `+`, `-` или `@` (напр.
+  случайно или нарочно въведено „=cmd|…“), вече не може да се изпълни като
+  формула/команда при отваряне на експортирания CSV в Excel/LibreOffice.
+- **Валидация на имейл адреса** при изпращане на напомняне по имейл от
+  „Заемане и връщане“.
+- **Граници на XLSX импортера** — файл над 60 MB, архив с необичайно много
+  вътрешни части или компресирана част, която би заела над 150 MB разопакована
+  (класически „zip bomb“), вече се отказват веднага с ясно съобщение, вместо
+  да рискуват да запълнят паметта на компютъра при внасяне на повреден файл.
+- **Автоматични тестове при всеки push/PR** — нов GitHub Actions workflow
+  пуска пълния тестов пакет (74 теста) автоматично, независимо от клона —
+  досега тестовете тръгваха само ако разработчикът се сети да ги пусне
+  локално.
+
+**Changes — security hardening (Phase 3, part one):**
+- **The window now refuses unexpected navigation/new windows** — the app
+  never legitimately opens a new window or navigates away from the loaded
+  screen; this is now technically enforced (`setWindowOpenHandler`, a
+  navigation guard), not just "doesn't happen today by coincidence".
+- **Tighter Content-Security-Policy** — added `object-src`, `base-uri`, and
+  `form-action`, with no visible change to the interface.
+- **CSV formula-injection protection on catalog export** — a title, author,
+  or other text field starting with `=`, `+`, `-`, or `@` (e.g. an
+  accidentally or deliberately entered "=cmd|…") can no longer execute as a
+  formula/command when the exported CSV is opened in Excel/LibreOffice.
+- **Email validation** when sending a reminder email from "Loans".
+- **XLSX importer limits** — a file over 60 MB, an archive declaring an
+  unreasonable number of internal parts, or a compressed part that would
+  inflate past 150 MB (a classic "zip bomb"), are now rejected immediately
+  with a clear message instead of risking exhausting the computer's memory
+  when importing a corrupted file.
+- **Automated tests on every push/PR** — a new GitHub Actions workflow runs
+  the full test suite (74 tests) automatically on every branch — until now
+  tests only ran if a developer remembered to run them locally.
+
 ## v1.22.0
 
 **Промени — по-плавни списъци при голям фонд/списък с читатели (Фаза 2, продължение):**

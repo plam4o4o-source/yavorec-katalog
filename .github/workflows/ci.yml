@@ -1,0 +1,50 @@
+name: CI — тестове при всеки push/PR
+
+# Фаза 3 от плана (сигурност/платформа): досега единственият workflow
+# (release-electron.yml) се стартираше само при таг за издание — тестовете
+# (npm test, 74 теста към момента) се пускаха само ако разработчикът се сети
+# да ги пусне локално. Този workflow ги пуска автоматично при всеки push и
+# pull request, независимо от клона — за да не се качи чупещ ред, без някой
+# изобщо да е разбрал.
+
+on:
+  push: {}
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: electron-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Инсталиране на зависимости
+        run: npm ci
+
+      # package.json има postinstall (electron-rebuild -f -w better-sqlite3), който
+      # прекомпилира better-sqlite3 за ABI-то на Electron (необходимо за пакетирания
+      # .exe — виж release-electron.yml). Тестовете тук обаче се пускат с обикновен
+      # `node --test`, не през Electron, затова компилираме better-sqlite3 обратно
+      # за текущия Node — иначе require() гърми с "NODE_MODULE_VERSION mismatch".
+      - name: Компилиране на better-sqlite3 за обикновен Node (не Electron) — за самите тестове
+        run: npm rebuild better-sqlite3
+
+      - name: Бърза синтактична проверка на всички .js файлове (извън node_modules)
+        shell: bash
+        run: |
+          set -e
+          for f in $(git ls-files '*.js' | grep -v 'node_modules/'); do
+            node --check "$f"
+          done
+
+      - name: Тестове (node:test)
+        run: npm test
