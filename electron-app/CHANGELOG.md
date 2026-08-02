@@ -11,6 +11,40 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.30.0
+
+**Промени — пети извлечен домейн от main.js (Фаза 4, стъпка 6), без промяна в поведението:**
+- Кодът за "Служители" (4 IPC канала: списък, добавяне, редакция,
+  изтриване) е изваден от `main.js` в нов файл `handlers/employees.js`.
+- Най-простият случай досега: обикновено CRUD над една таблица, само
+  `getDb()`/`run`/`logAudit` — никакви функции не се връщат обратно към
+  main.js, защото никой друг домейн не вика код от този.
+- IPC каналите (`employees:list/create/update/delete`) и поведението им са
+  напълно непроменени.
+- Добавен нов тестови файл `test/handlers-employees.test.js` (8 нови теста,
+  общо вече 118) — покрива и частичното обновяване (само някои полета
+  подадени), реда на сортиране (активни преди неактивни), и дубликат по
+  уникалното име.
+- Продължение на "внимателно, малка стъпка по стъпка" — остават: книги,
+  заемания, читатели, каталог/git публикуване, настройки, и няколко
+  по-малки самостоятелни домейна (категории, правила за календара вече
+  готови).
+
+**Changes — fifth domain extracted from main.js (Phase 4, step 6), no behavior change:**
+- The "Employees" code (4 IPC channels: list, create, update, delete) has
+  been extracted from `main.js` into a new file `handlers/employees.js`.
+- The simplest case so far: plain CRUD over a single table, only
+  `getDb()`/`run`/`logAudit` needed — nothing is returned back to main.js
+  since no other domain calls into this one.
+- The IPC channels (`employees:list/create/update/delete`) and their
+  behavior are completely unchanged.
+- Added a new test file `test/handlers-employees.test.js` (8 new tests, 118
+  total now) — covers partial updates (only some fields provided), sort
+  order (active before inactive), and a duplicate-name conflict.
+- Continuing "carefully, small step by step" — remaining: books, loans,
+  readers, catalog/git publishing, settings, and a few smaller standalone
+  domains.
+
 ## v1.29.0
 
 **Промени — четвърти извлечен домейн от main.js (Фаза 4, стъпка 5), без промяна в поведението:**

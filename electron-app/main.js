@@ -648,30 +648,10 @@ ipcMain.handle('app:setUser', (e, name) =>
 );
 ipcMain.handle('app:getUser', () => run(() => CURRENT_USER));
 
-/* ---------------- Служители ---------------- */
-ipcMain.handle('employees:list', () => run(() => db.prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
-ipcMain.handle('employees:create', (e, name) =>
-  run(() => {
-    if (!name || !name.trim()) throw new Error('Въведете име на служителя.');
-    const info = db.prepare('INSERT INTO employees (name) VALUES (?)').run(name.trim());
-    logAudit('Нов служител', name.trim());
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('employees:update', (e, { id, name, active }) =>
-  run(() => {
-    const cur = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
-    if (!cur) throw new Error('Служителят не е намерен.');
-    db.prepare('UPDATE employees SET name=?, active=? WHERE id=?').run(
-      name !== undefined && name !== null ? name.trim() : cur.name,
-      active !== undefined && active !== null ? (active ? 1 : 0) : cur.active,
-      id
-    );
-  })
-);
-ipcMain.handle('employees:delete', (e, id) =>
-  run(() => { db.prepare('DELETE FROM employees WHERE id = ?').run(id); })
-);
+/* ---------------- Служители ----------------
+   Извадени в handlers/employees.js (Фаза 4, стъпка 6 от разбиването на
+   монолита main.js на модули по домейн). */
+require('./handlers/employees')(ipcMain, { getDb: () => db, run, logAudit });
 ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
 // Отваря папката с дневниците на грешки (logs/) в системния файлов мениджър —
 // удобно, за да прикачи librarianят файловете при заявка за поддръжка.
