@@ -11,6 +11,32 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.22.0
+
+**Промени — по-плавни списъци при голям фонд/списък с читатели (Фаза 2, продължение):**
+- **Прозоречен рендер на „Книги“ и „Читатели“** — при библиотека с хиляди
+  документи/читатели екраните вече изчертават списъка на части (по 300 реда),
+  с бутон „Покажи още“ за следващите, вместо да чертаят всичко наведнъж —
+  избягва забележимото замръзване на интерфейса при 5 000–15 000+ записа.
+  Търсенето, подредбата и груповите действия върху книги ("Групова
+  редакция…", "Във витрина…") работят както досега, върху пълния резултат от
+  търсенето — не само върху заредената в момента част.
+- **По-леко търсене в публичния онлайн каталог** — полето за търсене на
+  сайта вече изчаква кратка пауза в писането (150мс), преди да филтрира
+  списъка, вместо да го прави при всяка буквичка.
+
+**Changes — smoother lists with a large catalog/reader list (Phase 2, continued):**
+- **Windowed rendering for "Books" and "Readers"** — with thousands of
+  documents/readers, these screens now draw the list in chunks (300 rows at
+  a time) with a "Show more" button for the rest, instead of drawing
+  everything at once — avoids the noticeable interface freeze at
+  5,000–15,000+ records. Search, sorting, and bulk actions on books ("Bulk
+  edit…", "Add to shelf…") still work as before, across the full search
+  result — not just the currently-loaded chunk.
+- **Lighter search on the public online catalog** — the site's search box
+  now waits for a brief pause in typing (150ms) before filtering the list,
+  instead of doing it on every keystroke.
+
 ## v1.21.0
 
 **Промени — по-бързо търсене и по-плавна работа при голям фонд (началото на Фаза 2):**

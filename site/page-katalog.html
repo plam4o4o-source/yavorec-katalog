@@ -533,7 +533,11 @@ function page(){
   P+=50;
   document.getElementById('katM').style.display=P<R.length?'block':'none';
 }
-document.getElementById('katQ').addEventListener('input',run);
+/* Дребна поправка (Фаза 2): търсенето филтрираше D и пренаписваше целия
+   резултатен списък при ВСЯКА буквичка — забележимо при по-голям каталог.
+   150ms debounce чака кратка пауза в писането, преди да филтрира. */
+function katDebounce(fn,ms){var t=null;return function(){clearTimeout(t);t=setTimeout(fn,ms);};}
+document.getElementById('katQ').addEventListener('input',katDebounce(run,150));
 document.getElementById('katF').addEventListener('change',run);
 document.getElementById('katO').addEventListener('change',run);
 document.getElementById('katM').addEventListener('click',page);
