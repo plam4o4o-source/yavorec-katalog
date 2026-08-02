@@ -1,0 +1,60 @@
+// Лични данни: анонимизиране (Koha: pseudonymization) — извадени от main.js
+// в отделен модул (Фаза 4, стъпка 20). Върнати заемания, по-стари от N
+// години, губят връзката с името: закачат се за служебния запис
+// „— анонимизирани заемания —", а категорията и годината се снимат в
+// anon_category — статистиката остава вярна („дете, 2024 г."), името
+// изчезва. Настройка anonymize_years = 0 изключва всичко. Необратимо е —
+// затова е ръчен бутон.
+module.exports = function registerGdprHandlers(ipcMain, deps) {
+  const { getDb, run, logAudit } = deps;
+
+  function anonReaderId() {
+    const db = getDb();
+    const NAME = '— анонимизирани заемания —';
+    const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
+    if (r) return r.id;
+    return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
+      VALUES (?, '—', 'прекратен', date('now'), 0)`).run(NAME).lastInsertRowid;
+  }
+  function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
+
+  ipcMain.handle('gdpr:candidates', () =>
+    run(() => {
+      const db = getDb();
+      const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
+      const years = parseInt(s.anonymize_years, 10) || 0;
+      if (!years) return { years: 0, count: 0 };
+      const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get('— анонимизирани заемания —');
+      const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
+        WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
+        .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;
+      return { years, count, cutoff: anonCutoff(years) };
+    })
+  );
+  ipcMain.handle('gdpr:anonymize', () =>
+    run(() => {
+      const db = getDb();
+      const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
+      const years = parseInt(s.anonymize_years, 10) || 0;
+      if (!years) throw new Error('Първо задайте срок в „Настройки“ → „Лични данни“ (0 = изключено).');
+      const cutoff = anonCutoff(years);
+      const anonId = anonReaderId();
+      const tx = db.transaction(() => {
+        const n = db.prepare(`
+          UPDATE loans SET
+            anon_category = COALESCE((SELECT r.category FROM readers r WHERE r.id = loans.reader_id), '—')
+                            || ' · ' || substr(loans.date_out, 1, 4),
+            reader_id = ?
+          WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL AND reader_id != ?
+        `).run(anonId, cutoff, anonId).changes;
+        // Събитията също губят връзката с читателя; категорията им е снимана още при записа.
+        db.prepare('UPDATE events SET reader_id = NULL WHERE date < ? AND reader_id IS NOT NULL AND reader_id != ?')
+          .run(cutoff, anonId);
+        return n;
+      });
+      const n = tx();
+      logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани');
+      return { anonymized: n, cutoff };
+    })
+  );
+};

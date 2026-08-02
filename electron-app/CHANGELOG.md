@@ -11,6 +11,31 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.42.0
+
+**Промени — три извлечени домейна от main.js (Фаза 4, стъпки 18-20), без промяна в поведението:**
+- "Читателска сметка" (Koha: accountlines — 4 IPC канала: get/charge/pay/
+  deleteLine) изведени в `handlers/account.js`.
+- "Предложения за покупка от читатели" (Koha: suggestions — 4 IPC канала:
+  list/create/setStatus/delete) изведени в `handlers/suggestions.js`.
+- "Лични данни: анонимизиране" (Koha: pseudonymization — 2 IPC канала:
+  gdpr:candidates/gdpr:anonymize) изведени в `handlers/gdpr.js`.
+- И трите зависят само от `getDb`, `run`, `logAudit` (и `today` за account/
+  suggestions) — самостоятелни домейни без връзка помежду си, обединени в
+  едно издание.
+- IPC поведението непроменено. Три нови тестови файла (21 нови теста, общо 222).
+
+**Changes — three domains extracted from main.js (Phase 4, steps 18-20), no behavior change:**
+- "Reader account" (Koha: accountlines — 4 IPC channels: get/charge/pay/
+  deleteLine) extracted into `handlers/account.js`.
+- "Reader purchase suggestions" (Koha: suggestions — 4 IPC channels:
+  list/create/setStatus/delete) extracted into `handlers/suggestions.js`.
+- "Personal data anonymization" (Koha: pseudonymization — 2 IPC channels:
+  gdpr:candidates/gdpr:anonymize) extracted into `handlers/gdpr.js`.
+- All three depend only on `getDb`, `run`, `logAudit` (and `today` for
+  account/suggestions) — independent domains bundled into one release.
+- IPC behavior unchanged. Three new test files (21 new tests, 222 total).
+
 ## v1.41.0
 
 **Промени — шестнайсети извлечен домейн от main.js (Фаза 4, стъпка 17), без промяна в поведението:**

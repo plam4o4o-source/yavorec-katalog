@@ -948,77 +948,12 @@ require('./handlers/readers')(ipcMain, {
 /* ---------------- Читателска сметка (Koha: accountlines) ----------------
    amount > 0 = начислено (дължи се), amount < 0 = платено. Балансът е SUM(amount).
    Не е касов модул — само дневник на движенията + квитанция за печат. */
-ipcMain.handle('account:get', (e, readerId) =>
-  run(() => {
-    const lines = db.prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY date DESC, id DESC').all(readerId);
-    const balance = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
-    return { lines, balance };
-  })
-);
-ipcMain.handle('account:charge', (e, { reader_id, type, amount, note, date }) =>
-  run(() => {
-    const amt = Math.abs(Number(amount) || 0);
-    if (!amt) throw new Error('Сумата трябва да е положителна.');
-    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(reader_id, date || today(), 'начисление', type || 'друго', amt, note || null);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Начисление', (r ? r.name : reader_id) + ' — ' + (type || 'друго') + ' ' + amt.toFixed(2) + ' лв.');
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('account:pay', (e, { reader_id, amount, note, date }) =>
-  run(() => {
-    const amt = Math.abs(Number(amount) || 0);
-    if (!amt) throw new Error('Сумата трябва да е положителна.');
-    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(reader_id, date || today(), 'плащане', 'плащане', -amt, note || null);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' лв.');
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('account:deleteLine', (e, id) =>
-  run(() => { db.prepare('DELETE FROM account_lines WHERE id = ?').run(id); })
-);
+require('./handlers/account')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- Предложения за покупка от читатели (Koha: suggestions) ----------------
    заявено → одобрено → поръчано → получено/отказано. При „получено" може да се закачи
    към партида в Постъпления, за да остане следа откъде реално е дошла книгата. */
-ipcMain.handle('suggestions:list', (e, status) =>
-  run(() => {
-    const sql = `SELECT s.*, r.name AS reader_name_live, a.no AS acq_no, a.year AS acq_year
-      FROM suggestions s LEFT JOIN readers r ON r.id = s.reader_id
-      LEFT JOIN acquisitions a ON a.id = s.acquisition_id`;
-    const rows = status ? db.prepare(sql + ' WHERE s.status = ? ORDER BY s.date DESC').all(status)
-                         : db.prepare(sql + ' ORDER BY s.date DESC').all();
-    rows.forEach(r => { if (r.reader_name_live) r.reader_name = r.reader_name_live; });
-    return rows;
-  })
-);
-ipcMain.handle('suggestions:create', (e, sug) =>
-  run(() => {
-    if (!(sug.title || '').trim()) throw new Error('Заглавието е задължително.');
-    const info = db.prepare(`
-      INSERT INTO suggestions (date, reader_id, reader_name, author, title, note, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'заявено')
-    `).run(sug.date || today(), sug.reader_id || null, sug.reader_name || null, sug.author || null, sug.title.trim(), sug.note || null);
-    logAudit('Предложение за покупка', sug.title);
-    return info.lastInsertRowid;
-  })
-);
-const SUGGESTION_STATUSES = ['заявено', 'одобрено', 'поръчано', 'получено', 'отказано'];
-ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id }) =>
-  run(() => {
-    if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
-    db.prepare('UPDATE suggestions SET status = ?, acquisition_id = ? WHERE id = ?')
-      .run(status, status === 'получено' ? (acquisition_id || null) : null, id);
-    const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
-    logAudit('Предложение за покупка', (s ? s.title : id) + ' → ' + status);
-  })
-);
-ipcMain.handle('suggestions:delete', (e, id) =>
-  run(() => { db.prepare('DELETE FROM suggestions WHERE id = ?').run(id); })
-);
+require('./handlers/suggestions')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- Обслужване по домовете (Koha: housebound) ----------------
    Извадени в handlers/housebound.js (Фаза 4, стъпка 8 от разбиването на
@@ -1034,51 +969,7 @@ require('./handlers/housebound')(ipcMain, {
    служебния запис „— анонимизирани заемания —", а категорията и годината се снимат в
    anon_category — статистиката остава вярна („дете, 2024 г."), името изчезва.
    Настройка anonymize_years = 0 изключва всичко. Необратимо е — затова е ръчен бутон. */
-function anonReaderId() {
-  const NAME = '— анонимизирани заемания —';
-  const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
-  if (r) return r.id;
-  return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
-    VALUES (?, '—', 'прекратен', date('now'), 0)`).run(NAME).lastInsertRowid;
-}
-function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
-ipcMain.handle('gdpr:candidates', () =>
-  run(() => {
-    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
-    const years = parseInt(s.anonymize_years, 10) || 0;
-    if (!years) return { years: 0, count: 0 };
-    const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get('— анонимизирани заемания —');
-    const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
-      WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
-      .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;
-    return { years, count, cutoff: anonCutoff(years) };
-  })
-);
-ipcMain.handle('gdpr:anonymize', () =>
-  run(() => {
-    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
-    const years = parseInt(s.anonymize_years, 10) || 0;
-    if (!years) throw new Error('Първо задайте срок в „Настройки“ → „Лични данни“ (0 = изключено).');
-    const cutoff = anonCutoff(years);
-    const anonId = anonReaderId();
-    const tx = db.transaction(() => {
-      const n = db.prepare(`
-        UPDATE loans SET
-          anon_category = COALESCE((SELECT r.category FROM readers r WHERE r.id = loans.reader_id), '—')
-                          || ' · ' || substr(loans.date_out, 1, 4),
-          reader_id = ?
-        WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL AND reader_id != ?
-      `).run(anonId, cutoff, anonId).changes;
-      // Събитията също губят връзката с читателя; категорията им е снимана още при записа.
-      db.prepare('UPDATE events SET reader_id = NULL WHERE date < ? AND reader_id IS NOT NULL AND reader_id != ?')
-        .run(cutoff, anonId);
-      return n;
-    });
-    const n = tx();
-    logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани');
-    return { anonymized: n, cutoff };
-  })
-);
+require('./handlers/gdpr')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Календар на библиотеката ----------------
    Извадени в handlers/calendar.js (Фаза 4, стъпка 4 от разбиването на
