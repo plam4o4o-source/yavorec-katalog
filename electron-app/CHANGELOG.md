@@ -11,6 +11,31 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.57.0
+
+**BG:** Продължава разбиването на `main.js` след "големите пет" (Фаза 4,
+стъпка 35): "Защита на лични данни: ЕГН/№ ЛК" (обща парола, AES-256-GCM) е
+изнесено в `handlers/pdp.js` — 5 handler-а: `pdp:status/setup/unlock/lock/
+changePassword`. `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite` се
+връщат обратно към `main.js`, защото `handlers/readers.js` (извадено
+по-рано) вече ги ползва по референция. `PDP_KEY` (ключът, отключен само за
+текущата сесия на процеса, никога на диск) остава изцяло вътрешно състояние
+на новия модул. Премахнат е и неизползваният вече `const pii = require(...)`
+в горната част на `main.js`. IPC поведението е напълно непроменено. Нов
+тест: `test/handlers-pdp.test.js` (11 теста) — общо 392 теста (бяха 381).
+
+**EN:** Continues splitting `main.js` past the "big five" (Phase 4, step
+35): the "personal data protection: EGN/ID card number" domain (shared
+password, AES-256-GCM) moves to `handlers/pdp.js` — 5 handlers:
+`pdp:status/setup/unlock/lock/changePassword`. `maskReaderRow`/
+`maskReaderRows`/`preparePiiForWrite` are returned back to `main.js`, since
+`handlers/readers.js` (extracted earlier) already depends on them by
+reference. `PDP_KEY` (the key, unlocked only for the current process
+session, never written to disk) stays entirely internal to the new module.
+Also removed the now-unused `const pii = require(...)` near the top of
+`main.js`. IPC behavior is fully unchanged. New test file
+`test/handlers-pdp.test.js` (11 tests) — 392 tests total (up from 381).
+
 ## v1.56.0
 
 **BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 34 — последният
