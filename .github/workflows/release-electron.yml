@@ -54,9 +54,30 @@ jobs:
             Write-Host 'Сертификатът е зареден — инсталаторът ще бъде подписан.'
           }
 
-      - name: Build and publish release
+      # GitHub понякога връща "422 Published releases must have a valid tag" при
+      # СЪЗДАВАНЕ на нов release+таг едновременно (v1.24.0 се провали точно така) —
+      # временна нестабилност в API-то, потвърдена и от отворени issue-та на
+      # electron-builder. Компилацията/подписването вече са минали дотук; само
+      # публикуването във втория опит гърми. Затова се повтаря целият build, а не
+      # само публикуването — electron-builder презаписва вече качените assets при
+      # повторен опит без грешка, а изчистването на dist/ гарантира чист старт.
+      - name: Build and publish release (с повторен опит при временна грешка на GitHub)
         shell: pwsh
-        run: npm run build -- --publish always $env:SIGN_ARG
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Опит $attempt от $maxAttempts…"
+            npm run build -- --publish always $env:SIGN_ARG
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -lt $maxAttempts) {
+              $delay = 15 * $attempt
+              Write-Host "Неуспешно — изчакване $delay сек. преди следващия опит…"
+              Start-Sleep -Seconds $delay
+              if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+            }
+          }
+          Write-Host "Всичките $maxAttempts опита се провалиха."
+          exit 1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}

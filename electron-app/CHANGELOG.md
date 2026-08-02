@@ -23,6 +23,14 @@ for full detail.
 - **Композитен индекс за "тази книга заета ли е в момента"** — тази проверка
   се прави за ВСЕКИ ред от списъка с книги (при всяко отваряне на „Книги“);
   новият индекс я прави директна, вместо да сканира заеманията на книгата.
+- **Поправка при прилагането**: самите заявки за търсене по баркод/инв. №
+  (8 места в кода) сравняваха `CAST(inv_number AS TEXT) = ?` — CAST върху
+  колоната пречи на SQLite да ползва какъвто и да е индекс по нея, което на
+  практика правеше новия индекс на баркода безполезен. Пренаписани да CAST-ват
+  параметъра вместо колоната (`inv_number = CAST(? AS INTEGER)`); проверено с
+  `EXPLAIN QUERY PLAN`, че сега планът е `MULTI-INDEX OR` по двата индекса.
+  Страничен ефект (подобрение): вече съвпада и инв. номер, сканиран/въведен с
+  водещи нули (напр. „000123“), което старата текстова форма пропускаше.
 
 **Changes — two new database indexes (Phase 4, part one):**
 - **Barcode index** — scanning a barcode (dashboard, loans/returns) now uses
@@ -34,6 +42,15 @@ for full detail.
 - **Composite index for "is this book currently on loan"** — this check runs
   for EVERY row of the books list (every time "Books" is opened); the new
   index makes it direct instead of scanning that book's loan history.
+- **Applied-on-merge fix**: the actual barcode/inv.-no. lookup queries (8
+  places) compared `CAST(inv_number AS TEXT) = ?` — casting the column
+  prevents SQLite from using any index on it, which made the new barcode
+  index effectively dead weight in practice. Rewritten to cast the parameter
+  instead (`inv_number = CAST(? AS INTEGER)`); verified with `EXPLAIN QUERY
+  PLAN` that the plan is now `MULTI-INDEX OR` across both indexes. Side
+  effect (improvement): an inventory number scanned/typed with leading zeros
+  (e.g. "000123") now matches too, which the old text-based comparison
+  missed.
 
 ## v1.24.0
 

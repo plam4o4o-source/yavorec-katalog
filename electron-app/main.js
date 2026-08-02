@@ -1391,7 +1391,12 @@ ipcMain.handle('books:list', (e, query, sort) =>
 );
 ipcMain.handle('books:get', (e, id) => run(() => db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
 ipcMain.handle('books:byBarcode', (e, code) =>
-  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?`).get(code, code))
+  // CAST-ва се ПАРАМЕТЪРЪТ, не колоната — CAST(b.inv_number AS TEXT) = ? би
+  // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
+  // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
+  // (потвърдено с EXPLAIN QUERY PLAN: с тази форма планът е MULTI-INDEX OR по
+  // двата индекса).
+  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code))
 );
 
 ipcMain.handle('books:create', (e, book) =>
@@ -1572,7 +1577,7 @@ ipcMain.handle('deaccessionActs:nextNo', (e, year) =>
   })
 );
 ipcMain.handle('deaccessionActs:findBook', (e, code) =>
-  run(() => db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?) AND b.status != 'отчислен'`).get(code, code))
+  run(() => db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(code, code))
 );
 ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
   run(() => {
@@ -2132,7 +2137,7 @@ ipcMain.handle('holds:list', () =>
 );
 ipcMain.handle('holds:add', (e, { reader_id, code }) =>
   run(() => {
-    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
     const openLoan = db.prepare('SELECT reader_id FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id);
@@ -2254,7 +2259,7 @@ ipcMain.handle('loans:extend', (e, { id }) =>
 ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
   run(() => {
     const tx = db.transaction(() => {
-      const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?`).get(code, code);
+      const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
       const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
@@ -2279,7 +2284,7 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
 );
 ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
   run(() => {
-    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     const loan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
     if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
@@ -2416,7 +2421,7 @@ ipcMain.handle('inventorySessions:scan', (e, { sessionId, code }) =>
   run(() => {
     const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
     if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
-    const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?`).get(code, code);
+    const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(code, code);
     if (!b) throw new Error('Непознат баркод/инв. № ' + code);
     const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
     if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
@@ -3400,7 +3405,7 @@ ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
     if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
     const list = [...new Set((codes || []).map(c => String(c).trim()).filter(Boolean))];
     if (!list.length) throw new Error('Списъкът е празен.');
-    const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?');
+    const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)');
     const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');
     const addScan = db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)');
     const addCheck = db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)');
@@ -3878,7 +3883,7 @@ ipcMain.handle('shelves:delete', (e, id) =>
 );
 ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
   run(() => {
-    const b = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?')
+    const b = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)')
       .get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
