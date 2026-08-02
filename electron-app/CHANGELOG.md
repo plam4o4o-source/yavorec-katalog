@@ -11,6 +11,32 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.52.0
+
+**BG:** Продължава разбиването на `main.js` на модули по домейн (Фаза 4,
+стъпка 30): "Дневник на библиотеката" (Раздел А/Б) е изваден в
+`handlers/dnevnik.js` — `dnevnik:getMonth`, `dnevnik:saveDay`,
+`dnevnik:suggest` (с таблиците за съпоставяне вид/език/УДК/възраст) и
+`dnevnik:exportCsv`. `dnevnikSumRow` (годишните/месечните тотали) се връща
+обратно към `main.js`, защото `handlers/stats.js` (изваден в предишна
+версия) вече го ползва по референция за готовата справка "Годишен
+статистически отчет" — редът на зареждане в `main.js` е запазен така, че
+константата вече да е присвоена, преди `stats.js` да я поиска. IPC
+поведението е напълно непроменено. Нов тестов файл
+`test/handlers-dnevnik.test.js` (8 теста) — общо 312 теста (бяха 304).
+
+**EN:** Continues splitting `main.js` into per-domain modules (Phase 4, step
+30): the "library journal" (Section A/B) domain moves to
+`handlers/dnevnik.js` — `dnevnik:getMonth`, `dnevnik:saveDay`,
+`dnevnik:suggest` (with its type/language/UDK/age lookup tables), and
+`dnevnik:exportCsv`. `dnevnikSumRow` (the month/year-to-date totals
+function) is returned back to `main.js`, since `handlers/stats.js`
+(extracted in a previous version) already depends on it by reference for
+the "annual statistical report" built-in report — load order in `main.js`
+is preserved so the constant is assigned before `stats.js` needs it. IPC
+behavior is fully unchanged. New test file `test/handlers-dnevnik.test.js`
+(8 tests) — 312 tests total (up from 304).
+
 ## v1.51.0
 
 **Промени — двайсет и девети извлечен домейн от main.js (Фаза 4, стъпка 29), без промяна в поведението:**
