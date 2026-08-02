@@ -11,6 +11,62 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.26.0
+
+**Промени — начало на разбиването на main.js на модули (Фаза 4, стъпка 2), без промяна в поведението:**
+- Кодът за "Резервни копия" (списък, ръчно копие, възстановяване, автоматично
+  дневно копие) е изваден от `main.js` в самостоятелен файл
+  `handlers/backup.js`. Избран е като първи кандидат, защото е напълно
+  самостоятелен — никой друг домейн (книги/заемания/читатели) не вика
+  функциите му и обратно.
+- Използва се инжектиране на зависимости (dependency injection) вместо голи
+  споделени променливи: `db` и `mainWindow` се подават като getter/setter
+  функции (`getDb()`/`setDb()`/`getMainWindow()`), защото и двете се
+  преприсвояват по време на изпълнение (`mainWindow` при пресъздаване на
+  прозореца, `db` — само веднъж при иницилизация, и после `null` точно преди
+  рестартиране след възстановяване от копие).
+- IPC каналите (`backup:list`, `backup:now`, `backup:restoreFromList`,
+  `backup:restoreBrowse`) и поведението им са напълно непроменени — това е
+  чисто структурно преместване на код, не нова функционалност.
+- Добавен нов тестови файл `test/handlers-backup.test.js` (9 нови теста) —
+  възможност, която този рефакторинг отключва за пръв път, защото `main.js`
+  самият той никога не може да се зареди директно в тестова среда (той е
+  Electron main процес). Общо тестовете вече са 84 (бяха 75).
+- `handlers/**/*` добавен в списъка с пакетирани файлове
+  (`package.json` → `build.files`) — без това инсталаторът за Windows би
+  паднал при стартиране с грешка "Cannot find module".
+- Това е стъпка 1 от няколко за разбиването на монолита — оставащите домейни
+  (книги, заемания, читатели, каталог/git публикуване, настройки) предстоят в
+  следващи версии, по изричното желание на библиотекаря да се прави
+  "внимателно, малка стъпка по стъпка".
+
+**Changes — start of splitting main.js into modules (Phase 4, step 2), no behavior change:**
+- The "Backups" domain code (list, manual backup, restore, daily auto-backup)
+  has been extracted from `main.js` into a standalone file
+  `handlers/backup.js`. Chosen as the first candidate because it's fully
+  self-contained — no other domain (books/loans/readers) calls into it, and
+  it doesn't call into them.
+- Uses dependency injection rather than bare shared variables: `db` and
+  `mainWindow` are passed as getter/setter functions
+  (`getDb()`/`setDb()`/`getMainWindow()`), because both are reassigned during
+  the process lifetime (`mainWindow` when the window is recreated, `db` only
+  once at init time and then `null` right before relaunching after a
+  restore).
+- The IPC channels (`backup:list`, `backup:now`, `backup:restoreFromList`,
+  `backup:restoreBrowse`) and their behavior are completely unchanged — this
+  is a pure structural code move, not new functionality.
+- Added a new test file `test/handlers-backup.test.js` (9 new tests) — a
+  testing capability this refactor unlocks for the first time, since
+  `main.js` itself can never be loaded directly in a test environment (it's
+  the Electron main process). Total tests are now 84 (were 75).
+- `handlers/**/*` added to the packaged-files list (`package.json` →
+  `build.files`) — without this the Windows installer would fail at startup
+  with "Cannot find module".
+- This is step 1 of several for splitting up the monolith — the remaining
+  domains (books, loans, readers, catalog/git publishing, settings) are
+  planned for future versions, per the librarian's explicit preference to do
+  this "carefully, small step by step".
+
 ## v1.25.0
 
 **Промени — два нови индекса в базата данни (Фаза 4, първа част):**
