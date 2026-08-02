@@ -3800,7 +3800,7 @@ function suggestRepoName(s) {
 }
 /* ---------------- Витрини в онлайн каталога ----------------
    Ръчно подбрани тематични списъци, показвани от страницата на сайта като
-   бутони. Всяка промяна презаписва katalog.json веднага (writeCatalogIfConfigured),
+   бутони. Всяка промяна насрочва запис на katalog.json (scheduleCatalogWrite),
    за да се отрази при следващото автоматично публикуване. */
 ipcMain.handle('shelves:list', () =>
   run(() => db.prepare(`
