@@ -108,20 +108,48 @@ test('migration v2 adds pdp_salt/pdp_verifier and advances user_version, for bot
   dbB.close();
 });
 
-test('migration chain v2+v3 (PII columns + FTS5 search indexes) reaches user_version 3 from scratch', () => {
-  const MIGRATIONS = [
-    { version: 2, run: (db) => ensureColumns(db, 'settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }) },
-    { version: 3, run: (db) => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } }
-  ];
+const FULL_MIGRATIONS = [
+  { version: 2, run: (db) => ensureColumns(db, 'settings', { pdp_salt: 'TEXT', pdp_verifier: 'TEXT' }) },
+  { version: 3, run: (db) => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } },
+  { version: 4, run: (db) => {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_books_barcode ON books(barcode)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_loans_book_open ON loans(book_id, date_in)');
+  } }
+];
+
+test('migration chain v2+v3+v4 (PII columns + FTS5 search + barcode/loans indexes) reaches user_version 4 from scratch', () => {
   const db = freshDb();
   db.prepare('INSERT INTO books (title) VALUES (?)').run('Преди миграцията вече вкаран документ');
-  runMigrationsLike(db, MIGRATIONS.map(m => ({ version: m.version, run: () => m.run(db) })), 3);
-  assert.equal(db.pragma('user_version', { simple: true }), 3);
+  runMigrationsLike(db, FULL_MIGRATIONS.map(m => ({ version: m.version, run: () => m.run(db) })), 4);
+  assert.equal(db.pragma('user_version', { simple: true }), 4);
   const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name));
   assert.ok(tables.has('books_fts') && tables.has('readers_fts'));
   // Документ, добавен ПРЕДИ миграцията, трябва да е обхванат от еднократното
   // INSERT INTO ... SELECT в BOOKS_FTS_SETUP_SQL, не само бъдещите вмъквания.
   const hit = db.prepare("SELECT rowid FROM books_fts WHERE books_fts MATCH '\"миграцията\"*'").all();
   assert.equal(hit.length, 1);
+  const indexes = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(r => r.name));
+  assert.ok(indexes.has('idx_books_barcode'));
+  assert.ok(indexes.has('idx_loans_book_open'));
+  db.close();
+});
+
+test('v4 index migration on an already-versioned DB (v3) with pre-existing DUPLICATE barcodes does not throw', () => {
+  // Точно причината, поради която v4 нарочно НЕ добавя UNIQUE — реална
+  // инсталация може вече да има дублирани баркодове от по-стари данни, а
+  // обикновен (не-уникален) индекс трябва да мине без проблем върху тях.
+  const db = freshDb();
+  db.pragma('user_version = 3');
+  db.exec(BOOKS_FTS_SETUP_SQL);
+  db.exec(READERS_FTS_SETUP_SQL);
+  db.prepare('INSERT INTO books (title, barcode) VALUES (?, ?)').run('Книга А', '000123');
+  db.prepare('INSERT INTO books (title, barcode) VALUES (?, ?)').run('Книга Б (дублиран баркод)', '000123');
+  const v4Only = [FULL_MIGRATIONS[2]];
+  assert.doesNotThrow(() => {
+    runMigrationsLike(db, v4Only.map(m => ({ version: m.version, run: () => m.run(db) })), 4);
+  });
+  assert.equal(db.pragma('user_version', { simple: true }), 4);
+  const dupCount = db.prepare("SELECT COUNT(*) AS n FROM books WHERE barcode = '000123'").get().n;
+  assert.equal(dupCount, 2, 'both pre-existing duplicate rows must survive the migration untouched');
   db.close();
 });

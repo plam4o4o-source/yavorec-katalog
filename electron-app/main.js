@@ -266,7 +266,7 @@ function initDb() {
    само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
    просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
    без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -276,7 +276,24 @@ const MIGRATIONS = [
   // (name), с unicode61 токенайзер: решава едновременно пълното сканиране при
   // всяко търсене и дефекта, че кирилицата не се сгъва по регистър в LIKE
   // ("белият" не намираше "Белият"). Виж search-fts.js за подробности.
-  { version: 3, run: () => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } }
+  { version: 3, run: () => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); } },
+  // v4 — два допълнителни индекса (Фаза 4, "евтини поправки" от анализа):
+  // books.barcode нямаше никакъв индекс, въпреки че books:byBarcode и
+  // сканирането от таблото търсят точно по него при всяко сканиране на
+  // баркод; loans(book_id, date_in) е композитен индекс за най-честата
+  // проверка "тази книга заета ли е в момента" (използва се в BOOK_SELECT
+  // за ВСЕКИ ред от списъка с книги — коренна причина за забавяне при
+  // голям фонд). Нарочно БЕЗ UNIQUE на barcode: съществуващи инсталации
+  // може вече да имат дублирани/празни баркодове от по-стари данни или
+  // ръчно въведени грешки — добавянето на UNIQUE constraint би счупило
+  // миграцията (и оттам — стартирането на програмата) на всяка база с
+  // такъв дубликат, без предварителна проверка/почистване на данните.
+  // Истинското UNIQUE изисква отделна стъпка за откриване и решаване на
+  // дублиращите се баркодове от библиотекаря, не тихо налагане тук.
+  { version: 4, run: () => {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_books_barcode ON books(barcode)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_loans_book_open ON loans(book_id, date_in)');
+  } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
@@ -1374,7 +1391,12 @@ ipcMain.handle('books:list', (e, query, sort) =>
 );
 ipcMain.handle('books:get', (e, id) => run(() => db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
 ipcMain.handle('books:byBarcode', (e, code) =>
-  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?`).get(code, code))
+  // CAST-ва се ПАРАМЕТЪРЪТ, не колоната — CAST(b.inv_number AS TEXT) = ? би
+  // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
+  // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
+  // (потвърдено с EXPLAIN QUERY PLAN: с тази форма планът е MULTI-INDEX OR по
+  // двата индекса).
+  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code))
 );
 
 ipcMain.handle('books:create', (e, book) =>
@@ -1555,7 +1577,7 @@ ipcMain.handle('deaccessionActs:nextNo', (e, year) =>
   })
 );
 ipcMain.handle('deaccessionActs:findBook', (e, code) =>
-  run(() => db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?) AND b.status != 'отчислен'`).get(code, code))
+  run(() => db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(code, code))
 );
 ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
   run(() => {
@@ -2115,7 +2137,7 @@ ipcMain.handle('holds:list', () =>
 );
 ipcMain.handle('holds:add', (e, { reader_id, code }) =>
   run(() => {
-    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
     const openLoan = db.prepare('SELECT reader_id FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id);
@@ -2237,7 +2259,7 @@ ipcMain.handle('loans:extend', (e, { id }) =>
 ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
   run(() => {
     const tx = db.transaction(() => {
-      const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR CAST(b.inv_number AS TEXT) = ?`).get(code, code);
+      const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
       const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
@@ -2262,7 +2284,7 @@ ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
 );
 ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
   run(() => {
-    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?').get(code, code);
+    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     const loan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
     if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
@@ -2399,7 +2421,7 @@ ipcMain.handle('inventorySessions:scan', (e, { sessionId, code }) =>
   run(() => {
     const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
     if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
-    const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?`).get(code, code);
+    const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(code, code);
     if (!b) throw new Error('Непознат баркод/инв. № ' + code);
     const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
     if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
@@ -3383,7 +3405,7 @@ ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
     if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
     const list = [...new Set((codes || []).map(c => String(c).trim()).filter(Boolean))];
     if (!list.length) throw new Error('Списъкът е празен.');
-    const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?');
+    const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)');
     const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');
     const addScan = db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)');
     const addCheck = db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)');
@@ -3861,7 +3883,7 @@ ipcMain.handle('shelves:delete', (e, id) =>
 );
 ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
   run(() => {
-    const b = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR CAST(inv_number AS TEXT) = ?')
+    const b = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)')
       .get(code, code);
     if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
     if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
