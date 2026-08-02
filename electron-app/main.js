@@ -640,21 +640,16 @@ ipcMain.handle('settings:noticeDefaults', () =>
    монолита main.js на модули по домейн). */
 require('./handlers/categories')(ipcMain, { getDb: () => db, run });
 
-/* ---------------- Книги ---------------- */
-const BOOK_SELECT = `
-  SELECT b.*, c.name AS category_name,
-         COALESCE(i.quantity, 0) AS quantity,
-         COALESCE(i.quantity, 0) - COALESCE((
-           SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.date_in IS NULL
-         ), 0) AS available
-  FROM books b
-  LEFT JOIN categories c ON c.id = b.category_id
-  LEFT JOIN inventory i ON i.book_id = b.id
-`;
-const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
-  'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
-  'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
-  'status', 'status_date', 'price', 'description', 'acquisition_id', 'cn_sort'];
+/* ---------------- Книги (фонд) + Лимит на броя записи ----------------
+   Извадени в handlers/books.js (Фаза 4, стъпка 34, последният от "големите
+   пет"). BOOK_SELECT/BOOK_FIELDS/checkRecordLimit се връщат обратно, защото
+   по-рано извадени модули (acquisitions.js, deaccession-acts.js, loans.js,
+   catalog.js, readers.js) вече ги ползват по пряка референция в обект,
+   подаден на require(), позициониран СЛЕД това място — същият модел, както
+   при LOAN_SELECT/firstActiveHold. */
+const { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit } = require('./handlers/books')(ipcMain, {
+  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite
+});
 
 /* ---------------- Контрол на авторитетните данни ----------------
    Извадени в handlers/authorities.js (Фаза 4, стъпка 11 от разбиването на
@@ -665,177 +660,6 @@ require('./handlers/authorities')(ipcMain, { getDb: () => db, run, logAudit });
    Извадени в handlers/av.js (Фаза 4, стъпка 12 от разбиването на монолита
    main.js на модули по домейн). */
 require('./handlers/av')(ipcMain, { getDb: () => db, run, logAudit });
-
-/* ---------------- Лимит на броя записи ----------------
-   Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
-   Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
-   остава възможна дори ако лимитът вече е достигнат или намален след това. */
-function checkRecordLimit(kind) {
-  const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
-  const cfg = kind === 'books'
-    ? { limit: s.limit_books, table: 'books', label: 'документи във фонда' }
-    : { limit: s.limit_readers, table: 'readers', label: 'читатели' };
-  const limit = parseInt(cfg.limit, 10) || 0;
-  if (limit <= 0) return;
-  const n = db.prepare(`SELECT COUNT(*) AS n FROM ${cfg.table}`).get().n;
-  if (n >= limit) {
-    throw new Error(`Достигнат е зададеният лимит от ${limit} ${cfg.label}. ` +
-      'Увеличете или премахнете лимита в „Настройки“ → „Ограничения“, за да добавяте нови записи.');
-  }
-}
-ipcMain.handle('limits:usage', () =>
-  run(() => {
-    const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
-    return {
-      books: db.prepare('SELECT COUNT(*) AS n FROM books').get().n,
-      readers: db.prepare('SELECT COUNT(*) AS n FROM readers').get().n,
-      limitBooks: parseInt(s.limit_books, 10) || 0,
-      limitReaders: parseInt(s.limit_readers, 10) || 0
-    };
-  })
-);
-ipcMain.handle('limits:update', (e, { limit_books, limit_readers }) =>
-  run(() => {
-    db.prepare('UPDATE settings SET limit_books=?, limit_readers=? WHERE id=1')
-      .run(Math.max(0, parseInt(limit_books, 10) || 0), Math.max(0, parseInt(limit_readers, 10) || 0));
-    logAudit('Редакция на настройки', 'променени лимити на записите');
-  })
-);
-
-/* prev — досегашният ред от базата (при редакция): status_date се обновява само
-   когато статусът реално се променя, а не при всяко записване на формата. */
-function bookPayload(b, prev) {
-  const out = {};
-  BOOK_FIELDS.forEach(f => { out[f] = b[f] === undefined || b[f] === '' ? null : b[f]; });
-  if (out.inv_number != null) out.inv_number = parseInt(out.inv_number, 10);
-  if (out.category_id != null) out.category_id = parseInt(out.category_id, 10);
-  if (out.acquisition_id != null) out.acquisition_id = parseInt(out.acquisition_id, 10);
-  out.price = b.price ? parseFloat(b.price) : 0;
-  out.status = b.status || 'наличен';
-  out.register_date = b.register_date || today();
-  out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
-  out.status_date = !prev ? today()
-    : (prev.status !== out.status ? today() : (prev.status_date || null));
-  return out;
-}
-
-// sort: 'title' (по подразбиране), 'cn' (по сигнатура — cn_sort нарежда „Ч-9" преди
-// „Ч-84", виж cnSortKey) или 'inv' (по инвентарен номер). Изборът е от фиксиран
-// списък тук, никога суров SQL от интерфейса.
-const BOOK_ORDERS = { title: 'b.title', cn: "b.cn_sort IS NULL, b.cn_sort, b.title", inv: 'b.inv_number' };
-ipcMain.handle('books:list', (e, query, sort) =>
-  run(() => {
-    const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
-    if (query && query.trim()) {
-      const q = `%${query.trim()}%`;
-      // Заглавие/подзаглавие/автор минават през FTS5 (unicode61) — сгъва регистъра
-      // и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
-      // таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
-      // потребителите очакват "съдържа навсякъде", а не само префикс.
-      return db.prepare(`${BOOK_SELECT}
-        WHERE b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
-           OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
-        ORDER BY ${order}`).all(ftsQuery(query), q, q, q);
-    }
-    return db.prepare(`${BOOK_SELECT} ORDER BY ${order}`).all();
-  })
-);
-ipcMain.handle('books:get', (e, id) => run(() => db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
-ipcMain.handle('books:byBarcode', (e, code) =>
-  // CAST-ва се ПАРАМЕТЪРЪТ, не колоната — CAST(b.inv_number AS TEXT) = ? би
-  // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
-  // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
-  // (потвърдено с EXPLAIN QUERY PLAN: с тази форма планът е MULTI-INDEX OR по
-  // двата индекса).
-  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code))
-);
-
-ipcMain.handle('books:create', (e, book) =>
-  run(() => {
-    checkRecordLimit('books');
-    const tx = db.transaction((b) => {
-      const payload = bookPayload(b);
-      const info = db.prepare(`
-        INSERT INTO books (${BOOK_FIELDS.join(',')}, register_date)
-        VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')}, @register_date)
-      `).run(payload);
-      const id = info.lastInsertRowid;
-      db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)')
-        .run(id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
-      if (payload.inv_number) {
-        const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get();
-        if (payload.inv_number >= s.next_inv_number) {
-          db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(payload.inv_number + 1);
-        }
-      }
-      logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
-      return id;
-    });
-    const id = tx(book);
-    scheduleCatalogWrite();
-    return id;
-  })
-);
-ipcMain.handle('books:update', (e, book) =>
-  run(() => {
-    const tx = db.transaction((b) => {
-      const prev = db.prepare('SELECT * FROM books WHERE id = ?').get(b.id);
-      const payload = bookPayload(b, prev);
-      db.prepare(`
-        UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
-      `).run(Object.assign({ id: b.id }, payload));
-      db.prepare(`
-        INSERT INTO inventory (book_id, quantity) VALUES (?, ?)
-        ON CONFLICT(book_id) DO UPDATE SET quantity = excluded.quantity
-      `).run(b.id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
-      const diff = diffFields(prev, payload, BOOK_FIELDS);
-      logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
-    });
-    tx(book);
-    scheduleCatalogWrite();
-  })
-);
-ipcMain.handle('books:delete', (e, id) =>
-  run(() => {
-    db.prepare('DELETE FROM books WHERE id = ?').run(id);
-    scheduleCatalogWrite();
-  })
-);
-/* Групова редакция — смяна на едно поле на много документи наведнъж (Koha: "batch item
-   modification"). Полето идва от списък с изрично позволени имена (никога суров SQL
-   от renderer-а), а „отчислен“ е нарочно изваден от позволените стойности за „status“:
-   отчисляването минава единствено през формален акт (раздел „Отчисляване“, чл. 30–39),
-   не бива да е на един клик разстояние от таблицата с книги. По същата причина вече
-   отчислени документи не се пипат от груповата редакция, дори да са били маркирани. */
-const BULK_EDIT_FIELDS = ['department', 'status', 'category_id', 'language'];
-const BULK_EDIT_STATUS_VALUES = ['наличен', 'липсващ', 'за реставрация'];
-ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
-  run(() => {
-    if (!BULK_EDIT_FIELDS.includes(field)) throw new Error('Непозволено поле за групова редакция.');
-    if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
-    if (field === 'status' && !BULK_EDIT_STATUS_VALUES.includes(value)) {
-      throw new Error('Отчисляването на документи минава само през акт за отчисляване (раздел „Отчисляване“), не и през групова редакция.');
-    }
-    const v = field === 'category_id' ? (value ? parseInt(value, 10) : null) : (value || null);
-    const placeholders = ids.map(() => '?').join(',');
-    // Смяната на статус носи и датата си (Koha: датирани статуси) — иначе справката
-    // „кога стана липсваща" няма отговор.
-    const extra = field === 'status' ? ", status_date = date('now')" : '';
-    const tx = db.transaction(() => db.prepare(
-      `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND status != 'отчислен'`
-    ).run(v, ...ids).changes);
-    const changes = tx();
-    logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
-    scheduleCatalogWrite();
-    return changes;
-  })
-);
-ipcMain.handle('books:addCheck', (e, { bookId, date }) =>
-  run(() => db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(bookId, date || today()))
-);
-ipcMain.handle('books:checks', (e, bookId) =>
-  run(() => db.prepare('SELECT date FROM inventory_checks WHERE book_id = ? ORDER BY date').all(bookId))
-);
 
 /* ---------------- Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) ----------------
    Извадени в handlers/inv-book.js (Фаза 4, стъпка 13 от разбиването на

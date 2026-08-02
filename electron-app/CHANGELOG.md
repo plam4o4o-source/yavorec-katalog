@@ -11,6 +11,47 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.56.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 34 — последният
+от "големите пет"): "Книги" (фондът) и вложеният в същата секция "Лимит на
+броя записи" са изнесени в `handlers/books.js` — 9 handler-а
+(`books:list/get/byBarcode/create/update/delete/bulkUpdate/addCheck/checks`)
+плюс `limits:usage/update`. `BOOK_SELECT`/`BOOK_FIELDS`/`checkRecordLimit` се
+връщат обратно към `main.js`, защото по-рано извадени модули
+(`acquisitions.js`, `deaccession-acts.js`, `loans.js`, `catalog.js`,
+`readers.js`) вече ги ползват по пряка референция в обект, подаден на техния
+`require()`, изпълнен СЛЕД мястото на `handlers/books.js` — същият модел на
+връщане напред, установен за `LOAN_SELECT`/`firstActiveHold`. IPC
+поведението е напълно непроменено. Нов тест: `test/handlers-books.test.js`
+(11 теста) — общо 381 теста (бяха 370).
+
+С това всичките "големи пет" (заемания, каталог, справки, настройки, книги)
+и всички по-малки домейни от първоначалния план са извадени от `main.js` —
+остават само дневникът/краеведските модули (вече извадени в предишни
+версии), внасянето от други системи и мобилният импорт на сканирано (виж
+статуса на Фаза 4 в предишните записи).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 34 — the last of the
+"big five"): the "books" (fund) domain, along with the "record count limit"
+sub-section nested in the same block, moves to `handlers/books.js` — 9
+handlers (`books:list/get/byBarcode/create/update/delete/bulkUpdate/
+addCheck/checks`) plus `limits:usage/update`. `BOOK_SELECT`/`BOOK_FIELDS`/
+`checkRecordLimit` are returned back to `main.js`, since previously
+extracted modules (`acquisitions.js`, `deaccession-acts.js`, `loans.js`,
+`catalog.js`, `readers.js`) already depend on them by direct reference in
+an object passed to their `require()`, which runs AFTER
+`handlers/books.js`'s position — the same forward-return pattern already
+established for `LOAN_SELECT`/`firstActiveHold`. IPC behavior is fully
+unchanged. New test file `test/handlers-books.test.js` (11 tests) — 381
+tests total (up from 370).
+
+With this, all of the "big five" (loans, catalog, reports, settings, books)
+and every smaller domain from the original plan have been extracted from
+`main.js` — what remains is the journal/local-history cluster (already
+extracted in earlier versions), data import from other systems, and the
+mobile phone-scan import (see the Phase 4 status in earlier entries).
+
 ## v1.55.0
 
 **BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 33, един от
