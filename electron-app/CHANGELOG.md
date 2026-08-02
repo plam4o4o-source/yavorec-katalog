@@ -11,6 +11,27 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.43.0
+
+**Промени — двайсети извлечен домейн от main.js (Фаза 4, стъпка 21), без промяна в поведението:**
+- "Резервации" (3 IPC канала: holds:list/add/cancel) изведени в
+  `handlers/holds.js`. `firstActiveHold`/`consumeHoldOnCheckout`/
+  `activateHoldOnReturn` се връщат обратно към main.js (по същия модел като
+  `handlers/calendar.js`/`handlers/circ-rules.js`), защото ги ползва
+  домейнът "Заемания", който все още е в main.js и е следващият за
+  извличане — той е плътно свързан с резервациите (при заемане/връщане
+  трябва да провери/задели активна резервация).
+- IPC поведението непроменено. Нов тестови файл (9 нови теста, общо 231).
+
+**Changes — twentieth domain extracted from main.js (Phase 4, step 21), no behavior change:**
+- "Holds" (3 IPC channels: holds:list/add/cancel) extracted into
+  `handlers/holds.js`. `firstActiveHold`/`consumeHoldOnCheckout`/
+  `activateHoldOnReturn` are returned back to main.js (same pattern as
+  `handlers/calendar.js`/`handlers/circ-rules.js`), since the still-
+  unextracted "Loans" domain — next in line, and tightly coupled to holds
+  (checkout/return must check/promote an active hold) — depends on them.
+- IPC behavior unchanged. New test file (9 new tests, 231 total).
+
 ## v1.42.0
 
 **Промени — три извлечени домейна от main.js (Фаза 4, стъпки 18-20), без промяна в поведението:**
