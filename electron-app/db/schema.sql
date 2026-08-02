@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS readers (
   guarantor_relation TEXT,   -- родител | настойник | друго
   guarantor_phone    TEXT,   -- контакт и отговорност носи гарантът, не детето
   note              TEXT,
+  alert_note        TEXT,    -- изскача открояващо се при избор в „Заемане и връщане" (Koha: patron messages)
   created_at        TEXT DEFAULT (datetime('now'))
 );
 
@@ -234,6 +235,61 @@ CREATE TABLE IF NOT EXISTS catalog_shelf_items (
   sort     INTEGER DEFAULT 0,
   PRIMARY KEY (shelf_id, book_id)
 );
+
+-- Правила за обслужване по категория читатели (Koha: circulation_rules). Всяко поле,
+-- оставено празно (NULL), пада обратно към глобалната настройка в settings — така
+-- библиотека, която не пипа нищо тук, работи точно както преди тази версия.
+CREATE TABLE IF NOT EXISTS circulation_rules (
+  category          TEXT PRIMARY KEY,
+  loan_days         INTEGER,
+  max_books         INTEGER,
+  extensions_count  INTEGER,
+  extension_days    INTEGER,
+  suspend_per_day   REAL,
+  suspend_max       INTEGER
+);
+
+-- Календар на библиотеката (Koha: repeatable_holidays + special_holidays). work_days
+-- в settings пази кои дни от седмицата библиотеката работи (0=неделя…6=събота);
+-- calendar_closed добавя конкретни затворени дати (официални празници, отпуск).
+-- Падеж, който се пада в затворен ден, се измества към следващия работен ден;
+-- наказанието в дни не брои затворени дни (виж closedDaysBetween в main.js).
+CREATE TABLE IF NOT EXISTS calendar_closed (
+  date    TEXT PRIMARY KEY,
+  reason  TEXT
+);
+
+-- Читателска сметка (Koha: accountlines) — начисления (годишна такса, обезщетение за
+-- изгубена книга) и плащания в един ред на движение. amount > 0 = начислено (дължи се),
+-- amount < 0 = платено. Балансът на читателя е SUM(amount).
+CREATE TABLE IF NOT EXISTS account_lines (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  reader_id   INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+  date        TEXT NOT NULL,
+  kind        TEXT NOT NULL,   -- начисление | плащане
+  type        TEXT,            -- годишна такса | обезщетение | друго
+  amount      REAL NOT NULL,
+  note        TEXT,
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_account_reader ON account_lines(reader_id, date);
+
+-- Предложения за покупка от читатели (Koha: suggestions) — от устна/писмена заявка на
+-- гишето до получаване. reader_id е незадължителен (читателят може вече да не е в базата
+-- или предложението да идва анонимно); reader_name пази името дори читателят да отпадне.
+CREATE TABLE IF NOT EXISTS suggestions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  date           TEXT NOT NULL,
+  reader_id      INTEGER REFERENCES readers(id) ON DELETE SET NULL,
+  reader_name    TEXT,
+  author         TEXT,
+  title          TEXT NOT NULL,
+  note           TEXT,
+  status         TEXT DEFAULT 'заявено',  -- заявено | одобрено | поръчано | получено | отказано
+  acquisition_id INTEGER REFERENCES acquisitions(id) ON DELETE SET NULL,
+  created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status, date);
 
 -- Резервации: читател чака заета книга. Опашката е по реда на заявяване.
 -- status: чака (книгата е още у друг) → заделена (върната е и стои настрана
@@ -467,6 +523,7 @@ CREATE TABLE IF NOT EXISTS settings (
   remind2_days      INTEGER DEFAULT 14, -- след толкова дни просрочие напомнянето става 2-ра степен
   remind3_days      INTEGER DEFAULT 30, -- ... и 3-та степен
   anonymize_years   INTEGER DEFAULT 0,  -- анонимизиране на върнати заемания, по-стари от N години; 0 = изключено
+  work_days         TEXT DEFAULT '0,1,2,3,4,5,6',  -- работни дни от седмицата (0=нед…6=съб); по подразбиране всички — без промяна за библиотеки, които не пипат календара
   gh_user           TEXT,
   gh_repo           TEXT,
   gh_branch         TEXT DEFAULT 'main',

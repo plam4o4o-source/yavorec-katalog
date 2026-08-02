@@ -374,7 +374,7 @@ const NAV = [
   { g: 'Фонд', items: [['books', 'Книги'], ['invbook', 'Инвентарна книга'],
     ['kdbf', 'КДБФ'], ['acq', 'Постъпления'], ['acts', 'Отчисляване'], ['invent', 'Инвентаризация'],
     ['auth', 'Авторитетни данни']] },
-  { g: 'Читатели', items: [['readers', 'Читатели'], ['circ', 'Заемане и връщане'], ['over', 'Просрочени']] },
+  { g: 'Читатели', items: [['readers', 'Читатели'], ['circ', 'Заемане и връщане'], ['over', 'Просрочени'], ['sugg', 'Предложения за покупка']] },
   { g: 'Други регистри', items: [['periodika', 'Периодика'], ['mzs', 'МЗС'], ['dnevnik', 'Дневник']] },
   { g: 'Краезнание', items: [['analytics', 'Аналитично описание'], ['persons', 'Персоналии'], ['chronicle', 'Летопис']] },
   { g: 'Отчети', items: [['stats', 'Справки и статистика'], ['reports', 'Готови справки'], ['catalog', 'Онлайн каталог'], ['labels', 'Баркод етикети'], ['odit', 'Одитна следа']] },
@@ -382,7 +382,7 @@ const NAV = [
 ];
 const NAV_ICONS = {
   dash: '📊', books: '📚', invbook: '📖', kdbf: '📒', acq: '📥', acts: '📤',
-  invent: '🗃️', auth: '🗂️', readers: '👥', circ: '🔄', over: '⏰',
+  invent: '🗃️', auth: '🗂️', readers: '👥', circ: '🔄', over: '⏰', sugg: '💡',
   periodika: '📰', mzs: '🤝', dnevnik: '📅', analytics: '📑', persons: '👤',
   chronicle: '🕰️', stats: '📈', reports: '🗒️', catalog: '🌐', labels: '🏷️', odit: '🧾', setup: '⚙️'
 };
@@ -398,6 +398,7 @@ const TITLES = {
   readers: ['Читатели', 'регистър на ползвателите'],
   circ: ['Заемане и връщане', 'чл. 42 – 49'],
   over: ['Просрочени заемания', 'контрол по чл. 43 и 49'],
+  sugg: ['Предложения за покупка', 'читателите предлагат заглавия — от заявка до партида'],
   periodika: ['Периодика', 'картотека на постъпилите броеве'],
   mzs: ['Междубиблиотечно заемане', 'заявки от и към други библиотеки'],
   dnevnik: ['Дневник на библиотеката', 'месечен статистически дневник — Раздел А и Раздел Б'],
@@ -429,7 +430,7 @@ function drawNav() {
 const RENDERERS = {
   dash: renderDash, books: renderBooks, invbook: renderInvBook,
   kdbf: renderKdbf, acq: renderAcq, acts: renderActs, invent: renderInvent,
-  auth: renderAuth, readers: renderReaders, circ: renderCirc, over: renderOver,
+  auth: renderAuth, readers: renderReaders, circ: renderCirc, over: renderOver, sugg: renderSuggestions,
   periodika: renderPeriodika, mzs: renderMzs, dnevnik: renderDnevnik,
   analytics: renderAnalytics, persons: renderPersons, chronicle: renderChronicle,
   stats: renderStats, reports: renderReports, catalog: renderCatalog, labels: renderLabels, odit: renderOdit, setup: renderSetup
@@ -595,7 +596,7 @@ async function renderDash() {
           <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
         </div>
       </div>
-      <div class="card"><h3 style="margin-top:0">📋 За днес</h3>
+      <div class="card"><h3 style="margin-top:0">📋 За днес${r.today.isTodayOpen === false ? ' <span class="badge warn">затворен ден</span>' : ''}</h3>
         <div class="statRows">
           <div><span>Връщания до 3 дни — напомнете <b>преди</b> срока</span>
             <b>${r.upcoming.length ? `<a href="#circ">${r.upcoming.length}</a>` : '0'}</b></div>
@@ -1787,13 +1788,15 @@ async function renderReaders() {
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
     </div>
     <div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:230px"></th></tr></thead>
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:290px"></th></tr></thead>
       <tbody>
         ${readers.length ? readers.map(r => `
-          <tr><td>${esc(r.name)}</td><td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
+          <tr><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
+            <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
             <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
             <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
                 <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
+                <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
                 <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
           : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`}
       </tbody>
@@ -1833,6 +1836,8 @@ async function readerForm(id) {
         ${fld('Състояние', 'status', { type: 'select', opts: ['активен', 'прекратен'], val: v.status, allowEmpty: false })}
         ${fld('Забележка', 'note', { val: v.note || '' })}
       </div>
+      ${fld('Бележка при заемане', 'alert_note', { val: v.alert_note || '', type: 'textarea', rows: 2,
+        hint: 'изскача открояващо се, щом читателят бъде избран в „Заемане и връщане" — напр. „носи още старата книга на брат си"' })}
       ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.'
         + (v.gdpr_consent_date ? ' <span class="fh">(дадено на ' + bg(v.gdpr_consent_date) + ')</span>' : ''),
         'gdpr_consent', { type: 'checkbox', val: v.gdpr_consent })}
@@ -1856,6 +1861,7 @@ async function readerForm(id) {
     </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
+     ${id ? `<button class="btn" onclick="accountModal(${id})">Сметка</button>` : ''}
      <button class="btn pri" onclick="saveReader(${id || 'null'})">Запиши</button>`);
   if (id) $('#readerF').dataset.id = id;
 }
@@ -1893,6 +1899,225 @@ async function deleteReader(id) {
   renderReaders();
 }
 window.deleteReader = deleteReader;
+
+/* ---------------- Читателска сметка ---------------- */
+async function accountModal(readerId) {
+  const [r, acc, s] = await Promise.all([
+    call(window.api.readers.get(readerId)), call(window.api.account.get(readerId)), call(window.api.settings.get())
+  ]);
+  if (!r || !acc) return;
+  window._ACC_READER = r;
+  window._ACC_LINES = acc.lines;
+  const balColor = acc.balance > 0 ? 'var(--red)' : (acc.balance < 0 ? 'var(--green)' : 'inherit');
+  const fee = (s && s.annual_fee) ? Number(s.annual_fee) : 0;
+  modal('Сметка — ' + r.name, `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="hint">Карта ${esc(r.card_no || '—')}</div>
+      <div style="font-size:1.1rem"><b style="color:${balColor}">${mny(acc.balance)}</b>
+        <span class="hint">${acc.balance > 0 ? ' (дължи)' : acc.balance < 0 ? ' (надплатено)' : ''}</span></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn sm" onclick="chargeAnnualFee(${readerId}, ${fee})" ${fee ? '' : 'disabled title="Годишната такса в Настройки е 0"'}>
+        + Годишна такса (${mny(fee)})</button>
+      <button class="btn sm" onclick="chargeOther(${readerId})">+ Друго начисление…</button>
+      <button class="btn sm pri" onclick="payAccount(${readerId})">Плащане…</button>
+    </div>
+    <div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
+      <th>Дата</th><th>Вид</th><th>Сума</th><th>Бележка</th><th style="width:130px"></th></tr></thead><tbody>
+      ${acc.lines.length ? acc.lines.map(l => `<tr><td class="num">${bg(l.date)}</td>
+        <td>${esc(l.type || l.kind)}</td>
+        <td class="num" style="color:${l.amount > 0 ? 'var(--red)' : 'var(--green)'}">${l.amount > 0 ? '+' : ''}${mny(l.amount)}</td>
+        <td style="font-size:12px">${esc(l.note || '')}</td>
+        <td><button class="btn sm" onclick="printReceiptLine(${l.id})">Квитанция</button>
+            <button class="btn sm dgr" onclick="deleteAccountLine(${readerId},${l.id})">✕</button></td></tr>`).join('')
+        : '<tr><td colspan="5" class="empty">Няма движения.</td></tr>'}
+    </tbody></table></div>`,
+    `<button class="btn" onclick="closeModal()">Затвори</button>`);
+}
+window.accountModal = accountModal;
+async function chargeAnnualFee(readerId, fee) {
+  if (!fee) return;
+  if (!confirm('Начисли годишна такса ' + mny(fee) + '?')) return;
+  const id = await call(window.api.account.charge({ reader_id: readerId, type: 'годишна такса', amount: fee, date: today() }), 'Начислено.');
+  if (id != null) { markSaved(); accountModal(readerId); }
+}
+window.chargeAnnualFee = chargeAnnualFee;
+function chargeOther(readerId) {
+  modal2('Ново начисление', `
+    <form id="chgF" onsubmit="return false">
+      ${fld('Вид', 'type', { type: 'select', opts: ['годишна такса', 'обезщетение', 'друго'], val: 'друго', allowEmpty: false })}
+      ${fld('Сума (лв.)', 'amount', { type: 'number', step: '0.01', val: '', req: 1 })}
+      ${fld('Бележка', 'note', { val: '' })}
+    </form>`,
+    `<button class="btn" onclick="closeModal2()">Отказ</button>
+     <button class="btn pri" onclick="saveCharge(${readerId})">Начисли</button>`);
+}
+window.chargeOther = chargeOther;
+async function saveCharge(readerId) {
+  const d = formData('#chgF');
+  if (!d.amount || Number(d.amount) <= 0) return toast('Въведете сума.', 'err');
+  const id = await call(window.api.account.charge({ reader_id: readerId, type: d.type, amount: d.amount, note: d.note, date: today() }), 'Начислено.');
+  if (id != null) { closeModal2(); markSaved(); accountModal(readerId); }
+}
+window.saveCharge = saveCharge;
+function payAccount(readerId) {
+  modal2('Плащане', `
+    <form id="payF" onsubmit="return false">
+      ${fld('Сума (лв.)', 'amount', { type: 'number', step: '0.01', val: '', req: 1 })}
+      ${fld('Бележка', 'note', { val: '' })}
+    </form>`,
+    `<button class="btn" onclick="closeModal2()">Отказ</button>
+     <button class="btn pri" onclick="savePayment(${readerId})">Плати</button>`);
+}
+window.payAccount = payAccount;
+async function savePayment(readerId) {
+  const d = formData('#payF');
+  if (!d.amount || Number(d.amount) <= 0) return toast('Въведете сума.', 'err');
+  const id = await call(window.api.account.pay({ reader_id: readerId, amount: d.amount, note: d.note, date: today() }), 'Записано плащане.');
+  if (id != null) { closeModal2(); markSaved(); accountModal(readerId); printReceiptLine(id); }
+}
+window.savePayment = savePayment;
+async function deleteAccountLine(readerId, id) {
+  if (!confirm('Изтриване на записа от сметката?')) return;
+  const ok = await call(window.api.account.deleteLine(id), 'Изтрито.');
+  if (ok !== null) { markSaved(); accountModal(readerId); }
+}
+window.deleteAccountLine = deleteAccountLine;
+function printReceiptLine(lineId) {
+  const line = (window._ACC_LINES || []).find(l => l.id === lineId);
+  const r = window._ACC_READER;
+  if (!line || !r) return;
+  setPrintPage({ name: 'Квитанция — ' + r.name + ' — ' + bg(line.date), landscape: false, margin: '20mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2 style="font-size:16pt">КВИТАНЦИЯ</h2>
+    <div class="pmeta">Дата: <b>${bg(line.date)}</b><br>
+    Читател: <b>${esc(r.name)}</b>${r.card_no ? ' (карта ' + esc(r.card_no) + ')' : ''}<br>
+    ${line.kind === 'плащане' ? 'Платена сума' : 'Начислена сума'}: <b>${mny(Math.abs(line.amount))}</b><br>
+    Основание: <b>${esc(line.type || line.kind)}</b>${line.note ? '<br>Бележка: ' + esc(line.note) : ''}</div>
+    ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
+}
+window.printReceiptLine = printReceiptLine;
+
+/* ---------------- Предложения за покупка от читатели ---------------- */
+const SUGG_STATUSES = ['заявено', 'одобрено', 'поръчано', 'получено', 'отказано'];
+let SUGG_STATUS = '';
+async function renderSuggestions() {
+  const rows = await call(window.api.suggestions.list(SUGG_STATUS || undefined));
+  if (!rows) return;
+  $('#view').innerHTML = `
+    <div class="note" style="margin-top:0">Читател иска заглавие на гишето → заявено → одобрено → поръчано →
+    получено (закача се към партида в „Постъпления") или отказано. Директен канал „какво наистина искат хората",
+    вместо покупки на сляпо.</div>
+    <div class="toolbar">
+      <select onchange="SUGG_STATUS=this.value;renderSuggestions()">
+        <option value="">Всички състояния</option>
+        ${SUGG_STATUSES.map(st => `<option value="${st}" ${SUGG_STATUS === st ? 'selected' : ''}>${esc(st)}</option>`).join('')}
+      </select>
+      <span style="flex:1"></span>
+      <button class="btn pri" onclick="suggestionForm()">+ Ново предложение</button>
+    </div>
+    <div class="wrap"><table class="ledger"><thead><tr>
+      <th>Дата</th><th>Автор, заглавие</th><th>Читател</th><th>Бележка</th><th>Състояние</th><th style="width:260px"></th>
+    </tr></thead><tbody>
+    ${rows.length ? rows.map(s => `<tr>
+      <td class="num">${bg(s.date)}</td>
+      <td>${esc([s.author, s.title].filter(Boolean).join(' — '))}</td>
+      <td>${esc(s.reader_name || '—')}</td>
+      <td style="font-size:12px">${esc(s.note || '')}</td>
+      <td><span class="badge ${s.status === 'получено' ? 'ok' : (s.status === 'отказано' ? '' : 'warn')}">${esc(s.status)}</span>
+        ${s.acquisition_id ? `<div class="hint">партида № ${s.acq_no}/${s.acq_year}</div>` : ''}</td>
+      <td>${suggActionButtons(s)}</td>
+    </tr>`).join('') : `<tr><td colspan="6" class="empty">Няма предложения.</td></tr>`}
+    </tbody></table></div>`;
+}
+function suggActionButtons(s) {
+  if (s.status === 'заявено') return `<button class="btn sm" onclick="setSuggStatus(${s.id},'одобрено')">Одобри</button>
+    <button class="btn sm dgr" onclick="setSuggStatus(${s.id},'отказано')">Откажи</button>`;
+  if (s.status === 'одобрено') return `<button class="btn sm" onclick="setSuggStatus(${s.id},'поръчано')">Поръчано</button>
+    <button class="btn sm dgr" onclick="setSuggStatus(${s.id},'отказано')">Откажи</button>`;
+  if (s.status === 'поръчано') return `<button class="btn sm pri" onclick="receiveSuggestion(${s.id})">Получено…</button>`;
+  return `<button class="btn sm dgr" onclick="deleteSuggestion(${s.id})">Изтрий</button>`;
+}
+function suggestionForm() {
+  modal('Ново предложение за покупка', `
+    <form id="suggF" onsubmit="return false">
+      ${fld('Заглавие', 'title', { val: '', req: 1 })}
+      ${fld('Автор', 'author', { val: '' })}
+      ${fld('Читател (име или № карта — по желание)', 'reader_q', { val: '' })}
+      ${fld('Бележка', 'note', { val: '', type: 'textarea', rows: 2 })}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="saveSuggestion()">Запиши</button>`);
+}
+window.suggestionForm = suggestionForm;
+async function saveSuggestion() {
+  const d = formData('#suggF');
+  if (!d.title.trim()) return toast('Заглавието е задължително.', 'err');
+  let reader_id = null, reader_name = null;
+  const q = (d.reader_q || '').trim();
+  if (q) {
+    const byCard = await window.api.readers.byCard(q);
+    if (byCard.ok && byCard.data) { reader_id = byCard.data.id; reader_name = byCard.data.name; }
+    else {
+      const list = await window.api.readers.list(q);
+      if (list.ok && list.data && list.data[0]) { reader_id = list.data[0].id; reader_name = list.data[0].name; }
+      else reader_name = q;
+    }
+  }
+  const id = await call(window.api.suggestions.create({
+    title: d.title.trim(), author: d.author, note: d.note, reader_id, reader_name
+  }), 'Предложението е записано.');
+  if (id != null) { closeModal(); renderSuggestions(); }
+}
+window.saveSuggestion = saveSuggestion;
+async function setSuggStatus(id, status) {
+  const ok = await call(window.api.suggestions.setStatus({ id, status }), 'Обновено.');
+  if (ok !== null) { markSaved(); renderSuggestions(); }
+}
+window.setSuggStatus = setSuggStatus;
+async function receiveSuggestion(id) {
+  const acqs = await call(window.api.acquisitions.list());
+  if (!acqs) return;
+  modal2('Получено предложение', `
+    <div class="note" style="margin-top:0">По желание закачете предложението към партида в „Постъпления“, за да
+    остане следа откъде реално е дошла книгата.</div>
+    <form id="recvF" onsubmit="return false">
+      ${fld('Партида', 'acquisition_id', { type: 'select', emptyLabel: '— без партида —',
+        opts: acqs.map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') })) })}
+    </form>`,
+    `<button class="btn" onclick="closeModal2()">Отказ</button>
+     <button class="btn pri" onclick="confirmReceive(${id})">Отбележи получено</button>`);
+}
+window.receiveSuggestion = receiveSuggestion;
+async function confirmReceive(id) {
+  const d = formData('#recvF');
+  const ok = await call(window.api.suggestions.setStatus({ id, status: 'получено', acquisition_id: d.acquisition_id || null }),
+    'Отбелязано като получено.');
+  if (ok !== null) { closeModal2(); markSaved(); renderSuggestions(); notifySuggestionReceived(id); }
+}
+window.confirmReceive = confirmReceive;
+async function deleteSuggestion(id) {
+  if (!confirm('Изтриване на предложението?')) return;
+  const ok = await call(window.api.suggestions.delete(id), 'Изтрито.');
+  if (ok !== null) renderSuggestions();
+}
+window.deleteSuggestion = deleteSuggestion;
+// Уведомяването е ръчно и по избор — не всеки читател има имейл, а автоматично
+// изпратено писмо без потвърждение е изненада, не удобство.
+async function notifySuggestionReceived(id) {
+  const rows = await call(window.api.suggestions.list('получено'));
+  const s = rows && rows.find(x => x.id === id);
+  if (!s || !s.reader_id) return;
+  const reader = await call(window.api.readers.get(s.reader_id));
+  if (!reader || !reader.email) return;
+  if (!confirm('Да отворя ли писмо до ' + reader.name + ' за пристигналата книга „' + s.title + '“?')) return;
+  const subject = 'Пристигна предложената от Вас книга';
+  const body = 'Здравейте, ' + reader.name + ',\n\nКнигата „' + (s.author ? s.author + '. ' : '') + s.title +
+    '“, която предложихте, вече е налична в библиотеката.\n\nПоздрави!';
+  const res = await window.api.loans.mailto({ email: reader.email, subject, body });
+  if (!res.ok) toast(res.error, 'err');
+}
+window.notifySuggestionReceived = notifySuggestionReceived;
 
 /* ---------------- Заемане и връщане (изцяло чрез сканиране на баркод) ----------------
    Баркод четецът работи като клавиатура: въвежда текста и накрая изпраща Enter.
@@ -1949,23 +2174,29 @@ async function renderCirc() {
 
   let col1, col2, table = '';
   if (CIRC.readerId) {
-    const r = await call(window.api.readers.get(CIRC.readerId));
+    const [r, acc] = await Promise.all([
+      call(window.api.readers.get(CIRC.readerId)), call(window.api.account.get(CIRC.readerId))
+    ]);
     if (!r) { CIRC.readerId = null; return renderCirc(); }
+    const rule = await call(window.api.circRules.effective(r.category)) || s;
     const myLoans = await call(window.api.loans.byReader(CIRC.readerId)) || [];
     const openMine = myLoans.filter(l => !l.date_in);
     col1 = `<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1">
       <b style="font-size:17px">${esc(r.name)}</b>
-      <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${s.max_books ? ' / ' + s.max_books : ''}</div></div>
+      <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${rule.max_books ? ' / ' + rule.max_books : ''}</div></div>
+      <button class="btn sm" onclick="accountModal(${r.id})" title="Читателска сметка">💰</button>
       <button class="btn sm" onclick="houseboundModal(${r.id})" title="Обслужване по домовете — график и посещения">🏠</button>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
+      ${r.alert_note ? `<div class="note w" style="border-left-color:#c9a84c;background:rgba(201,168,76,.12)">📌 <b>${esc(r.alert_note)}</b></div>` : ''}
       ${r.guarantor_name ? `<div class="hint">👪 Родител/настойник: <b>${esc(r.guarantor_name)}</b>${r.guarantor_phone ? ' · тел. ' + esc(r.guarantor_phone) : ''}</div>` : ''}
       ${r.suspended_until && r.suspended_until > today() ? `<div class="note w">⛔ Заемането е преустановено до <b>${bg(r.suspended_until)}</b>.
         <button class="btn sm" style="margin-left:8px" onclick="clearSuspension(${r.id})">Снеми</button></div>` : ''}
+      ${acc && acc.balance > 0 ? `<div class="hint">💰 Дължи по сметка: <b style="color:var(--red)">${mny(acc.balance)}</b></div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
     const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
-    const maxRenew = s.extensions_count == null ? 2 : s.extensions_count;
+    const maxRenew = rule.extensions_count == null ? 2 : rule.extensions_count;
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
-      <div class="hint" style="margin-top:6px">Срок за заемане: ${s.loan_days} дни${maxRenew ? ' · до ' + maxRenew + ' продължения' : ''}</div>
+      <div class="hint" style="margin-top:6px">Срок за заемане: ${rule.loan_days} дни${maxRenew ? ' · до ' + maxRenew + ' продължения' : ''}</div>
       <div class="toolbar" style="margin:10px 0 0">
         <button class="btn sm" onclick="holdPrompt()">📌 Резервирай заета книга…</button>
       </div>
@@ -3024,6 +3255,14 @@ function reportBodyHtml(r) {
         <div class="card"><h3 style="margin-top:0">По състояние</h3>${reportPairTable(r.byStatus)}</div>
       </div>`;
   }
+  if (r.id === 'fees_income') {
+    return `
+      <div class="kpis" style="margin-bottom:16px">
+        ${kpi('💰', mny(r.chargedValue), 'Начислено през ' + r.year + ' г.', r.chargedTotal + ' начисления')}
+        ${kpi('✅', mny(r.paidValue), 'Събрано през ' + r.year + ' г.', r.paidCount + ' плащания')}
+      </div>
+      <div class="card"><h3 style="margin-top:0">Начислено по вид</h3>${reportPairTable(r.charged, true)}</div>`;
+  }
   return '<span class="hint">Няма данни.</span>';
 }
 /* Отделен, по-опростен вариант за печат (плътни таблици вместо картички) — по същия
@@ -3070,6 +3309,12 @@ function reportPrintHtml(r) {
       <div class="pmeta">Заявки за ${r.year} г.: ${r.total}</div>
       ${prTable(['Посока', 'Бр.'], r.byDirection)}
       ${prTable(['Състояние', 'Бр.'], r.byStatus)}`;
+  }
+  if (r.id === 'fees_income') {
+    return `
+      <div class="pmeta">Начислено през ${r.year} г. — ${r.chargedTotal} бр., ${mny(r.chargedValue)} ·
+      събрано — ${r.paidCount} бр., ${mny(r.paidValue)}</div>
+      ${prTable(['Вид', 'Бр.', 'Сума'], r.charged, true)}`;
   }
   return '';
 }
@@ -3686,6 +3931,9 @@ async function renderSetup() {
         </div>
       </div>
       <div class="card"><h3 style="margin-top:0">Обслужване</h3>
+        <div class="note" style="margin-top:0">Стойностите тук са <b>общите по подразбиране</b>. Отделна категория
+        читатели (напр. деца или специалисти) може да има собствени срокове — вижте картата
+        „Правила по категория читатели“ по-долу.</div>
         <div class="grid g2">
           ${fld('Срок за заемане (дни)', 'loan_days', { val: s.loan_days, type: 'number' })}
           ${fld('Максимум документи на читател', 'max_books', { val: s.max_books, type: 'number' })}
@@ -3716,6 +3964,26 @@ async function renderSetup() {
         ${fld('Член 3 (счетоводител)', 'committee3', { val: s.committee3 || '' })}
       </div>
       <div class="hint">Комисията се назначава със заповед на ръководителя; участието на библиотекар и счетоводител е задължително (чл. 35, ал. 1).</div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Правила по категория читатели</h3>
+      <div class="note" style="margin-top:0">Празно поле = ползва се общата стойност от картата „Обслужване“.
+      Не е нужно да попълвате всички полета за всяка категория — само тези, които реално се различават
+      (напр. децата с по-кратък срок, специалистите — без наказание).</div>
+      <div id="circRulesBox">зареждане…</div>
+      <div class="toolbar" style="margin-top:8px"><button class="btn" onclick="addCircRule()">+ Правило за категория…</button></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Календар на библиотеката</h3>
+      <div class="note" style="margin-top:0">Падеж, паднал се в затворен ден, се измества автоматично към
+      следващия работен ден. Затворените дни не се броят в наказанието за забава.</div>
+      <div id="calWorkDays">зареждане…</div>
+      <div class="toolbar" style="margin-top:10px"><button class="btn" onclick="saveWorkDays()">Запиши работните дни</button></div>
+      <h3 style="font-size:14px;margin:16px 0 8px">Затворени дни (официални празници, отпуск)</h3>
+      <div class="toolbar">
+        ${fld('Дата', 'calDate', { type: 'date', val: today() })}
+        ${fld('Причина', 'calReason', { val: '', hint: 'по желание' })}
+        <div class="field"><label>&nbsp;</label><button class="btn" onclick="addClosedDay()" style="width:100%">+ Добави</button></div>
+      </div>
+      <div id="calClosedBox">зареждане…</div>
     </div>
     <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Лични данни (ЗЗЛД / GDPR)</h3>
       <div class="note" style="margin-top:0">Върнати заемания, по-стари от зададения срок, могат да се
@@ -3880,6 +4148,8 @@ async function renderSetup() {
   loadNoticePlaceholders();
   loadAvEditors();
   loadAnonHint();
+  loadCircRulesBox();
+  loadCalendarBox();
 }
 /* ---------------- Номенклатури (редактор) ---------------- */
 async function loadAvEditors() {
@@ -3933,6 +4203,97 @@ async function runAnonymize() {
   loadAnonHint();
 }
 window.runAnonymize = runAnonymize;
+/* ---------------- Правила за обслужване по категория ---------------- */
+const CIRC_RULE_FIELDS = [
+  ['loan_days', 'Срок (дни)'], ['max_books', 'Максимум документи'],
+  ['extensions_count', 'Продължения'], ['extension_days', 'Дни на продължение'],
+  ['suspend_per_day', 'Наказание (дни/ден забава)'], ['suspend_max', 'Таван на наказанието']
+];
+async function loadCircRulesBox() {
+  const box = $('#circRulesBox'); if (!box) return;
+  const rules = await call(window.api.circRules.list());
+  if (!rules) { box.textContent = 'Правилата не се заредиха.'; return; }
+  box.innerHTML = rules.length ? `
+    <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+      <th>Категория</th>${CIRC_RULE_FIELDS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th style="width:80px"></th>
+    </tr></thead><tbody>
+    ${rules.map(r => `<tr><td><b>${esc(r.category)}</b></td>
+      ${CIRC_RULE_FIELDS.map(([k]) => `<td class="num">${r[k] == null ? '<span class="hint">общото</span>' : r[k]}</td>`).join('')}
+      <td><button class="btn sm" onclick="addCircRule('${esc(r.category).replace(/'/g, '&#39;')}')">Редакция</button></td></tr>`).join('')}
+    </tbody></table></div>`
+    : '<div class="hint">Още няма отделни правила — всички категории ползват общите стойности от „Обслужване“.</div>';
+}
+function addCircRule(category) {
+  const editing = !!category;
+  (editing ? call(window.api.circRules.list()) : Promise.resolve(null)).then(rules => {
+    const r = editing && rules ? rules.find(x => x.category === category) : null;
+    modal2(editing ? 'Правило — ' + category : 'Ново правило за категория', `
+      <form id="crF" onsubmit="return false">
+        ${editing
+          ? `<input type="hidden" name="category" value="${esc(category)}"><div class="hint" style="margin-bottom:8px">Категория: <b>${esc(category)}</b></div>`
+          : fld('Категория', 'category', { type: 'select', opts: KATEG, allowEmpty: false })}
+        <div class="grid g2">
+          ${CIRC_RULE_FIELDS.map(([k, l]) => fld(l, k, { type: 'number', val: r && r[k] != null ? r[k] : '', hint: 'празно = общото' })).join('')}
+        </div>
+      </form>`,
+      `<button class="btn" onclick="closeModal2()">Отказ</button>
+       ${editing ? `<button class="btn dgr" onclick="deleteCircRule('${esc(category).replace(/'/g, "&#39;")}')">Изтрий правилото</button>` : ''}
+       <button class="btn pri" onclick="saveCircRule()">Запиши</button>`);
+  });
+}
+window.addCircRule = addCircRule;
+async function saveCircRule() {
+  const d = formData('#crF');
+  if (!d.category || !d.category.trim()) return toast('Изберете категория.', 'err');
+  const ok = await call(window.api.circRules.save(d), 'Правилото е записано.');
+  if (ok !== null) { closeModal2(); markSaved(); loadCircRulesBox(); }
+}
+window.saveCircRule = saveCircRule;
+async function deleteCircRule(category) {
+  if (!confirm('Изтриване на правилото за „' + category + '“? Категорията ще започне да ползва общите стойности.')) return;
+  const ok = await call(window.api.circRules.delete(category), 'Изтрито.');
+  if (ok !== null) { closeModal2(); loadCircRulesBox(); }
+}
+window.deleteCircRule = deleteCircRule;
+
+/* ---------------- Календар на библиотеката ---------------- */
+const WEEKDAY_NAMES = ['неделя', 'понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'];
+async function loadCalendarBox() {
+  const wd = $('#calWorkDays'), cb = $('#calClosedBox');
+  if (!wd || !cb) return;
+  const cal = await call(window.api.calendar.get());
+  if (!cal) { wd.textContent = 'Календарът не се зареди.'; return; }
+  wd.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:14px">
+    ${WEEKDAY_NAMES.map((name, i) => `<label class="chk"><input type="checkbox" name="wd${i}" ${cal.workDays.includes(i) ? 'checked' : ''}>
+      <span>${esc(name)}</span></label>`).join('')}
+  </div>`;
+  cb.innerHTML = cal.closed.length ? `
+    <div class="wrap" style="border:0;box-shadow:none;margin-top:8px"><table class="ledger"><tbody>
+    ${cal.closed.map(c => `<tr><td class="num">${bg(c.date)}</td><td>${esc(c.reason || '')}</td>
+      <td style="width:60px"><button class="btn sm dgr" onclick="removeClosedDay('${c.date}')">✕</button></td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="hint" style="margin-top:8px">Няма добавени затворени дни.</div>';
+}
+async function saveWorkDays() {
+  const days = [];
+  WEEKDAY_NAMES.forEach((_, i) => { const el = document.querySelector(`[name=wd${i}]`); if (el && el.checked) days.push(i); });
+  if (!days.length && !confirm('Няма отбелязан нито един работен ден — библиотеката ще излиза „затворена“ всеки ден. Наистина ли?')) return;
+  const ok = await call(window.api.calendar.saveWorkDays(days), 'Работните дни са записани.');
+  if (ok !== null) { markSaved(); loadCalendarBox(); }
+}
+window.saveWorkDays = saveWorkDays;
+async function addClosedDay() {
+  const date = document.querySelector('[name=calDate]').value;
+  const reason = document.querySelector('[name=calReason]').value;
+  if (!date) return toast('Изберете дата.', 'err');
+  const ok = await call(window.api.calendar.addClosed({ date, reason }), 'Добавен затворен ден.');
+  if (ok !== null) { markSaved(); loadCalendarBox(); }
+}
+window.addClosedDay = addClosedDay;
+async function removeClosedDay(date) {
+  const ok = await call(window.api.calendar.removeClosed(date), 'Премахнато.');
+  if (ok !== null) loadCalendarBox();
+}
+window.removeClosedDay = removeClosedDay;
 function employeeForm(id) {
   const emp = id ? (window._EMPLOYEES_ALL || []).find(x => x.id === id) : null;
   modal(emp ? 'Редакция на служител' : 'Нов служител', `
