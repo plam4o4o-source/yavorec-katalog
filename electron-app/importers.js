@@ -72,7 +72,19 @@ function parseDelimited(text, delimiter) {
 /* ---------------- XLSX ----------------
    XLSX е ZIP архив с XML вътре. Тук се чете ръчно: обхожда се централната
    директория на архива, изваждат се двата нужни файла и се разчита първият лист. */
+// Лимити срещу изчерпване на паметта/процесора при внасяне на повреден или
+// злонамерено скалъпен .xlsx (Фаза 3, сигурност — "hand-rolled XLSX парсер
+// без лимити" от анализа). Разопаковането (inflateRawSync) на малка компресирана
+// част в огромна разопакована ("zip bomb") е класически риск за такъв ръчен
+// парсер; maxOutputLength спира разопаковането веднага, вместо да позволи да
+// изяде цялата налична памет на компютъра на библиотекаря.
+const MAX_XLSX_FILE_SIZE = 60 * 1024 * 1024; // суров .xlsx файл — разумен таван за библиотечен внос
+const MAX_XLSX_ENTRIES = 2000; // вътрешни части в архива (истински .xlsx има под 20–30)
+const MAX_XLSX_ENTRY_UNCOMPRESSED = 150 * 1024 * 1024; // разопакован размер на ЕДНА вътрешна част
 function unzipEntries(buf) {
+  if (buf.length > MAX_XLSX_FILE_SIZE) {
+    throw new Error('Файлът е твърде голям за внасяне (над ' + Math.round(MAX_XLSX_FILE_SIZE / 1024 / 1024) + ' MB).');
+  }
   const out = {};
   // Краят на централната директория (EOCD) носи къде започва тя.
   let eocd = -1;
@@ -81,8 +93,10 @@ function unzipEntries(buf) {
   }
   if (eocd < 0) throw new Error('Файлът не е валиден XLSX архив.');
   const count = buf.readUInt16LE(eocd + 10);
+  if (count > MAX_XLSX_ENTRIES) throw new Error('XLSX архивът съдържа необичайно много вътрешни части.');
   let p = buf.readUInt32LE(eocd + 16);
   for (let i = 0; i < count; i++) {
+    if (p < 0 || p + 46 > buf.length) throw new Error('Повреден или недовършен XLSX архив.');
     if (buf.readUInt32LE(p) !== 0x02014b50) break;
     const method = buf.readUInt16LE(p + 10);
     const compSize = buf.readUInt32LE(p + 20);
@@ -92,12 +106,17 @@ function unzipEntries(buf) {
     const localOff = buf.readUInt32LE(p + 42);
     const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
     // Локалният запис има собствени дължини на име и допълнителни данни.
+    if (localOff < 0 || localOff + 30 > buf.length) throw new Error('Повреден или недовършен XLSX архив.');
     const lNameLen = buf.readUInt16LE(localOff + 26);
     const lExtraLen = buf.readUInt16LE(localOff + 28);
     const dataStart = localOff + 30 + lNameLen + lExtraLen;
     const raw = buf.slice(dataStart, dataStart + compSize);
     if (name.endsWith('.xml') || name.endsWith('.rels')) {
-      out[name] = method === 0 ? raw : zlib.inflateRawSync(raw);
+      try {
+        out[name] = method === 0 ? raw : zlib.inflateRawSync(raw, { maxOutputLength: MAX_XLSX_ENTRY_UNCOMPRESSED });
+      } catch (err) {
+        throw new Error('Част от XLSX архива не може да бъде разопакована (повреден файл или неочаквано голям размер).');
+      }
     }
     p += 46 + nameLen + extraLen + commentLen;
   }

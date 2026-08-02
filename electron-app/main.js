@@ -7,6 +7,7 @@ const importers = require('./importers');
 const pii = require('./pii-crypto');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
 const { createDebouncer } = require('./debounce');
+const { csvCell, isValidEmail } = require('./security-utils');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -643,6 +644,18 @@ function createWindow() {
     }
   });
   win.setMenuBarVisibility(false);
+  // Сигурност (Фаза 3): приложението никога легитимно не отваря нов прозорец
+  // и не навигира извън заредения src/index.html (вътрешното "рутиране" по
+  // изгледи е само смяна на location.hash, което не задейства тези събития —
+  // виж app.js). Всеки опит — независимо дали от неочакван код, компрометиран
+  // renderer или инжектирано съдържание — се отказва тук. Ако все пак дойде
+  // легитимен адрес за отваряне (напр. бъдещ линк с target="_blank"), той се
+  // праща към системния браузър вместо в самия прозорец на приложението.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
   return win;
 }
@@ -2539,9 +2552,15 @@ ipcMain.handle('notices:log', (e, { reader_id, level, channel, loans_count }) =>
 );
 // Отваря пощенския клиент на потребителя. Адресът се сглобява тук, за да не се
 // налага интерфейсът да навигира към mailto:, което Electron би отворил в прозореца.
+// Груба, но достатъчна проверка на формата на имейла (Фаза 3, сигурност) — схемата
+// на URL-а е фиксирана буквално на 'mailto:' (не идва от полето), но валидирането
+// пази от подаване на съвсем несвързан низ от читателската картотека към
+// shell.openExternal, а не само от техническа коректност на адреса (виж
+// security-utils.js за isValidEmail).
 ipcMain.handle('loans:mailto', (e, { email, subject, body }) => {
   try {
     if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
+    if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };
     const url = 'mailto:' + encodeURIComponent(email) +
       '?subject=' + encodeURIComponent(subject || '') +
       '&body=' + encodeURIComponent(body || '');
@@ -4102,7 +4121,12 @@ ipcMain.handle('catalog:exportCsv', async () => {
     const rows = db.prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
     const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Място', 'Издателство',
       'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Цена (лв.)', 'Цена (€)', 'Състояние'];
-    const esc = (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"';
+    // Защита срещу CSV/formula injection (Фаза 3): свободните текстови полета (заглавие,
+    // автор и т.н.) идват от каталогизатора и биха могли случайно или нарочно да
+    // започват с =, +, -, @ — символи, които Excel/LibreOffice изпълняват като формула
+    // при отваряне на файла (напр. заглавие "=cmd|'/c calc'!A1"). Водещ апостроф
+    // отпред неутрализира изпълнението, без видимо да променя стойността.
+    const esc = csvCell;
     const csv = [h.join(';')].concat(rows.map(b => [
       b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title, b.city, b.publisher,
       b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
