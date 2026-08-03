@@ -11,6 +11,53 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.63.0
+
+**BG — спешна поправка: програмата изобщо не стартираше след инсталиране
+(v1.59.0 – v1.62.0).** Инсталираната програма падаше веднага при пускане с
+`A JavaScript error occurred in the main process — Cannot find module
+'./db/enum-triggers'`. Причина: v1.59.0 добави `db/enum-triggers.js` и
+`main.js` го изисква при стартиране, но списъкът `build.files` в
+`package.json` изброяваше от папката `db/` само `db/schema.sql` — затова
+новият файл не влизаше в `app.asar` и липсваше на компютъра на
+потребителя. Нито един от 418-те теста не хвана това, защото тестовете се
+пускат от изходния код, където файлът очевидно съществува; счупен беше
+само опакованият инсталатор. Поправено: `db/schema.sql` → `db/**/*`, така
+че всеки бъдещ файл в `db/` влиза автоматично. По същия повод е добавен и
+`icon.ico` — `main.js` го подава на прозореца (`BrowserWindow`), но и той
+липсваше в списъка; това не чупеше нищо (Electron мълчаливо ползва иконата
+по подразбиране), затова не е личало.
+
+**Нов регресионен тест** `test/build-files-coverage.test.js` (3 теста, общо
+421): обхожда реалните `require()` в `main.js`/`preload.js`/`handlers/*.js`
+плюс файловете, четени по време на работа (`db/schema.sql`,
+`src/mobile-template.html`, `src/index.html`, `icon.ico`), и проверява, че
+всеки от тях е покрит от някой шаблон в `build.files`. Проверено е, че
+тестът наистина пада със стария (счупен) списък и посочва точно виновния
+файл — иначе не би пазил от нищо. Третият тест пази самия matcher от това
+да почне да връща „покрито“ за всичко.
+
+**EN — urgent fix: the installed program did not start at all (v1.59.0 –
+v1.62.0).** It crashed immediately on launch with `Cannot find module
+'./db/enum-triggers'`. Cause: v1.59.0 added `db/enum-triggers.js`, required
+by `main.js` at startup, but the `build.files` list in `package.json`
+included only `db/schema.sql` from the `db/` folder — so the new file never
+made it into `app.asar`. None of the 418 tests caught this, because tests
+run from the source tree where the file plainly exists; only the packaged
+installer was broken. Fixed: `db/schema.sql` → `db/**/*`, so any future
+file in `db/` is included automatically. The same audit found `icon.ico`
+missing from the list as well — `main.js` passes it to `BrowserWindow`, but
+its absence merely made Electron fall back to the default icon, so it never
+surfaced.
+
+**New regression test** `test/build-files-coverage.test.js` (3 tests, 421
+total): walks the real `require()` calls across `main.js`/`preload.js`/
+`handlers/*.js` plus the files read at runtime, and asserts each is covered
+by some `build.files` pattern. Verified that the test does fail against the
+old (broken) list and names the offending file — otherwise it would guard
+nothing. A third test keeps the pattern matcher itself from silently
+degrading into "everything matches".
+
 ## v1.62.0
 
 **BG:** Довършва Фаза 5 (документация): физическо разделяне на
