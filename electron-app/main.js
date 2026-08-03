@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 const Database = require('better-sqlite3');
 const importers = require('./importers');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
+const { applyEnumTriggers } = require('./db/enum-triggers');
 const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail } = require('./security-utils');
 const { autoUpdater } = require('electron-updater');
@@ -265,7 +266,7 @@ function initDb() {
    само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
    просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
    без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -292,7 +293,14 @@ const MIGRATIONS = [
   { version: 4, run: () => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_books_barcode ON books(barcode)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_loans_book_open ON loans(book_id, date_in)');
-  } }
+  } },
+  // v5 — "CHECK/authority на enum-подобните TEXT колони" (последната точка от
+  // "евтините поправки" на анализа за Фаза 4). Логиката е в db/enum-triggers.js
+  // (вижте там пълния коментар защо са тригери, а не истински CHECK constraint,
+  // и списъка на изрично изключените колони) — изнесена в отделен модул, за да
+  // може и тестовете да прилагат абсолютно същите тригери върху собствената си
+  // тестова база, по образец на BOOKS_FTS_SETUP_SQL/READERS_FTS_SETUP_SQL.
+  { version: 5, run: () => { applyEnumTriggers(db); } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
