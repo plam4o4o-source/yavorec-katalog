@@ -11,6 +11,132 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.55.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 33, един от
+"големите пет"): "Настройки" (без шаблоните за напомняне по подразбиране)
+е изнесено в `handlers/settings.js` — 7 handler-а: `settings:get/update/
+updateNotices/updateLabelFormat/chooseLogo/clearLogo/updateTheme`.
+`settings:noticeDefaults` умишлено ОСТАВА в `main.js`: чете
+`DEFAULT_NOTICE_*`/`NOTICE_PLACEHOLDERS`, върнати от `handlers/notices.js`,
+чийто `require()` стои по-нататък в `main.js` от мястото на
+`handlers/settings.js` — преместването му би било същият TDZ капан като при
+`logEvent`. `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` се връщат обратно към
+`main.js`, защото `handlers/local-photo.js` (require()-нат по-нататък) вече
+ги ползва по референция. IPC поведението е напълно непроменено. Нов тест:
+`test/handlers-settings.test.js` (10 теста) — общо 370 теста (бяха 360).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 33, one of the "big
+five"): the "settings" domain (excluding the default reminder templates)
+moves to `handlers/settings.js` — 7 handlers: `settings:get/update/
+updateNotices/updateLabelFormat/chooseLogo/clearLogo/updateTheme`.
+`settings:noticeDefaults` deliberately STAYS in `main.js`: it reads
+`DEFAULT_NOTICE_*`/`NOTICE_PLACEHOLDERS` returned from `handlers/notices.js`,
+whose `require()` sits further down in `main.js` than
+`handlers/settings.js` — moving it would hit the same TDZ trap as
+`logEvent`. `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` are returned back to
+`main.js` since `handlers/local-photo.js` (required further down) already
+depends on them by reference. IPC behavior is fully unchanged. New test
+file `test/handlers-settings.test.js` (10 tests) — 370 tests total (up
+from 360).
+
+## v1.54.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 32, един от
+"големите пет"): "Онлайн каталог" (публикуване през GitHub) и "Експорт в
+библиотечни формати" (UNIMARC/MARCXML, Dublin Core) са изнесени в
+`handlers/catalog.js` — 11 handler-а: `catalog:status/remoteCheck/updateGh/
+chooseFolder/disconnectFolder/gitPublishNow/writeNow/exportMarc/exportDc/
+export/exportCsv`. `scheduleCatalogWrite`/`flushCatalogWrite`/
+`buildCatalogPayload` умишлено ОСТАВАТ hoisted в `main.js` (по същата
+причина като `logEvent`): по-рано извадени модули (`deaccession-acts.js`,
+`loans.js`) вече ги ползват по пряка референция в обект, подаден на техния
+`require()`, изпълнен преди мястото на `handlers/catalog.js` — преместването
+им би било същият TDZ капан. `startAutoPushTimer`/`stopAutoPushTimer` (нова
+функция, заменя пряката работа с `AUTO_PUSH_TIMER` в `window-all-closed`) се
+връщат обратно към `main.js`, защото се викат само вътре в отложени
+callback-и (`app.whenReady()`/`window-all-closed`) — редът там няма
+значение. IPC поведението е напълно непроменено. Нов тестов файл
+`test/handlers-catalog.test.js` (17 теста, с фалшив `execFile`, за да не
+зависи от инсталиран git/мрежа) — общо 360 теста (бяха 343).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 32, one of the "big
+five"): the "online catalog" (GitHub publishing) and "library format
+exports" (UNIMARC/MARCXML, Dublin Core) domains move to
+`handlers/catalog.js` — 11 handlers: `catalog:status/remoteCheck/updateGh/
+chooseFolder/disconnectFolder/gitPublishNow/writeNow/exportMarc/exportDc/
+export/exportCsv`. `scheduleCatalogWrite`/`flushCatalogWrite`/
+`buildCatalogPayload` deliberately STAY hoisted in `main.js` (same reason as
+`logEvent`): previously extracted modules (`deaccession-acts.js`,
+`loans.js`) already depend on them by direct reference in an object passed
+to their `require()`, which runs before `handlers/catalog.js`'s position —
+moving them would hit the same TDZ trap. `startAutoPushTimer`/
+`stopAutoPushTimer` (a new function replacing direct `AUTO_PUSH_TIMER`
+manipulation in `window-all-closed`) are returned back to `main.js`, since
+they're only invoked inside deferred callbacks (`app.whenReady()`/
+`window-all-closed`) — load order there doesn't matter. IPC behavior is
+fully unchanged. New test file `test/handlers-catalog.test.js` (17 tests,
+using a fake `execFile` so tests don't depend on installed git/network) —
+360 tests total (up from 343).
+
+## v1.53.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 31): краеведският
+клъстер "аналитично описание, персоналии, летопис, снимки, връзки" е изваден
+в пет отделни модула — `handlers/analytics.js`, `handlers/persons.js`,
+`handlers/chronicle.js`, `handlers/local-photo.js`, `handlers/links.js`.
+Всеки подмодул е самостоятелен: `linkLabel()` в `links.js` чете направо от
+съответните таблици по `getDb()`, без препратки към другите извадени
+модули. `local-photo.js` получава `mainWindow` през `getMainWindow()` getter
+(както `handlers/backup.js`) и `LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` — стойности,
+дефинирани по-рано в `main.js` (при логото на читалището), подадени по
+референция. IPC поведението е напълно непроменено. Нови тестови файлове:
+`test/handlers-analytics.test.js` (6), `test/handlers-persons.test.js` (5),
+`test/handlers-chronicle.test.js` (6), `test/handlers-local-photo.test.js` (7),
+`test/handlers-links.test.js` (7) — общо 343 теста (бяха 312).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 31): the local-history
+("краеведски") cluster — analytical description, persons, chronicle,
+photos, and cross-links — moves into five separate modules —
+`handlers/analytics.js`, `handlers/persons.js`, `handlers/chronicle.js`,
+`handlers/local-photo.js`, `handlers/links.js`. Each submodule is
+self-contained: `linkLabel()` in `links.js` reads directly from the
+relevant tables via `getDb()`, with no cross-references to the other
+extracted modules. `local-photo.js` receives `mainWindow` through a
+`getMainWindow()` getter (same pattern as `handlers/backup.js`) and
+`LOGO_MIME`/`LOCAL_PHOTO_MAX_BYTES` — values defined earlier in `main.js`
+(for the institution's logo) — passed by reference. IPC behavior is fully
+unchanged. New test files: `test/handlers-analytics.test.js` (6),
+`test/handlers-persons.test.js` (5), `test/handlers-chronicle.test.js` (6),
+`test/handlers-local-photo.test.js` (7), `test/handlers-links.test.js` (7) —
+343 tests total (up from 312).
+
+## v1.52.0
+
+**BG:** Продължава разбиването на `main.js` на модули по домейн (Фаза 4,
+стъпка 30): "Дневник на библиотеката" (Раздел А/Б) е изваден в
+`handlers/dnevnik.js` — `dnevnik:getMonth`, `dnevnik:saveDay`,
+`dnevnik:suggest` (с таблиците за съпоставяне вид/език/УДК/възраст) и
+`dnevnik:exportCsv`. `dnevnikSumRow` (годишните/месечните тотали) се връща
+обратно към `main.js`, защото `handlers/stats.js` (изваден в предишна
+версия) вече го ползва по референция за готовата справка "Годишен
+статистически отчет" — редът на зареждане в `main.js` е запазен така, че
+константата вече да е присвоена, преди `stats.js` да я поиска. IPC
+поведението е напълно непроменено. Нов тестов файл
+`test/handlers-dnevnik.test.js` (8 теста) — общо 312 теста (бяха 304).
+
+**EN:** Continues splitting `main.js` into per-domain modules (Phase 4, step
+30): the "library journal" (Section A/B) domain moves to
+`handlers/dnevnik.js` — `dnevnik:getMonth`, `dnevnik:saveDay`,
+`dnevnik:suggest` (with its type/language/UDK/age lookup tables), and
+`dnevnik:exportCsv`. `dnevnikSumRow` (the month/year-to-date totals
+function) is returned back to `main.js`, since `handlers/stats.js`
+(extracted in a previous version) already depends on it by reference for
+the "annual statistical report" built-in report — load order in `main.js`
+is preserved so the constant is assigned before `stats.js` needs it. IPC
+behavior is fully unchanged. New test file `test/handlers-dnevnik.test.js`
+(8 tests) — 312 tests total (up from 304).
+
 ## v1.51.0
 
 **Промени — двайсет и девети извлечен домейн от main.js (Фаза 4, стъпка 29), без промяна в поведението:**
