@@ -11,6 +11,50 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.60.0
+
+**BG:** Отделен bug-fix commit (както беше препоръчано в бележките към
+v1.58.0/`patches-batch6`): поправя стария бъг във вноса на данни от други
+системи (`import:run`, `handlers/data-import.js`). При по-задълбочена
+проверка на всичките 28 полета от `BOOK_FIELDS` срещу payload литерала се
+оказа, че липсват НЕ едно, а **три** полета — `permanent_location`,
+`status_date` и `cn_sort` — само първото (по реда в `BOOK_FIELDS`) стигаше
+до съобщението `Missing named parameter`, докато не се поправеше;
+поправянето само на `permanent_location` би довело до същата грешка на
+следващото липсващо поле. Резултатът досега: better-sqlite3 хвърляше тази
+грешка за ВСЕКИ ред при всеки внос — функцията "Приемане на данни от
+други системи" не е работила изобщо, откакто `permanent_location` е
+добавено към `BOOK_FIELDS`. Поправка: `permanent_location` е `null`
+(незадължително поле, огледало `bookPayload()` в `handlers/books.js` за
+нов запис), `status_date` е днешна дата (`today()`, вече подаван като
+зависимост от `main.js`), `cn_sort` се смята от сигнатурата чрез
+`cnSortKey()` (също подадена зависимост), ако е налична. Тестът, който
+преди документираше счупеното поведение
+(`test/handlers-data-import.test.js`), сега е регресионен тест, който
+проверява, че редът реално се записва с очакваните стойности. Общо 418
+теста (без промяна в броя — старите два теста са заменени, не добавени).
+
+**EN:** A dedicated bug-fix commit (as recommended in the v1.58.0/
+`patches-batch6` notes): fixes the long-standing data-import bug
+(`import:run`, `handlers/data-import.js`). A closer check of all 28
+fields in `BOOK_FIELDS` against the payload literal found that NOT one
+but **three** fields were missing — `permanent_location`, `status_date`,
+and `cn_sort` — only the first (by `BOOK_FIELDS` order) ever surfaced in
+the `Missing named parameter` message, so fixing only
+`permanent_location` would have hit the same error on the next missing
+field. The result until now: better-sqlite3 threw this error for EVERY
+row on every import — the "data import from other systems" feature had
+not worked at all since `permanent_location` was added to `BOOK_FIELDS`.
+Fix: `permanent_location` is `null` (an optional field, mirroring
+`bookPayload()` in `handlers/books.js` for a new record), `status_date` is
+today's date (`today()`, now passed in as a dependency from `main.js`),
+and `cn_sort` is computed from the call number via `cnSortKey()` (also a
+passed-in dependency) when available. The test that used to document the
+broken behavior (`test/handlers-data-import.test.js`) is now a regression
+test verifying the row is actually inserted with the expected values. 418
+tests total (unchanged count — the two old tests were replaced, not
+added to).
+
 ## v1.59.0
 
 **BG:** Последната точка от "евтините поправки" на Фаза 4 анализа:

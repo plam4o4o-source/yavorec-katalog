@@ -44,7 +44,11 @@ function setup() {
       showOpenDialog: async () => savedDialogs.openDialog || { canceled: true, filePaths: [] }
     },
     getMainWindow: () => ({}),
-    fs, path, BOOK_FIELDS
+    fs, path, BOOK_FIELDS,
+    // Копие на today()/cnSortKey() от main.js — виж деловете там (v1.59.0
+    // bug-fix commit) защо import:run сега разчита на тях.
+    today: () => '2026-08-02',
+    cnSortKey: (s) => String(s || '').toUpperCase().trim().replace(/\d+/g, m => m.padStart(6, '0'))
   };
   registerDataImportHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, dir, savedDialogs };
@@ -104,33 +108,39 @@ test('import:run requires a title column mapping', async () => {
   assert.match(result.error, /Заглавие/);
 });
 
-// PRE-EXISTING BUG, NOT introduced by this extraction (confirmed via git history:
-// 'permanent_location' was added to BOOK_FIELDS in an older commit and the
-// import:run payload literal was never updated to include it). Because the INSERT
-// is built from BOOK_FIELDS with named placeholders, and the payload object never
-// sets `permanent_location`, better-sqlite3 throws "Missing named parameter
-// 'permanent_location'" for EVERY row, which import:run's per-row catch turns into
-// a silent per-line error entry — so data import has been fully non-functional
-// since that field was added. Preserved as-is per Phase 4's no-behavior-change
-// rule; flagged in the CHANGELOG for a follow-up bug-fix commit (out of scope here).
-test('import:run currently fails every row with a "Missing named parameter" error (pre-existing bug, not from this extraction)', async () => {
+// BUG FIX (v1.59.0 — виж CHANGELOG): това по-рано беше документиран,
+// НЕпоправен бъг (permanent_location липсваше от payload-а на import:run,
+// макар да е част от BOOK_FIELDS — better-sqlite3 хвърляше "Missing named
+// parameter" за ВСЕКИ ред и вносът не работеше изобщо). При по-задълбочена
+// проверка на всичките 28 полета в BOOK_FIELDS срещу payload литерала се
+// оказа, че липсват НЕ едно, а три полета: permanent_location, status_date
+// и cn_sort — само първото (по реда в BOOK_FIELDS) стигаше до съобщението
+// за грешка, докато не се поправеше. И трите вече се подават коректно
+// (виж handlers/data-import.js) — този тест сега проверява, че вносът
+// реално записва реда, вместо да документира счупеното поведение.
+test('import:run successfully inserts a row (regression test for the fixed permanent_location/status_date/cn_sort bug)', async () => {
   const { db, ipcMain } = setup();
   const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-run-'));
   const csv = [
-    'Инвентарен №;Заглавие;Автор;Език',
-    '1;Под игото;Вазов, Иван;български',
+    'Инвентарен №;Заглавие;Автор;Език;Сигнатура',
+    '1;Под игото;Вазов, Иван;български;Ч-9',
   ].join('\r\n') + '\r\n';
   fs.writeFileSync(path.join(realDir, 'in.csv'), csv, 'utf8');
   await ipcMain.invoke('import:load', path.join(realDir, 'in.csv'));
-  const result = await ipcMain.invoke('import:run', { mapping: { 0: 'inv_number', 1: 'title', 2: 'author', 3: 'language' }, options: {} });
+  const result = await ipcMain.invoke('import:run', { mapping: { 0: 'inv_number', 1: 'title', 2: 'author', 3: 'language', 4: 'call_number' }, options: {} });
   assert.equal(result.ok, true);
-  assert.equal(result.data.added, 0);
-  assert.equal(result.data.skipped, 1);
-  assert.match(result.data.errors[0].error, /Missing named parameter "permanent_location"/);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM books WHERE title='Под игото'").get().n, 0);
+  assert.equal(result.data.added, 1);
+  assert.equal(result.data.skipped, 0);
+  assert.equal(result.data.errors.length, 0);
+  const row = db.prepare("SELECT * FROM books WHERE title='Под игото'").get();
+  assert.ok(row, 'the row should have actually been inserted');
+  assert.equal(row.permanent_location, null);
+  assert.equal(row.status_date, '2026-08-02');
+  assert.equal(row.status, 'наличен');
+  assert.equal(row.cn_sort, 'Ч-000009'); // cnSortKey() pads the digits in the call number
 });
 
-test('import:run with skipDuplicates=true still reaches the duplicate-skip check before the (buggy) insert', async () => {
+test('import:run with skipDuplicates=true still reaches the duplicate-skip check before the insert', async () => {
   const { db, ipcMain } = setup();
   db.prepare("INSERT INTO books (inv_number, title) VALUES (10, 'Стар')").run();
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-dup-'));

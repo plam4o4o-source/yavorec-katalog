@@ -712,7 +712,7 @@ require('./handlers/links')(ipcMain, { getDb: () => db, run });
    да мине на тази програма без преписване на ръка.
    ============================================================================ */
 require('./handlers/data-import')(ipcMain, {
-  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, BOOK_FIELDS
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, BOOK_FIELDS, today, cnSortKey
 });
 
 /* ============================================================================

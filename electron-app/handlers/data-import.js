@@ -5,7 +5,7 @@
 // състояние тук — не е нужно да излиза навън, ползва се само вътре в тези
 // три handler-а.
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS } = deps;
+  const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
 
   const IMPORT_FIELDS = {
@@ -136,6 +136,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               if (!cats.has(key)) cats.set(key, insertCat.run(catName).lastInsertRowid);
               categoryId = cats.get(key);
             }
+            const callNumber = cell(row, 'call_number') || null;
             const payload = {
               inv_number: inv,
               barcode: cell(row, 'barcode') || String(inv),
@@ -150,7 +151,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               pages: cell(row, 'pages') || null,
               language: cell(row, 'language') || opt.defaultLanguage || null,
               udk: cell(row, 'udk') || null,
-              call_number: cell(row, 'call_number') || null,
+              call_number: callNumber,
               author_mark: cell(row, 'author_mark') || null,
               city: cell(row, 'city') || null,
               publisher: cell(row, 'publisher') || null,
@@ -158,10 +159,20 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               annotation: cell(row, 'annotation') || null,
               cover_url: null,
               department: cell(row, 'department') || opt.defaultDepartment || 'за възрастни',
+              // BUG FIX (виж CHANGELOG v1.59.0): тези три полета липсваха тук, макар
+              // да са част от BOOK_FIELDS — better-sqlite3 хвърляше "Missing named
+              // parameter" за ВСЕКИ ред при всеки внос и вносът не работеше изобщо.
+              // Стойностите огледват bookPayload() в handlers/books.js за нов запис
+              // (prev == null там): permanent_location е незадължително поле, празно
+              // при внос, ако не идва от файла; status_date е днешна дата (нов запис);
+              // cn_sort се смята от сигнатурата, ако е налична.
+              permanent_location: null,
               status: cell(row, 'status') || 'наличен',
+              status_date: today(),
               price: parseNum(cell(row, 'price')),
               description: cell(row, 'description') || null,
-              acquisition_id: null
+              acquisition_id: null,
+              cn_sort: callNumber ? cnSortKey(callNumber) : null
             };
             const info = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
               VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`).run(payload);
