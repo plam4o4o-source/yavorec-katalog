@@ -11,6 +11,40 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.62.0
+
+**BG:** Довършва Фаза 5 (документация): физическо разделяне на
+`electron-app/README.md` на два отделни файла по аудитория, вместо един
+файл от 1308 реда с раздели, редуващи се между библиотекари и разработчици
+(отбелязано като оставащо в бележките към `patches-batch8`/`patches-batch9`).
+Новият `electron-app/README-bibliotekar.md` съдържа „Данни на библиотеката
+(универсалност)“, „Цифров подпис и антивирусни програми“ и „Раздели“ —
+всичко за библиотекари, без нужда да прелистват build/схема на базата
+данни. `electron-app/README.md` остава чисто разработческият документ
+(структура на проекта, инсталация, build, версии, автоматично обновяване,
+език на инсталатора, схема на базата данни, „как да добавя…“ примери) с
+обновено съдържание в началото, което сочи към новия файл. Обновени и
+кръстосаните препратки в `README.md` (корен) и
+`docs/naredba-3-karta.md`, които сочеха към раздели, преместени в новия
+файл. Само документация — няма промяна в поведението на програмата.
+418 теста, без промяна в броя.
+
+**EN:** Completes Phase 5 (documentation): physically splits
+`electron-app/README.md` into two separate files by audience, instead of
+one 1308-line file with sections alternating between librarian- and
+developer-facing content (flagged as remaining work in the
+`patches-batch8`/`patches-batch9` notes). The new
+`electron-app/README-bibliotekar.md` holds "Library data (universality)",
+"Code signing and antivirus programs", and "Sections" — everything a
+librarian needs, without wading through build/database-schema material.
+`electron-app/README.md` is now the purely developer-facing document
+(project structure, installation, build, versions, auto-update, installer
+language, database schema, "how to add..." examples), with an updated
+table of contents pointing to the new file. Cross-references in the root
+`README.md` and `docs/naredba-3-karta.md` that pointed at sections now
+living in the new file were updated accordingly. Documentation only — no
+behavior change. 418 tests, no change in count.
+
 ## v1.61.0
 
 **BG:** Изравнява лицензионната формулировка навсякъде към

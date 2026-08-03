@@ -19,7 +19,7 @@
   `docs/narachnik-za-bibliotekarya.pdf` в това хранилище, или го поискайте от
   поддръжката.
 - За подробно описание на всеки раздел на програмата — вижте
-  [„Раздели“ в `electron-app/README.md`](electron-app/README.md#раздели).
+  [„Раздели“ в `electron-app/README-bibliotekar.md`](electron-app/README-bibliotekar.md#раздели).
 
 ## Аз съм разработчик — искам да развивам кода
 
