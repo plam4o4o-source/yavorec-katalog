@@ -61,6 +61,52 @@
   <div id="printArea"></div>
 
   <script src="udk.js"></script>
-  <script src="app.js"></script>
+  <!-- app.js (Фаза 4/5-продължение: разбиване по домейни, вижте
+       docs/ARCHITECTURE.md) е разделен на src/views/*.js — по един файл на
+       раздел от интерфейса, огледално на handlers/*.js в главния процес.
+       Редът тук има значение само за views/bootstrap.js, който ТРЯБВА да е
+       последен (вижте обяснителния коментар в началото на самия файл);
+       редът между всички останали view-файлове е без значение — никой от
+       тях не чете чужда функция/променлива на ниво скрипт веднага при
+       зареждане, само отвътре на функции, извиквани по-късно. -->
+  <script src="views/core.js"></script>
+  <script src="views/navigation.js"></script>
+  <script src="views/employee-badge.js"></script>
+  <script src="views/auto-update.js"></script>
+  <script src="views/dashboard.js"></script>
+  <script src="views/categories.js"></script>
+  <script src="views/books.js"></script>
+  <script src="views/notices.js"></script>
+  <script src="views/authorities.js"></script>
+  <script src="views/inv-book.js"></script>
+  <script src="views/kdbf.js"></script>
+  <script src="views/acquisitions.js"></script>
+  <script src="views/deaccession-acts.js"></script>
+  <script src="views/readers.js"></script>
+  <script src="views/account.js"></script>
+  <script src="views/suggestions.js"></script>
+  <script src="views/loans.js"></script>
+  <script src="views/housebound.js"></script>
+  <script src="views/holds.js"></script>
+  <script src="views/overdue.js"></script>
+  <script src="views/inventory-sessions.js"></script>
+  <script src="views/periodicals.js"></script>
+  <script src="views/mzs.js"></script>
+  <script src="views/dnevnik.js"></script>
+  <script src="views/stats.js"></script>
+  <script src="views/reports.js"></script>
+  <script src="views/catalog.js"></script>
+  <script src="views/barcode-labels.js"></script>
+  <script src="views/logo-org.js"></script>
+  <script src="views/audit.js"></script>
+  <script src="views/settings.js"></script>
+  <script src="views/analytics.js"></script>
+  <script src="views/persons.js"></script>
+  <script src="views/chronicle.js"></script>
+  <script src="views/links.js"></script>
+  <script src="views/av.js"></script>
+  <script src="views/data-import.js"></script>
+  <script src="views/mobile.js"></script>
+  <script src="views/bootstrap.js"></script>
 </body>
 </html>
