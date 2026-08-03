@@ -11,6 +11,94 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.43.0
+
+**Промени — двайсети извлечен домейн от main.js (Фаза 4, стъпка 21), без промяна в поведението:**
+- "Резервации" (3 IPC канала: holds:list/add/cancel) изведени в
+  `handlers/holds.js`. `firstActiveHold`/`consumeHoldOnCheckout`/
+  `activateHoldOnReturn` се връщат обратно към main.js (по същия модел като
+  `handlers/calendar.js`/`handlers/circ-rules.js`), защото ги ползва
+  домейнът "Заемания", който все още е в main.js и е следващият за
+  извличане — той е плътно свързан с резервациите (при заемане/връщане
+  трябва да провери/задели активна резервация).
+- IPC поведението непроменено. Нов тестови файл (9 нови теста, общо 231).
+
+**Changes — twentieth domain extracted from main.js (Phase 4, step 21), no behavior change:**
+- "Holds" (3 IPC channels: holds:list/add/cancel) extracted into
+  `handlers/holds.js`. `firstActiveHold`/`consumeHoldOnCheckout`/
+  `activateHoldOnReturn` are returned back to main.js (same pattern as
+  `handlers/calendar.js`/`handlers/circ-rules.js`), since the still-
+  unextracted "Loans" domain — next in line, and tightly coupled to holds
+  (checkout/return must check/promote an active hold) — depends on them.
+- IPC behavior unchanged. New test file (9 new tests, 231 total).
+
+## v1.42.0
+
+**Промени — три извлечени домейна от main.js (Фаза 4, стъпки 18-20), без промяна в поведението:**
+- "Читателска сметка" (Koha: accountlines — 4 IPC канала: get/charge/pay/
+  deleteLine) изведени в `handlers/account.js`.
+- "Предложения за покупка от читатели" (Koha: suggestions — 4 IPC канала:
+  list/create/setStatus/delete) изведени в `handlers/suggestions.js`.
+- "Лични данни: анонимизиране" (Koha: pseudonymization — 2 IPC канала:
+  gdpr:candidates/gdpr:anonymize) изведени в `handlers/gdpr.js`.
+- И трите зависят само от `getDb`, `run`, `logAudit` (и `today` за account/
+  suggestions) — самостоятелни домейни без връзка помежду си, обединени в
+  едно издание.
+- IPC поведението непроменено. Три нови тестови файла (21 нови теста, общо 222).
+
+**Changes — three domains extracted from main.js (Phase 4, steps 18-20), no behavior change:**
+- "Reader account" (Koha: accountlines — 4 IPC channels: get/charge/pay/
+  deleteLine) extracted into `handlers/account.js`.
+- "Reader purchase suggestions" (Koha: suggestions — 4 IPC channels:
+  list/create/setStatus/delete) extracted into `handlers/suggestions.js`.
+- "Personal data anonymization" (Koha: pseudonymization — 2 IPC channels:
+  gdpr:candidates/gdpr:anonymize) extracted into `handlers/gdpr.js`.
+- All three depend only on `getDb`, `run`, `logAudit` (and `today` for
+  account/suggestions) — independent domains bundled into one release.
+- IPC behavior unchanged. Three new test files (21 new tests, 222 total).
+
+## v1.41.0
+
+**Промени — шестнайсети извлечен домейн от main.js (Фаза 4, стъпка 17), без промяна в поведението:**
+- "Читатели" (7 IPC канала: list/get/byCard/create/update/clearSuspension/
+  delete) изведени в `handlers/readers.js`. Зависи по референция от
+  `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite` (затворени над
+  мутируемото PDP_KEY състояние за защита на ЕГН/№ ЛК), `diffFields`,
+  `checkRecordLimit`, `ftsQuery` (стабилен модулен export от
+  `search-fts.js`) и `today`/`logAudit`.
+- `readers:delete` беше физически разположен в main.js след секцията за
+  GDPR анонимизиране — преместен в `handlers/readers.js` заедно с
+  останалите читателски handlers, без промяна в поведението.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 201).
+
+**Changes — sixteenth domain extracted from main.js (Phase 4, step 17), no behavior change:**
+- "Readers" (7 IPC channels: list/get/byCard/create/update/
+  clearSuspension/delete) extracted into `handlers/readers.js`. Depends by
+  reference on `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite`
+  (closed over the mutable PDP_KEY state protecting national ID fields),
+  `diffFields`, `checkRecordLimit`, `ftsQuery` (a stable module export from
+  `search-fts.js`), and `today`/`logAudit`.
+- `readers:delete` was physically located in main.js after the GDPR
+  anonymization section — moved into `handlers/readers.js` alongside the
+  other reader handlers, with no behavior change.
+- IPC behavior unchanged. New test file (10 new tests, 201 total).
+
+## v1.40.0
+
+**Промени — петнайсети извлечен домейн от main.js (Фаза 4, стъпка 16), без промяна в поведението:**
+- "КДБФ — книга за движение на фонда" (единственият справочен, read-only
+  `kdbf:report`) изведен в `handlers/kdbf.js`. Зависи само от `getDb`, `run`
+  и `yearOf` (по стойност) — не пише нищо, само агрегира постъпления,
+  отчисления и наличност към края на годината.
+- IPC поведението непроменено. Нов тестови файл (6 нови теста, общо 191).
+
+**Changes — fifteenth domain extracted from main.js (Phase 4, step 16), no behavior change:**
+- "KDBF — fund movement ledger" (a single read-only report handler,
+  `kdbf:report`) extracted into `handlers/kdbf.js`. Depends only on
+  `getDb`, `run` and `yearOf` (by value) — writes nothing, only aggregates
+  acquisitions, deaccessions, and year-end stock levels.
+- IPC behavior unchanged. New test file (6 new tests, 191 total).
+
 ## v1.39.0
 
 **Промени — четиринайсети извлечен домейн от main.js (Фаза 4, стъпка 15), без промяна в поведението:**

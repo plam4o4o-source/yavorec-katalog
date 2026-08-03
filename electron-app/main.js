@@ -937,183 +937,23 @@ require('./handlers/deaccession-acts')(ipcMain, {
 });
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
-ipcMain.handle('kdbf:report', (e, year) =>
-  run(() => {
-    const y = year || yearOf();
-    const part1 = db.prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM books b WHERE b.acquisition_id=a.id) AS registered_count,
-             (SELECT COALESCE(SUM(price),0) FROM books b WHERE b.acquisition_id=a.id) AS registered_value,
-             (SELECT MIN(inv_number) FROM books b WHERE b.acquisition_id=a.id) AS inv_from,
-             (SELECT MAX(inv_number) FROM books b WHERE b.acquisition_id=a.id) AS inv_to
-      FROM acquisitions a WHERE a.year = ? ORDER BY a.no
-    `).all(y);
-    const part3 = db.prepare(`
-      SELECT d.*, (SELECT COUNT(*) FROM deaccession_items i WHERE i.act_id=d.id) AS item_count,
-             (SELECT COALESCE(SUM(price),0) FROM deaccession_items i WHERE i.act_id=d.id) AS item_value
-      FROM deaccession_acts d WHERE d.year = ? ORDER BY d.no
-    `).all(y);
-    const end = y + '-12-31';
-    const stockAt = (d) => db.prepare(`
-      SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS v FROM books
-      WHERE register_date <= ? AND (deaccession_date IS NULL OR deaccession_date > ?)
-    `).get(d, d);
-    const stockEnd = stockAt(end);
-    const acquiredYear = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS v FROM books WHERE substr(register_date,1,4) = ?`).get(y);
-    const deaccYear = db.prepare(`
-      SELECT COUNT(*) AS n, COALESCE(SUM(i.price),0) AS v FROM deaccession_items i
-      JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
-    `).get(y);
-    return { part1, part3, stockEnd, acquiredYear, deaccYear, year: y };
-  })
-);
+require('./handlers/kdbf')(ipcMain, { getDb: () => db, run, yearOf });
 
 /* ---------------- Читатели ---------------- */
-const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
-  'id_card_no', 'id_card_date', 'id_card_issuer', 'birth_date', 'category', 'registered_at',
-  're_registered_at', 'status', 'gdpr_consent', 'gdpr_consent_date', 'parent_consent',
-  'parent_consent_date', 'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note'];
-/* prev — досегашният ред (при редакция). Датата на съгласието се записва в момента
-   на отбелязване и се пази при следващи записи; голият флаг 0/1 без дата е слаба
-   защита при проверка по ЗЗЛД/GDPR. Сваленото съгласие сваля и датата. */
-function readerPayload(r, prev) {
-  const out = {};
-  READER_FIELDS.forEach(f => { out[f] = r[f] === undefined || r[f] === '' ? null : r[f]; });
-  out.gdpr_consent = r.gdpr_consent ? 1 : 0;
-  out.parent_consent = r.parent_consent ? 1 : 0;
-  out.gdpr_consent_date = out.gdpr_consent ? ((prev && prev.gdpr_consent_date) || today()) : null;
-  out.parent_consent_date = out.parent_consent ? ((prev && prev.parent_consent_date) || today()) : null;
-  out.category = r.category || 'възрастен';
-  out.status = r.status || 'активен';
-  out.registered_at = r.registered_at || today();
-  return out;
-}
-ipcMain.handle('readers:list', (e, query) =>
-  run(() => {
-    if (query && query.trim()) {
-      const q = `%${query.trim()}%`;
-      // Името минава през FTS5 (виж books:list по-горе за обяснението); телефон и
-      // карта остават LIKE — цифри, без проблем с регистъра, а "съдържа навсякъде"
-      // помага при търсене по част от номера.
-      return maskReaderRows(db.prepare(`
-        SELECT * FROM readers
-        WHERE id IN (SELECT rowid FROM readers_fts WHERE readers_fts MATCH ?)
-           OR phone LIKE ? OR card_no LIKE ?
-        ORDER BY name
-      `).all(ftsQuery(query), q, q));
-    }
-    return maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY name').all());
-  })
-);
-ipcMain.handle('readers:get', (e, id) => run(() => maskReaderRow(db.prepare('SELECT * FROM readers WHERE id = ?').get(id))));
-ipcMain.handle('readers:byCard', (e, card) => run(() => maskReaderRow(db.prepare('SELECT * FROM readers WHERE card_no = ?').get(card))));
-ipcMain.handle('readers:create', (e, r) =>
-  run(() => {
-    checkRecordLimit('readers');
-    const payload = readerPayload(r);
-    preparePiiForWrite(payload, null);
-    const info = db.prepare(`
-      INSERT INTO readers (${READER_FIELDS.join(',')}) VALUES (${READER_FIELDS.map(f => '@' + f).join(',')})
-    `).run(payload);
-    logAudit('Нов читател', 'карта ' + (r.card_no || '') + ' — ' + r.name);
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('readers:update', (e, r) =>
-  run(() => {
-    const prev = db.prepare('SELECT * FROM readers WHERE id = ?').get(r.id);
-    const payload = readerPayload(r, prev);
-    preparePiiForWrite(payload, prev);
-    db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
-      .run(Object.assign({ id: r.id }, payload));
-    // ЕГН и номер на документ за самоличност не влизат в диференца на одитната следа —
-    // тя се пази с експорт в CSV и не бива да удвоява най-чувствителните лични данни.
-    const diff = diffFields(prev, payload, READER_FIELDS.filter(f => f !== 'egn' && f !== 'id_card_no'));
-    logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name, diff);
-  })
-);
-// Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
-ipcMain.handle('readers:clearSuspension', (e, id) =>
-  run(() => {
-    db.prepare('UPDATE readers SET suspended_until = NULL WHERE id = ?').run(id);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(id);
-    logAudit('Снето наказание', r ? r.name : ('читател № ' + id));
-  })
-);
+require('./handlers/readers')(ipcMain, {
+  getDb: () => db, run, logAudit, today, ftsQuery,
+  maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit
+});
 
 /* ---------------- Читателска сметка (Koha: accountlines) ----------------
    amount > 0 = начислено (дължи се), amount < 0 = платено. Балансът е SUM(amount).
    Не е касов модул — само дневник на движенията + квитанция за печат. */
-ipcMain.handle('account:get', (e, readerId) =>
-  run(() => {
-    const lines = db.prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY date DESC, id DESC').all(readerId);
-    const balance = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
-    return { lines, balance };
-  })
-);
-ipcMain.handle('account:charge', (e, { reader_id, type, amount, note, date }) =>
-  run(() => {
-    const amt = Math.abs(Number(amount) || 0);
-    if (!amt) throw new Error('Сумата трябва да е положителна.');
-    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(reader_id, date || today(), 'начисление', type || 'друго', amt, note || null);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Начисление', (r ? r.name : reader_id) + ' — ' + (type || 'друго') + ' ' + amt.toFixed(2) + ' лв.');
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('account:pay', (e, { reader_id, amount, note, date }) =>
-  run(() => {
-    const amt = Math.abs(Number(amount) || 0);
-    if (!amt) throw new Error('Сумата трябва да е положителна.');
-    const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(reader_id, date || today(), 'плащане', 'плащане', -amt, note || null);
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' лв.');
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('account:deleteLine', (e, id) =>
-  run(() => { db.prepare('DELETE FROM account_lines WHERE id = ?').run(id); })
-);
+require('./handlers/account')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- Предложения за покупка от читатели (Koha: suggestions) ----------------
    заявено → одобрено → поръчано → получено/отказано. При „получено" може да се закачи
    към партида в Постъпления, за да остане следа откъде реално е дошла книгата. */
-ipcMain.handle('suggestions:list', (e, status) =>
-  run(() => {
-    const sql = `SELECT s.*, r.name AS reader_name_live, a.no AS acq_no, a.year AS acq_year
-      FROM suggestions s LEFT JOIN readers r ON r.id = s.reader_id
-      LEFT JOIN acquisitions a ON a.id = s.acquisition_id`;
-    const rows = status ? db.prepare(sql + ' WHERE s.status = ? ORDER BY s.date DESC').all(status)
-                         : db.prepare(sql + ' ORDER BY s.date DESC').all();
-    rows.forEach(r => { if (r.reader_name_live) r.reader_name = r.reader_name_live; });
-    return rows;
-  })
-);
-ipcMain.handle('suggestions:create', (e, sug) =>
-  run(() => {
-    if (!(sug.title || '').trim()) throw new Error('Заглавието е задължително.');
-    const info = db.prepare(`
-      INSERT INTO suggestions (date, reader_id, reader_name, author, title, note, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'заявено')
-    `).run(sug.date || today(), sug.reader_id || null, sug.reader_name || null, sug.author || null, sug.title.trim(), sug.note || null);
-    logAudit('Предложение за покупка', sug.title);
-    return info.lastInsertRowid;
-  })
-);
-const SUGGESTION_STATUSES = ['заявено', 'одобрено', 'поръчано', 'получено', 'отказано'];
-ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id }) =>
-  run(() => {
-    if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
-    db.prepare('UPDATE suggestions SET status = ?, acquisition_id = ? WHERE id = ?')
-      .run(status, status === 'получено' ? (acquisition_id || null) : null, id);
-    const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
-    logAudit('Предложение за покупка', (s ? s.title : id) + ' → ' + status);
-  })
-);
-ipcMain.handle('suggestions:delete', (e, id) =>
-  run(() => { db.prepare('DELETE FROM suggestions WHERE id = ?').run(id); })
-);
+require('./handlers/suggestions')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- Обслужване по домовете (Koha: housebound) ----------------
    Извадени в handlers/housebound.js (Фаза 4, стъпка 8 от разбиването на
@@ -1129,52 +969,7 @@ require('./handlers/housebound')(ipcMain, {
    служебния запис „— анонимизирани заемания —", а категорията и годината се снимат в
    anon_category — статистиката остава вярна („дете, 2024 г."), името изчезва.
    Настройка anonymize_years = 0 изключва всичко. Необратимо е — затова е ръчен бутон. */
-function anonReaderId() {
-  const NAME = '— анонимизирани заемания —';
-  const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
-  if (r) return r.id;
-  return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
-    VALUES (?, '—', 'прекратен', date('now'), 0)`).run(NAME).lastInsertRowid;
-}
-function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
-ipcMain.handle('gdpr:candidates', () =>
-  run(() => {
-    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
-    const years = parseInt(s.anonymize_years, 10) || 0;
-    if (!years) return { years: 0, count: 0 };
-    const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get('— анонимизирани заемания —');
-    const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
-      WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
-      .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;
-    return { years, count, cutoff: anonCutoff(years) };
-  })
-);
-ipcMain.handle('gdpr:anonymize', () =>
-  run(() => {
-    const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
-    const years = parseInt(s.anonymize_years, 10) || 0;
-    if (!years) throw new Error('Първо задайте срок в „Настройки“ → „Лични данни“ (0 = изключено).');
-    const cutoff = anonCutoff(years);
-    const anonId = anonReaderId();
-    const tx = db.transaction(() => {
-      const n = db.prepare(`
-        UPDATE loans SET
-          anon_category = COALESCE((SELECT r.category FROM readers r WHERE r.id = loans.reader_id), '—')
-                          || ' · ' || substr(loans.date_out, 1, 4),
-          reader_id = ?
-        WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL AND reader_id != ?
-      `).run(anonId, cutoff, anonId).changes;
-      // Събитията също губят връзката с читателя; категорията им е снимана още при записа.
-      db.prepare('UPDATE events SET reader_id = NULL WHERE date < ? AND reader_id IS NOT NULL AND reader_id != ?')
-        .run(cutoff, anonId);
-      return n;
-    });
-    const n = tx();
-    logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани');
-    return { anonymized: n, cutoff };
-  })
-);
-ipcMain.handle('readers:delete', (e, id) => run(() => db.prepare('DELETE FROM readers WHERE id = ?').run(id)));
+require('./handlers/gdpr')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Календар на библиотеката ----------------
    Извадени в handlers/calendar.js (Фаза 4, стъпка 4 от разбиването на
@@ -1257,73 +1052,14 @@ function checkSuspended(readerId) {
   }
 }
 
-/* ---------------- Резервации ---------------- */
-const HOLD_ACTIVE = "('чака','заделена')";
-const HOLD_SELECT = `
-  SELECT h.*, b.title, b.author, b.inv_number, b.barcode,
-         r.name AS reader_name, r.card_no, r.phone
-  FROM holds h
-  JOIN books b ON b.id = h.book_id
-  JOIN readers r ON r.id = h.reader_id
-`;
-// Най-старата активна резервация за книгата — тя определя кой е „наред“.
-function firstActiveHold(bookId) {
-  return db.prepare(`${HOLD_SELECT} WHERE h.book_id = ? AND h.status IN ${HOLD_ACTIVE} ORDER BY h.placed_at, h.id`).get(bookId);
-}
-// При заемане: читателят, който е наред, минава (резервацията му се изпълнява);
-// всеки друг се отказва, докато резервацията стои — иначе заделената книга
-// тихо заминава при трети човек.
-function consumeHoldOnCheckout(bookId, readerId) {
-  const h = firstActiveHold(bookId);
-  if (!h) return;
-  if (h.reader_id !== readerId) {
-    throw new Error('Книгата е резервирана за ' + h.reader_name +
-      (h.status === 'заделена' ? ' (заделена, чака взимане)' : '') +
-      '. Откажете резервацията, ако все пак трябва да я заемете другиму.');
-  }
-  db.prepare("UPDATE holds SET status = 'изпълнена', resolved_at = datetime('now') WHERE id = ?").run(h.id);
-}
-// При връщане: най-старата чакаща резервация става „заделена“, за да не се
-// върне книгата на рафта. Връща резервацията, за да я покаже екранът.
-function activateHoldOnReturn(bookId) {
-  const h = firstActiveHold(bookId);
-  if (!h) return null;
-  if (h.status === 'чака') {
-    db.prepare("UPDATE holds SET status = 'заделена', ready_at = datetime('now') WHERE id = ?").run(h.id);
-    h.status = 'заделена';
-    logAudit('Заделена книга', 'инв. № ' + h.inv_number + ' — ' + h.title + ' за ' + h.reader_name);
-  }
-  return h;
-}
+/* ---------------- Резервации ----------------
+   Извадени в handlers/holds.js (Фаза 4, стъпка 21 от разбиването на
+   монолита main.js на модули по домейн). firstActiveHold/
+   consumeHoldOnCheckout/activateHoldOnReturn се връщат обратно тук, защото
+   ги ползва и домейнът "Заемания" по-долу (все още неизваден). */
+const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
+  require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit });
 
-ipcMain.handle('holds:list', () =>
-  run(() => db.prepare(`${HOLD_SELECT} WHERE h.status IN ${HOLD_ACTIVE}
-    ORDER BY CASE h.status WHEN 'заделена' THEN 0 ELSE 1 END, h.placed_at, h.id`).all())
-);
-ipcMain.handle('holds:add', (e, { reader_id, code }) =>
-  run(() => {
-    const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
-    if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
-    if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
-    const openLoan = db.prepare('SELECT reader_id FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id);
-    if (!openLoan) throw new Error('Инв. № ' + b.inv_number + ' е свободен — заемете го направо, без резервация.');
-    if (openLoan.reader_id === reader_id) throw new Error('Читателят в момента държи тази книга.');
-    const dup = db.prepare(`SELECT 1 FROM holds WHERE book_id = ? AND reader_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id, reader_id);
-    if (dup) throw new Error('Този читател вече има резервация за книгата.');
-    const info = db.prepare('INSERT INTO holds (book_id, reader_id) VALUES (?, ?)').run(b.id, reader_id);
-    const queue = db.prepare(`SELECT COUNT(*) AS n FROM holds WHERE book_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id).n;
-    const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-    logAudit('Резервация', 'инв. № ' + b.inv_number + ' — ' + b.title + ' за ' + (r ? r.name : reader_id));
-    return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, queue };
-  })
-);
-ipcMain.handle('holds:cancel', (e, id) =>
-  run(() => {
-    const h = db.prepare(`${HOLD_SELECT} WHERE h.id = ?`).get(id);
-    db.prepare("UPDATE holds SET status = 'отказана', resolved_at = datetime('now') WHERE id = ?").run(id);
-    if (h) logAudit('Отказана резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' (' + h.reader_name + ')');
-  })
-);
 ipcMain.handle('loans:list', (e, { onlyOpen } = {}) =>
   run(() => {
     if (onlyOpen) return db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL ORDER BY l.date_due`).all();
