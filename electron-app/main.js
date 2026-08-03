@@ -1052,38 +1052,7 @@ const { DEFAULT_NOTICE_SUBJECT, DEFAULT_NOTICE_BODY, DEFAULT_NOTICE_SMS, NOTICE_
 require('./handlers/periodicals')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- МЗС ---------------- */
-ipcMain.handle('mzs:list', () => run(() => db.prepare('SELECT * FROM mzs_requests ORDER BY date DESC, no DESC').all()));
-ipcMain.handle('mzs:nextNo', (e, year) =>
-  run(() => {
-    const y = year || yearOf();
-    const row = db.prepare('SELECT MAX(no) AS m FROM mzs_requests WHERE year = ?').get(y);
-    return (row.m || 0) + 1;
-  })
-);
-ipcMain.handle('mzs:create', (e, m) =>
-  run(() => {
-    const info = db.prepare(`
-      INSERT INTO mzs_requests (no, year, date, direction, partner, author, title, isbn, requester, status, due_date, note)
-      VALUES (@no, @year, @date, @direction, @partner, @author, @title, @isbn, @requester, @status, @due_date, @note)
-    `).run({
-      no: parseInt(m.no, 10), year: yearOf(m.date), date: m.date, direction: m.direction || 'изходящо',
-      partner: m.partner, author: m.author || null, title: m.title, isbn: m.isbn || null,
-      requester: m.requester || null, status: m.status || 'заявено', due_date: m.due_date || null, note: m.note || null
-    });
-    logAudit('Нова МЗС заявка', '№ ' + m.no + ' — ' + m.title + ' (' + m.direction + ')');
-    return info.lastInsertRowid;
-  })
-);
-ipcMain.handle('mzs:update', (e, m) =>
-  run(() => {
-    db.prepare(`
-      UPDATE mzs_requests SET direction=@direction, partner=@partner, author=@author, title=@title, isbn=@isbn,
-        requester=@requester, status=@status, due_date=@due_date, note=@note WHERE id=@id
-    `).run(m);
-    logAudit('Редакция на МЗС заявка', '№ ' + m.no + ' — ' + m.title);
-  })
-);
-ipcMain.handle('mzs:delete', (e, id) => run(() => db.prepare('DELETE FROM mzs_requests WHERE id = ?').run(id)));
+require('./handlers/mzs')(ipcMain, { getDb: () => db, run, logAudit, yearOf });
 
 /* ---------------- Дневник на библиотеката (Раздел А / Раздел Б) ----------------
    Електронен вариант на официалния месечен статистически дневник. Един ред в
@@ -1834,201 +1803,19 @@ ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
 );
 
 /* ---------------- Одитна следа ---------------- */
-ipcMain.handle('audit:list', (e, query) =>
-  run(() => {
-    if (query && query.trim()) {
-      const q = `%${query.trim()}%`;
-      return db.prepare(`
-        SELECT * FROM audit_log WHERE user LIKE ? OR action LIKE ? OR detail LIKE ?
-        ORDER BY id DESC LIMIT 500
-      `).all(q, q, q);
-    }
-    return db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500').all();
-  })
-);
+require('./handlers/audit')(ipcMain, { getDb: () => db, run });
 
-/* ---------------- История на търсенията (Koha: search_history) ----------------
-   Записва завършени търсения (не всяко натискане на клавиш), за да предлага
-   скорошните заявки в полето за търсене — удобство при повторно търсене, не
-   пълноценна одитна следа. */
-ipcMain.handle('searchHistory:log', (e, { kind, query }) =>
-  run(() => {
-    const q = String(query || '').trim();
-    if (!kind || q.length < 2) return;
-    const last = db.prepare('SELECT query FROM search_history WHERE kind = ? ORDER BY id DESC LIMIT 1').get(kind);
-    if (last && last.query === q) return; // без дубликат на последното същото търсене
-    db.prepare('INSERT INTO search_history (user, kind, query) VALUES (?, ?, ?)').run(CURRENT_USER || '', kind, q);
-  })
-);
-ipcMain.handle('searchHistory:suggest', (e, kind) =>
-  run(() => db.prepare(`
-    SELECT query FROM search_history WHERE kind = ? GROUP BY query ORDER BY MAX(id) DESC LIMIT 10
-  `).all(kind).map(r => r.query))
-);
+/* ---------------- История на търсенията (Koha: search_history) ---------------- */
+require('./handlers/search-history')(ipcMain, { getDb: () => db, run, getCurrentUser: () => CURRENT_USER });
 
 /* ---------------- Посещения ---------------- */
-ipcMain.handle('visits:add', (e, { date, count }) =>
-  run(() => db.prepare(`
-    INSERT INTO visits (date, count) VALUES (?, ?)
-    ON CONFLICT(date) DO UPDATE SET count = count + excluded.count
-  `).run(date, parseInt(count, 10) || 0))
-);
+require('./handlers/visits')(ipcMain, { getDb: () => db, run });
 
-/* ---------------- Справки и статистика ---------------- */
-ipcMain.handle('stats:report', (e, year) =>
-  run(() => {
-    const y = year || yearOf();
-    const end = y + '-12-31';
-    const fund = db.prepare(`
-      SELECT * FROM books WHERE register_date <= ? AND (deaccession_date IS NULL OR deaccession_date > ?)
-    `).all(end, end);
-    const acquired = db.prepare(`SELECT * FROM books WHERE substr(register_date,1,4) = ?`).all(y);
-    const deaccessioned = db.prepare(`
-      SELECT i.* FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
-    `).all(y);
-    const loansYear = db.prepare(`SELECT * FROM loans WHERE substr(date_out,1,4) = ?`).all(y);
-    const readersYear = db.prepare(`
-      SELECT * FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?
-    `).all(y, y);
-    const visitsYear = db.prepare(`SELECT COALESCE(SUM(count),0) AS n FROM visits WHERE substr(date,1,4) = ?`).get(y).n;
-    const byGroup = (rows, field) => {
-      const m = {};
-      rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + 1; });
-      return Object.entries(m).sort((a, b) => b[1] - a[1]);
-    };
-    const topLoans = db.prepare(`
-      SELECT b.title, COUNT(*) AS n FROM loans l JOIN books b ON b.id = l.book_id
-      GROUP BY l.book_id ORDER BY n DESC LIMIT 10
-    `).all();
-    const fundByCategory = db.prepare(`
-      SELECT COALESCE(c.name,'—') AS k, COUNT(*) AS n FROM books b LEFT JOIN categories c ON c.id=b.category_id
-      WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
-      GROUP BY k ORDER BY n DESC
-    `).all(end, end).map(r => [r.k, r.n]);
-    return {
-      year: y,
-      fundCount: fund.length, fundValue: value(fund),
-      acquiredCount: acquired.length, acquiredValue: value(acquired),
-      deaccessionedCount: deaccessioned.length, deaccessionedValue: value(deaccessioned),
-      loansCount: loansYear.length,
-      readersCount: readersYear.length,
-      visits: visitsYear || loansYear.length,
-      returnedOnTime: loansYear.filter(l => l.date_in && l.date_due && l.date_in <= l.date_due).length,
-      returnedLate: loansYear.filter(l => l.date_in && l.date_due && l.date_in > l.date_due).length,
-      finesCollected: loansYear.reduce((s, l) => s + (l.fine || 0), 0),
-      fundByLanguage: byGroup(fund, 'language'),
-      fundByDepartment: byGroup(fund, 'department'),
-      fundByCategory,
-      topLoans
-    };
-  })
-);
-
-/* ---------------- Готови справки ----------------
-   Koha предлага споделена библиотека от стотици готови отчети. Тукашният аналог е малък
-   и фиксиран набор от справки, всяка от които съответства на нещо, което читалищна
-   библиотека реално подава към регионалната библиотека/Министерството на културата —
-   не общи "конструктор на справки" възможности, а точно тези таблици, готови за печат.
-   REPORTS_CATALOG описва какво се показва в списъка за избор; reports:run връща данните. */
-const REPORTS_CATALOG = [
-  { id: 'annual_ab', title: 'Годишен статистически отчет — Раздел А и Б', needsYear: true,
-    hint: 'Обобщение на дневника на библиотеката за цялата година — по образеца, подаван към регионалната библиотека.' },
-  { id: 'fund_breakdown', title: 'Библиотечен фонд по отдели, категории и езици', needsYear: true,
-    hint: 'Състояние на фонда към 31.12. на избраната година — таблици вместо диаграми, за прилагане към отчета.' },
-  { id: 'readers_by_category', title: 'Читатели по възрастови категории', needsYear: true,
-    hint: 'Брой активни читатели по категория и новорегистрирани през годината.' },
-  { id: 'fund_movement', title: 'Движение на фонда — постъпления и отчисления', needsYear: true,
-    hint: 'Обобщено по начин на придобиване/причина за отчисляване — извадка от КДБФ за прилагане към годишния отчет.' },
-  { id: 'mzs_annual', title: 'Междубиблиотечно заемане (МЗС) — обобщение', needsYear: true,
-    hint: 'Брой заявки по посока и състояние през годината.' },
-  { id: 'fees_income', title: 'Приходи от такси и обезщетения', needsYear: true,
-    hint: 'Начислено и събрано по вид (годишна такса, обезщетения) от читателската сметка през годината.' }
-];
-ipcMain.handle('reports:list', () => run(() => REPORTS_CATALOG));
-ipcMain.handle('reports:run', (e, { id, year }) =>
-  run(() => {
-    const y = String(year || yearOf());
-    if (id === 'annual_ab') {
-      const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ?').all(`${y}-01-01`, `${y}-12-31`);
-      return { id, year: y, totals: dnevnikSumRow(rows), daysRecorded: rows.length };
-    }
-    if (id === 'fund_breakdown') {
-      const end = y + '-12-31';
-      const fund = db.prepare(`
-        SELECT * FROM books WHERE register_date <= ? AND (deaccession_date IS NULL OR deaccession_date > ?)
-      `).all(end, end);
-      const byGroup = (rows, field) => {
-        const m = {};
-        rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + 1; });
-        return Object.entries(m).sort((a, b) => b[1] - a[1]);
-      };
-      const byCategory = db.prepare(`
-        SELECT COALESCE(c.name,'—') AS k, COUNT(*) AS n FROM books b LEFT JOIN categories c ON c.id=b.category_id
-        WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
-        GROUP BY k ORDER BY n DESC
-      `).all(end, end).map(r => [r.k, r.n]);
-      return {
-        id, year: y, fundCount: fund.length, fundValue: value(fund),
-        byDepartment: byGroup(fund, 'department'), byLanguage: byGroup(fund, 'language'), byCategory
-      };
-    }
-    if (id === 'readers_by_category') {
-      const byCategory = db.prepare(`
-        SELECT COALESCE(category,'—') AS k, COUNT(*) AS n FROM readers WHERE status != 'прекратен' GROUP BY k ORDER BY n DESC
-      `).all().map(r => [r.k, r.n]);
-      const total = byCategory.reduce((s, [, n]) => s + n, 0);
-      const newThisYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ?`).get(y).n;
-      return { id, year: y, total, byCategory, newThisYear };
-    }
-    if (id === 'fund_movement') {
-      const acquired = db.prepare(`
-        SELECT COALESCE(how,'—') AS k, COUNT(*) AS n, COALESCE(SUM(total_count),0) AS cnt, COALESCE(SUM(sum),0) AS val
-        FROM acquisitions WHERE year = ? GROUP BY k ORDER BY cnt DESC
-      `).all(y);
-      const deaccessioned = db.prepare(`
-        SELECT COALESCE(d.reason_text,'—') AS k, COUNT(*) AS cnt, COALESCE(SUM(i.price),0) AS val
-        FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? GROUP BY k ORDER BY cnt DESC
-      `).all(y);
-      return {
-        id, year: y,
-        acquired: acquired.map(r => [r.k, r.cnt, r.val]),
-        acquiredTotal: acquired.reduce((s, r) => s + r.cnt, 0),
-        acquiredValue: acquired.reduce((s, r) => s + r.val, 0),
-        deaccessioned: deaccessioned.map(r => [r.k, r.cnt, r.val]),
-        deaccessionedTotal: deaccessioned.reduce((s, r) => s + r.cnt, 0),
-        deaccessionedValue: deaccessioned.reduce((s, r) => s + r.val, 0)
-      };
-    }
-    if (id === 'mzs_annual') {
-      const byDirection = db.prepare(`
-        SELECT direction AS k, COUNT(*) AS n FROM mzs_requests WHERE year = ? GROUP BY direction ORDER BY k
-      `).all(y).map(r => [r.k, r.n]);
-      const byStatus = db.prepare(`
-        SELECT COALESCE(status,'—') AS k, COUNT(*) AS n FROM mzs_requests WHERE year = ? GROUP BY k ORDER BY n DESC
-      `).all(y).map(r => [r.k, r.n]);
-      const total = byDirection.reduce((s, [, n]) => s + n, 0);
-      return { id, year: y, total, byDirection, byStatus };
-    }
-    if (id === 'fees_income') {
-      const charged = db.prepare(`
-        SELECT COALESCE(type,'друго') AS k, COUNT(*) AS n, COALESCE(SUM(amount),0) AS val
-        FROM account_lines WHERE kind = 'начисление' AND substr(date,1,4) = ? GROUP BY k ORDER BY val DESC
-      `).all(y);
-      const paid = db.prepare(`
-        SELECT COALESCE(SUM(-amount),0) AS val, COUNT(*) AS n FROM account_lines
-        WHERE kind = 'плащане' AND substr(date,1,4) = ?
-      `).get(y);
-      return {
-        id, year: y,
-        charged: charged.map(r => [r.k, r.n, r.val]),
-        chargedTotal: charged.reduce((s, r) => s + r.n, 0),
-        chargedValue: charged.reduce((s, r) => s + r.val, 0),
-        paidCount: paid.n, paidValue: paid.val
-      };
-    }
-    throw new Error('Непозната справка.');
-  })
-);
+/* ---------------- Справки и статистика + Готови справки ----------------
+   Извадени в handlers/stats.js (Фаза 4, стъпка 29 от разбиването на
+   монолита main.js на модули по домейн). dnevnikSumRow е hoisted function
+   declaration от все още неизвадения домейн "Дневник на библиотеката". */
+require('./handlers/stats')(ipcMain, { getDb: () => db, run, yearOf, value, dnevnikSumRow });
 
 /* ---------------- Онлайн каталог (публикуване през GitHub) ----------------
    Изнасят се само библиографски данни и наличност — никога читатели, цени

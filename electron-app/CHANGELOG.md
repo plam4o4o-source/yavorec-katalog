@@ -11,6 +11,62 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.51.0
+
+**Промени — двайсет и девети извлечен домейн от main.js (Фаза 4, стъпка 29), без промяна в поведението:**
+- "Справки и статистика" + "Готови справки" (8 IPC канала: stats:report,
+  reports:list/run) изведени в `handlers/stats.js`. Зависи от `value`
+  (стабилна функция в main.js) и `dnevnikSumRow` (hoisted function
+  declaration от все още неизвадения домейн "Дневник на библиотеката") —
+  и двете по референция.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 304).
+
+**Changes — twenty-ninth domain extracted from main.js (Phase 4, step 29), no behavior change:**
+- "Statistics and reports" (8 IPC channels: stats:report, reports:list/run)
+  extracted into `handlers/stats.js`. Depends on `value` (a stable
+  function in main.js) and `dnevnikSumRow` (a hoisted function declaration
+  from the still-unextracted "Library journal" domain) — both by
+  reference.
+- IPC behavior unchanged. New test file (10 new tests, 304 total).
+
+## v1.50.0
+
+**Промени — три извлечени домейна от main.js (Фаза 4, стъпка 28), без промяна в поведението:**
+- "Одитна следа" (audit:list) изведени в `handlers/audit.js`.
+- "История на търсенията" (searchHistory:log/suggest) изведени в
+  `handlers/search-history.js`. `getCurrentUser` е getter (по същия модел
+  като getDb/setDb), тъй като `CURRENT_USER` е мутируемо `let` в main.js,
+  сменяно от `app:setUser`.
+- "Посещения" (visits:add) изведени в `handlers/visits.js`.
+- Три самостоятелни, малки домейна — без връзка помежду си, обединени в
+  едно издание.
+- IPC поведението непроменено. Три нови тестови файла (12 нови теста, общо 294).
+
+**Changes — three domains extracted from main.js (Phase 4, step 28), no behavior change:**
+- "Audit trail" (audit:list) extracted into `handlers/audit.js`.
+- "Search history" (searchHistory:log/suggest) extracted into
+  `handlers/search-history.js`. `getCurrentUser` is a getter (same pattern
+  as getDb/setDb), since `CURRENT_USER` is a mutable `let` in main.js,
+  changed by `app:setUser`.
+- "Visits" (visits:add) extracted into `handlers/visits.js`.
+- Three independent, small domains — unrelated to each other, bundled into
+  one release.
+- IPC behavior unchanged. Three new test files (12 new tests, 294 total).
+
+## v1.49.0
+
+**Промени — двайсет и шести извлечен домейн от main.js (Фаза 4, стъпка 27), без промяна в поведението:**
+- "МЗС" (междубиблиотечно заемане — 5 IPC канала: mzs:list/nextNo/create/
+  update/delete) изведени в `handlers/mzs.js`. Зависи само от `getDb`,
+  `run`, `logAudit`, `yearOf`.
+- IPC поведението непроменено. Нов тестови файл (6 нови теста, общо 282).
+
+**Changes — twenty-sixth domain extracted from main.js (Phase 4, step 27), no behavior change:**
+- "MZS" (inter-library loan — 5 IPC channels: mzs:list/nextNo/create/
+  update/delete) extracted into `handlers/mzs.js`. Depends only on
+  `getDb`, `run`, `logAudit`, `yearOf`.
+- IPC behavior unchanged. New test file (6 new tests, 282 total).
+
 ## v1.48.0
 
 **Промени — двайсет и пети извлечен домейн от main.js (Фаза 4, стъпка 26), без промяна в поведението:**
