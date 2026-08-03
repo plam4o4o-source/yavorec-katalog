@@ -11,6 +11,128 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.48.0
+
+**Промени — двайсет и пети извлечен домейн от main.js (Фаза 4, стъпка 26), без промяна в поведението:**
+- "Периодика" (7 IPC канала: periodicals:list/get/create/update/delete,
+  periodicalIssues:add/delete) изведени в `handlers/periodicals.js`.
+  Зависи само от `getDb`, `run`, `logAudit`, `today`.
+- IPC поведението непроменено. Нов тестови файл (10 нови теста, общо 276).
+
+**Changes — twenty-fifth domain extracted from main.js (Phase 4, step 26), no behavior change:**
+- "Periodicals" (7 IPC channels: periodicals:list/get/create/update/
+  delete, periodicalIssues:add/delete) extracted into
+  `handlers/periodicals.js`. Depends only on `getDb`, `run`, `logAudit`,
+  `today`.
+- IPC behavior unchanged. New test file (10 new tests, 276 total).
+
+## v1.47.0
+
+**Промени — двайсет и четвърти извлечен домейн от main.js (Фаза 4, стъпка 25), без промяна в поведението:**
+- "Просрочени: напомняния" (3 IPC канала: loans:reminders/mailto,
+  notices:log) изведени в `handlers/notices.js`. Зависи от `LOAN_SELECT`
+  (loans.js), `EUR_RATE` (по стойност), `isValidEmail` (стабилен модулен
+  export от `security-utils.js`), `shell` (Electron) и `today`.
+- `DEFAULT_NOTICE_SUBJECT`/`DEFAULT_NOTICE_BODY`/`DEFAULT_NOTICE_SMS`/
+  `NOTICE_PLACEHOLDERS` се връщат обратно към main.js (по същия модел като
+  LOAN_SELECT/circRule), защото ги ползва все още неизвадената "Настройки"
+  (`settings:noticeDefaults`).
+- IPC поведението непроменено. Нов тестови файл (7 нови теста, общо 266).
+
+**Changes — twenty-fourth domain extracted from main.js (Phase 4, step 25), no behavior change:**
+- "Overdue reminders" (3 IPC channels: loans:reminders/mailto,
+  notices:log) extracted into `handlers/notices.js`. Depends on
+  `LOAN_SELECT` (loans.js), `EUR_RATE` (by value), `isValidEmail` (a stable
+  module export from `security-utils.js`), `shell` (Electron), and `today`.
+- `DEFAULT_NOTICE_SUBJECT`/`DEFAULT_NOTICE_BODY`/`DEFAULT_NOTICE_SMS`/
+  `NOTICE_PLACEHOLDERS` are returned back to main.js (same pattern as
+  LOAN_SELECT/circRule), since the still-unextracted "Settings" domain
+  depends on them (`settings:noticeDefaults`).
+- IPC behavior unchanged. New test file (7 new tests, 266 total).
+
+## v1.46.0
+
+**Промени — двайсет и трети извлечен домейн от main.js (Фаза 4, стъпка 24), без промяна в поведението:**
+- "Инвентаризация" (6 IPC канала: inventorySessions:list/requirement/
+  start/get/scan/close) изведени в `handlers/inventory-sessions.js`.
+  Зависи от `pctRequired`/`naturalLoss` (стабилни function declarations в
+  main.js) и getDb/run/logAudit.
+- `inventorySessions:importScans` (внасяне на сканирано с телефон) остава
+  засега в main.js — физически принадлежи към отделна секция за мобилно
+  сканиране, не към основния маркер "Инвентаризация"; ще се изведе с
+  бъдещия домейн "mobile".
+- IPC поведението непроменено. Нов тестови файл (8 нови теста, общо 259).
+
+**Changes — twenty-third domain extracted from main.js (Phase 4, step 24), no behavior change:**
+- "Inventory sessions" (6 IPC channels: inventorySessions:list/
+  requirement/start/get/scan/close) extracted into
+  `handlers/inventory-sessions.js`. Depends on `pctRequired`/`naturalLoss`
+  (stable function declarations in main.js) and getDb/run/logAudit.
+- `inventorySessions:importScans` (importing phone-scanned codes) stays in
+  main.js for now — it physically belongs to a separate mobile-scanning
+  section, not the main "Инвентаризация" marker; it will move out with a
+  future "mobile" domain.
+- IPC behavior unchanged. New test file (8 new tests, 259 total).
+
+## v1.45.0
+
+**Промени — двайсет и втори извлечен домейн от main.js (Фаза 4, стъпка 23), без промяна в поведението:**
+- "Табло" (2 read-only IPC канала: dashboard:stats/full) изведени в
+  `handlers/dashboard.js`. Зависи от `LOAN_SELECT` (holds/loans.js),
+  `isWorkDay` (calendar.js), `pctRequired`/`yearOf` (стабилни функции/
+  конст в main.js) и `today`.
+- IPC поведението непроменено. Нов тестови файл (5 нови теста, общо 251).
+
+**Changes — twenty-second domain extracted from main.js (Phase 4, step 23), no behavior change:**
+- "Dashboard" (2 read-only IPC channels: dashboard:stats/full) extracted
+  into `handlers/dashboard.js`. Depends on `LOAN_SELECT` (from
+  loans.js), `isWorkDay` (calendar.js), `pctRequired`/`yearOf` (stable
+  functions/consts in main.js), and `today`.
+- IPC behavior unchanged. New test file (5 new tests, 251 total).
+
+## v1.44.0
+
+**Промени — двайсет и първи извлечен домейн от main.js (Фаза 4, стъпка 22), без промяна в поведението — един от "големите пет":**
+- "Заемания" (10 IPC канала: list/overdue/byReader/byBook/overdueByReader/
+  checkout/return/extend/checkoutByCode/returnByCode, плюс events:localuse)
+  изведени в `handlers/loans.js`. Ползва почти всичко вече извадено:
+  `circRule`/`readerCategory` (circ-rules.js), `nextWorkDay`/
+  `closedDaysBetween` (calendar.js), `firstActiveHold`/
+  `consumeHoldOnCheckout`/`activateHoldOnReturn` (holds.js), `BOOK_SELECT`
+  (по стойност, от все още неизвадения домейн "Книги") и
+  `scheduleCatalogWrite` (по референция, hoisted по-долу в main.js).
+- `logEvent` **остава** hoisted function declaration в main.js (не се мести
+  в модула) — `handlers/housebound.js` вече го изисква по референция
+  по-рано във файла (стъпка 8); местенето му в `handlers/loans.js` би
+  минало през `const` присвояване по-късно във файла и би счупило по-ранния
+  достъп (TDZ). `applySuspension`/`checkSuspended` (вътрешни, без пряк IPC)
+  се преместиха изцяло в модула, тъй като никой друг домейн не ги ползва.
+- `LOAN_SELECT` се връща обратно към main.js (по същия модел като
+  calendar.js/circ-rules.js/holds.js), защото го ползват все още
+  неизвадените домейни "Табло" и "Просрочени: напомняния".
+- IPC поведението непроменено. Нов тестови файл (15 нови теста, общо 246).
+
+**Changes — twenty-first domain extracted from main.js (Phase 4, step 22), no behavior change — one of the "big five":**
+- "Loans" (10 IPC channels: list/overdue/byReader/byBook/overdueByReader/
+  checkout/return/extend/checkoutByCode/returnByCode, plus events:localuse)
+  extracted into `handlers/loans.js`. Consumes nearly everything extracted
+  so far: `circRule`/`readerCategory` (circ-rules.js), `nextWorkDay`/
+  `closedDaysBetween` (calendar.js), `firstActiveHold`/
+  `consumeHoldOnCheckout`/`activateHoldOnReturn` (holds.js), `BOOK_SELECT`
+  (by value, from the still-unextracted "Books" domain), and
+  `scheduleCatalogWrite` (by reference, hoisted further down in main.js).
+- `logEvent` **stays** a hoisted function declaration in main.js (not moved
+  into the module) — `handlers/housebound.js` already requires it by
+  reference earlier in the file (step 8); moving it into
+  `handlers/loans.js` would turn it into a `const` assigned later in the
+  file and break that earlier access (TDZ). `applySuspension`/
+  `checkSuspended` (internal, no direct IPC surface) moved into the module
+  entirely, since no other domain uses them.
+- `LOAN_SELECT` is returned back to main.js (same pattern as
+  calendar.js/circ-rules.js/holds.js), since the still-unextracted
+  "Dashboard" and "Overdue reminders" domains depend on it.
+- IPC behavior unchanged. New test file (15 new tests, 246 total).
+
 ## v1.43.0
 
 **Промени — двайсети извлечен домейн от main.js (Фаза 4, стъпка 21), без промяна в поведението:**
