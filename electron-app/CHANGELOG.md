@@ -11,6 +11,38 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.61.0
+
+**BG:** Изравнява лицензионната формулировка навсякъде към
+**GPL-3.0-or-later** — решение, взето от автора, след разминаване, отбелязано
+при писането на документацията (Фаза 5): `package.json` → `"license"` вече
+отдавна декларираше `"GPL-3.0-or-later"`, докато README текстовете, кредитния
+надпис в самата програма и `package.json` → `"copyright"` говореха само за
+„GPL-3.0“ (без „or later“) — реално разминаване в избора на лиценз, не само в
+текста. Поправено: `electron-app/README.md` (пет места, плюс нова изрична
+бележка „This program is free software...“ по образеца на GPL), кредитният
+надпис в програмата (`src/app.js` → `APP_CREDIT_TEXT`, вижда се долу вляво в
+менюто и в „Настройки“), и `package.json` → `"copyright"`.
+`LICENSE.bg.md` НЕ е пипнат — той е превод на самия текст на GPL версия 3 и
+остава коректен независимо от избора „или по-нова версия“, който е решение
+на носителя на авторските права, не свойство на самия текст на лиценза.
+Няма промяна в поведението на програмата — само текст.
+
+**EN:** Aligns the license wording everywhere to **GPL-3.0-or-later** — a
+decision made by the author, after a mismatch flagged while writing the
+documentation (Phase 5): `package.json` → `"license"` had long declared
+`"GPL-3.0-or-later"`, while the README prose, the in-app credit line, and
+`package.json` → `"copyright"` all said only "GPL-3.0" (without "or later")
+— a real mismatch in the license election itself, not just wording. Fixed:
+`electron-app/README.md` (five spots, plus a new explicit "This program is
+free software..." notice following the standard GPL template), the in-app
+credit text (`src/app.js` → `APP_CREDIT_TEXT`, shown bottom-left in the nav
+and in "Settings"), and `package.json` → `"copyright"`. `LICENSE.bg.md` was
+NOT touched — it is a translation of the GPL version 3 text itself and
+remains accurate regardless of the "or later" election, which is the
+copyright holder's choice, not a property of the license text. No behavior
+change — text only.
+
 ## v1.60.0
 
 **BG:** Отделен bug-fix commit (както беше препоръчано в бележките към
