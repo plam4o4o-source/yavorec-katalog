@@ -4,7 +4,6 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const Database = require('better-sqlite3');
 const importers = require('./importers');
-const pii = require('./pii-crypto');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
 const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail } = require('./security-utils');
@@ -333,131 +332,12 @@ const backupHandlers = require('./handlers/backup')(ipcMain, {
 const { autoBackupIfNeeded } = backupHandlers;
 
 /* ---------------- Защита на лични данни: ЕГН / № лична карта (обща парола) ----------------
-   ЕГН и номер на лична карта на читателите могат да се защитят с обща парола
-   (AES-256-GCM, виж pii-crypto.js) — една и съща парола на всички компютри,
-   които ползват тази база данни, включително споделена мрежова база (затова
-   НЕ е обвързана с конкретния компютър — виж бележката в README). Останалите
-   данни за читателя (име, адрес, телефон, история на заемания) не са засегнати
-   и продължават да работят нормално без паролата.
-
-   Ключът се пази само в паметта на текущия процес ("отключено" за тази сесия
-   на програмата) — никога на диск. При затваряне на програмата или ръчно
-   "Заключи" паролата трябва да се въведе отново. */
-let PDP_KEY = null;
-const PDP_PLACEHOLDER = 'Защитени данни';
-function pdpSettingsRow() {
-  return db.prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id = 1').get() || {};
-}
-function pdpConfigured() {
-  const s = pdpSettingsRow();
-  return !!(s.pdp_salt && s.pdp_verifier);
-}
-// Прилага се към всеки читателски ред, преди да напусне main процеса: разкрипта
-// egn/id_card_no ако защитата е отключена в момента, показва плейсхолдър ако е
-// заключена, и оставя непроменени старите стойности в чист текст (инсталации,
-// които никога не са задавали тази защита — пълна обратна съвместимост).
-function maskReaderRow(r) {
-  if (!r) return r;
-  for (const f of ['egn', 'id_card_no']) {
-    if (!pii.isEncryptedField(r[f])) continue;
-    if (!PDP_KEY) { r[f] = PDP_PLACEHOLDER; continue; }
-    try { r[f] = pii.decryptField(r[f], PDP_KEY); }
-    catch (e) { r[f] = PDP_PLACEHOLDER; console.error('Разкриптиране на лични данни:', e.message); }
-  }
-  return r;
-}
-function maskReaderRows(rows) { rows.forEach(maskReaderRow); return rows; }
-// Подготвя egn/id_card_no за запис. Ако защитата не е зададена изобщо — без
-// промяна (старо поведение, чист текст). Ако е зададена и отключена — криптира
-// новите стойности. Ако е зададена, но ЗАКЛЮЧЕНА в момента: при редакция се
-// пази предишната (криптирана) стойност непроменена, каквото и да е дошло от
-// интерфейса — тези полета там се показват само за четене, докато не се въведе
-// паролата, точно за да не презапишат криптирана стойност с плейсхолдъра. При
-// нов читател без предишен ред няма какво да се пази, затова се изисква
-// отключване, ако е въведено ЕГН/№ ЛК.
-function preparePiiForWrite(out, prev) {
-  if (!pdpConfigured()) return;
-  for (const f of ['egn', 'id_card_no']) {
-    if (PDP_KEY) {
-      if (out[f] && !pii.isEncryptedField(out[f])) out[f] = pii.encryptField(out[f], PDP_KEY);
-    } else if (prev) {
-      out[f] = prev[f];
-    } else if (out[f]) {
-      throw new Error('Отключете защитата на лични данни от „Настройки“, за да запишете ЕГН/№ ЛК на нов читател.');
-    }
-  }
-}
-// Прекриптира всички съществуващи стойности egn/id_card_no с нов ключ — ползва
-// се и при първо задаване на паролата (стойностите тогава са в чист текст), и
-// при смяна на паролата (стойностите тогава вече са криптирани със стария
-// ключ). readKey е null, ако стойностите в момента са в чист текст.
-function reencryptAllReaders(readKey, writeKey) {
-  const rows = db.prepare(`SELECT id, egn, id_card_no FROM readers
-    WHERE (egn IS NOT NULL AND egn <> '') OR (id_card_no IS NOT NULL AND id_card_no <> '')`).all();
-  const upd = db.prepare('UPDATE readers SET egn = ?, id_card_no = ? WHERE id = ?');
-  for (const r of rows) {
-    const plainEgn = readKey ? pii.decryptField(r.egn, readKey) : r.egn;
-    const plainIdc = readKey ? pii.decryptField(r.id_card_no, readKey) : r.id_card_no;
-    upd.run(
-      plainEgn ? pii.encryptField(plainEgn, writeKey) : plainEgn,
-      plainIdc ? pii.encryptField(plainIdc, writeKey) : plainIdc,
-      r.id
-    );
-  }
-  return rows.length;
-}
-ipcMain.handle('pdp:status', () =>
-  run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY }))
-);
-ipcMain.handle('pdp:setup', (e, password) =>
-  run(() => {
-    if (!password || String(password).length < 4) throw new Error('Паролата трябва да е поне 4 знака.');
-    if (pdpConfigured()) throw new Error('Защитата вече е зададена — за смяна на паролата ползвайте смяната на паролата.');
-    const salt = pii.generateSalt();
-    const key = pii.deriveKey(password, salt);
-    const verifier = pii.makeVerifier(key);
-    let n = 0;
-    db.transaction(() => {
-      db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
-        .run(salt.toString('base64'), verifier);
-      n = reencryptAllReaders(null, key);
-    })();
-    PDP_KEY = key;
-    logAudit('Защита на лични данни', 'зададена е парола за защита на ЕГН/№ ЛК (' + n + ' читатели засегнати)');
-    return true;
-  })
-);
-ipcMain.handle('pdp:unlock', (e, password) =>
-  run(() => {
-    const s = pdpSettingsRow();
-    if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
-    const key = pii.deriveKey(password, Buffer.from(s.pdp_salt, 'base64'));
-    if (!pii.checkVerifier(s.pdp_verifier, key)) throw new Error('Грешна парола.');
-    PDP_KEY = key;
-    return true;
-  })
-);
-ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; }));
-ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
-  run(() => {
-    const s = pdpSettingsRow();
-    if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
-    if (!newPassword || String(newPassword).length < 4) throw new Error('Новата парола трябва да е поне 4 знака.');
-    const oldKey = pii.deriveKey(oldPassword, Buffer.from(s.pdp_salt, 'base64'));
-    if (!pii.checkVerifier(s.pdp_verifier, oldKey)) throw new Error('Текущата парола е грешна.');
-    const newSalt = pii.generateSalt();
-    const newKey = pii.deriveKey(newPassword, newSalt);
-    const newVerifier = pii.makeVerifier(newKey);
-    db.transaction(() => {
-      db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
-        .run(newSalt.toString('base64'), newVerifier);
-      reencryptAllReaders(oldKey, newKey);
-    })();
-    PDP_KEY = newKey;
-    logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
-    return true;
-  })
-);
+   Извадени в handlers/pdp.js (Фаза 4, стъпка 35). maskReaderRow/
+   maskReaderRows/preparePiiForWrite се връщат обратно, защото
+   handlers/readers.js (по-нататък в този файл) вече ги ползва по референция. */
+const { maskReaderRow, maskReaderRows, preparePiiForWrite } = require('./handlers/pdp')(ipcMain, {
+  getDb: () => db, run, logAudit
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -640,21 +520,16 @@ ipcMain.handle('settings:noticeDefaults', () =>
    монолита main.js на модули по домейн). */
 require('./handlers/categories')(ipcMain, { getDb: () => db, run });
 
-/* ---------------- Книги ---------------- */
-const BOOK_SELECT = `
-  SELECT b.*, c.name AS category_name,
-         COALESCE(i.quantity, 0) AS quantity,
-         COALESCE(i.quantity, 0) - COALESCE((
-           SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.date_in IS NULL
-         ), 0) AS available
-  FROM books b
-  LEFT JOIN categories c ON c.id = b.category_id
-  LEFT JOIN inventory i ON i.book_id = b.id
-`;
-const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
-  'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
-  'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
-  'status', 'status_date', 'price', 'description', 'acquisition_id', 'cn_sort'];
+/* ---------------- Книги (фонд) + Лимит на броя записи ----------------
+   Извадени в handlers/books.js (Фаза 4, стъпка 34, последният от "големите
+   пет"). BOOK_SELECT/BOOK_FIELDS/checkRecordLimit се връщат обратно, защото
+   по-рано извадени модули (acquisitions.js, deaccession-acts.js, loans.js,
+   catalog.js, readers.js) вече ги ползват по пряка референция в обект,
+   подаден на require(), позициониран СЛЕД това място — същият модел, както
+   при LOAN_SELECT/firstActiveHold. */
+const { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit } = require('./handlers/books')(ipcMain, {
+  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite
+});
 
 /* ---------------- Контрол на авторитетните данни ----------------
    Извадени в handlers/authorities.js (Фаза 4, стъпка 11 от разбиването на
@@ -665,177 +540,6 @@ require('./handlers/authorities')(ipcMain, { getDb: () => db, run, logAudit });
    Извадени в handlers/av.js (Фаза 4, стъпка 12 от разбиването на монолита
    main.js на модули по домейн). */
 require('./handlers/av')(ipcMain, { getDb: () => db, run, logAudit });
-
-/* ---------------- Лимит на броя записи ----------------
-   Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
-   Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
-   остава възможна дори ако лимитът вече е достигнат или намален след това. */
-function checkRecordLimit(kind) {
-  const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
-  const cfg = kind === 'books'
-    ? { limit: s.limit_books, table: 'books', label: 'документи във фонда' }
-    : { limit: s.limit_readers, table: 'readers', label: 'читатели' };
-  const limit = parseInt(cfg.limit, 10) || 0;
-  if (limit <= 0) return;
-  const n = db.prepare(`SELECT COUNT(*) AS n FROM ${cfg.table}`).get().n;
-  if (n >= limit) {
-    throw new Error(`Достигнат е зададеният лимит от ${limit} ${cfg.label}. ` +
-      'Увеличете или премахнете лимита в „Настройки“ → „Ограничения“, за да добавяте нови записи.');
-  }
-}
-ipcMain.handle('limits:usage', () =>
-  run(() => {
-    const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
-    return {
-      books: db.prepare('SELECT COUNT(*) AS n FROM books').get().n,
-      readers: db.prepare('SELECT COUNT(*) AS n FROM readers').get().n,
-      limitBooks: parseInt(s.limit_books, 10) || 0,
-      limitReaders: parseInt(s.limit_readers, 10) || 0
-    };
-  })
-);
-ipcMain.handle('limits:update', (e, { limit_books, limit_readers }) =>
-  run(() => {
-    db.prepare('UPDATE settings SET limit_books=?, limit_readers=? WHERE id=1')
-      .run(Math.max(0, parseInt(limit_books, 10) || 0), Math.max(0, parseInt(limit_readers, 10) || 0));
-    logAudit('Редакция на настройки', 'променени лимити на записите');
-  })
-);
-
-/* prev — досегашният ред от базата (при редакция): status_date се обновява само
-   когато статусът реално се променя, а не при всяко записване на формата. */
-function bookPayload(b, prev) {
-  const out = {};
-  BOOK_FIELDS.forEach(f => { out[f] = b[f] === undefined || b[f] === '' ? null : b[f]; });
-  if (out.inv_number != null) out.inv_number = parseInt(out.inv_number, 10);
-  if (out.category_id != null) out.category_id = parseInt(out.category_id, 10);
-  if (out.acquisition_id != null) out.acquisition_id = parseInt(out.acquisition_id, 10);
-  out.price = b.price ? parseFloat(b.price) : 0;
-  out.status = b.status || 'наличен';
-  out.register_date = b.register_date || today();
-  out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
-  out.status_date = !prev ? today()
-    : (prev.status !== out.status ? today() : (prev.status_date || null));
-  return out;
-}
-
-// sort: 'title' (по подразбиране), 'cn' (по сигнатура — cn_sort нарежда „Ч-9" преди
-// „Ч-84", виж cnSortKey) или 'inv' (по инвентарен номер). Изборът е от фиксиран
-// списък тук, никога суров SQL от интерфейса.
-const BOOK_ORDERS = { title: 'b.title', cn: "b.cn_sort IS NULL, b.cn_sort, b.title", inv: 'b.inv_number' };
-ipcMain.handle('books:list', (e, query, sort) =>
-  run(() => {
-    const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
-    if (query && query.trim()) {
-      const q = `%${query.trim()}%`;
-      // Заглавие/подзаглавие/автор минават през FTS5 (unicode61) — сгъва регистъра
-      // и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
-      // таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
-      // потребителите очакват "съдържа навсякъде", а не само префикс.
-      return db.prepare(`${BOOK_SELECT}
-        WHERE b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
-           OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
-        ORDER BY ${order}`).all(ftsQuery(query), q, q, q);
-    }
-    return db.prepare(`${BOOK_SELECT} ORDER BY ${order}`).all();
-  })
-);
-ipcMain.handle('books:get', (e, id) => run(() => db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
-ipcMain.handle('books:byBarcode', (e, code) =>
-  // CAST-ва се ПАРАМЕТЪРЪТ, не колоната — CAST(b.inv_number AS TEXT) = ? би
-  // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
-  // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
-  // (потвърдено с EXPLAIN QUERY PLAN: с тази форма планът е MULTI-INDEX OR по
-  // двата индекса).
-  run(() => db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code))
-);
-
-ipcMain.handle('books:create', (e, book) =>
-  run(() => {
-    checkRecordLimit('books');
-    const tx = db.transaction((b) => {
-      const payload = bookPayload(b);
-      const info = db.prepare(`
-        INSERT INTO books (${BOOK_FIELDS.join(',')}, register_date)
-        VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')}, @register_date)
-      `).run(payload);
-      const id = info.lastInsertRowid;
-      db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)')
-        .run(id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
-      if (payload.inv_number) {
-        const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get();
-        if (payload.inv_number >= s.next_inv_number) {
-          db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(payload.inv_number + 1);
-        }
-      }
-      logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
-      return id;
-    });
-    const id = tx(book);
-    scheduleCatalogWrite();
-    return id;
-  })
-);
-ipcMain.handle('books:update', (e, book) =>
-  run(() => {
-    const tx = db.transaction((b) => {
-      const prev = db.prepare('SELECT * FROM books WHERE id = ?').get(b.id);
-      const payload = bookPayload(b, prev);
-      db.prepare(`
-        UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
-      `).run(Object.assign({ id: b.id }, payload));
-      db.prepare(`
-        INSERT INTO inventory (book_id, quantity) VALUES (?, ?)
-        ON CONFLICT(book_id) DO UPDATE SET quantity = excluded.quantity
-      `).run(b.id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
-      const diff = diffFields(prev, payload, BOOK_FIELDS);
-      logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
-    });
-    tx(book);
-    scheduleCatalogWrite();
-  })
-);
-ipcMain.handle('books:delete', (e, id) =>
-  run(() => {
-    db.prepare('DELETE FROM books WHERE id = ?').run(id);
-    scheduleCatalogWrite();
-  })
-);
-/* Групова редакция — смяна на едно поле на много документи наведнъж (Koha: "batch item
-   modification"). Полето идва от списък с изрично позволени имена (никога суров SQL
-   от renderer-а), а „отчислен“ е нарочно изваден от позволените стойности за „status“:
-   отчисляването минава единствено през формален акт (раздел „Отчисляване“, чл. 30–39),
-   не бива да е на един клик разстояние от таблицата с книги. По същата причина вече
-   отчислени документи не се пипат от груповата редакция, дори да са били маркирани. */
-const BULK_EDIT_FIELDS = ['department', 'status', 'category_id', 'language'];
-const BULK_EDIT_STATUS_VALUES = ['наличен', 'липсващ', 'за реставрация'];
-ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
-  run(() => {
-    if (!BULK_EDIT_FIELDS.includes(field)) throw new Error('Непозволено поле за групова редакция.');
-    if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
-    if (field === 'status' && !BULK_EDIT_STATUS_VALUES.includes(value)) {
-      throw new Error('Отчисляването на документи минава само през акт за отчисляване (раздел „Отчисляване“), не и през групова редакция.');
-    }
-    const v = field === 'category_id' ? (value ? parseInt(value, 10) : null) : (value || null);
-    const placeholders = ids.map(() => '?').join(',');
-    // Смяната на статус носи и датата си (Koha: датирани статуси) — иначе справката
-    // „кога стана липсваща" няма отговор.
-    const extra = field === 'status' ? ", status_date = date('now')" : '';
-    const tx = db.transaction(() => db.prepare(
-      `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND status != 'отчислен'`
-    ).run(v, ...ids).changes);
-    const changes = tx();
-    logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
-    scheduleCatalogWrite();
-    return changes;
-  })
-);
-ipcMain.handle('books:addCheck', (e, { bookId, date }) =>
-  run(() => db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(bookId, date || today()))
-);
-ipcMain.handle('books:checks', (e, bookId) =>
-  run(() => db.prepare('SELECT date FROM inventory_checks WHERE book_id = ? ORDER BY date').all(bookId))
-);
 
 /* ---------------- Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) ----------------
    Извадени в handlers/inv-book.js (Фаза 4, стъпка 13 от разбиването на
@@ -995,306 +699,32 @@ require('./handlers/local-photo')(ipcMain, {
 require('./handlers/links')(ipcMain, { getDb: () => db, run });
 
 /* ============================================================================
-   ПРИЕМАНЕ НА ДАННИ ОТ ДРУГИ СИСТЕМИ
-   Цел: читалище с изоставена стара база (АБ, iLib, чужд Excel) да мине на тази
-   програма без преписване на ръка.
+   ПРИЕМАНЕ НА ДАННИ ОТ ДРУГИ СИСТЕМИ → handlers/data-import.js (Фаза 4,
+   стъпка 36). Цел: читалище с изоставена стара база (АБ, iLib, чужд Excel)
+   да мине на тази програма без преписване на ръка.
    ============================================================================ */
-const IMPORT_FIELDS = {
-  inv_number: 'Инвентарен №', title: 'Заглавие', subtitle: 'Подзаглавие', author: 'Автор',
-  publisher: 'Издателство', city: 'Място на издаване', year: 'Година', isbn: 'ISBN / ISSN',
-  pages: 'Страници', language: 'Език', udk: 'УДК', call_number: 'Сигнатура',
-  author_mark: 'Авторски знак', keywords: 'Ключови думи', annotation: 'Анотация',
-  price: 'Цена', department: 'Отдел', category_name: 'Вид документ', status: 'Състояние',
-  volume: 'Том / част', barcode: 'Баркод', register_date: 'Дата на вписване',
-  description: 'Забележка'
-};
-let IMPORT_CACHE = null; // прочетеният файл се пази между прегледа и внасянето
-
-// Разчита файла и подготвя прегледа. Ползва се и от диалога за избор, и когато
-// файлът е провлачен върху прозореца на програмата.
-function loadImportFile(filePath) {
-  const t = importers.readTable(filePath);
-  if (!t.rows.length) throw new Error('Файлът е празен или не се разчита като таблица.');
-  const headers = t.rows[0].map(h => String(h || '').trim());
-  const body = t.rows.slice(1);
-  IMPORT_CACHE = { path: filePath, headers, body };
-  return {
-    path: filePath, encoding: t.encoding, delimiter: t.delimiter,
-    headers, mapping: importers.guessMapping(headers),
-    preview: body.slice(0, 8), total: body.length, fields: IMPORT_FIELDS
-  };
-}
-ipcMain.handle('import:load', (e, filePath) => {
-  try {
-    if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Файлът не е намерен.' };
-    return { ok: true, data: loadImportFile(filePath) };
-  } catch (err) { return { ok: false, error: err.message }; }
-});
-ipcMain.handle('import:choose', async () => {
-  try {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: 'Изберете файл за внасяне (износ от друга библиотечна система)',
-      properties: ['openFile'],
-      filters: [
-        { name: 'Таблици', extensions: ['csv', 'txt', 'tsv', 'xlsx'] },
-        { name: 'Всички файлове', extensions: ['*'] }
-      ]
-    });
-    if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
-    return { ok: true, data: loadImportFile(filePaths[0]) };
-  } catch (err) { return { ok: false, error: err.message }; }
-});
-
-// Числата в стари износи идват с интервали за хилядни и със запетая за десетичен знак.
-function parseNum(v) {
-  const s = String(v ?? '').replace(/\s/g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : 0;
-}
-function parseIntOrNull(v) {
-  const s = String(v ?? '').replace(/[^\d]/g, '');
-  return s ? parseInt(s, 10) : null;
-}
-// Дати в износите са в най-различен вид; приемат се трите обичайни, иначе полето
-// се оставя празно, вместо да се запише безсмислица.
-function parseDate(v) {
-  const s = String(v ?? '').trim();
-  if (!s) return null;
-  let m = s.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
-  if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
-  m = s.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4})/);
-  if (m) return `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
-  return null;
-}
-ipcMain.handle('import:run', (e, { mapping, options }) => {
-  try {
-    if (!IMPORT_CACHE) return { ok: false, error: 'Първо изберете файл.' };
-    const opt = options || {};
-    const cols = {};
-    for (const [idx, field] of Object.entries(mapping || {})) if (field) cols[field] = Number(idx);
-    if (cols.title == null) return { ok: false, error: 'Задължително е да посочите коя колона е „Заглавие“.' };
-
-    const cats = new Map(db.prepare('SELECT id, name FROM categories').all().map(c => [c.name.toLowerCase(), c.id]));
-    const insertCat = db.prepare('INSERT INTO categories (name) VALUES (?)');
-    const existingInv = new Set(db.prepare('SELECT inv_number FROM books WHERE inv_number IS NOT NULL')
-      .all().map(r => String(r.inv_number)));
-    const existingIsbn = new Set(db.prepare("SELECT isbn FROM books WHERE isbn IS NOT NULL AND isbn <> ''")
-      .all().map(r => String(r.isbn).replace(/[^0-9Xx]/g, '')));
-    // Трета проверка за дубликат: ред без инвентарен номер и без ISBN не може да се
-    // разпознае по нищо друго освен по заглавие и автор. Без нея повторното внасяне
-    // на същия файл удвоява точно тези редове.
-    const titleKey = (t, a) => (String(t || '') + '|' + String(a || '')).toLowerCase().replace(/\s+/g, ' ').trim();
-    const existingTitles = new Set(db.prepare('SELECT title, author FROM books').all()
-      .map(r => titleKey(r.title, r.author)));
-
-    const report = { added: 0, skipped: 0, errors: [], usedInv: [] };
-    const cell = (row, field) => cols[field] == null ? '' : String(row[cols[field]] ?? '').trim();
-
-    const tx = db.transaction(() => {
-      let nextInv = (db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {}).next_inv_number || 1;
-      IMPORT_CACHE.body.forEach((row, i) => {
-        const lineNo = i + 2; // +1 за заглавния ред, +1 за човешко броене
-        try {
-          const title = cell(row, 'title');
-          if (!title) { report.skipped++; return; }
-
-          let inv = parseIntOrNull(cell(row, 'inv_number'));
-          const isbnRaw = cell(row, 'isbn');
-          const isbnKey = isbnRaw.replace(/[^0-9Xx]/g, '');
-
-          const author = cell(row, 'author');
-          if (opt.skipDuplicates) {
-            if (inv != null && existingInv.has(String(inv))) { report.skipped++; return; }
-            if (!inv && isbnKey && existingIsbn.has(isbnKey)) { report.skipped++; return; }
-            if (!inv && !isbnKey && existingTitles.has(titleKey(title, author))) { report.skipped++; return; }
-          }
-          existingTitles.add(titleKey(title, author));
-          // Зает или липсващ инвентарен номер: дава се следващият свободен, за да
-          // не се губи записът и да не се чупи уникалността в инвентарната книга.
-          if (inv == null || existingInv.has(String(inv))) {
-            while (existingInv.has(String(nextInv))) nextInv++;
-            inv = nextInv;
-            report.usedInv.push({ line: lineNo, inv });
-          }
-          existingInv.add(String(inv));
-          if (isbnKey) existingIsbn.add(isbnKey);
-
-          let categoryId = null;
-          const catName = cell(row, 'category_name') || opt.defaultCategory || '';
-          if (catName) {
-            const key = catName.toLowerCase();
-            if (!cats.has(key)) cats.set(key, insertCat.run(catName).lastInsertRowid);
-            categoryId = cats.get(key);
-          }
-          const payload = {
-            inv_number: inv,
-            barcode: cell(row, 'barcode') || String(inv),
-            register_date: parseDate(cell(row, 'register_date')) || new Date().toISOString().slice(0, 10),
-            title,
-            subtitle: cell(row, 'subtitle') || null,
-            author: author || null,
-            category_id: categoryId,
-            year: cell(row, 'year') || null,
-            volume: cell(row, 'volume') || null,
-            isbn: isbnRaw || null,
-            pages: cell(row, 'pages') || null,
-            language: cell(row, 'language') || opt.defaultLanguage || null,
-            udk: cell(row, 'udk') || null,
-            call_number: cell(row, 'call_number') || null,
-            author_mark: cell(row, 'author_mark') || null,
-            city: cell(row, 'city') || null,
-            publisher: cell(row, 'publisher') || null,
-            keywords: cell(row, 'keywords') || null,
-            annotation: cell(row, 'annotation') || null,
-            cover_url: null,
-            department: cell(row, 'department') || opt.defaultDepartment || 'за възрастни',
-            status: cell(row, 'status') || 'наличен',
-            price: parseNum(cell(row, 'price')),
-            description: cell(row, 'description') || null,
-            acquisition_id: null
-          };
-          const info = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
-            VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`).run(payload);
-          db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
-          if (inv >= nextInv) nextInv = inv + 1;
-          report.added++;
-        } catch (err) {
-          // Грешката на един ред не бива да проваля целия внос — събира се и се
-          // показва накрая, а останалите редове продължават.
-          if (report.errors.length < 100) report.errors.push({ line: lineNo, error: err.message });
-          report.skipped++;
-        }
-      });
-      db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(nextInv);
-    });
-    tx();
-    logAudit('Внасяне на данни', `${report.added} документа от ${path.basename(IMPORT_CACHE.path)}` +
-      (report.skipped ? `, пропуснати ${report.skipped}` : ''));
-    return { ok: true, data: report };
-  } catch (err) { return { ok: false, error: err.message }; }
+require('./handlers/data-import')(ipcMain, {
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, BOOK_FIELDS
 });
 
 /* ============================================================================
-   МОБИЛНО СКАНИРАНЕ
-   Вместо RFID: страница, която се отваря на телефона и ползва камерата като
-   баркод четец. Списъкът се пренася обратно като текст или файл.
+   МОБИЛНО СКАНИРАНЕ → handlers/mobile.js (Фаза 4, стъпка 36). Вместо RFID:
+   страница, която се отваря на телефона и ползва камерата като баркод
+   четец. Списъкът се пренася обратно като текст или файл.
    ============================================================================ */
+require('./handlers/mobile')(ipcMain, {
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path
+});
+
 /* ============================================================================
-   ПОМОЩ СРЕЩУ АНТИВИРУСНИ БЛОКИРОВКИ
-   Докато инсталаторът е без закупен цифров подпис, Defender и други антивирусни
-   спират както инсталирането, така и работата на вече инсталираната програма —
-   най-често като заключват записа в базата данни, резервните копия или папката
-   на каталога. Скриптът по-долу добавя изключенията наведнъж; пуска се веднъж,
-   като администратор. Съдържанието се показва на екрана преди записване, за да
-   се вижда какво точно ще бъде изключено.
+   ПОМОЩ СРЕЩУ АНТИВИРУСНИ БЛОКИРОВКИ → handlers/security-exclusions.js
+   (Фаза 4, стъпка 36). Докато инсталаторът е без закупен цифров подпис,
+   Defender и други антивирусни спират както инсталирането, така и работата
+   на вече инсталираната програма.
    ============================================================================ */
-function psQuote(v) { return String(v).replace(/'/g, "''"); }
-function buildAvExclusionScript() {
-  const exePath = process.execPath;
-  const dirs = new Set([
-    path.dirname(exePath),          // папката на програмата
-    app.getPath('userData'),        // база данни, настройки, резервни копия
-    resolveDbDir()                  // мрежова папка, ако базата е преместена
-  ]);
-  try {
-    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-    if (s && s.catalog_folder) dirs.add(s.catalog_folder); // работното копие на каталога
-  } catch (e) {}
-  const lines = [
-    '@echo off',
-    'chcp 65001 >nul',
-    'net session >nul 2>&1',
-    'if %errorlevel% neq 0 (',
-    '  echo Този файл трябва да се изпълни като администратор:',
-    '  echo десен бутон върху файла - "Изпълни като администратор".',
-    '  pause',
-    '  exit /b 1',
-    ')',
-    'echo Добавяне на изключения в Windows Defender...'
-  ];
-  for (const d of dirs) {
-    lines.push(`powershell -NoProfile -Command "Add-MpPreference -ExclusionPath '${psQuote(d)}'"`);
-  }
-  lines.push(
-    `powershell -NoProfile -Command "Add-MpPreference -ExclusionProcess '${psQuote(path.basename(exePath))}'"`,
-    // Controlled Folder Access ("Защита от рансъмуер") блокира записа в Documents
-    // дори при добавена папка-изключение — програмата трябва да е разрешено приложение.
-    `powershell -NoProfile -Command "Add-MpPreference -ControlledFolderAccessAllowedApplications '${psQuote(exePath)}'"`,
-    'echo.',
-    'echo Готово. Изключенията са добавени.',
-    'echo Ако ползвате друга антивирусна (Avast, ESET и др.), добавете същите папки',
-    'echo в нейните настройки за изключения.',
-    'pause'
-  );
-  return { content: lines.join('\r\n') + '\r\n', dirs: [...dirs], exe: exePath };
-}
-ipcMain.handle('security:exclusionInfo', () =>
-  run(() => {
-    const b = buildAvExclusionScript();
-    return { dirs: b.dirs, exe: b.exe };
-  })
-);
-ipcMain.handle('security:writeExclusionScript', async () => {
-  try {
-    const b = buildAvExclusionScript();
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Запишете скрипта за изключения в Defender',
-      defaultPath: 'Inventar-Defender-izklyuchenia.bat',
-      filters: [{ name: 'Команден файл', extensions: ['bat'] }]
-    });
-    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-    fs.writeFileSync(filePath, b.content, 'utf8');
-    logAudit('Антивирусна защита', 'генериран скрипт за изключения: ' + filePath);
-    return { ok: true, data: filePath };
-  } catch (err) { return { ok: false, error: err.message }; }
+require('./handlers/security-exclusions')(ipcMain, {
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, app, resolveDbDir
 });
-
-ipcMain.handle('mobile:generate', async () => {
-  try {
-    const s = db.prepare('SELECT lib_name, org, place FROM settings WHERE id = 1').get() || {};
-    const name = [s.lib_name || s.org || '', s.place || ''].filter(Boolean).join(' · ');
-    const tpl = fs.readFileSync(path.join(__dirname, 'src', 'mobile-template.html'), 'utf8');
-    const html = tpl.replace('__LIB__', name.replace(/[<>&]/g, ''));
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Запишете страницата за сканиране с телефон',
-      defaultPath: 'inventarizaciya-skener.html',
-      filters: [{ name: 'HTML страница', extensions: ['html'] }]
-    });
-    if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-    fs.writeFileSync(filePath, html, 'utf8');
-    return { ok: true, data: filePath };
-  } catch (err) { return { ok: false, error: err.message }; }
-});
-
-// Внасяне на сканираните с телефона номера в отворена сесия за инвентаризация.
-ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
-  run(() => {
-    const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
-    if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
-    const list = [...new Set((codes || []).map(c => String(c).trim()).filter(Boolean))];
-    if (!list.length) throw new Error('Списъкът е празен.');
-    const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)');
-    const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');
-    const addScan = db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)');
-    const addCheck = db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)');
-    const res = { added: 0, duplicates: 0, unknown: [] };
-    db.transaction(() => {
-      for (const code of list) {
-        const b = find.get(code, code);
-        if (!b) { res.unknown.push(code); continue; }
-        if (already.get(sessionId, b.id)) { res.duplicates++; continue; }
-        addScan.run(sessionId, b.id);
-        addCheck.run(b.id, s.date);
-        db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
-        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
-        res.added++;
-      }
-    })();
-    logAudit('Инвентаризация', `внесени ${res.added} сканирания от телефон` +
-      (res.unknown.length ? `, ${res.unknown.length} непознати` : ''));
-    return res;
-  })
-);
 
 /* ---------------- Одитна следа ---------------- */
 require('./handlers/audit')(ipcMain, { getDb: () => db, run });

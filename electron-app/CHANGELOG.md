@@ -11,6 +11,160 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.58.0
+
+**BG:** Завършва разбиването на `main.js` по домейни (Фаза 4, стъпка 36 —
+последната планирана партида): "Приемане на данни от други системи" (стар
+АБ/iLib/Excel внос) е изнесено в `handlers/data-import.js`
+(`import:load/choose/run`, вътрешно ползва `require('../importers')` пряко,
+както при `backup-crypto` в `handlers/backup.js`); "Мобилно сканиране"
+(страница за телефон вместо RFID четец) — в `handlers/mobile.js`
+(`mobile:generate`, `inventorySessions:importScans`); "Помощ срещу
+антивирусни блокировки" (генериране на `.bat` с изключения за Windows
+Defender) — в `handlers/security-exclusions.js`
+(`security:exclusionInfo/writeExclusionScript`). И трите модула четат
+`BOOK_FIELDS` по референция от по-рано извадения `handlers/books.js`. IPC
+поведението е напълно непроменено. Нови тестове:
+`test/handlers-data-import.test.js` (8), `test/handlers-mobile.test.js` (6),
+`test/handlers-security-exclusions.test.js` (6) — общо 412 теста (бяха
+392).
+
+С това `main.js` вече съдържа само трайна инфраструктура, а не отделни
+домейни: жизненият цикъл на приложението (`app.whenReady`,
+`window-all-closed`, `app:setUser/getUser/getVersion/
+checkForUpdates/installUpdate/openLogsFolder`), автообновяването,
+инициализацията/миграциите на базата данни (`initDb`, `ensureColumns`,
+`MIGRATIONS`), `createWindow()`, помощните функции `run`/`logAudit`/
+`diffFields`/`friendlyDbError`, както и вече установените изключения от
+общото правило за преместване, поддържани заради TDZ капана:
+`logEvent`, `scheduleCatalogWrite`/`flushCatalogWrite`/`buildCatalogPayload`
+и `settings:noticeDefaults`. С това Фаза 4 (разбиването на монолита
+`main.js` на модули по домейн под `handlers/`) е завършена.
+
+**ВАЖНО — открит стар бъг, НЕ въведен от това разбиване:** докато пишех
+тестовете за `import:run`, установих (и потвърдих чрез `git log -p --
+follow -S"permanent_location"`), че полето `permanent_location` е добавено
+към `BOOK_FIELDS` в по-стар commit, но обектът с данните за внос никога не
+е бил обновен да го включва. Резултатът: SQL заявката за вмъкване очаква
+именуван параметър `permanent_location`, който липсва — better-sqlite3
+хвърля грешка `Missing named parameter "permanent_location"` за ВСЕКИ ред
+при всеки внос, тихо прихваната от try/catch на реда и записана като
+грешка за него. С други думи функцията "Приемане на данни от други
+системи" не работи изобщо от момента на добавянето на това поле. По
+правилото "без промяна на поведението по време на механично изнасяне" не
+го поправих тук — запазих го точно както си е, с подробен коментар в
+`test/handlers-data-import.test.js`, документиращ бъга. Нужен е отделен,
+самостоятелен commit само за тази поправка.
+
+**EN:** Completes splitting `main.js` by domain (Phase 4, step 36 — the
+last planned batch): "data import from other systems" (legacy АБ/iLib/
+Excel import) moves to `handlers/data-import.js`
+(`import:load/choose/run`, internally `require('../importers')` directly,
+same pattern as `backup-crypto` in `handlers/backup.js`); "mobile
+scanning" (a phone page instead of an RFID reader) moves to
+`handlers/mobile.js` (`mobile:generate`, `inventorySessions:importScans`);
+"antivirus exclusion help" (generates a `.bat` with Windows Defender
+exclusions) moves to `handlers/security-exclusions.js`
+(`security:exclusionInfo/writeExclusionScript`). All three modules read
+`BOOK_FIELDS` by reference from the earlier-extracted `handlers/books.js`.
+IPC behavior is fully unchanged. New test files:
+`test/handlers-data-import.test.js` (8), `test/handlers-mobile.test.js`
+(6), `test/handlers-security-exclusions.test.js` (6) — 412 tests total (up
+from 392).
+
+With this, `main.js` now holds only permanent infrastructure, not
+individual domains: app lifecycle (`app.whenReady`, `window-all-closed`,
+`app:setUser/getUser/getVersion/checkForUpdates/installUpdate/
+openLogsFolder`), auto-update, database init/migrations (`initDb`,
+`ensureColumns`, `MIGRATIONS`), `createWindow()`, the shared helpers
+`run`/`logAudit`/`diffFields`/`friendlyDbError`, and the already-
+established exceptions to the move-everything rule kept in place because
+of the TDZ hazard: `logEvent`, `scheduleCatalogWrite`/
+`flushCatalogWrite`/`buildCatalogPayload`, and `settings:noticeDefaults`.
+With this, Phase 4 (splitting the `main.js` monolith into per-domain
+modules under `handlers/`) is complete.
+
+**IMPORTANT — pre-existing bug found, NOT introduced by this split:**
+while writing tests for `import:run`, I found (and confirmed via `git log
+-p --follow -S"permanent_location"`) that `permanent_location` was added
+to `BOOK_FIELDS` in an older commit, but the import payload object was
+never updated to include it. Result: the INSERT statement expects a named
+parameter `permanent_location` that's missing — better-sqlite3 throws
+`Missing named parameter "permanent_location"` for EVERY row on every
+import, silently caught by that row's try/catch and recorded as a
+per-line error. In other words, the "data import from other systems"
+feature has not worked at all since that field was added. Per the "no
+behavior change during mechanical extraction" rule, I did not fix it here
+— preserved exactly as-is, with a detailed comment in
+`test/handlers-data-import.test.js` documenting the bug. A separate,
+dedicated commit is needed just for that fix.
+
+## v1.57.0
+
+**BG:** Продължава разбиването на `main.js` след "големите пет" (Фаза 4,
+стъпка 35): "Защита на лични данни: ЕГН/№ ЛК" (обща парола, AES-256-GCM) е
+изнесено в `handlers/pdp.js` — 5 handler-а: `pdp:status/setup/unlock/lock/
+changePassword`. `maskReaderRow`/`maskReaderRows`/`preparePiiForWrite` се
+връщат обратно към `main.js`, защото `handlers/readers.js` (извадено
+по-рано) вече ги ползва по референция. `PDP_KEY` (ключът, отключен само за
+текущата сесия на процеса, никога на диск) остава изцяло вътрешно състояние
+на новия модул. Премахнат е и неизползваният вече `const pii = require(...)`
+в горната част на `main.js`. IPC поведението е напълно непроменено. Нов
+тест: `test/handlers-pdp.test.js` (11 теста) — общо 392 теста (бяха 381).
+
+**EN:** Continues splitting `main.js` past the "big five" (Phase 4, step
+35): the "personal data protection: EGN/ID card number" domain (shared
+password, AES-256-GCM) moves to `handlers/pdp.js` — 5 handlers:
+`pdp:status/setup/unlock/lock/changePassword`. `maskReaderRow`/
+`maskReaderRows`/`preparePiiForWrite` are returned back to `main.js`, since
+`handlers/readers.js` (extracted earlier) already depends on them by
+reference. `PDP_KEY` (the key, unlocked only for the current process
+session, never written to disk) stays entirely internal to the new module.
+Also removed the now-unused `const pii = require(...)` near the top of
+`main.js`. IPC behavior is fully unchanged. New test file
+`test/handlers-pdp.test.js` (11 tests) — 392 tests total (up from 381).
+
+## v1.56.0
+
+**BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 34 — последният
+от "големите пет"): "Книги" (фондът) и вложеният в същата секция "Лимит на
+броя записи" са изнесени в `handlers/books.js` — 9 handler-а
+(`books:list/get/byBarcode/create/update/delete/bulkUpdate/addCheck/checks`)
+плюс `limits:usage/update`. `BOOK_SELECT`/`BOOK_FIELDS`/`checkRecordLimit` се
+връщат обратно към `main.js`, защото по-рано извадени модули
+(`acquisitions.js`, `deaccession-acts.js`, `loans.js`, `catalog.js`,
+`readers.js`) вече ги ползват по пряка референция в обект, подаден на техния
+`require()`, изпълнен СЛЕД мястото на `handlers/books.js` — същият модел на
+връщане напред, установен за `LOAN_SELECT`/`firstActiveHold`. IPC
+поведението е напълно непроменено. Нов тест: `test/handlers-books.test.js`
+(11 теста) — общо 381 теста (бяха 370).
+
+С това всичките "големи пет" (заемания, каталог, справки, настройки, книги)
+и всички по-малки домейни от първоначалния план са извадени от `main.js` —
+остават само дневникът/краеведските модули (вече извадени в предишни
+версии), внасянето от други системи и мобилният импорт на сканирано (виж
+статуса на Фаза 4 в предишните записи).
+
+**EN:** Continues splitting `main.js` (Phase 4, step 34 — the last of the
+"big five"): the "books" (fund) domain, along with the "record count limit"
+sub-section nested in the same block, moves to `handlers/books.js` — 9
+handlers (`books:list/get/byBarcode/create/update/delete/bulkUpdate/
+addCheck/checks`) plus `limits:usage/update`. `BOOK_SELECT`/`BOOK_FIELDS`/
+`checkRecordLimit` are returned back to `main.js`, since previously
+extracted modules (`acquisitions.js`, `deaccession-acts.js`, `loans.js`,
+`catalog.js`, `readers.js`) already depend on them by direct reference in
+an object passed to their `require()`, which runs AFTER
+`handlers/books.js`'s position — the same forward-return pattern already
+established for `LOAN_SELECT`/`firstActiveHold`. IPC behavior is fully
+unchanged. New test file `test/handlers-books.test.js` (11 tests) — 381
+tests total (up from 370).
+
+With this, all of the "big five" (loans, catalog, reports, settings, books)
+and every smaller domain from the original plan have been extracted from
+`main.js` — what remains is the journal/local-history cluster (already
+extracted in earlier versions), data import from other systems, and the
+mobile phone-scan import (see the Phase 4 status in earlier entries).
+
 ## v1.55.0
 
 **BG:** Продължава разбиването на `main.js` (Фаза 4, стъпка 33, един от
