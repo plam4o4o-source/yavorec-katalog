@@ -9,8 +9,9 @@ Windows десктоп версия на библиотечния каталог
 промяна в кода. Виж „Данни на библиотеката (универсалност)“ по-долу.
 
 Copyright © 2026 Пламен Христов - Пачо. Лицензирана е под
-**GNU General Public License v3.0** (вижте `LICENSE`; неофициален превод на
-български език — `LICENSE.bg.md`).
+**GNU General Public License, версия 3 или по-нова, по избор на получателя**
+(GPL-3.0-or-later) — вижте `LICENSE` (текстът на версия 3; неофициален
+превод на български — `LICENSE.bg.md`).
 Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases);
 Windows инсталаторът се подписва безплатно чрез
 [SignPath Foundation](https://signpath.org/)-ната програма за проекти с
@@ -27,7 +28,7 @@ Windows инсталаторът се подписва безплатно чре
 онлайн каталог през GitHub, работа в локална мрежа със споделена база данни,
 автоматични резервни копия и автоматично обновяване. Работи офлайн, без
 интернет връзка (освен при търсене по ISBN и онлайн каталога). Безплатна и с
-отворен код — GNU GPL-3.0.
+отворен код — GNU GPL-3.0 или по-нова версия (по избор на получателя).
 
 **English:** „Инвентар“ (*Inventory*) is a Windows desktop application for
 managing the collection of a small public or community library
@@ -38,14 +39,24 @@ lending, overdue-book reminders, export to library formats
 barcode scanning for stocktaking, a self-hosted online catalog via GitHub,
 local-network operation with a shared database, automatic backups, and
 automatic updates. It runs fully offline (except for optional ISBN lookups
-and the online catalog). Free and open source — GNU GPL-3.0.
+and the online catalog). Free and open source — GNU GPL-3.0 or later, at
+the recipient's option.
 
 - **Download / Изтегляне:** [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases)
-- **License / Лиценз:** GNU GPL-3.0 — `LICENSE` (English, canonical) /
+- **License / Лиценз:** GNU GPL-3.0-or-later — `LICENSE` (English, canonical
+  text of version 3; "or later" applies per the notice below) /
   `LICENSE.bg.md` (Bulgarian, unofficial reference translation)
 - **Requirements / Изисквания:** Windows 10/11, 64-bit
 - **Code signing / Подпис на кода:** free, via [SignPath Foundation](https://signpath.org/)
   for open-source projects (application pending / заявката е подадена)
+
+> This program is free software: you can redistribute it and/or modify it
+> under the terms of the GNU General Public License as published by the
+> Free Software Foundation, either version 3 of the License, or (at your
+> option) any later version. / Тази програма е свободен софтуер: можете да я
+> разпространявате и/или променяте според условията на Общия публичен лиценз
+> на GNU (GPL), публикуван от Free Software Foundation — версия 3 на лиценза,
+> или (по ваш избор) всяка по-късна версия.
 
 The rest of this document (build instructions, feature details, database
 schema) is written in Bulgarian, since it targets Bulgarian-speaking
@@ -168,7 +179,7 @@ npm run build
 - долу вляво в страничното меню (под индикатора за последния запис)
 - в „Настройки“, най-долу на страницата
 
-Текстът е: „Създадено от Пламен Христов - Пачо · GPL-3.0 © &lt;година(и)&gt; · v&lt;версия&gt;“
+Текстът е: „Създадено от Пламен Христов - Пачо · GPL-3.0-or-later © &lt;година(и)&gt; · v&lt;версия&gt;“
 — годината се изчислява автоматично (напр. „2026–2027“, ако програмата се ползва
 и следващата година), версията идва директно от `package.json`, без да се пипа
 ръчно другаде.
@@ -395,7 +406,7 @@ Microsoft — купува се от сертифициращ орган. Въз
 | **OV сертификат** (Certum, Sectigo) | ~200 – 400 EUR/година; Certum има поевтинял вариант за физически лица | след няколко седмици и няколкостотин изтегляния |
 | Самоподписан сертификат | безплатно | **никога** — не помага, дори влошава положението |
 
-Проектът е с отворен код (GPL-3.0), затова е избран **SignPath Foundation** —
+Проектът е с отворен код (GPL-3.0-or-later), затова е избран **SignPath Foundation** —
 единственият напълно безплатен вариант, без месечна такса и без нуждата от
 организационна проверка пред сертифициращ орган. Certum („Open Source Code
 Signing“) е най-евтиният платен вариант за физическо лице в България, ако
@@ -410,7 +421,7 @@ GitHub Actions. В такъв случай подписването става �
 ### SignPath Foundation — безплатно за проекти с отворен код
 
 Избраният път за тази програма. Безплатно е завинаги, но изисква проектът да е
-с отворен код (условие, изпълнено от лиценза GPL-3.0) и одобрение от екипа на
+с отворен код (условие, изпълнено от лиценза GPL-3.0-or-later) и одобрение от екипа на
 SignPath, което може да отнеме дни до седмици — и може да бъде отказано, ако
 проектът е сметнат за твърде малко разпространен.
 
@@ -487,7 +498,9 @@ SignPath, което може да отнеме дни до седмици — �
   българска транслитерация; ако в личната карта е изписано другояче (напр.
   `Plamen Boianov Christov`), в `package.json` се записва точно това от
   документа, не транслитерацията.
-- `LICENSE` в корена на хранилището — пълният текст на GPL-3.0.
+- `LICENSE` в корена на хранилището — пълният текст на GPL версия 3 (проектът
+  е лицензиран „версия 3 или по-нова, по избор на получателя“ — вижте
+  бележката в „Общ преглед“ по-горе).
 - Инсталацията е **за текущия потребител** (`perMachine: false`), затова
   не иска администраторски права. Един прозорец на UAC по-малко.
 - Стъпката за подпис в `.github/workflows/release-electron.yml` е готова и се

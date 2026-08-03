@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "1.60.0",
+  "version": "1.61.0",
   "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -27,7 +27,7 @@
   "build": {
     "appId": "org.chyavorec.inventar",
     "productName": "Инвентар",
-    "copyright": "Copyright © 2026 Пламен Христов - Пачо. Свободен софтуер под GNU GPL-3.0.",
+    "copyright": "Copyright © 2026 Пламен Христов - Пачо. Свободен софтуер под GNU GPL-3.0-or-later.",
     "publish": [
       {
         "provider": "github",
