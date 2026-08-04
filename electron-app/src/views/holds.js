@@ -18,8 +18,10 @@ async function renderHolds(tabs) {
 async function holdPrompt() {
   let readerId = CIRC.readerId;
   if (!readerId) {
-    const cardOrName = prompt('Карта или име на читателя, за когото е резервацията:');
-    if (!cardOrName) return;
+    const cardOrName = await askText('Нова резервация', {
+      label: 'Читател', hint: 'номер на карта или име', okLabel: 'Напред'
+    });
+    if (!cardOrName || !cardOrName.trim()) return;
     const byCard = await call(window.api.readers.byCard(cardOrName.trim()));
     if (byCard) { readerId = byCard.id; }
     else {
@@ -28,8 +30,10 @@ async function holdPrompt() {
       readerId = found.id;
     }
   }
-  const code = prompt('Баркод или инв. № на заетата книга за резервиране:');
-  if (!code) return;
+  const code = await askText('Нова резервация', {
+    label: 'Заета книга', hint: 'баркод или инв. №', okLabel: 'Резервирай'
+  });
+  if (!code || !code.trim()) return;
   const res = await window.api.holds.add({ reader_id: readerId, code: code.trim() });
   if (!res.ok) return toast(res.error, 'err');
   toast('Резервирана: инв. № ' + res.data.inv_number + ' — на опашката е ' + res.data.queue + '-ри.', 'ok');

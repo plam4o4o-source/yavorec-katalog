@@ -97,7 +97,10 @@ function buildDom(overrides) {
   const { window } = dom;
   window.api = apiMock(overrides || {});
   window.confirm = () => true;
-  window.prompt = () => null;
+  // Точно както в Electron: window.prompt() НЕ се поддържа и хвърля. Мокът
+  // трябва да е верен на средата — по-рано тук стоеше () => null и това
+  // скриваше дефекта, който правеше „Витрини в каталога“ неизползваеми.
+  window.prompt = () => { throw new Error('prompt() is not supported.'); };
   window.alert = () => {};
   window.print = () => {};
   window.document.querySelectorAll('script[src]').forEach(el => el.remove());
@@ -288,4 +291,96 @@ test('всеки клас за решетка, ползван в изгледи�
       `class="grid ${cls}" се ползва в изгледите, но в style.css няма ` +
       `.grid.${cls}{display:grid…} — редът ще се подреди вертикално`);
   }
+});
+
+/* --- 4. window.prompt() в Electron ---
+   Electron НЕ поддържа window.prompt(): извикването хвърля „prompt() is not
+   supported.“ право в handler-а на бутона — без прозорец, без съобщение, без
+   следа на екрана. Проверено с истинския Electron 43 от package.json:
+   executeJavaScript("window.prompt('Име:')") връща THREW prompt() is not
+   supported. Ефект за библиотекаря: „Витрини в каталога“ бяха напълно
+   неизползваеми — „+ Нова витрина“ не правеше НИЩО, а без витрина и всичко
+   останало в раздела е безсмислено. Същият дефект убиваше „Нова резервация“
+   и вписването на посещение по домовете.
+
+   Двата теста по-долу: първият пази срещу всяко ново ползване на prompt(),
+   вторият проверява, че замяната (askText() в core.js) наистина работи —
+   отваря прозорец, връща въведеното и се разрешава при отказ, вместо да
+   увисне. */
+const stripComments = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+test('нито един изглед не вика prompt() — Electron не го поддържа (ползвайте askText)', () => {
+  const bad = [];
+  for (const f of fs.readdirSync(VIEWS_DIR)) {
+    if (!f.endsWith('.js')) continue;
+    const src = stripComments(fs.readFileSync(path.join(VIEWS_DIR, f), 'utf8'));
+    for (const m of src.matchAll(/\bprompt\s*\(/g)) {
+      const before = src.slice(0, m.index);
+      const line = before.split('\n').length;
+      bad.push(`${f}:${line}`);
+    }
+  }
+  assert.deepEqual(bad, [], 'prompt() хвърля в Electron и действието умира тихо; ' +
+    'ползвайте askText(title, opts) от core.js');
+});
+
+// Мок на window.api, който ЗАПОМНЯ извикванията — тук ни трябват точните
+// аргументи на shelves:create, не само че не е гръмнало.
+function recordingApi(calls, results) {
+  const node = (parts) => new Proxy(function () {}, {
+    get(t, p) { if (p === 'then' || typeof p === 'symbol') return undefined; return node(parts.concat(p)); },
+    apply(t, self, args) {
+      const key = parts.join('.');
+      calls.push({ key, args });
+      return Promise.resolve({ ok: true, data: results && key in results ? results[key] : [] });
+    }
+  });
+  return node([]);
+}
+
+test('„+ Нова витрина“ работи и когато prompt() хвърля, както в Electron', async () => {
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  // Точно поведението на Electron — ако кодът пак посегне към prompt(), гърми.
+  window.prompt = () => { throw new Error('prompt() is not supported.'); };
+  const calls = [];
+  window.api = recordingApi(calls, { 'shelves.create': 7 });
+
+  const p = window.createShelf();
+  await new Promise(r => setTimeout(r, 0));
+  const input = window.document.querySelector('#modal input[name="v"]');
+  assert.ok(input, 'прозорецът за име на новата витрина не се отвори');
+  input.value = 'Лято 2026';
+  window.document.querySelector('#modal [data-ask="ok"]').click();
+  await p;
+
+  const create = calls.find(c => c.key === 'shelves.create');
+  assert.ok(create, 'shelves:create не беше извикан');
+  // Аргументите идват от друга realm (jsdom), затова се сравняват поелементно.
+  assert.equal(create.args.length, 1);
+  assert.equal(create.args[0], 'Лято 2026');
+  // След създаване списъкът се презарежда и новата витрина се отваря.
+  assert.ok(calls.some(c => c.key === 'shelves.list'), 'списъкът с витрини не се презареди');
+  assert.ok(calls.some(c => c.key === 'shelves.items' && c.args[0] === 7), 'новата витрина не се отвори');
+});
+
+test('отказ (Esc) в askText разрешава обещанието с null, вместо да увисне', async () => {
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  const calls = [];
+  window.api = recordingApi(calls, {});
+
+  const p = window.createShelf();
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(window.document.querySelector('#modal input[name="v"]'), 'прозорецът не се отвори');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+  // Ако обещанието не се разреши, тук се увисва — затова с изричен краен срок.
+  const outcome = await Promise.race([p.then(() => 'разрешено'),
+    new Promise(r => setTimeout(() => r('УВИСНА'), 500))]);
+  assert.equal(outcome, 'разрешено');
+  assert.equal(calls.length, 0, 'при отказ не трябва да се вика нищо');
+  assert.equal(window.document.querySelector('#modal input[name="v"]'), null, 'прозорецът остана отворен');
 });

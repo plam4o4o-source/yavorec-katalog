@@ -36,7 +36,10 @@ async function saveHousebound(readerId) {
 }
 window.saveHousebound = saveHousebound;
 async function addHouseboundVisit(readerId) {
-  const note = prompt('Бележка към посещението (по желание):') || '';
+  const note = await askText('Ново посещение', {
+    label: 'Бележка към посещението', hint: 'по желание', okLabel: 'Впиши'
+  });
+  if (note === null) return; // отказ — посещението не се вписва
   const ok = await call(window.api.housebound.addVisit({ reader_id: readerId, note }), 'Посещението е вписано.');
   if (ok !== null) houseboundModal(readerId);
 }

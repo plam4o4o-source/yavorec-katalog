@@ -11,6 +11,42 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.67.1
+
+**BG:** Поправено: **„Витрини в каталога“ не работеха изобщо.** Бутонът
+„+ Нова витрина“ не правеше нищо — без прозорец, без съобщение, без грешка
+на екрана, така че витрина не можеше да бъде създадена, а без витрина и
+останалото в раздела е безсмислено. Причината: кодът питаше за името през
+`window.prompt()`, а Electron **не поддържа** `window.prompt()` — вместо
+прозорец извикването хвърля грешка право в бутона и действието умира тихо.
+Проверено с истинския Electron 43 от инсталатора: старият код дава
+`Error: prompt() is not supported.` и прозорец не се появява; след
+поправката витрината се създава.
+
+Вместо това вече се отваря обикновен прозорец на самата програма (какъвто
+се ползва навсякъде другаде): Enter потвърждава, Esc отказва. Същият дефект
+убиваше още две места и те също са поправени — **„Нова резервация“** (питаше
+за читател и за книга) и вписването на **посещение по домовете** (бележка
+към посещението).
+
+Добавени три проверки, за да не се върне: в изгледите вече не се допуска
+`prompt()`; тестовата среда се държи като Electron (по-рано тя връщаше
+`null` вместо да хвърля и точно това скриваше дефекта); и функционална
+проверка, че „+ Нова витрина“ стига до записа, а отказът с Esc не оставя
+програмата да чака вечно.
+
+**EN:** Fixed: **catalog showcases ("Витрини") were completely unusable.**
+"+ New showcase" did nothing at all — no window, no message, no visible
+error. The cause: the code asked for the name via `window.prompt()`, which
+Electron does not support — the call throws inside the button handler and
+the action dies silently (verified against the real Electron 43 that ships
+in the installer). Replaced with the app's own modal dialog (Enter confirms,
+Esc cancels). The same defect also broke "New hold" and recording a
+housebound visit; both fixed. Three new guards keep it from returning: no
+view may call `prompt()`, the jsdom test harness now throws exactly like
+Electron (it previously returned `null`, which is what hid the bug), and a
+functional test drives the new dialog end to end.
+
 ## v1.67.0
 
 **BG:** Официалните празници влизат в „Календар на библиотеката“
