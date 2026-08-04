@@ -1,0 +1,143 @@
+// Тест на bg-holidays.js — автоматичното попълване на официалните празници
+// в „Календар на библиотеката“. Датите на Великден са проверени срещу
+// публично известните дати на Българската православна църква; заместващите
+// почивни дни (чл. 154, ал. 2 КТ) — срещу реалните постановления, вкл.
+// двойния декемврийски случай от 2022 г. (27 и 28 декември).
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const Database = require('better-sqlite3');
+const { orthodoxEaster, bulgarianHolidays, seedYear, ensureHolidaysSeeded, FIXED_HOLIDAYS } =
+  require('../bg-holidays');
+const registerCalendarHandlers = require('../handlers/calendar');
+
+const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+function freshDb() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-holidays-test-'));
+  const db = new Database(path.join(dir, 'library.db'));
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
+  // Мигрираната колона (v6 в main.js) — тук я добавяме направо.
+  db.exec('ALTER TABLE settings ADD COLUMN holidays_seeded TEXT');
+  return db;
+}
+
+test('orthodoxEaster връща известните дати на православния Великден', () => {
+  assert.equal(iso(orthodoxEaster(2024)), '2024-05-05');
+  assert.equal(iso(orthodoxEaster(2025)), '2025-04-20');
+  assert.equal(iso(orthodoxEaster(2026)), '2026-04-12');
+  assert.equal(iso(orthodoxEaster(2027)), '2027-05-02');
+  assert.equal(iso(orthodoxEaster(2028)), '2028-04-16');
+  // Великден е винаги неделя.
+  for (let y = 1900; y <= 2060; y++) {
+    assert.equal(new Date(orthodoxEaster(y)).getUTCDay(), 0, 'година ' + y);
+  }
+});
+
+test('orthodoxEaster отказва шумно извън диапазона на 13-дневната поправка', () => {
+  assert.throws(() => orthodoxEaster(1899), /1900/);
+  assert.throws(() => orthodoxEaster(2100), /1900/);
+});
+
+test('2026 г.: фиксирани празници, Великденски дни и трите заместващи дни', () => {
+  const days = bulgarianHolidays(2026);
+  const byDate = new Map(days.map(d => [d.date, d.reason]));
+
+  for (const [md] of FIXED_HOLIDAYS) assert.ok(byDate.has('2026-' + md), md);
+  assert.equal(byDate.get('2026-04-10'), 'Велики петък');
+  assert.equal(byDate.get('2026-04-12'), 'Великден');
+  assert.equal(byDate.get('2026-04-13'), 'Великден — втори ден');
+
+  // 24 май и 6 септември 2026 са неделя, 26 декември — събота.
+  assert.match(byDate.get('2026-05-25') || '', /Почивен ден за „Ден на светите братя/);
+  assert.match(byDate.get('2026-09-07') || '', /Почивен ден за „Ден на Съединението/);
+  assert.match(byDate.get('2026-12-28') || '', /Почивен ден за „Рождество Христово — втори ден/);
+  assert.equal(days.length, 4 + FIXED_HOLIDAYS.length + 3);
+});
+
+test('Великденските дни не пораждат заместващи дни (изключението в ал. 2)', () => {
+  // Велика събота и Великден са ВИНАГИ в събота и неделя — ако изключението
+  // липсваше, всяка година щеше да има фалшив „Почивен ден за Великден“.
+  for (const y of [2024, 2025, 2026, 2030]) {
+    const bad = bulgarianHolidays(y).filter(d => /Почивен ден за „Вели?к/.test(d.reason));
+    assert.deepEqual(bad, [], 'година ' + y);
+  }
+});
+
+test('2022 г.: декемврийската група поражда ДВА заместващи дни — 27 и 28 декември', () => {
+  // 24.12.2022 бе събота, 25.12 — неделя: реално почивни бяха 27 и 28 декември.
+  const byDate = new Map(bulgarianHolidays(2022).map(d => [d.date, d.reason]));
+  assert.match(byDate.get('2022-12-27') || '', /Почивен ден за „Бъдни вечер/);
+  assert.match(byDate.get('2022-12-28') || '', /Почивен ден за „Рождество Христово“/);
+  assert.equal(byDate.has('2022-12-29'), false);
+});
+
+test('никоя година няма дублирани дати (сблъсък Великден/Гергьовден — 2013 г.)', () => {
+  for (let y = 2000; y <= 2060; y++) {
+    const days = bulgarianHolidays(y);
+    assert.equal(new Set(days.map(d => d.date)).size, days.length, 'година ' + y);
+  }
+  // През 2013 г. вторият ден на Великден се падна на 6 май: една дата, една причина.
+  const d2013 = bulgarianHolidays(2013).filter(d => d.date === '2013-05-06');
+  assert.equal(d2013.length, 1);
+  assert.equal(d2013[0].reason, 'Великден — втори ден');
+});
+
+test('seedYear е идемпотентен и не презаписва ръчно въведена причина', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO calendar_closed (date, reason) VALUES (?, ?)')
+    .run('2026-12-25', 'Инвентаризация');
+
+  const added = seedYear(db, 2026);
+  assert.equal(added, bulgarianHolidays(2026).length - 1); // 25.12 вече е зает
+
+  // Ръчната причина на библиотекаря остава непокътната (INSERT OR IGNORE).
+  assert.equal(db.prepare('SELECT reason FROM calendar_closed WHERE date = ?')
+    .get('2026-12-25').reason, 'Инвентаризация');
+
+  assert.equal(seedYear(db, 2026), 0); // второ извикване — нищо ново
+});
+
+test('ensureHolidaysSeeded засява текущата и следващата година, точно по веднъж', () => {
+  const db = freshDb();
+  const first = ensureHolidaysSeeded(db, '2026-08-04');
+  assert.deepEqual(first.seededYears, [2026, 2027]);
+  assert.equal(first.addedByYear[2026], bulgarianHolidays(2026).length);
+  assert.equal(first.addedByYear[2027], bulgarianHolidays(2027).length);
+  assert.equal(db.prepare('SELECT holidays_seeded FROM settings WHERE id = 1').get().holidays_seeded,
+    '2026,2027');
+
+  // Библиотекарят решава да работи на 3 март — трие го от календара.
+  db.prepare('DELETE FROM calendar_closed WHERE date = ?').run('2026-03-03');
+
+  // Следващо стартиране същата година: нищо не се презасява, изтритото остава изтрито.
+  const second = ensureHolidaysSeeded(db, '2026-12-30');
+  assert.deepEqual(second.seededYears, []);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM calendar_closed WHERE date = ?')
+    .get('2026-03-03').n, 0);
+
+  // Нова година: досява се само 2028 (2027 вече е готова от декември).
+  const third = ensureHolidaysSeeded(db, '2027-01-02');
+  assert.deepEqual(third.seededYears, [2028]);
+  assert.equal(db.prepare('SELECT holidays_seeded FROM settings WHERE id = 1').get().holidays_seeded,
+    '2026,2027,2028');
+});
+
+test('интеграция: след засяване календарният модул смята празниците за неработни', () => {
+  const db = freshDb();
+  db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run('1,2,3,4,5'); // пон–пет
+  ensureHolidaysSeeded(db, '2026-08-04');
+  const ipcMain = { handle: () => {} };
+  const { isWorkDay, nextWorkDay } = registerCalendarHandlers(ipcMain, {
+    getDb: () => db,
+    run: (fn) => ({ ok: true, data: fn() }),
+    logAudit: () => {}
+  });
+  assert.equal(isWorkDay('2026-12-25'), false); // Рождество Христово (петък)
+  assert.equal(isWorkDay('2026-12-28'), false); // заместващ ден
+  assert.equal(isWorkDay('2027-01-01'), false); // следващата година е засята отрано
+  // Падеж, изчислен около Коледа, прескача празници, събота/неделя и заместващия ден.
+  assert.equal(nextWorkDay('2026-12-24'), '2026-12-29');
+});
