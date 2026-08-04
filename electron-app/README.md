@@ -108,9 +108,14 @@ electron-app/
 │   └── schema.sql          # схема на базата данни + начални категории (изпълнява се при първо стартиране)
 │   └── library.db          # SQLite базата данни (създава се автоматично, не се качва в git)
 ├── src/
-│   ├── index.html           # разметка на интерфейса
+│   ├── index.html           # разметка на интерфейса + подредения списък <script> тагове
 │   ├── style.css            # стилове (хартиено-бронзова тема)
-│   └── app.js                # рендиране на изгледите, форми, IPC заявки към main.js
+│   ├── udk.js                # УДК таблицата (данни), зарежда се преди всичко останало
+│   └── views/                # рендиране на изгледите, форми, IPC заявки към main.js —
+│       ├── core.js            #   по един файл на раздел от интерфейса (виж docs/ARCHITECTURE.md);
+│       ├── navigation.js      #   core.js/navigation.js/bootstrap.js са инфраструктура,
+│       ├── ...                #   всички останали файлове са по един на раздел на менюто
+│       └── bootstrap.js       #   ЗАРЕЖДА СЕ ПОСЛЕДЕН — вижте обяснението в началото на файла
 └── .gitignore
 ```
 
@@ -333,15 +338,21 @@ settings(id=1, org, lib_name, place, bulstat, reg_no, director, director_role, l
    }
    ```
 
-4. **app.js** — добавете нов запис в `NAV`/`TITLES`, функция `renderMyTable()`
-   в обекта `renderers` в `route()`, и форма по образец на `bookForm`/`readerForm`.
+4. **нов файл `src/views/mytable.js`** (по образец на `src/views/books.js`) —
+   форма по образец на `bookForm`/`readerForm`, плюс `renderMyTable()`.
+   Регистрирайте новия файл с `<script src="views/mytable.js"></script>` в
+   `src/index.html` — редът спрямо другите view-файлове е без значение, само
+   `views/bootstrap.js` трябва да остане ПОСЛЕДЕН (вижте обяснението в
+   началото на самия `bootstrap.js`). Добавете нов запис в `NAV`/`TITLES` в
+   `src/views/navigation.js` и `renderMyTable` в обекта `RENDERERS` в
+   `src/views/bootstrap.js`.
 
 ## Как да добавя ново поле към книга (пример)
 
 1. `db/schema.sql`: добавете колоната в `CREATE TABLE books (...)`.
 2. `main.js`: добавете полето в `BOOK_SELECT`, `books:create` и `books:update`.
-3. `src/app.js`: добавете `<input name="ново_поле">` в `bookForm()` и полето
-   в `payload` в `saveBook()`.
+3. `src/views/books.js`: добавете `<input name="ново_поле">` в `bookForm()` и
+   полето в `payload` в `saveBook()`.
 
 ## Забележка за обхвата на тази версия
 

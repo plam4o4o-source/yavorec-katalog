@@ -58,6 +58,110 @@ old (broken) list and names the offending file — otherwise it would guard
 nothing. A third test keeps the pattern matcher itself from silently
 degrading into "everything matches".
 
+## v1.64.0
+
+**BG:** Разбива бившия `src/app.js` (5441 реда, монолитен от самото начало на
+Electron версията) на `src/views/*.js` — по един файл на раздел от
+интерфейса, огледално на `handlers/*.js` в главния процес (Фаза 4). Тази
+задача стоеше отложена изрично по избор на автора (предпочетена бе Фаза 5 —
+документация — пред нея, когато последно бе предложена).
+
+Механизъм: `src/index.html` зарежда всеки `views/*.js` файл като отделен
+класически `<script>` таг (НЕ ES modules, без bundler) — класическите
+`<script>` тагове споделят общ глобален лексикален обхват за `let`/`const`,
+затова редът между повечето файлове е без значение. Едно изключение:
+`views/bootstrap.js` (нов файл — съдържа `RENDERERS`, `route()` и
+`window.addEventListener('hashchange', route)`, извадени от предишната обща
+секция "Навигация", плюс истинския стартов код) трябва да е ПОСЛЕДНИЯТ
+зареден файл — обяснено подробно в коментар в началото на самия файл и в
+`docs/ARCHITECTURE.md`. Причината: `RENDERERS`-литералът прави еднократен,
+незабавен прочит на ~23 имена на render-функции при самото си дефиниране —
+безопасно в един монолитен файл (function hoisting важи за целия файл), но
+не и през отделни `<script>` тагове (hoisting е само в рамките на всеки таг),
+а стартовият код вика `route()` вътре в промис `.then()`, който браузърът
+обработва като microtask веднага след текущия `<script>`, преди следващия —
+ако не е последен, може да извика render-функция от файл, който още не се е
+заредил.
+
+Преди разбиването `src/app.js` нямаше НИКАКВО тестово покритие. Изграден е
+`test/views-smoke.test.js` (4 теста) ПРЕДИ самото разбиване — зарежда
+истинския `index.html` в jsdom, вмъква всеки `views/*.js` файл като реален
+`<script>` елемент в точния ред от `index.html` (не през `window.eval()` —
+`eval()` дава лъжливи "not defined" грешки, защото `let`/`const` в eval НЕ
+се качват в споделения глобален обхват, за разлика от истински `<script>`
+тагове), после рутира към всеки от над 20-те раздела в менюто и проверява
+липса на изключение. Именно този safety net улови и находката за
+`RENDERERS` по-горе, докато все още беше поправима евтино. `window.api` е
+мокнат с generic "safe default" Proxy обект (връща себе си верижно за
+произволна дълбочина, държи се като празен масив/0/'' при опит за
+преобразуване) — над 150 различни `window.api.*` извиквания из файловете
+правят ръчно моделиране на всяка форма данни непропорционално усилие за
+smoke тест, чиято цел е да хване регресии от реда на файловете, не от
+бизнес логиката.
+
+**Разширен `test/build-files-coverage.test.js` (добавен в v1.63.0) с три
+проверки за интерфейса** — при прилагането на това разбиване стана ясно, че
+онзи тест пазеше само главния процес (`require()`), а интерфейсът се зарежда
+през `<script src>` в `index.html` и затова оставаше извън обхвата му. Точно
+това е класът бъг, който счупи v1.59.0 – v1.62.0, а сега файловете на
+интерфейса станаха 39. Добавени: (1) всеки `<script>` от `index.html`
+съществува и влиза в `build.files`; (2) всеки файл в `src/views/` реално се
+зарежда от `index.html` (файл, забравен в `index.html`, е мъртъв раздел);
+(3) `views/bootstrap.js` е последният зареден скрипт — единственото истинско
+ограничение на реда, което дотогава се пазеше само от коментар. Всяка от
+трите е проверена, че наистина пада при нарушение (местене на `bootstrap.js`
+и добавяне на файл извън `index.html`), а не минава винаги.
+
+Обновени: `docs/ARCHITECTURE.md` (нов раздел "Renderer процесът"),
+`electron-app/README.md` (структурата на проекта, "как да добавя нова
+таблица"), `db/enum-triggers.js` (препратки към новите файлове). `jsdom`
+добавен като devDependency (само за теста, не се пакетира в `.exe`).
+425 теста (421 + 4 нови), 0 провалени.
+
+**EN:** Splits the former `src/app.js` (5441 lines, monolithic since the
+Electron version's inception) into `src/views/*.js` — one file per UI
+section, mirroring `handlers/*.js` in the main process (Phase 4). This work
+had been explicitly deferred by the author's own choice (documentation —
+Phase 5 — was preferred over it when last offered).
+
+Mechanism: `src/index.html` loads each `views/*.js` file as a separate
+classic `<script>` tag (no ES modules, no bundler) — classic `<script>` tags
+share a common top-level lexical scope for `let`/`const`, so load order
+between most files doesn't matter. One exception: `views/bootstrap.js` (new
+file — holds `RENDERERS`, `route()`, and
+`window.addEventListener('hashchange', route)`, extracted from the former
+combined "Навигация" section, plus the real startup code) must be the LAST
+file loaded — explained in full in a comment at the top of that file and in
+`docs/ARCHITECTURE.md`. Reason: the `RENDERERS` object literal does a
+one-time, immediate read of ~23 render-function names at the moment it's
+defined — safe in one monolithic file (function hoisting spans the whole
+file) but not across separate `<script>` tags (hoisting is per-tag only),
+and the startup code calls `route()` inside a promise `.then()`, which the
+browser processes as a microtask right after the current `<script>`, before
+the next one — if not last, it could call a render function from a file
+that hasn't loaded yet.
+
+Before the split, `src/app.js` had NO test coverage whatsoever.
+`test/views-smoke.test.js` (4 tests) was built BEFORE the split itself —
+loads the real `index.html` in jsdom, inserts each `views/*.js` file as a
+real `<script>` element in the exact order from `index.html` (not via
+`window.eval()` — `eval()` gives false "not defined" errors, since
+`let`/`const` inside eval do NOT get promoted to the shared global scope,
+unlike real `<script>` tags), then routes to each of the 20+ menu sections
+and checks for no exception. This exact safety net caught the `RENDERERS`
+finding above while it was still cheap to fix. `window.api` is mocked with a
+generic "safe default" Proxy object (chainable to any depth, behaves like an
+empty array/0/'' when coerced) — over 150 distinct `window.api.*` calls
+across the files would make hand-modeling every data shape disproportionate
+effort for a smoke test whose goal is catching file-order regressions, not
+business-logic bugs.
+
+Updated: `docs/ARCHITECTURE.md` (new "Renderer process" section),
+`electron-app/README.md` (project structure, "how to add a new table"),
+`db/enum-triggers.js` (pointers to the new files). `jsdom` added as a
+devDependency (test-only, not packaged into the `.exe`). 425 tests (421 +
+4 new), 0 failing.
+
 ## v1.62.0
 
 **BG:** Довършва Фаза 5 (документация): физическо разделяне на
