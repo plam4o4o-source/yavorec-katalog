@@ -132,7 +132,7 @@ async function loadShelvesBox() {
       <tr><th>Витрина</th><th>Записи</th><th style="width:230px"></th></tr></thead><tbody>
       ${shelves.map(sh => `<tr><td><b>${esc(sh.name)}</b></td><td class="num">${sh.n}</td>
         <td><button class="btn sm" onclick="openShelf(${sh.id})">Отвори</button>
-            <button class="btn sm" onclick="renameShelf(${sh.id}, '${esc(sh.name).replace(/'/g, '&#39;')}')">Преименувай</button>
+            <button class="btn sm" onclick="renameShelf(${sh.id}, '${jsq(sh.name)}')">Преименувай</button>
             <button class="btn sm dgr" onclick="deleteShelf(${sh.id})">Изтрий</button></td></tr>`).join('')}
     </tbody></table></div>`
     : '<div class="hint">Още няма витрини. Създайте първата — напр. „Нови български романи“ или „Краезнание“.</div>';

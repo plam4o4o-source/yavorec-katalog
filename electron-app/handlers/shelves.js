@@ -76,7 +76,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       const db = getDb();
       const ins = db.prepare(`
         INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id)
-        SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND department != 'служебен'
+        SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND COALESCE(department,'') != 'служебен'
       `);
       let added = 0;
       db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; })();

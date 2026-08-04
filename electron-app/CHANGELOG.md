@@ -11,52 +11,157 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
-## v1.63.0
+## v1.65.0
 
-**BG — спешна поправка: програмата изобщо не стартираше след инсталиране
-(v1.59.0 – v1.62.0).** Инсталираната програма падаше веднага при пускане с
-`A JavaScript error occurred in the main process — Cannot find module
-'./db/enum-triggers'`. Причина: v1.59.0 добави `db/enum-triggers.js` и
-`main.js` го изисква при стартиране, но списъкът `build.files` в
-`package.json` изброяваше от папката `db/` само `db/schema.sql` — затова
-новият файл не влизаше в `app.asar` и липсваше на компютъра на
-потребителя. Нито един от 418-те теста не хвана това, защото тестовете се
-пускат от изходния код, където файлът очевидно съществува; счупен беше
-само опакованият инсталатор. Поправено: `db/schema.sql` → `db/**/*`, така
-че всеки бъдещ файл в `db/` влиза автоматично. По същия повод е добавен и
-`icon.ico` — `main.js` го подава на прозореца (`BrowserWindow`), но и той
-липсваше в списъка; това не чупеше нищо (Electron мълчаливо ползва иконата
-по подразбиране), затова не е личало.
+**BG — осем поправки след цялостен одит за грешки и сривове.** Всяка е
+проверена емпирично (истински Chromium за поведението на HTML парсера,
+истинска SQLite база за заявките) и всяка е покрита с регресионен тест,
+за който е проверено, че пада срещу стария код. Нито един от осемте
+дефекта не идва от разбиването на `app.js` в v1.64.0 — всички са
+по-стари.
 
-**Нов регресионен тест** `test/build-files-coverage.test.js` (3 теста, общо
-421): обхожда реалните `require()` в `main.js`/`preload.js`/`handlers/*.js`
-плюс файловете, четени по време на работа (`db/schema.sql`,
-`src/mobile-template.html`, `src/index.html`, `icon.ico`), и проверява, че
-всеки от тях е покрит от някой шаблон в `build.files`. Проверено е, че
-тестът наистина пада със стария (счупен) списък и посочва точно виновния
-файл — иначе не би пазил от нищо. Третият тест пази самия matcher от това
-да почне да връща „покрито“ за всичко.
+**1. Падежите се изчисляваха с един ден по-рано, при всяко заемане.**
+`handlers/calendar.js` четеше датата като `"…T00:00:00"` — тоест МЕСТНА
+полунощ — а я записваше обратно през `toISOString()`, което е UTC. При
+UTC+2/+3, тоест в България, където програмата реално работи, това връща
+предишния ден и проверява грешния ден от седмицата: срокът за връщане
+излизаше с ден по-рано, а падеж в събота се местеше НАЗАД в петък вместо
+напред в понеделник. Същото засягаше и броенето на затворени дни в
+наказанието за забава. Дефектът остана невидим, защото целият тестов
+пакет се изпълняваше под `TZ=UTC`, където двете скàли съвпадат — под
+`TZ=Europe/Sofia` собственият тест на хранилището падаше. Всички дати вече
+се смятат изцяло в UTC (`T00:00:00Z`, `getUTCDay`, `setUTCDate`), а тестът
+минава явно през пет часови зони от двете страни на UTC.
 
-**EN — urgent fix: the installed program did not start at all (v1.59.0 –
-v1.62.0).** It crashed immediately on launch with `Cannot find module
-'./db/enum-triggers'`. Cause: v1.59.0 added `db/enum-triggers.js`, required
-by `main.js` at startup, but the `build.files` list in `package.json`
-included only `db/schema.sql` from the `db/` folder — so the new file never
-made it into `app.asar`. None of the 418 tests caught this, because tests
-run from the source tree where the file plainly exists; only the packaged
-installer was broken. Fixed: `db/schema.sql` → `db/**/*`, so any future
-file in `db/` is included automatically. The same audit found `icon.ico`
-missing from the list as well — `main.js` passes it to `BrowserWindow`, but
-its absence merely made Electron fall back to the default icon, so it never
-surfaced.
+**2. Защитата на ЕГН/№ ЛК не можеше да бъде отключена — изобщо.**
+`loadPdpBox()` вкарваше `<form id="pdpUnlockF">` в `#pdpBox`, който стоеше
+вътре във `<form id="stF">`. Вложена `<form>` е грешка според алгоритъма за
+парсване на HTML и таговете просто се ИЗХВЪРЛЯТ (полетата остават,
+формата — не), затова `$('#pdpUnlockF')` беше `null` и бутонът „Отключи“
+хвърляше `TypeError` без никакво съобщение. Библиотекарят въвежда паролата,
+натиска бутона и не се случва нищо, а ЕГН/№ ЛК остават нечетими завинаги.
+Картата вече стои извън главната форма — с което отпада и вторият
+страничен ефект: въведената парола попадаше в `formData('#stF')` и пътуваше
+към `settings:update`.
 
-**New regression test** `test/build-files-coverage.test.js` (3 tests, 421
-total): walks the real `require()` calls across `main.js`/`preload.js`/
-`handlers/*.js` plus the files read at runtime, and asserts each is covered
-by some `build.files` pattern. Verified that the test does fail against the
-old (broken) list and names the offending file — otherwise it would guard
-nothing. A third test keeps the pattern matcher itself from silently
-degrading into "everything matches".
+**3. Книга без попълнен „Отдел“ изчезваше от онлайн каталога.** Условието
+беше `department != 'служебен'`, а в SQL сравнение с NULL дава NULL, не
+истина — редът отпада. Полето не е задължително при въвеждане, затова това
+ставаше тихо: книгата стои в инвентарната книга, но липсва в
+`katalog.json`, в брояча „публикувани“ и при добавяне към витрина. И на
+четирите места вече е `COALESCE(department,'')`.
+
+**4. Недостъпна мрежова папка създаваше тихо нова, празна база.**
+`resolveDbDir()` проверяваше дали настроената папка съществува и при
+неуспех се връщаше към локалната, където веднага се създаваше празна база.
+На екрана изглежда като пълна загуба на данни, а по-опасното идва после —
+въведеното в тази база никога няма да се срещне с общата. Сега програмата
+пита изрично: „Опитай отново“, „Работи с локална база“ (с ясно
+предупреждение какво значи) или „Изход“. Решението живее в новия
+`db-folder.js` без зависимост от Electron, за да е тестваемо.
+
+**5. Квитанцията след плащане не се отпечатваше.** `savePayment()`
+викаше `accountModal()` без `await` и веднага след това
+`printReceiptLine()`, която търси реда в `window._ACC_LINES` — списък,
+който `accountModal` тепърва щеше да презапише. Търсенето падаше в стария
+списък, не намираше новия ред и функцията излизаше мълчаливо.
+
+**6. Апостроф в име чупеше бутоните.** `esc()` вече превръща `'` в
+`&#39;`, затова всяко `esc(x).replace(/'/g, …)` след него беше мъртъв код;
+парсерът връща `&#39;` като истински апостроф точно преди тялото на
+handler-а да се компилира, което го чупи със `SyntaxError`. Бутон до запис
+с апостроф в името („Жана д'Арк“ — витрина, категория) или до резервно
+копие с апостроф в пътя просто не правеше нищо. Нов помощник `jsq()` в
+`core.js` екранира първо за JavaScript, чак после за HTML; проверен е през
+истински Chromium, включително с `<script>`-подобни стойности.
+
+**7. Колона „Състояние“ проваляше ЦЕЛИЯ внос.** В наследените таблици
+(АБ, стар Excel) тази колона почти винаги описва физическото състояние на
+екземпляра — „добро“, „скъсана корица“ — но се съпоставяше към
+`books.status`, където тригерът допуска само четирите статуса. Резултат:
+нула добавени реда при иначе напълно годни данни. Сега непозната стойност
+не губи нито реда, нито информацията — статусът пада към „наличен“, а
+оригиналният текст се дописва към забележката. Досегашният тест не го
+хващаше, защото не прилагаше тригерите, докато `main.js` ги прилага при
+всяко стартиране.
+
+**8. Прекъснато възстановяване оставяше програмата без база.**
+`performRestore` затваряше базата ПРЕДИ да копира резервното копие върху
+активния файл; провал на копирането (пълен диск, прекъснат мрежов дял)
+оставяше `db === null` и вероятно отрязан файл. Сега копието се записва
+настрани, докато базата още работи, и чак тогава се затваря и се прави
+преименуване — атомарна операция на едно и също устройство. При провал
+предишната база се връща на място и се съобщава къде е предпазното копие.
+
+**17 нови теста, общо 445, 0 провалени** — пакетът се пуска и под
+`TZ=UTC`, и под `TZ=Europe/Sofia`. Нови файлове: `db-folder.js`,
+`test/db-folder.test.js`, `test/views-regressions.test.js`.
+
+**EN — eight fixes from a full audit for errors and crashes.** Each was
+verified empirically (real Chromium for HTML-parser behaviour, a real
+SQLite database for the queries) and each is covered by a regression test
+that was checked to fail against the old code. None of the eight came from
+the v1.64.0 `app.js` split — all predate it.
+
+**1. Due dates were computed one day early, on every loan.**
+`handlers/calendar.js` parsed dates as `"…T00:00:00"` (LOCAL midnight) but
+formatted them back with `toISOString()` (UTC). At UTC+2/+3 — Bulgaria,
+where the program actually runs — that returns the previous day and tests
+the wrong weekday: due dates landed a day early, and a Saturday due date
+moved BACKWARDS to Friday instead of forward to Monday. The same applied to
+counting closed days in the overdue penalty. It stayed invisible because
+the whole suite ran under `TZ=UTC`, where the two scales coincide; under
+`TZ=Europe/Sofia` the repository's own test failed. All date arithmetic is
+now UTC throughout, and the test explicitly sweeps five timezones on both
+sides of UTC.
+
+**2. The ЕГН / ID-card protection could never be unlocked.**
+`loadPdpBox()` injected `<form id="pdpUnlockF">` into `#pdpBox`, which sat
+inside `<form id="stF">`. A nested `<form>` is a parse error and the tag is
+DROPPED (the fields survive, the form does not), so `$('#pdpUnlockF')` was
+`null` and the "Unlock" button threw a `TypeError` with no visible message.
+The card now lives outside the main form, which also stops the typed
+password from being swept into `settings:update` by `formData('#stF')`.
+
+**3. Books with an empty "department" vanished from the public catalog.**
+`department != 'служебен'` yields NULL, not true, for a NULL department, so
+the row drops out. The field is optional on entry, so this happened
+silently. Now `COALESCE(department,'')` in all four places.
+
+**4. An unreachable network folder silently created a new, empty
+database.** `resolveDbDir()` fell back to the local default folder, where an
+empty database was created on the spot — looking like total data loss, and
+worse, inviting data entry that would never reach the shared database. The
+program now asks explicitly (Retry / Work locally / Quit). The decision
+lives in the new `db-folder.js`, free of Electron, so it is testable.
+
+**5. The payment receipt was never printed.** `savePayment()` called the
+async `accountModal()` without `await`, so `printReceiptLine()` searched the
+pre-payment `_ACC_LINES` and silently found nothing.
+
+**6. An apostrophe in a name broke the buttons.** `esc()` already turns `'`
+into `&#39;`, making every following `esc(x).replace(/'/g, …)` dead code;
+the parser turns `&#39;` back into a real apostrophe just before the handler
+body is compiled, breaking it with a `SyntaxError`. New `jsq()` helper in
+`core.js` escapes for JavaScript first, HTML second — verified in real
+Chromium.
+
+**7. A "Състояние" (condition) column failed the ENTIRE import.** In legacy
+tables that column describes physical condition, but it mapped to
+`books.status`, where the enum trigger allows only four values — zero rows
+imported from otherwise perfectly good data. An unknown value now costs
+neither the row nor the information: status falls back to "наличен" and the
+original text is appended to the note.
+
+**8. An interrupted restore left the program with no database.**
+`performRestore` closed the database BEFORE copying over the active file.
+The new copy is now staged beside it while the database is still open, and
+only then closed and renamed (atomic on the same device); on failure the
+previous database is put back.
+
+**17 new tests, 445 total, 0 failing** — the suite runs under both `TZ=UTC`
+and `TZ=Europe/Sofia`. New files: `db-folder.js`, `test/db-folder.test.js`,
+`test/views-regressions.test.js`.
 
 ## v1.64.0
 
@@ -161,6 +266,53 @@ Updated: `docs/ARCHITECTURE.md` (new "Renderer process" section),
 `db/enum-triggers.js` (pointers to the new files). `jsdom` added as a
 devDependency (test-only, not packaged into the `.exe`). 425 tests (421 +
 4 new), 0 failing.
+
+## v1.63.0
+
+**BG — спешна поправка: програмата изобщо не стартираше след инсталиране
+(v1.59.0 – v1.62.0).** Инсталираната програма падаше веднага при пускане с
+`A JavaScript error occurred in the main process — Cannot find module
+'./db/enum-triggers'`. Причина: v1.59.0 добави `db/enum-triggers.js` и
+`main.js` го изисква при стартиране, но списъкът `build.files` в
+`package.json` изброяваше от папката `db/` само `db/schema.sql` — затова
+новият файл не влизаше в `app.asar` и липсваше на компютъра на
+потребителя. Нито един от 418-те теста не хвана това, защото тестовете се
+пускат от изходния код, където файлът очевидно съществува; счупен беше
+само опакованият инсталатор. Поправено: `db/schema.sql` → `db/**/*`, така
+че всеки бъдещ файл в `db/` влиза автоматично. По същия повод е добавен и
+`icon.ico` — `main.js` го подава на прозореца (`BrowserWindow`), но и той
+липсваше в списъка; това не чупеше нищо (Electron мълчаливо ползва иконата
+по подразбиране), затова не е личало.
+
+**Нов регресионен тест** `test/build-files-coverage.test.js` (3 теста, общо
+421): обхожда реалните `require()` в `main.js`/`preload.js`/`handlers/*.js`
+плюс файловете, четени по време на работа (`db/schema.sql`,
+`src/mobile-template.html`, `src/index.html`, `icon.ico`), и проверява, че
+всеки от тях е покрит от някой шаблон в `build.files`. Проверено е, че
+тестът наистина пада със стария (счупен) списък и посочва точно виновния
+файл — иначе не би пазил от нищо. Третият тест пази самия matcher от това
+да почне да връща „покрито“ за всичко.
+
+**EN — urgent fix: the installed program did not start at all (v1.59.0 –
+v1.62.0).** It crashed immediately on launch with `Cannot find module
+'./db/enum-triggers'`. Cause: v1.59.0 added `db/enum-triggers.js`, required
+by `main.js` at startup, but the `build.files` list in `package.json`
+included only `db/schema.sql` from the `db/` folder — so the new file never
+made it into `app.asar`. None of the 418 tests caught this, because tests
+run from the source tree where the file plainly exists; only the packaged
+installer was broken. Fixed: `db/schema.sql` → `db/**/*`, so any future
+file in `db/` is included automatically. The same audit found `icon.ico`
+missing from the list as well — `main.js` passes it to `BrowserWindow`, but
+its absence merely made Electron fall back to the default icon, so it never
+surfaced.
+
+**New regression test** `test/build-files-coverage.test.js` (3 tests, 421
+total): walks the real `require()` calls across `main.js`/`preload.js`/
+`handlers/*.js` plus the files read at runtime, and asserts each is covered
+by some `build.files` pattern. Verified that the test does fail against the
+old (broken) list and names the offending file — otherwise it would guard
+nothing. A third test keeps the pattern matcher itself from silently
+degrading into "everything matches".
 
 ## v1.62.0
 

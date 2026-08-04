@@ -72,7 +72,11 @@ async function savePayment(readerId) {
   const d = formData('#payF');
   if (!d.amount || Number(d.amount) <= 0) return toast('Въведете сума.', 'err');
   const id = await call(window.api.account.pay({ reader_id: readerId, amount: d.amount, note: d.note, date: today() }), 'Записано плащане.');
-  if (id != null) { closeModal2(); markSaved(); accountModal(readerId); printReceiptLine(id); }
+  // accountModal е async и презарежда window._ACC_LINES — трябва да се ИЗЧАКА, преди
+  // printReceiptLine да потърси там току-що записания ред. Без await квитанцията се
+  // търсеше в стария списък (отпреди плащането), не се намираше и функцията излизаше
+  // мълчаливо — плащането се записваше, но квитанция не се отпечатваше никога.
+  if (id != null) { closeModal2(); markSaved(); await accountModal(readerId); printReceiptLine(id); }
 }
 window.savePayment = savePayment;
 async function deleteAccountLine(readerId, id) {

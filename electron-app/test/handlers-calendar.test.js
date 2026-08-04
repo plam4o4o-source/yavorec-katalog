@@ -118,3 +118,39 @@ test('closedDaysBetween counts weekends and closed dates strictly within (a, b]'
   assert.equal(returned.closedDaysBetween(null, '2026-08-04'), 0);
   assert.equal(returned.closedDaysBetween('2026-08-04', '2026-08-04'), 0, 'a >= b must return 0');
 });
+
+/* ---------------------------------------------------------------------------
+   Регресия v1.65.0 — часова зона.
+
+   nextWorkDay/isWorkDay/closedDaysBetween четяха датата като „…T00:00:00" (МЕСТНА
+   полунощ), а я записваха обратно през toISOString() (UTC). При UTC+2/+3 — тоест в
+   България, където програмата реално работи — това връщаше ден ПО-РАНО и проверяваше
+   грешния ден от седмицата: всеки падеж излизаше с ден по-рано, а падеж в събота се
+   местеше НАЗАД в петък вместо напред в понеделник.
+
+   Дефектът остана невидим точно защото целият пакет се изпълняваше под TZ=UTC, където
+   двете скàли съвпадат. Затова тук зоната се сменя изрично по време на изпълнение
+   (Node прилага process.env.TZ към следващите Date операции) и се проверяват часови
+   зони и на изток, и на запад от UTC.
+   --------------------------------------------------------------------------- */
+test('датите не зависят от часовата зона на компютъра (падежи в България)', async () => {
+  const original = process.env.TZ;
+  try {
+    for (const tz of ['UTC', 'Europe/Sofia', 'Pacific/Auckland', 'America/Los_Angeles', 'Asia/Tokyo']) {
+      process.env.TZ = tz;
+      const { ipcMain, returned } = setup();
+      await ipcMain.invoke('calendar:saveWorkDays', [1, 2, 3, 4, 5]);
+      await ipcMain.invoke('calendar:addClosed', { date: '2026-08-03', reason: 'офиц. празник' });
+
+      assert.equal(returned.nextWorkDay('2026-08-04'), '2026-08-04', `${tz}: работен ден не се мести`);
+      assert.equal(returned.nextWorkDay('2026-08-01'), '2026-08-04', `${tz}: събота → следващият работен ден`);
+      assert.equal(returned.nextWorkDay('2026-08-03'), '2026-08-04', `${tz}: затворен ден → напред, не назад`);
+      assert.equal(returned.isWorkDay('2026-08-01'), false, `${tz}: 01.08.2026 е събота`);
+      assert.equal(returned.isWorkDay('2026-08-04'), true, `${tz}: 04.08.2026 е вторник`);
+      assert.equal(returned.closedDaysBetween('2026-07-31', '2026-08-04'), 3,
+        `${tz}: събота, неделя и обявеният празник`);
+    }
+  } finally {
+    if (original === undefined) delete process.env.TZ; else process.env.TZ = original;
+  }
+});

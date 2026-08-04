@@ -160,3 +160,78 @@ test('backup:restoreFromList reports a friendly error for a missing file instead
   assert.equal(result.ok, false);
   assert.match(result.error, /не е намерен/);
 });
+
+/* ---------------------------------------------------------------------------
+   Регресия v1.65.0 — прекъснато възстановяване оставяше програмата без база.
+
+   performRestore затваряше базата (setDb(null)) ПРЕДИ да копира резервното копие
+   върху активния файл. Ако това копиране се провалеше — пълен диск, изчезнал файл,
+   прекъснат мрежов дял — програмата оставаше жива, но с db === null, тоест всяка
+   следваща операция гърми, а активният файл можеше да е отрязан наполовина.
+
+   Сега новото копие се записва настрани, докато базата още работи, и чак след това
+   се затваря и се преименува (атомарна операция на едно и също устройство).
+   --------------------------------------------------------------------------- */
+function setupWithFs(fsPatch) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-backup-fail-'));
+  const dbPath = path.join(dir, 'library.db');
+  let db = new Database(dbPath);
+  db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');
+  db.prepare('INSERT INTO t (v) VALUES (?)').run('оригинал');
+
+  const relaunchCalls = [];
+  const exitCalls = [];
+  const ipcMain = fakeIpcMain();
+  const deps = {
+    app: {
+      getPath: (name) => (name === 'temp' ? os.tmpdir() : dir),
+      relaunch: () => relaunchCalls.push(true),
+      exit: (code) => exitCalls.push(code)
+    },
+    dialog: { showSaveDialog: async () => ({ canceled: true }), showOpenDialog: async () => ({ canceled: true }) },
+    // fs има само-за-четене свойства (F_OK и др.), затова не се копира, а се обгръща.
+    fs: new Proxy(fs, { get: (t, p) => (p in fsPatch ? fsPatch[p] : t[p]) }),
+    path,
+    getDb: () => db,
+    setDb: (v) => { db = v; },
+    getMainWindow: () => ({}),
+    run: (fn) => {
+      try { return { ok: true, data: fn() }; }
+      catch (err) { return { ok: false, error: err.message }; }
+    },
+    logAudit: () => {},
+    resolveDbDir: () => dir,
+    resolveDbPath: () => dbPath
+  };
+  registerBackupHandlers(ipcMain, deps);
+  return { dir, dbPath, ipcMain, relaunchCalls, exitCalls, getDb: () => db };
+}
+
+test('провалено копиране при възстановяване не оставя програмата без работеща база', async () => {
+  let sawStaged = null;
+  const { dir, dbPath, ipcMain, relaunchCalls, exitCalls, getDb } = setupWithFs({
+    copyFileSync: (src, dest) => {
+      if (String(dest).endsWith('.restore-tmp')) { sawStaged = dest; throw new Error('ENOSPC: няма място на устройството'); }
+      return fs.copyFileSync(src, dest);
+    }
+  });
+  const backupPath = path.join(dir, 'to-restore.db');
+  const bdb = new Database(backupPath);
+  bdb.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');
+  bdb.prepare('INSERT INTO t (v) VALUES (?)').run('от-резервно-копие');
+  bdb.close();
+
+  const result = await ipcMain.invoke('backup:restoreFromList', { path: backupPath, password: undefined });
+
+  assert.equal(result.ok, false, 'провалът трябва да се съобщи, а не да мине тихо');
+  assert.match(result.error, /не можа да бъде подготвено/);
+  assert.ok(sawStaged, 'копието трябва да се прави настрани, а не направо върху активната база');
+  assert.notEqual(getDb(), null, 'базата трябва да е останала отворена и работеща');
+  assert.equal(relaunchCalls.length, 0, 'няма рестарт при провал');
+  assert.equal(exitCalls.length, 0);
+  // Активният файл не е бил докосван — съдържанието е същото.
+  const still = new Database(dbPath);
+  assert.equal(still.prepare('SELECT v FROM t').get().v, 'оригинал');
+  still.close();
+  assert.equal(fs.existsSync(dbPath + '.restore-tmp'), false, 'временният файл се почиства');
+});

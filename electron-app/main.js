@@ -8,6 +8,7 @@ const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./sear
 const { applyEnumTriggers } = require('./db/enum-triggers');
 const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail } = require('./security-utils');
+const { ensureDbFolderAvailable } = require('./db-folder');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -91,6 +92,30 @@ function resolveDbPath() {
   const dir = resolveDbDir();
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'library.db');
+}
+
+/* Настроена, но недостъпна папка (изключен мрежов диск) караше resolveDbDir() тихо да
+   се върне към локалната папка, където веднага се създаваше НОВА, ПРАЗНА база — на
+   екрана „всичко е изчезнало“, а въведеното след това остава завинаги отделено от
+   общата база. Сега се пита изрично, преди базата да бъде отворена. Самото решение
+   живее в db-folder.js без зависимост от Electron, за да е тестваемо. */
+function askAboutMissingDbFolder(folder) {
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    noLink: true,
+    buttons: ['Опитай отново', 'Работи с локална база', 'Изход'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Папката с базата данни не е достъпна',
+    message: 'Настроената папка с базата данни не е достъпна:\n' + folder,
+    detail: 'Обикновено това означава, че мрежовият диск не е свързан или че компютърът, '
+      + 'който споделя папката, е изключен.\n\n'
+      + '• „Опитай отново“ — свържете диска и натиснете бутона.\n'
+      + '• „Работи с локална база“ — програмата ще отвори ПРАЗНА локална база. Данните, '
+      + 'въведени в нея, НЯМА да попаднат в общата база.\n'
+      + '• „Изход“ — затваря програмата, без да променя нищо. Това е безопасният избор.'
+  });
+  return choice === 0 ? 'retry' : (choice === 1 ? 'local' : 'quit');
 }
 
 // CREATE TABLE IF NOT EXISTS в schema.sql не пипа таблица, която вече съществува —
@@ -408,6 +433,12 @@ ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall
 let mainWindow;
 app.whenReady().then(() => {
   pruneOldLogs();
+  // Преди каквото и да е докосване на базата — виж askAboutMissingDbFolder по-горе.
+  if (!ensureDbFolderAvailable({ readConfig, existsSync: fs.existsSync, ask: askAboutMissingDbFolder })) {
+    logToFile('warn', 'Стартирането е прекратено — настроената папка с базата данни не е достъпна.');
+    app.exit(0);
+    return;
+  }
   initDb();
   // "Кой служител работи в момента" е настройка на този компютър (не на споделената база
   // данни) — всяко работно място пази собствения си избор в локалния config.json.
@@ -769,7 +800,7 @@ function publicBookFields(b, opacMap) {
   };
 }
 function buildCatalogPayload() {
-  const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND b.department != 'служебен' ORDER BY b.title`).all();
+  const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен' ORDER BY b.title`).all();
   const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
   const opacMap = {};
   for (const r of db.prepare(`SELECT category, value, opac_label FROM authorised_values WHERE opac_label IS NOT NULL AND TRIM(opac_label) <> ''`).all()) {

@@ -139,9 +139,9 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch, lib_name, org FROM settings WHERE id = 1').get();
-      const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND department != 'служебен'`).get().n;
+      const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND COALESCE(department,'') != 'служебен'`).get().n;
       const avail = db.prepare(`
-        SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND b.department != 'служебен'
+        SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен'
         AND COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id=b.id),0) >
             (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.date_in IS NULL)
       `).get().n;
