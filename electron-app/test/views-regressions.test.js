@@ -261,3 +261,31 @@ test('квитанцията след плащане се отпечатва (ac
   assert.match(printed[0], /КВИТАНЦИЯ/);
   assert.match(printed[0], /Иван Петров/);
 });
+
+// Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
+// правило за `.grid`. Затова, ако класът бъде преименуван/премахнат от
+// style.css, докато разметката още го ползва, редът тихо се разпада на
+// вертикална колона, без грешка никъде. Тази проверка важи за всички класове
+// за решетка, ползвани в изгледите, не само за новия.
+test('всеки клас за решетка, ползван в изгледите, има правило в style.css', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.join(__dirname, '..', 'src');
+  const css = fs.readFileSync(path.join(dir, 'style.css'), 'utf8');
+
+  const used = new Set();
+  for (const f of fs.readdirSync(path.join(dir, 'views'))) {
+    if (!f.endsWith('.js')) continue;
+    const src = fs.readFileSync(path.join(dir, 'views', f), 'utf8');
+    for (const m of src.matchAll(/class="grid ([a-zA-Z0-9_ -]+)"/g)) {
+      m[1].trim().split(/\s+/).forEach(c => used.add(c));
+    }
+  }
+  assert.ok(used.size > 0, 'не са намерени класове за решетка в изгледите');
+
+  for (const cls of used) {
+    assert.match(css, new RegExp('\\.grid\\.' + cls + '\\s*\\{[^}]*display\\s*:\\s*grid'),
+      `class="grid ${cls}" се ползва в изгледите, но в style.css няма ` +
+      `.grid.${cls}{display:grid…} — редът ще се подреди вертикално`);
+  }
+});

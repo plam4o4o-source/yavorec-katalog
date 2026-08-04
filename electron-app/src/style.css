@@ -434,6 +434,12 @@ table.ledger .num{font-family:var(--mono)}
 .grid.g2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 .grid.g3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px}
 .grid.g4{display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px}
+/* Редът „Том / част · ISBN / ISSN · Страници · Език“ във формата за документ.
+   Равните четвъртинки на .g4 не му вършат работа: „Том/част“ и „Страници“
+   побират по два-три знака, а полето за ISBN носи и двата бутона („Търси“ и
+   „SRU…“) и оставаше притиснато. Затова двете числови полета се свиват, а
+   освободеното място отива при ISBN. */
+.grid.gIsbn{display:grid; grid-template-columns:.55fr 2fr .55fr 1.1fr; gap:10px}
 fieldset{border:1px solid var(--rule); border-radius:4px; margin:0 0 14px; padding:12px 14px}
 fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); padding:0 6px}
 
