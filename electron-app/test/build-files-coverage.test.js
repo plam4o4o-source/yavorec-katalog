@@ -82,6 +82,41 @@ test('файловете, четени по време на работа (schema
   }
 });
 
+// Интерфейсът (renderer) не минава през require() — index.html го зарежда с
+// <script src="...">. Затова горните проверки не го покриват изобщо, а след
+// разбиването на бившия src/app.js на 39 файла в src/views/ това е точно
+// толкова чувствително към същия бъг: файл, който не влиза в инсталатора или
+// не е добавен в index.html, чупи цял раздел от програмата само в опакованата
+// версия.
+const indexHtml = fs.readFileSync(path.join(APP_DIR, 'src', 'index.html'), 'utf8');
+const scriptSrcs = [...indexHtml.matchAll(/<script src="([^"]+)"/g)].map(m => 'src/' + m[1]);
+
+test('всеки <script> от index.html съществува и влиза в инсталатора', () => {
+  assert.ok(scriptSrcs.length > 1, 'не са намерени <script src> тагове в index.html');
+  for (const rel of scriptSrcs) {
+    assert.ok(fs.existsSync(path.join(APP_DIR, rel)), `index.html зарежда ${rel}, но такъв файл няма`);
+    assert.ok(isPackaged(rel), `${rel} се зарежда от index.html, но не влиза в build.files`);
+  }
+});
+
+test('всеки файл в src/views/ реално се зарежда от index.html (няма мъртъв раздел)', () => {
+  const onDisk = fs.readdirSync(path.join(APP_DIR, 'src', 'views'))
+    .filter(f => f.endsWith('.js')).map(f => 'src/views/' + f).sort();
+  const loaded = scriptSrcs.filter(s => s.startsWith('src/views/')).sort();
+  assert.deepEqual(loaded, onDisk,
+    'Разминаване между файловете в src/views/ и заредените в index.html — ' +
+    'файл, който не е добавен в index.html, е мъртъв код, а липсващ файл чупи страницата.');
+});
+
+// Единственото истинско ограничение на реда след разбиването: bootstrap.js
+// чете имената на render-функциите веднага (RENDERERS) и вика route(), затова
+// всичко останало трябва вече да е заредено. Нищо в кода не пази това — ако
+// нов изглед се добави след него в index.html, програмата се чупи.
+test('views/bootstrap.js се зарежда последен', () => {
+  assert.equal(scriptSrcs[scriptSrcs.length - 1], 'src/views/bootstrap.js',
+    'bootstrap.js трябва да е последният <script> в index.html — вижте коментара в самия файл');
+});
+
 test('matcher-ът наистина отхвърля непокрит файл (иначе тестът по-горе би минавал винаги)', () => {
   // Пази самия тест от това да стане безсмислен: ако matches() почне да
   // връща true за всичко, горните проверки биха минавали, без да пазят нищо.
