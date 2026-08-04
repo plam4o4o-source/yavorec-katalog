@@ -60,6 +60,63 @@ document.addEventListener('keydown', e => {
   else if ($('#veil').classList.contains('on')) closeModal();
 });
 
+/* ---------------- askText: заместител на window.prompt() ----------------
+   Electron НЕ поддържа window.prompt() — извикването хвърля „prompt() is not
+   supported.“ право в handler-а на бутона. Проверено с истинския Electron 43
+   от package.json. Резултатът е най-лошият възможен вид дефект: бутонът не
+   прави НИЩО — без прозорец, без съобщение, без грешка на екрана. Точно
+   затова „Витрини в каталога“ изглеждаха счупени: „+ Нова витрина“ умираше
+   на първия ред и витрина не можеше да се създаде изобщо (а без витрина и
+   всичко останало в раздела е безсмислено).
+
+   Тук прозорецът е същият като всички други в програмата (modal/modal2),
+   така че се държи еднакво: Enter потвърждава, Esc/× отказва. Връща Promise
+   с въведения текст или null при отказ — и ЗАДЪЛЖИТЕЛНО се разрешава при
+   всеки изход, за да не увисне извикващият код.
+
+   Ползва втория слой (modal2), ако вече има отворен прозорец — иначе би
+   изтрил формата, върху която е извикан (напр. бележка към посещение по
+   домовете се пита върху вече отворената картонена справка). */
+function askText(title, opts) {
+  opts = opts || {};
+  const second = $('#veil').classList.contains('on');
+  const show = second ? modal2 : modal;
+  const hide = second ? closeModal2 : closeModal;
+  const rootSel = second ? '#modal2' : '#modal';
+  return new Promise(resolve => {
+    show(title,
+      `<form id="askTextF" onsubmit="return false">
+         ${fld(opts.label || 'Стойност', 'v', { val: opts.value || '', hint: opts.hint })}
+       </form>${opts.note ? `<div class="hint">${esc(opts.note)}</div>` : ''}`,
+      `<button class="btn" data-ask="cancel">Отказ</button>
+       <button class="btn pri" data-ask="ok">${esc(opts.okLabel || 'Готово')}</button>`);
+    const box = $(rootSel);
+    const input = box.querySelector('input[name="v"]');
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey, true);
+      hide();
+      resolve(val);
+    };
+    // Esc се обработва и от общия слушател по-горе (той само затваря прозореца);
+    // тук е нужен собствен, за да се разреши и обещанието, вместо да увисне.
+    function onKey(e) { if (e.key === 'Escape') finish(null); }
+    document.addEventListener('keydown', onKey, true);
+    box.querySelector('[data-ask="ok"]').addEventListener('click', () => finish(input.value));
+    box.querySelector('[data-ask="cancel"]').addEventListener('click', () => finish(null));
+    const x = box.querySelector('header .x');
+    if (x) x.addEventListener('click', () => finish(null));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(input.value); }
+    });
+    input.focus();
+    input.select();
+  });
+}
+window.askText = askText;
+
 function formData(sel) {
   const out = {};
   $(sel).querySelectorAll('input,select,textarea').forEach(el => {

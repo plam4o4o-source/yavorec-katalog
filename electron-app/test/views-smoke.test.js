@@ -140,7 +140,10 @@ function buildDom() {
   const { window } = dom;
   window.api = apiMock();
   window.confirm = () => true;
-  window.prompt = () => null;
+  // Точно както в Electron: window.prompt() НЕ се поддържа и хвърля. Мокът
+  // трябва да е верен на средата — по-рано тук стоеше () => null и това
+  // скриваше дефекта, който правеше „Витрини в каталога“ неизползваеми.
+  window.prompt = () => { throw new Error('prompt() is not supported.'); };
   window.alert = () => {};
   // index.html вече съдържа <script src="udk.js"> и <script src="views/...">
   // тагове, но jsdom няма да ги зареди сам (не правим мрежова/файлова

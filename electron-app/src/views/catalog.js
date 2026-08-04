@@ -138,14 +138,19 @@ async function loadShelvesBox() {
     : '<div class="hint">Още няма витрини. Създайте първата — напр. „Нови български романи“ или „Краезнание“.</div>';
 }
 async function createShelf() {
-  const name = prompt('Име на витрината (вижда се на сайта):');
+  const name = await askText('Нова витрина', {
+    label: 'Име на витрината', hint: 'вижда се на сайта', okLabel: 'Създай',
+    note: 'Например „Лято 2026“, „Краезнание“, „Нови български романи“.'
+  });
   if (!name || !name.trim()) return;
   const id = await call(window.api.shelves.create(name.trim()), 'Витрината е създадена.');
   if (id != null) { loadShelvesBox(); openShelf(id); }
 }
 window.createShelf = createShelf;
 async function renameShelf(id, current) {
-  const name = prompt('Ново име на витрината:', current || '');
+  const name = await askText('Преименуване на витрината', {
+    label: 'Ново име на витрината', value: current || '', okLabel: 'Преименувай'
+  });
   if (!name || !name.trim()) return;
   const ok = await call(window.api.shelves.rename({ id, name: name.trim() }), 'Преименувана.');
   if (ok !== null) loadShelvesBox();
