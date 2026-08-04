@@ -214,7 +214,7 @@ async function bookForm(id, presetAcqId) {
         ${fld('Издателство', 'publisher', { val: v.publisher || '', list: 'publisher' })}
         ${fld('Година', 'year', { val: v.year || '' })}
       </div>
-      <div class="grid g4">
+      <div class="grid gIsbn">
         ${fld('Том / част', 'volume', { val: v.volume || '' })}
         <div class="field"><label>ISBN / ISSN</label>
           <div class="isbnRow">

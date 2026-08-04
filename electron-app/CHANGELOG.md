@@ -11,6 +11,44 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.66.0
+
+**BG:** По молба на библиотекаря — в прозореца за нов документ редът
+„Том / част · ISBN / ISSN · Страници · Език“ вече не дели ширината на равни
+четвъртинки. „Том / част“ и „Страници“ побират по два-три знака, а полето за
+ISBN носи и двата бутона („Търси“ и „SRU…“), затова оставаше притиснато:
+измерено в Chromium, самото поле за въвеждане беше **103 px** — по-малко от
+един пълен ISBN с тирета. Сега двете числови полета се свиват, а
+освободеното място отива при ISBN: при обичайна ширина на прозореца полето
+за въвеждане става **311 px** (три пъти повече), а „Том / част“ и „Страници“
+падат от 231 на 121 px. Проверено на ширини от 700 до 1180 px — пълен
+13-цифрен ISBN с тирета се вижда изцяло, а двата бутона не преливат при нито
+една от тях.
+
+Добавена и обща проверка (`test/views-regressions.test.js`): всеки клас за
+решетка, ползван в изгледите, трябва да има правило в `style.css`. В този
+CSS няма общо правило за `.grid` — всеки клас носи собствено `display:grid`,
+затова изтрит или преименуван клас разсипва реда във вертикална колона тихо,
+без грешка никъде. Проверено е, че тестът наистина пада при махане на класа.
+
+**EN:** At the librarian's request — in the new-document window, the row
+"Volume · ISBN/ISSN · Pages · Language" no longer splits the width into
+equal quarters. "Volume" and "Pages" hold two or three characters, while the
+ISBN field also carries both lookup buttons ("Търси" and "SRU…") and was left
+cramped: measured in Chromium, the input itself was **103 px** — narrower
+than a single hyphenated ISBN. The two numeric fields now shrink and the
+freed space goes to ISBN: at a typical window width the input becomes
+**311 px** (three times more), while Volume and Pages drop from 231 to
+121 px. Verified at widths from 700 to 1180 px — a full 13-digit hyphenated
+ISBN is fully visible and the two buttons never overflow at any of them.
+
+Also added a general guard (`test/views-regressions.test.js`): every grid
+class used in the views must have a rule in `style.css`. This CSS has no
+shared `.grid` rule — each class carries its own `display:grid` — so a
+deleted or renamed class collapses the row into a vertical column silently,
+with no error anywhere. Verified the test does fail when the class is
+removed.
+
 ## v1.65.0
 
 **BG — осем поправки след цялостен одит за грешки и сривове.** Всяка е
