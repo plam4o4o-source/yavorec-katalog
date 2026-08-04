@@ -152,3 +152,46 @@ test('import:run with skipDuplicates=true still reaches the duplicate-skip check
   assert.equal(result.data.skipped, 1);
   assert.equal(result.data.errors.length, 0); // skipped via the dup check, never reached the insert
 });
+
+/* ---------------------------------------------------------------------------
+   Регресия v1.65.0 — колона „Състояние“ проваляше ЦЕЛИЯ внос.
+
+   importers.js съпоставя заглавие „състояние“ към books.status, но в наследените
+   таблици (АБ, стар Excel) тази колона почти винаги описва ФИЗИЧЕСКОТО състояние на
+   екземпляра — „добро“, „скъсана корица“, „пожълтяла“. Тригерът за изброими стойности
+   (db/enum-triggers.js) допуска само четирите статуса, затова всеки ред се отхвърляше
+   и вносът връщаше нула добавени при иначе напълно годни данни.
+
+   Досегашният тестов пакет не го хващаше, защото тук тригерите изобщо не се прилагаха,
+   докато main.js ги прилага при всяко стартиране — тоест тестът работеше върху база,
+   различна от реалната. Затова този тест ги прилага изрично.
+   --------------------------------------------------------------------------- */
+const { applyEnumTriggers } = require('../db/enum-triggers');
+
+test('колона „Състояние“ с физическо състояние не проваля вноса — пази се в забележката', async () => {
+  const { db, ipcMain } = setup();
+  applyEnumTriggers(db); // както прави main.js при всяко стартиране
+  const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-import-status-'));
+  const csv = [
+    'Инвентарен №;Заглавие;Състояние;Забележка',
+    '1;Под игото;добро;дарение',
+    '2;Тихият Дон;скъсана корица;',
+    '3;Записки;липсващ;'
+  ].join('\r\n') + '\r\n';
+  fs.writeFileSync(path.join(realDir, 'in.csv'), csv, 'utf8');
+  await ipcMain.invoke('import:load', path.join(realDir, 'in.csv'));
+  const result = await ipcMain.invoke('import:run', {
+    mapping: { 0: 'inv_number', 1: 'title', 2: 'status', 3: 'description' }, options: {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.added, 3, 'и трите реда трябва да влязат, не нула');
+
+  const rows = db.prepare('SELECT title, status, description FROM books ORDER BY inv_number').all();
+  assert.equal(rows[0].status, 'наличен', 'непознато състояние → статус по подразбиране');
+  assert.equal(rows[0].description, 'дарение · Състояние: добро', 'оригиналната стойност не се губи');
+  assert.equal(rows[1].status, 'наличен');
+  assert.equal(rows[1].description, 'Състояние: скъсана корица');
+  assert.equal(rows[2].status, 'липсващ', 'познат статус се приема както преди');
+  assert.equal(rows[2].description, null);
+});

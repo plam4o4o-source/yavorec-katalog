@@ -7,6 +7,10 @@
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
+  const { ENUM_COLUMNS } = require('../db/enum-triggers');
+  /* Позволените стойности се четат от същия списък, който създава тригерите — така
+     двата не могат да се разминат при бъдеща промяна. */
+  const BOOK_STATUSES = (ENUM_COLUMNS.find(c => c.table === 'books' && c.col === 'status') || {}).values || [];
 
   const IMPORT_FIELDS = {
     inv_number: 'Инвентарен №', title: 'Заглавие', subtitle: 'Подзаглавие', author: 'Автор',
@@ -137,6 +141,20 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               categoryId = cats.get(key);
             }
             const callNumber = cell(row, 'call_number') || null;
+            /* Колона „Състояние“ в наследени таблици почти винаги описва ФИЗИЧЕСКОТО
+               състояние на екземпляра („добро“, „скъсана корица“, „пожълтяла“), а не
+               статуса по смисъла на програмата. Тригерът за изброими стойности допуска
+               само четирите статуса, затова такъв файл се проваляше на ВСЕКИ ред и
+               вносът връщаше нула добавени — при иначе напълно годни данни. Сега нито
+               редът, нито информацията се губят: статусът пада към „наличен“, а
+               оригиналният текст се дописва към забележката. */
+            const rawStatus = String(cell(row, 'status') || '').trim();
+            const knownStatus = BOOK_STATUSES.includes(rawStatus);
+            const noteParts = [
+              cell(row, 'description') || null,
+              (rawStatus && !knownStatus) ? 'Състояние: ' + rawStatus : null
+            ].filter(Boolean);
+            if (rawStatus && !knownStatus) report.statusToNote = (report.statusToNote || 0) + 1;
             const payload = {
               inv_number: inv,
               barcode: cell(row, 'barcode') || String(inv),
@@ -167,10 +185,10 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               // при внос, ако не идва от файла; status_date е днешна дата (нов запис);
               // cn_sort се смята от сигнатурата, ако е налична.
               permanent_location: null,
-              status: cell(row, 'status') || 'наличен',
+              status: knownStatus ? rawStatus : 'наличен',
               status_date: today(),
               price: parseNum(cell(row, 'price')),
-              description: cell(row, 'description') || null,
+              description: noteParts.length ? noteParts.join(' · ') : null,
               acquisition_id: null,
               cn_sort: callNumber ? cnSortKey(callNumber) : null
             };

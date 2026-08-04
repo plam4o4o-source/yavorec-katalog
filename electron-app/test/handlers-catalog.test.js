@@ -276,3 +276,26 @@ test('export handlers report cancellation from the save dialog', async () => {
     assert.match(result.error, /Отказано/, ch);
   }
 });
+
+/* ---------------------------------------------------------------------------
+   Регресия v1.65.0 — книга без попълнен „Отдел“ изчезваше от публичния каталог.
+
+   Условието беше `department != 'служебен'`, а в SQL сравнение с NULL дава NULL,
+   не истина — редът просто отпада. Полето „Отдел“ не е задължително при въвеждане
+   (в базата е TEXT без NOT NULL и без стойност по подразбиране), затова това се
+   случваше тихо: книгата стои в инвентарната книга, но липсва в katalog.json, в
+   брояча „публикувани“ и при добавяне към витрина.
+   --------------------------------------------------------------------------- */
+test('книга без попълнен отдел (NULL) се брои за публикувана, а служебната — не', async () => {
+  const { db, ipcMain } = setup();
+  db.prepare("INSERT INTO books (title, status, department) VALUES ('С отдел', 'наличен', 'за възрастни')").run();
+  db.prepare("INSERT INTO books (title, status) VALUES ('Без отдел', 'наличен')").run(); // department остава NULL
+  db.prepare("INSERT INTO books (title, status, department) VALUES ('Празен низ', 'наличен', '')").run();
+  db.prepare("INSERT INTO books (title, status, department) VALUES ('Служебна', 'наличен', 'служебен')").run();
+  db.prepare("INSERT INTO books (title, status, department) VALUES ('Отчислена', 'отчислен', 'за възрастни')").run();
+
+  const result = await ipcMain.invoke('catalog:status');
+  assert.equal(result.ok, true);
+  assert.equal(result.data.total, 3,
+    'публикуват се „С отдел“, „Без отдел“ (NULL) и „Празен низ“ — но не служебната и не отчислената');
+});

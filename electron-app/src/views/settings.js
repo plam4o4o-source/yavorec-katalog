@@ -127,6 +127,17 @@ async function renderSetup() {
       </div>
       <div class="hint" id="anonHint">зареждане…</div>
     </div>
+    <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
+    </form>
+
+    <!-- Тази карта стои ИЗВЪН <form id="stF"> по две причини, и двете съществени:
+         1) loadPdpBox() вкарва в #pdpBox поле за парола; вложена <form> в друга <form>
+            се изхвърля мълчаливо от HTML парсера (по спецификация), заради което
+            бутонът „Отключи" по-рано не правеше нищо — formData() получаваше null.
+         2) Дори като <div>, поле вътре в #stF щеше да попадне в formData('#stF') на
+            saveSetup() и паролата щеше да пътува към settings:update без нужда.
+         Картата е самостоятелна — има си собствени бутони и не се пази с „Запиши
+         настройките". -->
     <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Защита на ЕГН / № лична карта</h3>
       <div class="note" style="margin-top:0">ЕГН и номер на лична карта на читателите могат да се пазят
       <b>криптирани</b> в самата база данни, с обща парола за всички компютри, които ползват тази база —
@@ -136,8 +147,6 @@ async function renderSetup() {
       невъзстановими</b> — както при криптирано резервно копие.</div>
       <div id="pdpBox">зареждане…</div>
     </div>
-    <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
-    </form>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Номенклатури</h3>
       <div class="note" style="margin-top:0">Контролирани списъци за полетата с избор — така „худ. л-ра“ и
@@ -274,7 +283,7 @@ async function renderSetup() {
           <td class="num">${fmtDateTime(b.mtime)}</td><td class="num">${fmtBytes(b.size)}</td>
           <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}
               ${b.encrypted ? '<span class="badge" title="Защитено с парола">🔒 криптирано</span>' : ''}</td>
-          <td><button class="btn sm" onclick="restoreBackupFromList('${esc(b.path).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">Възстанови</button></td></tr>`).join('')}
+          <td><button class="btn sm" onclick="restoreBackupFromList('${jsq(b.path)}')">Възстанови</button></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}
     </div>
 
@@ -354,9 +363,9 @@ async function loadPdpBox() {
   if (!s.unlocked) {
     el.innerHTML = `<div class="note w" style="margin:0 0 10px">🔒 Заключено за тази сесия — ЕГН/№ ЛК се
       показват като „Защитени данни“, докато не въведете паролата.</div>
-      <form id="pdpUnlockF" onsubmit="return false" style="max-width:320px">
+      <div id="pdpUnlockF" style="max-width:320px">
         ${fld('Парола', 'password', { type: 'password' })}
-      </form>
+      </div>
       <div class="toolbar" style="margin:0"><button type="button" class="btn pri" onclick="pdpDoUnlock()">Отключи</button></div>`;
     return;
   }
@@ -443,7 +452,7 @@ async function loadCircRulesBox() {
     </tr></thead><tbody>
     ${rules.map(r => `<tr><td><b>${esc(r.category)}</b></td>
       ${CIRC_RULE_FIELDS.map(([k]) => `<td class="num">${r[k] == null ? '<span class="hint">общото</span>' : r[k]}</td>`).join('')}
-      <td><button class="btn sm" onclick="addCircRule('${esc(r.category).replace(/'/g, '&#39;')}')">Редакция</button></td></tr>`).join('')}
+      <td><button class="btn sm" onclick="addCircRule('${jsq(r.category)}')">Редакция</button></td></tr>`).join('')}
     </tbody></table></div>`
     : '<div class="hint">Още няма отделни правила — всички категории ползват общите стойности от „Обслужване“.</div>';
 }
@@ -461,7 +470,7 @@ function addCircRule(category) {
         </div>
       </form>`,
       `<button class="btn" onclick="closeModal2()">Отказ</button>
-       ${editing ? `<button class="btn dgr" onclick="deleteCircRule('${esc(category).replace(/'/g, "&#39;")}')">Изтрий правилото</button>` : ''}
+       ${editing ? `<button class="btn dgr" onclick="deleteCircRule('${jsq(category)}')">Изтрий правилото</button>` : ''}
        <button class="btn pri" onclick="saveCircRule()">Запиши</button>`);
   });
 }
@@ -586,7 +595,7 @@ function askBackupPassword(path, fromList) {
     <div class="note" style="margin-top:0">Файлът е защитен с парола. Въведете паролата, с която е направен.</div>
     <form id="rsF" onsubmit="return false">${fld('Парола', 'password', { type: 'password' })}</form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn pri" onclick="restoreWithPassword('${esc(path).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}', ${fromList ? 'true' : 'false'})">Възстанови</button>`);
+     <button class="btn pri" onclick="restoreWithPassword('${jsq(path)}', ${fromList ? 'true' : 'false'})">Възстанови</button>`);
 }
 async function restoreWithPassword(path, fromList) {
   const d = formData('#rsF');

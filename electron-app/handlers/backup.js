@@ -126,8 +126,30 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); }
     const activePath = resolveDbPath();
     if (fs.existsSync(activePath)) fs.copyFileSync(activePath, safetyPath);
+
+    /* Редът тук е важен. Досега базата се затваряше ПРЕДИ копирането върху нея: ако
+       копирането се провалеше (пълен диск, изчезнал файл, прекъснат мрежов дял),
+       програмата оставаше с db === null и напълно неработеща, а активният файл — вероятно
+       отрязан наполовина. Сега новото копие първо се записва настрани, докато базата още
+       работи (провал на този етап не променя нищо), и чак след това се затваря и се прави
+       преименуване — операция на едно и също устройство, която е атомарна. При провал се
+       връща предпазното копие. */
+    const stagedPath = activePath + '.restore-tmp';
+    try {
+      fs.copyFileSync(realSource, stagedPath);
+    } catch (err) {
+      try { fs.unlinkSync(stagedPath); } catch (e) { /* нищо за чистене */ }
+      throw new Error('Копието не можа да бъде подготвено — базата не е променяна: ' + err.message);
+    }
     if (db) { db.close(); setDb(null); }
-    fs.copyFileSync(realSource, activePath);
+    try {
+      fs.renameSync(stagedPath, activePath);
+    } catch (err) {
+      try { if (fs.existsSync(safetyPath)) fs.copyFileSync(safetyPath, activePath); } catch (e) { /* виж съобщението долу */ }
+      try { fs.unlinkSync(stagedPath); } catch (e) { /* нищо за чистене */ }
+      throw new Error('Възстановяването се провали и предишната база беше върната на място. '
+        + 'Предпазното копие е запазено в „' + safetyPath + '“. Грешка: ' + err.message);
+    }
     if (tmpToClean) { try { fs.unlinkSync(tmpToClean); } catch (e) { /* временният файл ще се изчисти от системата */ } }
     app.relaunch();
     app.exit(0);

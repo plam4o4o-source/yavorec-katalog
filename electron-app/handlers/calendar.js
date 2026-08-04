@@ -21,19 +21,28 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
     const set = new Set(String(raw).split(',').map(x => parseInt(x, 10)).filter(n => !isNaN(n)));
     return set.size ? set : new Set([0, 1, 2, 3, 4, 5, 6]); // празна/повредена настройка — не блокирай всичко
   }
+  /* Датите в базата са голи низове „ГГГГ-ММ-ДД" без часова зона. Смятат се изцяло в
+     UTC — „T00:00:00Z" при четене, getUTCDay/setUTCDate при обхождане и toISOString()
+     при записване. Смесването на двете скàли беше истински дефект: „…T00:00:00" без
+     Z се тълкува като МЕСТНА полунощ, а toISOString() после връща UTC — при UTC+2/+3
+     (България) това дава ден ПО-РАНО и проверява грешния ден от седмицата, тоест
+     всеки падеж излизаше с ден по-рано, а падеж в събота се местеше назад в петък
+     вместо напред в понеделник. Тестовете не го хващаха, защото се изпълняваха под
+     TZ=UTC, където двете скàли съвпадат — затова test/handlers-calendar.test.js вече
+     проверява изрично и под Europe/Sofia. */
   function isWorkDay(dateStr, wdSet) {
     wdSet = wdSet || workDaysSet();
-    if (!wdSet.has(new Date(dateStr + 'T00:00:00').getDay())) return false;
+    if (!wdSet.has(new Date(dateStr + 'T00:00:00Z').getUTCDay())) return false;
     return !getDb().prepare('SELECT 1 FROM calendar_closed WHERE date = ?').get(dateStr);
   }
   // Измества дата напред до първия работен ден (включително самата нея, ако вече е работен ден).
   function nextWorkDay(dateStr) {
     const wdSet = workDaysSet();
-    const d = new Date(dateStr + 'T00:00:00');
+    const d = new Date(dateStr + 'T00:00:00Z');
     for (let i = 0; i < 400; i++) {
       const ds = d.toISOString().slice(0, 10);
       if (isWorkDay(ds, wdSet)) return ds;
-      d.setDate(d.getDate() + 1);
+      d.setUTCDate(d.getUTCDate() + 1);
     }
     return dateStr; // предпазна мярка — практически недостижимо
   }
@@ -44,13 +53,13 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
     const wdSet = workDaysSet();
     const closed = new Set(getDb().prepare('SELECT date FROM calendar_closed WHERE date > ? AND date <= ?').all(a, b).map(r => r.date));
     let n = 0;
-    const d = new Date(a + 'T00:00:00');
-    d.setDate(d.getDate() + 1);
-    const end = new Date(b + 'T00:00:00');
+    const d = new Date(a + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    const end = new Date(b + 'T00:00:00Z');
     for (let i = 0; d <= end && i < 5000; i++) {
       const ds = d.toISOString().slice(0, 10);
-      if (!wdSet.has(d.getDay()) || closed.has(ds)) n++;
-      d.setDate(d.getDate() + 1);
+      if (!wdSet.has(d.getUTCDay()) || closed.has(ds)) n++;
+      d.setUTCDate(d.getUTCDate() + 1);
     }
     return n;
   }
