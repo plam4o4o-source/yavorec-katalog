@@ -11,6 +11,56 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.67.0
+
+**BG:** Официалните празници влизат в „Календар на библиотеката“
+автоматично. При всяко стартиране програмата проверява дали празниците за
+текущата **и за следващата** година са вписани в затворените дни и ги
+допълва, ако липсват (следващата година се засява отрано нарочно — заемане
+през декември получава падеж през януари, и той трябва да прескочи 1 януари
+още от днес). Списъкът следва чл. 154 от Кодекса на труда: десетте
+фиксирани празника, четирите Великденски дни (Великден се изчислява по
+алгоритъма на Меус за православния календар — проверен срещу известните
+дати 2024–2028 г.) и заместващите почивни дни по ал. 2 — падне ли празник
+в събота или неделя, първият следващ работен ден също е неприсъствен, вкл.
+двойния декемврийски случай като през 2022 г. (27 **и** 28 декември).
+Всяка година се засява точно веднъж и с „добави само липсващото“: изтрие ли
+библиотекарят празник (работят на този ден) или запише своя причина за
+същата дата, решението му не се презаписва при следващо стартиране.
+Добавянето се отбелязва в одитния дневник.
+
+Проверен е и обменът на данни („Библиотечни формати за обмен“): нов тест
+`test/catalog-export-roundtrip.test.js` изнася фонд с нарочно неудобни
+данни (кирилица, `&`, `<`, `>`, кавички, управляващи знаци, празни полета,
+заглавие-формула `=SUM(…)`) и чете файловете обратно. UNIMARC/MARCXML и
+Dublin Core се разчитат със строг XML парсер и всички стойности се връщат
+едно към едно (вкл. по едно поле 606/dc:subject на ключова дума и разделяне
+„Вазов, Иван“ → фамилия/име в 700); JSON каталогът се разчита обратно
+идентично; CSV-то пази BOM за Excel, 17 колони на всеки ред, удвоените
+кавички и защитата от изпълнение на формули. Дефекти не бяха открити —
+форматите работят коректно.
+
+**EN:** Official Bulgarian public holidays are now seeded into the library
+calendar automatically. On every start the app ensures the closed-day list
+contains the holidays for the current **and next** year (next year is seeded
+early so December loans get correct January due dates). The list follows
+art. 154 of the Labour Code: the ten fixed holidays, the four Easter days
+(Orthodox Easter computed via Meeus' Julian algorithm, verified against the
+known 2024–2028 dates) and the substitute days of para. 2 — a holiday
+falling on a weekend moves the day off to the next working day, including
+the double December case as in 2022 (Dec 27 **and** 28). Each year is
+seeded exactly once with INSERT OR IGNORE, so librarian deletions and
+manual entries are never overwritten; seeding is recorded in the audit log.
+
+The "Library exchange formats" data exchange was verified end-to-end: a new
+round-trip test exports a fund with deliberately hostile data (Cyrillic,
+XML-special characters, control characters, NULL fields, a `=SUM(…)`
+formula title), re-parses every file with a strict XML parser and a
+quote-aware CSV reader, and checks all values survive the round trip
+(UNIMARC 606/700/995 structure, Dublin Core fields, JSON catalog, CSV BOM /
+17 columns / formula-injection guard). No defects found — the exchange
+formats work correctly.
+
 ## v1.66.0
 
 **BG:** По молба на библиотекаря — в прозореца за нов документ редът

@@ -9,6 +9,7 @@ const { applyEnumTriggers } = require('./db/enum-triggers');
 const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail } = require('./security-utils');
 const { ensureDbFolderAvailable } = require('./db-folder');
+const { ensureHolidaysSeeded } = require('./bg-holidays');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -276,6 +277,20 @@ function initDb() {
 
   runMigrations();
 
+  /* Официалните празници за текущата и следващата година влизат сами в
+     „Календар на библиотеката“ (виж bg-holidays.js — там е и защо всяка
+     година се засява само веднъж и ръчните промени не се презаписват).
+     Стои СЛЕД runMigrations(), защото ползва колоната settings.holidays_seeded
+     от миграция v6. Грешка тук не бива да спре стартирането — календарът е
+     удобство, не условие за работа. */
+  try {
+    const hol = ensureHolidaysSeeded(db, today());
+    for (const y of hol.seededYears) {
+      logAudit('Календар', 'официалните празници за ' + y + ' г. са добавени автоматично (' +
+        hol.addedByYear[y] + ' дни)');
+    }
+  } catch (err) { console.error('Официални празници:', err.message); }
+
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
 }
 
@@ -291,7 +306,7 @@ function initDb() {
    само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
    просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
    без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -325,7 +340,12 @@ const MIGRATIONS = [
   // и списъка на изрично изключените колони) — изнесена в отделен модул, за да
   // може и тестовете да прилагат абсолютно същите тригери върху собствената си
   // тестова база, по образец на BOOKS_FTS_SETUP_SQL/READERS_FTS_SETUP_SQL.
-  { version: 5, run: () => { applyEnumTriggers(db); } }
+  { version: 5, run: () => { applyEnumTriggers(db); } },
+  // v6 — кои години вече имат автоматично вписани официални празници в
+  // calendar_closed (виж bg-holidays.js). Пази се списък, а не флаг, за да
+  // се засява всяка нова година точно веднъж и изтритото от библиотекаря да
+  // не се връща само.
+  { version: 6, run: () => { ensureColumns('settings', { holidays_seeded: 'TEXT' }); } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
