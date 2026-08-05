@@ -24,6 +24,43 @@ function logSearchHistory(kind, q) {
   if (!q || !q.trim()) return;
   window.api.searchHistory.log({ kind, query: q });
 }
+function booksRowsHtml(shown) {
+  return shown.length ? shown.map(b => `
+    <tr>
+      <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
+      <td class="num">${b.inv_number ?? ''}</td>
+      <td>${esc(b.title)}</td>
+      <td>${esc(b.author || '')}</td>
+      <td>${esc(b.category_name || '')}</td>
+      <td>${esc(b.department || '')}</td>
+      <td class="num">${esc(b.year || '')}</td>
+      <td><span class="badge ${b.status === 'наличен' ? 'ok' : 'warn'}">${esc(b.status || '')}</span></td>
+      <td><span class="badge ${b.available > 0 ? 'ok' : 'warn'}">${b.available}/${b.quantity}</span></td>
+      <td><button class="btn sm" onclick="bookForm(${b.id})">Редакция</button>
+          <button class="btn sm dgr" onclick="deleteBook(${b.id})">Изтрий</button></td>
+    </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`;
+}
+function booksMoreHtml(more, total) {
+  return more > 0 ? `<button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooksBody()">Покажи още (${more} от общо ${total})</button>` : '';
+}
+/* „Покажи още“ само разширява прозореца на вече изтеглените от сървъра книги
+   (window._BOOKS_LIST) — БЕЗ нова обиколка по IPC. По-рано всяко натискане на
+   бутона викаше цялата renderBooks(), която пращаше books:list/categories:list/
+   searchHistory:suggest наново, макар данните вече да са в паметта: разгръщане
+   на голям фонд страница по страница пращаше едни и същи 15 000 реда по IPC
+   толкова пъти, колкото пъти е натиснат бутонът. Смяна на подредбата и
+   „Избери всички“ остават през пълния renderBooks() — данните там наистина
+   може да са различни (нова подредба) или засягат целия резултат отвъд
+   текущо изтегления прозорец. */
+function renderBooksBody() {
+  const books = window._BOOKS_LIST || [];
+  const shown = books.slice(0, BOOKS_RENDER_LIMIT);
+  const more = books.length - shown.length;
+  const body = $('#bBody'); if (body) body.innerHTML = booksRowsHtml(shown);
+  const moreBox = $('#bMore'); if (moreBox) moreBox.innerHTML = booksMoreHtml(more, books.length);
+  const chkAll = $('#chkAll'); if (chkAll) chkAll.checked = books.length > 0 && books.every(b => BOOKS_SELECTED.has(b.id));
+}
+window.renderBooksBody = renderBooksBody;
 async function renderBooks() {
   const [books, cats, searchSuggest] = await Promise.all([
     call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT)), call(window.api.categories.list()),
@@ -55,26 +92,9 @@ async function renderBooks() {
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
         ${books.length && books.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
         <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:160px"></th></tr></thead>
-      <tbody>
-        ${shown.length ? shown.map(b => `
-          <tr>
-            <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
-            <td class="num">${b.inv_number ?? ''}</td>
-            <td>${esc(b.title)}</td>
-            <td>${esc(b.author || '')}</td>
-            <td>${esc(b.category_name || '')}</td>
-            <td>${esc(b.department || '')}</td>
-            <td class="num">${esc(b.year || '')}</td>
-            <td><span class="badge ${b.status === 'наличен' ? 'ok' : 'warn'}">${esc(b.status || '')}</span></td>
-            <td><span class="badge ${b.available > 0 ? 'ok' : 'warn'}">${b.available}/${b.quantity}</span></td>
-            <td><button class="btn sm" onclick="bookForm(${b.id})">Редакция</button>
-                <button class="btn sm dgr" onclick="deleteBook(${b.id})">Изтрий</button></td>
-          </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`}
-      </tbody>
+      <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
-    ${more > 0 ? `<div class="toolbar" style="justify-content:center">
-      <button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooks()">Покажи още (${more} от общо ${books.length})</button>
-    </div>` : ''}
+    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, books.length)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
   $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; renderBooks(); }, 300));
@@ -88,11 +108,13 @@ window.toggleBookSel = toggleBookSel;
 function toggleBookSelAll(checked) {
   // "Избери всички" означава всички книги от текущия резултат от търсенето — не само
   // редовете, заредени в момента в таблицата (при windowed рендер може да е само част
-  // от тях), затова минаваме по window._BOOKS_LIST, а не по DOM чек-боксовете.
+  // от тях), затова минаваме по window._BOOKS_LIST, а не по DOM чек-боксовете. Селекцията
+  // не сменя кои книги съществуват, затова е достатъчен renderBooksBody() (без ново IPC).
   const ids = (window._BOOKS_LIST || []).map(b => b.id);
   if (checked) ids.forEach(id => BOOKS_SELECTED.add(id));
   else ids.forEach(id => BOOKS_SELECTED.delete(id));
-  renderBooks();
+  renderBooksBody();
+  updateBulkBar();
 }
 window.toggleBookSelAll = toggleBookSelAll;
 function updateBulkBar() {

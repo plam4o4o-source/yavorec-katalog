@@ -4,11 +4,36 @@ let READERS_QUERY = '';
 // съображение важи и за списъка с читатели при голяма библиотека.
 const READERS_PAGE_SIZE = 300;
 let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
+function readersRowsHtml(shown) {
+  return shown.length ? shown.map(r => `
+    <tr><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
+      <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
+      <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
+      <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
+          <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
+          <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
+          <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
+    : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`;
+}
+function readersMoreHtml(more, total) {
+  return more > 0 ? `<button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReadersBody()">Покажи още (${more} от общо ${total})</button>` : '';
+}
+/* „Покажи още“ разширява прозореца на вече изтегления window._READERS_LIST,
+   без нова обиколка по IPC — виж същия коментар при renderBooksBody() в books.js. */
+function renderReadersBody() {
+  const readers = window._READERS_LIST || [];
+  const shown = readers.slice(0, READERS_RENDER_LIMIT);
+  const more = readers.length - shown.length;
+  const body = $('#rBody'); if (body) body.innerHTML = readersRowsHtml(shown);
+  const moreBox = $('#rMore'); if (moreBox) moreBox.innerHTML = readersMoreHtml(more, readers.length);
+}
+window.renderReadersBody = renderReadersBody;
 async function renderReaders() {
   const [readers, searchSuggest] = await Promise.all([
     call(window.api.readers.list(READERS_QUERY)), call(window.api.searchHistory.suggest('readers'))
   ]);
   if (!readers) return;
+  window._READERS_LIST = readers;
   const shown = readers.slice(0, READERS_RENDER_LIMIT);
   const more = readers.length - shown.length;
   $('#view').innerHTML = `
@@ -18,21 +43,9 @@ async function renderReaders() {
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:290px"></th></tr></thead>
-      <tbody>
-        ${shown.length ? shown.map(r => `
-          <tr><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
-            <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
-            <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
-            <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
-                <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
-                <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
-                <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
-          : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`}
-      </tbody>
+      <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
-    ${more > 0 ? `<div class="toolbar" style="justify-content:center">
-      <button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReaders()">Покажи още (${more} от общо ${readers.length})</button>
-    </div>` : ''}
+    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, readers.length)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
   $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; renderReaders(); }, 300));
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
