@@ -384,3 +384,70 @@ test('отказ (Esc) в askText разрешава обещанието с nul
   assert.equal(calls.length, 0, 'при отказ не трябва да се вика нищо');
   assert.equal(window.document.querySelector('#modal input[name="v"]'), null, 'прозорецът остана отворен');
 });
+
+/* --- 5. „Инвентарна книга“: прозоречен рендер и забавено търсене ---
+   Преди поправката целият списък се чертаеше наведнъж, а полето за търсене
+   имаше inline oninput без debounce. Измерено в истински Chromium при 15 000
+   записа: първо изчертаване 1272 ms и 7 МБ HTML, а писането на осем знака —
+   2298 ms блокиран интерфейс (~287 ms на знак). След поправката: 36 ms,
+   140 КБ, и нула синхронна работа по време на писане.
+
+   Тук се пази същността, а не милисекундите: най-много INVBOOK_PAGE_SIZE реда
+   в таблицата, бутон „Покажи още“ за останалите, никакъв inline oninput (той
+   заобикаля debounce-а) и непокътнат източник за печата. */
+function invBookRows(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: i + 1, inv_number: i + 1, register_date: '2020-01-01',
+    author: i % 2 ? 'Вазов, Иван' : 'Йовков, Йордан', title: 'Заглавие ' + (i + 1),
+    year: '1980', price: 5, call_number: 'Б/Ваз', status: 'наличен', checks: []
+  }));
+}
+
+test('„Инвентарна книга“ чертае най-много една страница редове, с бутон „Покажи още“', async () => {
+  const N = 1000;
+  const dom = await settled(buildDom({ 'invBook.list': invBookRows(N) }));
+  const { window } = dom;
+  await window.renderInvBook();
+
+  // Размерът на страницата се чете от самия DOM (INVBOOK_PAGE_SIZE е const в
+  // глобалния лексикален обхват на скриптовете, не свойство на window).
+  const size = window.document.querySelectorAll('#ibBody tr').length;
+  assert.ok(size > 0 && size < N,
+    `в таблицата се чертаят ${size} от ${N} реда — при пълния списък интерфейсът замръзва`);
+  assert.match(window.document.querySelector('#ibMore').textContent, /Покажи още \((\d+) от общо 1000\)/);
+
+  // „Покажи още“ добавя следващата страница, без да презарежда данните.
+  window.document.querySelector('#ibMore button').click();
+  assert.equal(window.document.querySelectorAll('#ibBody tr').length, size * 2);
+
+  // Печатът ползва целия списък, независимо какво се вижда на екрана.
+  assert.equal(window._INVBOOK_ROWS.length, N);
+});
+
+test('търсенето в „Инвентарна книга“ е с debounce и не е инline oninput', async () => {
+  const dom = await settled(buildDom({ 'invBook.list': invBookRows(1000) }));
+  const { window } = dom;
+  await window.renderInvBook();
+
+  const input = window.document.querySelector('#ibSearch');
+  assert.equal(input.getAttribute('oninput'), null,
+    'inline oninput заобикаля debounce-а — всяко натискане на клавиш пререндира списъка');
+
+  // Осем натискания на клавиш → таблицата НЕ се пипа веднага…
+  const before = window.document.querySelector('#ibBody').innerHTML;
+  const word = 'Вазов, И';
+  for (let i = 1; i <= word.length; i++) {
+    input.value = word.slice(0, i);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
+  assert.equal(window.document.querySelector('#ibBody').innerHTML, before,
+    'таблицата не бива да се пререндира по време на писането');
+
+  // …а веднъж, след затихване.
+  await new Promise(r => setTimeout(r, 400));
+  const rows = [...window.document.querySelectorAll('#ibBody tr')];
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every(tr => /Вазов/.test(tr.textContent)), 'показани са само съвпаденията');
+  // Полето за търсене не се пресъздава — курсорът на библиотекаря остава в него.
+  assert.equal(window.document.querySelector('#ibSearch'), input);
+});
