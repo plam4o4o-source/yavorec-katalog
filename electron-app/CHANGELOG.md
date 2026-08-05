@@ -11,6 +11,44 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.68.1
+
+**BG:** „Покажи още“ в „Книги“ и „Читатели“ вече не праща едни и същи данни
+наново. Досега всяко натискане на бутона извикваше пълното изчертаване на
+раздела, а то тегли целия списък от базата отново — при 15 000 документа
+разгръщането страница по страница пращаше едни и същи хиляди редове толкова
+пъти, колкото пъти е натиснат бутонът. Измерено в истински Electron: едно
+такова прехвърляне на 15 000 реда струва **75 ms** (медиана от шест
+измервания), а „Книги“ правеше **три** такива на всяко натискане (списък,
+категории, история на търсенето), „Читатели“ — две. Сега бутонът само
+показва следващите редове от вече изтегления списък: **нула** нови
+извиквания. Пълното презареждане остава там, където данните наистина може да
+са различни — ново търсене или смяна на подредбата.
+
+Същото важи и за „Избери всички“ в „Книги“ — то също презареждаше целия
+фонд, за да отбележи чекбоксовете.
+
+Поправена и празна ивица под таблиците: лентата с бутона „Покажи още“ е
+постоянна и при библиотека под 300 записа стоеше празна, но пак заемаше
+място — измерено в Chromium точно 14 px под всяка таблица. Вече се скрива,
+когато е празна.
+
+471 теста, 0 провалени, под `TZ=UTC` и `TZ=Europe/Sofia`.
+
+**EN:** "Show more" in Books and Readers no longer re-fetches the same data.
+Each click used to re-run the full view render, which pulls the entire list
+from the database again — paging through 15,000 records resent the same
+thousands of rows once per click. Measured in real Electron, one such
+transfer of 15,000 rows costs **75 ms** (median of six runs), and Books did
+**three** of them per click (list, categories, search history), Readers two.
+The button now just reveals more of the already-fetched list: **zero** new
+calls. A full re-fetch remains only where the data can actually differ — a
+new search or a sort change. The same applied to "select all" in Books.
+
+Also fixed a blank 14 px strip under the tables: the "show more" bar is a
+permanent container that sat empty (but still took space) in libraries with
+fewer than 300 records; empty bars are now hidden.
+
 ## v1.68.0
 
 **BG:** „Инвентарна книга“ вече не се задавя при голям фонд. Досега екранът

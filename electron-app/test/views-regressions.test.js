@@ -451,3 +451,27 @@ test('търсенето в „Инвентарна книга“ е с debounce
   // Полето за търсене не се пресъздава — курсорът на библиотекаря остава в него.
   assert.equal(window.document.querySelector('#ibSearch'), input);
 });
+
+/* --- 6. Празна лента „Покажи още“ не бива да оставя дупка ---
+   #bMore/#rMore/#ibMore са постоянни контейнери, които се пълнят чак когато има
+   скрити редове — при библиотека под 300 записа стоят празни. `.toolbar` носи
+   margin-bottom:14px, затова празната лента оставяше празна ивица под всяка
+   таблица: измерено в Chromium точно 14 px (височина на #view 3422 → 3408 px
+   след правилото). Оттам `.toolbar:empty{display:none}` — правило, което всеки
+   нов такъв контейнер получава наготово. */
+test('style.css скрива празните ленти .toolbar (иначе оставят 14 px дупка)', () => {
+  const css = fs.readFileSync(path.join(SRC_DIR, 'style.css'), 'utf8');
+  assert.match(css, /\.toolbar:empty\s*\{[^}]*display\s*:\s*none/,
+    'липсва .toolbar:empty{display:none} — празните ленти „Покажи още“ ще оставят дупка');
+  // Правилото има смисъл само защото .toolbar носи долен отстъп.
+  assert.match(css, /\.toolbar\s*\{[^}]*margin-bottom/);
+});
+
+test('лентите „Покажи още“ са празни, а не липсващи, при малък списък', async () => {
+  const dom = await settled(buildDom({ 'invBook.list': invBookRows(10) }));
+  const { window } = dom;
+  await window.renderInvBook();
+  const bar = window.document.querySelector('#ibMore');
+  assert.ok(bar, 'контейнерът трябва да съществува, за да може „Покажи още“ да се появи по-късно');
+  assert.equal(bar.innerHTML.trim(), '', 'при 10 реда няма какво да се показва още');
+});

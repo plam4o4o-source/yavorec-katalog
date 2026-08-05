@@ -263,6 +263,11 @@ body{
 
 /* ---------- Toolbar / search ---------- */
 .toolbar{display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center}
+/* Лентите „Покажи още“ (#bMore/#rMore/#ibMore) са постоянни контейнери, които се
+   пълнят чак когато има скрити редове — при библиотека под 300 записа стоят
+   празни. Без това правило margin-bottom:14px оставаше празна ивица под всяка
+   таблица (измерено в Chromium: точно 14 px). display:none маха и полето. */
+.toolbar:empty{display:none}
 .toolbar input[type=text], .toolbar input[type=search]{
   flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
