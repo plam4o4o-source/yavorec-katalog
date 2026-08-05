@@ -11,6 +11,52 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.68.0
+
+**BG:** „Инвентарна книга“ вече не се задавя при голям фонд. Досега екранът
+чертаеше **всички** редове наведнъж, а полето за търсене пререндираше пълния
+списък при всяко натискане на клавиш. Измерено в истински Chromium при фонд
+от 15 000 записа:
+
+| | преди | сега |
+|---|---|---|
+| първо отваряне на раздела | 1272 ms | **36 ms** |
+| HTML в таблицата | 7,0 МБ | **140 КБ** |
+| писане на осем знака в търсенето | 2298 ms блокиран интерфейс (~287 ms на знак) | **0 ms** по време на писането |
+
+Двете причини са различни и са лекувани поотделно: в таблицата вече се
+чертаят по **300 реда** наведнъж (бутон „Покажи още (N от общо M)“ за
+следващите), а търсенето изчаква **300 ms** след последния клавиш, преди да
+пресметне — точно както вече работят „Книги“, „Читатели“ и „Одитна следа“.
+Търсенето пипа само таблицата, а не целия екран, затова курсорът остава в
+полето, докато библиотекарят пише.
+
+**Печатът не е променен** — разпечатката на инвентарната книга съдържа
+винаги целия списък, независимо какво се вижда на екрана. Тя е меродавният
+документ по чл. 26 от Наредба № 3 и не бива да зависи от търсенето.
+
+Поправени са и два теста с твърдо записани календарни дати, които тихо
+изтичаха с времето: тестът за „наближаващи падежи“ се проваляше от
+05.08.2026 г. без никакъв дефект в кода, а още два щяха да се счупят на
+05.09.2026 г. и на 01.01.2030 г. Датите вече се смятат динамично.
+
+**EN:** The inventory book screen no longer chokes on a large fund. It used
+to render **every** row at once and re-render the whole list on every
+keystroke in the search box. Measured in real Chromium with 15,000 records:
+first render 1272 ms → **36 ms**, table HTML 7.0 MB → **140 KB**, typing
+eight characters 2298 ms of blocked UI → **0 ms** while typing. Two separate
+causes, treated separately: the table now draws **300 rows** at a time (with
+a "show more" button) and the search is **debounced by 300 ms** — the same
+pattern already used by Books, Readers and the audit trail. The search
+repaints only the table, so the caret stays in the input. **Printing is
+unchanged**: the printed inventory book always contains the full list, since
+it is the authoritative document under art. 26 of Ordinance No. 3.
+
+Also fixed two tests with hard-coded calendar dates that silently expired —
+the "upcoming due dates" test had been failing since 2026-08-05 with no
+defect in the code at all; two others would have broken on 2026-09-05 and
+2030-01-01. Dates are now computed from the current clock.
+
 ## v1.67.1
 
 **BG:** Поправено: **„Витрини в каталога“ не работеха изобщо.** Бутонът
