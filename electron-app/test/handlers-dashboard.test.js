@@ -80,8 +80,13 @@ test('dashboard:full aggregates fund value, upcoming due dates (via LOAN_SELECT)
   const bookId = db.prepare("SELECT id FROM books WHERE inv_number=1").get().id;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bookId);
   const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
-  // Due in 2 days from "today" (2026-08-02) — within the 3-day "upcoming" window.
-  db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, readerId, '2026-07-20', '2026-08-04');
+  // Падеж 2 дни СЛЕД реалното „днес" — вътре в 3-дневния прозорец „наближаващи".
+  // Датата се смята динамично: първата версия на теста я беше записала твърдо
+  // ('2026-08-04', с коментар „днес е 2026-08-02") и тестът тихо ИЗТЕЧЕ — от
+  // 2026-08-05 нататък се проваляше вечно, без какъвто и да е дефект в кода.
+  // Твърди дати в тестове са допустими само когато и „сега" е твърдо зададено.
+  const dueSoon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, readerId, '2026-07-20', dueSoon);
 
   const result = await ipcMain.invoke('dashboard:full');
   assert.equal(result.ok, true);
@@ -110,7 +115,10 @@ test('dashboard:full computes anonCandidates only when anonymize_years is set', 
 
 test('dashboard:full counts currently suspended readers', async () => {
   const { db, ipcMain } = setup();
-  db.prepare("INSERT INTO readers (name, suspended_until) VALUES ('Наказан', '2030-01-01')").run();
+  // Заявката сравнява с реалния часовник (suspended_until > date('now')) — твърда
+  // бъдеща дата тук тихо изтича (тестът щеше да се счупи на 01.01.2030 г.).
+  const future = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  db.prepare("INSERT INTO readers (name, suspended_until) VALUES ('Наказан', ?)").run(future);
   db.prepare("INSERT INTO readers (name, suspended_until) VALUES ('Изтекъл', '2020-01-01')").run();
 
   const result = await ipcMain.invoke('dashboard:full');

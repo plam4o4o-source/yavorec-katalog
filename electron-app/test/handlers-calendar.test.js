@@ -92,13 +92,16 @@ test('calendar:addClosed rejects a missing date', async () => {
 
 test('calendar:get returns workDays and only closed dates from the last 30 days onward', async () => {
   const { ipcMain, db } = setup();
-  await ipcMain.invoke('calendar:addClosed', { date: '2026-08-05', reason: 'скоро' });
+  // Заявката в handler-а сравнява с реалния часовник (date('now','-30 days')), затова
+  // „скорошната" дата се смята динамично — твърда дата тук тихо изтича след 30 дни.
+  const recent = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  await ipcMain.invoke('calendar:addClosed', { date: recent, reason: 'скоро' });
   db.prepare('INSERT OR REPLACE INTO calendar_closed (date, reason) VALUES (?, ?)').run('2020-01-01', 'много старо');
   const result = await ipcMain.invoke('calendar:get');
   assert.equal(result.ok, true);
   assert.equal(result.data.workDays.length, 7);
   const dates = result.data.closed.map(c => c.date);
-  assert.ok(dates.includes('2026-08-05'));
+  assert.ok(dates.includes(recent));
   assert.ok(!dates.includes('2020-01-01'), 'closed dates older than 30 days should not be returned');
 });
 
