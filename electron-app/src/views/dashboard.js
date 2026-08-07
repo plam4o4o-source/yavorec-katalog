@@ -72,8 +72,8 @@ async function renderDash() {
         <div class="statRows">
           <div><span>Връщания до 3 дни — напомнете <b>преди</b> срока</span>
             <b>${r.upcoming.length ? `<a href="#circ">${r.upcoming.length}</a>` : '0'}</b></div>
-          <div><span>Просрочени за напомняне</span>
-            <b>${r.overdueCount ? `<a href="#over">${r.overdueCount}</a>` : '0'}</b></div>
+          <div><span>Читатели без изпратено напомняне за просрочие</span>
+            <b>${r.today.dueReminders ? `<a href="#over">${r.today.dueReminders}</a>` : '0'}</b></div>
           <div><span>Дължими пререгистрации (до 14 дни)</span>
             <b>${r.today.reregDue ? `<a href="#readers">${r.today.reregDue}</a>` : '0'}</b></div>
           <div><span>Просрочие над 60 дни — преценете „липсваща“</span>
@@ -81,6 +81,8 @@ async function renderDash() {
           ${r.today.suspendedNow ? `<div><span>Читатели с наказание в момента</span><b>${r.today.suspendedNow}</b></div>` : ''}
           ${r.today.anonCandidates ? `<div><span>Стари заемания за анонимизиране</span>
             <b><a href="#setup">${r.today.anonCandidates}</a></b></div>` : ''}
+          ${r.today.overduePeriodicals ? `<div><span>Периодични издания — закъснял/липсващ брой</span>
+            <b><a href="#periodika">${r.today.overduePeriodicals}</a></b></div>` : ''}
         </div>
         <div class="hint" style="margin-top:8px">Пререгистрацията е дължима една година след последното записване.</div>
       </div>

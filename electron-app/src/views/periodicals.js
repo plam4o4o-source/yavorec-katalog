@@ -6,12 +6,25 @@ async function renderPeriodika() {
     <div class="note">Картотека на периодичните издания и постъпилите броеве към всяко от тях (кардекс).</div>
     <div class="toolbar"><button class="btn pri" onclick="periodicalForm()">+ Ново периодично издание</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Заглавие</th><th>Периодичност</th><th>Издател</th>
-      <th>ISSN</th><th>Отдел</th><th>Броеве</th><th></th></tr></thead><tbody>
+      <th>ISSN</th><th>Отдел</th><th>Броеве</th><th>Следващ очакван брой</th><th></th></tr></thead><tbody>
     ${list.length ? list.map(p => `<tr><td>${esc(p.title)}</td><td>${esc(p.freq || '')}</td><td>${esc(p.publisher || '')}</td>
       <td class="num">${esc(p.issn || '')}</td><td>${esc(p.department || '')}</td><td class="num">${p.issue_count}</td>
+      <td class="num">${periodicalNextHtml(p)}</td>
       <td><button class="btn sm" onclick="openPeriodical(${p.id})">Отвори</button></td></tr>`).join('')
-      : `<tr><td colspan="7" class="empty">Няма заведени периодични издания.</td></tr>`}
+      : `<tr><td colspan="8" class="empty">Няма заведени периодични издания.</td></tr>`}
     </tbody></table></div>`;
+}
+/* Следваща очаквана дата, изчислена в handlers/periodicals.js от периодичността
+   и датата на последния постъпил брой (Koha: серийни издания — облекчен вариант
+   за мащаба на читалищна библиотека, само предвиждане на дата, без пълен
+   календар/рекламации). „—“ означава, че изданието е с „нередовно“/непозната
+   периодичност или все още няма нито един вписан брой — тогава предвиждане
+   умишлено не се прави (виж коментара в handlers/periodicals.js). */
+function periodicalNextHtml(p) {
+  if (!p.next_expected) return '<span class="hint">—</span>';
+  return p.issue_overdue_days > 0
+    ? `<span class="badge warn" title="Няма нов брой ${p.issue_overdue_days} дни след очакваната дата">${bg(p.next_expected)}</span>`
+    : bg(p.next_expected);
 }
 function periodicalForm(p) {
   const v = p || { freq: 'месечно', department: 'периодика' };

@@ -710,9 +710,16 @@ const { LOAN_SELECT } = require('./handlers/loans')(ipcMain, {
   firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn
 });
 
+/* ---------------- Периодика ----------------
+   Преместено ПРЕДИ "Табло" (беше по-надолу), защото Табло вече ползва
+   countOverduePeriodicals за реда "За днес" — периодика няма нужда от нищо,
+   регистрирано между старото и новото си място, преместването е безопасно. */
+const { countOverduePeriodicals } =
+  require('./handlers/periodicals')(ipcMain, { getDb: () => db, run, logAudit, today });
+
 /* ---------------- Табло ---------------- */
 require('./handlers/dashboard')(ipcMain, {
-  getDb: () => db, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT
+  getDb: () => db, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals
 });
 
 /* ---------------- Инвентаризация ---------------- */
@@ -729,9 +736,6 @@ const { DEFAULT_NOTICE_SUBJECT, DEFAULT_NOTICE_BODY, DEFAULT_NOTICE_SMS, NOTICE_
   require('./handlers/notices')(ipcMain, {
     getDb: () => db, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell
   });
-
-/* ---------------- Периодика ---------------- */
-require('./handlers/periodicals')(ipcMain, { getDb: () => db, run, logAudit, today });
 
 /* ---------------- МЗС ---------------- */
 require('./handlers/mzs')(ipcMain, { getDb: () => db, run, logAudit, yearOf });
