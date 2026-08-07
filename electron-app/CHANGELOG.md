@@ -11,6 +11,62 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.68.2
+
+**BG:** Две малки, но конкретни добавки от анализ на кое още от Koha (софтуерът
+за библиотеки, вдъхновил доста от съществуващите модули — вижте „Koha“ в
+CHANGELOG историята) би пасвало на мащаба на читалищна библиотека.
+
+„За днес" на таблото вече показва по-точен ред за напомнянията: досега броеше
+всички просрочени ЗАЕМАНИЯ (`overdueCount`), без значение дали читателят вече
+е получил напомняне за тях. Сега брои различни ЧИТАТЕЛИ, за които **няма**
+логнато напомняне (`notice_log`) от началото на текущото им просрочие — точно
+списъкът, който реално изисква действие днес. КПИ картата най-горе продължава
+да показва общия брой просрочени заемания (различна, също вярна метрика —
+„колко голям е проблемът", не „какво остава да се свърши").
+
+„Периодика" вече предвижда следващия очакван брой от периодичността и датата
+на последния постъпил (олекотен вариант на Koha-та „serials prediction
+pattern" — само дата, без пълен календар от броеве и без рекламации). Нова
+колона в таблицата показва датата, с оцветен бадж при закъснение; изданията
+без периодичност (например „нередовно") или без нито един вписан брой
+умишлено остават без предвиждане, вместо да показват подвеждащ шум. Броят на
+закъснелите издания се появява и в „За днес".
+
+Предвиждането смята месеците с притискане към края на месеца. SQLite прелива
+при обикновено събиране — `date('2026-01-31','+1 month')` връща **3 март**, а
+не 28 февруари — така месечно издание с брой от 31-ви щеше да „прескача“ цял
+месец и закъснението му да излиза с дни закъснение. Проверено и за 31 март
+(→ 30 април, не 1 май) и за 29 февруари в година + 1 (→ 28 февруари).
+
+**EN:** Two small, targeted additions from reviewing what else from Koha (the
+library software that inspired several existing modules — see "Koha" through
+the CHANGELOG history) would still fit the scale of a reading-community
+library.
+
+The dashboard's "For today" list now shows a more precise reminder count:
+it used to count every overdue LOAN (`overdueCount`), regardless of whether
+the reader had already been reminded. It now counts distinct READERS with
+**no** notice logged (`notice_log`) since their current overdue period began
+— the actual action list for today. The top KPI card still shows the total
+count of overdue loans (a different, equally valid metric — "how big is the
+problem", not "what's left to do").
+
+"Periodicals" now predicts the next expected issue from a title's frequency
+and its last recorded issue date (a lightweight take on Koha's serials
+prediction pattern — a date only, no full issue calendar and no claims
+workflow). A new table column shows that date, flagged when overdue; titles
+with an unpredictable frequency (e.g. "irregular") or with no issue recorded
+yet intentionally show no prediction rather than misleading noise. The count
+of overdue titles also surfaces on the dashboard's "For today" list.
+
+Month arithmetic is clamped to the end of the target month: SQLite overflows
+on plain addition — `date('2026-01-31','+1 month')` yields **March 3**, not
+February 28 — which made a monthly title issued on the 31st skip a month and
+report its delay days late.
+
+485 теста, 0 провалени / 485 tests, 0 failed, под/under `TZ=UTC` и `TZ=Europe/Sofia`.
+
 ## v1.68.1
 
 **BG:** „Покажи още“ в „Книги“ и „Читатели“ вече не праща едни и същи данни

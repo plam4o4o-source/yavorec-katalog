@@ -2,9 +2,14 @@
 // справочен домейн (2 read-only IPC канала), но чете от почти всяка
 // таблица във фонда — затова зависи от LOAN_SELECT (връщано от
 // handlers/loans.js), isWorkDay (връщано от handlers/calendar.js),
-// pctRequired/yearOf (стабилни функции/консти в main.js) и today.
+// pctRequired/yearOf (стабилни функции/консти в main.js), today и
+// countOverduePeriodicals (връщано от handlers/periodicals.js, регистриран
+// преди Табло именно заради тази зависимост — виж main.js).
+// countOverduePeriodicals е undefined-safe (== null проверка по-долу), за да
+// не се чупят по-стари/директни извиквания на регистратора без тази зависимост
+// (напр. по-стари тестове, извикващи регистратора без нея).
 module.exports = function registerDashboardHandlers(ipcMain, deps) {
-  const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT } = deps;
+  const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals } = deps;
 
   ipcMain.handle('dashboard:stats', () =>
     run(() => {
@@ -70,13 +75,30 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
           .get(`${new Date().getFullYear() - anonYears}-01-01`).n;
       }
       const suspendedNow = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE suspended_until > date('now')`).get().n;
+      /* Читатели, дължащи напомняне ДНЕС — не просто "има просрочие" (това е
+         overdueCount по-горе, брой ЗАЕМАНИЯ), а различни ЧИТАТЕЛИ, за които
+         няма логнато напомняне (notice_log) от началото на ТЕКУЩОТО им
+         просрочие насам. Огледално на r.lastNotice в handlers/notices.js →
+         loans:reminders — виж коментара там защо "> oldest_due", не "> today - N". */
+      const dueReminders = db.prepare(`
+        SELECT COUNT(*) AS n FROM (
+          SELECT l.reader_id, MIN(l.date_due) AS oldest_due
+          FROM loans l
+          WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
+          GROUP BY l.reader_id
+        ) t
+        WHERE NOT EXISTS (
+          SELECT 1 FROM notice_log nl WHERE nl.reader_id = t.reader_id AND nl.ts >= t.oldest_due
+        )
+      `).get().n;
+      const overduePeriodicals = countOverduePeriodicals == null ? 0 : countOverduePeriodicals();
       const isTodayOpen = isWorkDay(today());
       return {
         fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
         year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
         inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
         upcoming, holdsReady, holdsWaiting,
-        today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen }
+        today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen, dueReminders, overduePeriodicals }
       };
     })
   );

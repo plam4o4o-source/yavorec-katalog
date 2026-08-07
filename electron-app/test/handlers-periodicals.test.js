@@ -35,8 +35,8 @@ function setup() {
     logAudit: (action, detail) => auditLog.push({ action, detail }),
     today: () => '2026-08-02'
   };
-  registerPeriodicalsHandlers(ipcMain, deps);
-  return { db, ipcMain, auditLog };
+  const { countOverduePeriodicals } = registerPeriodicalsHandlers(ipcMain, deps);
+  return { db, ipcMain, auditLog, countOverduePeriodicals };
 }
 
 test('registerPeriodicalsHandlers registers all seven periodicals/periodicalIssues: IPC channels', () => {
@@ -134,4 +134,116 @@ test('periodicalIssues:delete removes a specific issue', async () => {
 
   const after = await ipcMain.invoke('periodicals:get', id);
   assert.equal(after.data.issues.length, 0);
+});
+
+/* Предвиждане на следващия очакван брой (Koha: serials prediction pattern,
+   облекчен вариант — виж коментара в handlers/periodicals.js). today() тук е
+   ФИКСИРАНО зададено в setup() ('2026-08-02'), а изчисленията ползват само
+   тази стойност и вписаните дати — без пряко date('now') — затова тестовете
+   не могат тихо да изтекат с реалния часовник (правилото от ARCHITECTURE.md). */
+test('periodicals:list computes next_expected and issue_overdue_days for a predictable, overdue monthly title', async () => {
+  const { ipcMain } = setup();
+  const id = (await ipcMain.invoke('periodicals:create', { title: 'Месечно списание', freq: 'месечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: id, issue_no: '6', date: '2026-06-01' });
+
+  const list = await ipcMain.invoke('periodicals:list');
+  const p = list.data.find(x => x.id === id);
+  assert.equal(p.next_expected, '2026-07-01', 'месечно + последен брой 2026-06-01 → очакван 2026-07-01');
+  assert.equal(p.issue_overdue_days, 32, 'today() = 2026-08-02, 32 дни след 2026-07-01');
+});
+
+test('periodicals:list reports issue_overdue_days = 0 when the next issue is not due yet', async () => {
+  const { ipcMain } = setup();
+  const id = (await ipcMain.invoke('periodicals:create', { title: 'Седмичен вестник', freq: 'седмично' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: id, issue_no: '31', date: '2026-08-01' });
+
+  const list = await ipcMain.invoke('periodicals:list');
+  const p = list.data.find(x => x.id === id);
+  assert.equal(p.next_expected, '2026-08-08');
+  assert.equal(p.issue_overdue_days, 0, 'очакваната дата (08.08) е след today() (02.08) — не е закъсняло');
+});
+
+test('periodicals:list leaves next_expected null for freq="нередовно" even with issues recorded', async () => {
+  const { ipcMain } = setup();
+  const id = (await ipcMain.invoke('periodicals:create', { title: 'Непериодично издание', freq: 'нередовно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: id, issue_no: '1', date: '2020-01-01' });
+
+  const list = await ipcMain.invoke('periodicals:list');
+  const p = list.data.find(x => x.id === id);
+  assert.equal(p.next_expected, null);
+  assert.equal(p.issue_overdue_days, 0);
+});
+
+test('periodicals:list leaves next_expected null for a predictable freq with no issues yet', async () => {
+  const { ipcMain } = setup();
+  await ipcMain.invoke('periodicals:create', { title: 'Ново издание без броеве', freq: 'месечно' });
+
+  const list = await ipcMain.invoke('periodicals:list');
+  const p = list.data.find(x => x.title === 'Ново издание без броеве');
+  assert.equal(p.next_expected, null);
+});
+
+test('countOverduePeriodicals counts only predictable titles past their expected next issue', async () => {
+  const { ipcMain, countOverduePeriodicals } = setup();
+  const overdueId = (await ipcMain.invoke('periodicals:create', { title: 'Закъсняло', freq: 'месечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: overdueId, issue_no: '1', date: '2026-06-01' }); // очаква се 07-01, закъсняло
+
+  const onTimeId = (await ipcMain.invoke('periodicals:create', { title: 'Навреме', freq: 'седмично' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: onTimeId, issue_no: '1', date: '2026-08-01' }); // очаква се 08-08, не е закъсняло
+
+  const irregularId = (await ipcMain.invoke('periodicals:create', { title: 'Нередовно', freq: 'нередовно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: irregularId, issue_no: '1', date: '2020-01-01' }); // непредвидимо, не бива да се брои
+
+  await ipcMain.invoke('periodicals:create', { title: 'Без броеве', freq: 'месечно' }); // предвидимо по freq, но без нито един брой — не бива да се брои
+
+  assert.equal(countOverduePeriodicals(), 1, 'само „Закъсняло“ отговаря на условието');
+});
+
+/* Краят на месеца — SQLite прелива при събиране на месеци:
+   date('2026-01-31','+1 month') връща '2026-03-03', а не 28 февруари. За
+   месечно издание с брой от 31-ви това означава предвиждане в грешен месец и
+   закъснение, отчетено три дни по-късно. Затова handlers/periodicals.js
+   притиска резултата към последния ден на целевия месец. */
+test('предвиждането се притиска към последния ден на месеца (31.01 + месец = 28.02, не 03.03)', async () => {
+  const { ipcMain } = setup(); // today() = '2026-08-02'
+  const id = (await ipcMain.invoke('periodicals:create', { title: 'Месечник от 31-ви', freq: 'месечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: id, issue_no: '1', date: '2026-01-31' });
+
+  const p = (await ipcMain.invoke('periodicals:list')).data.find(x => x.id === id);
+  assert.equal(p.next_expected, '2026-02-28', 'февруари 2026 има 28 дни — предвиждането не бива да прелива в март');
+});
+
+test('предвиждането не прелива и при 31.03 (април има 30 дни) и при 29.02 → година', async () => {
+  const { ipcMain } = setup();
+  const monthly = (await ipcMain.invoke('periodicals:create', { title: 'Месечник от 31.03', freq: 'месечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: monthly, issue_no: '3', date: '2026-03-31' });
+
+  const yearly = (await ipcMain.invoke('periodicals:create', { title: 'Годишник от 29.02', freq: 'годишно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: yearly, issue_no: '1', date: '2024-02-29' });
+
+  const list = (await ipcMain.invoke('periodicals:list')).data;
+  assert.equal(list.find(x => x.id === monthly).next_expected, '2026-04-30');
+  assert.equal(list.find(x => x.id === yearly).next_expected, '2025-02-28');
+});
+
+test('обичайните дати не се променят от притискането (01.06 + месец = 01.07)', async () => {
+  const { ipcMain } = setup();
+  const id = (await ipcMain.invoke('periodicals:create', { title: 'Обикновен месечник', freq: 'месечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: id, issue_no: '6', date: '2026-06-01' });
+
+  const p = (await ipcMain.invoke('periodicals:list')).data.find(x => x.id === id);
+  assert.equal(p.next_expected, '2026-07-01');
+  assert.equal(p.issue_overdue_days, 32);
+});
+
+test('тримесечно и полугодишно също се смятат в месеци, не в дни', async () => {
+  const { ipcMain } = setup();
+  const q = (await ipcMain.invoke('periodicals:create', { title: 'Тримесечник', freq: 'тримесечно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: q, issue_no: '1', date: '2025-12-31' });
+  const h = (await ipcMain.invoke('periodicals:create', { title: 'Полугодишник', freq: 'полугодишно' })).data;
+  await ipcMain.invoke('periodicalIssues:add', { periodical_id: h, issue_no: '1', date: '2025-08-31' });
+
+  const list = (await ipcMain.invoke('periodicals:list')).data;
+  assert.equal(list.find(x => x.id === q).next_expected, '2026-03-31');
+  assert.equal(list.find(x => x.id === h).next_expected, '2026-02-28', 'февруари 2026 има 28 дни');
 });
