@@ -33,6 +33,12 @@ pattern" — само дата, без пълен календар от брое
 умишлено остават без предвиждане, вместо да показват подвеждащ шум. Броят на
 закъснелите издания се появява и в „За днес".
 
+Предвиждането смята месеците с притискане към края на месеца. SQLite прелива
+при обикновено събиране — `date('2026-01-31','+1 month')` връща **3 март**, а
+не 28 февруари — така месечно издание с брой от 31-ви щеше да „прескача“ цял
+месец и закъснението му да излиза с дни закъснение. Проверено и за 31 март
+(→ 30 април, не 1 май) и за 29 февруари в година + 1 (→ 28 февруари).
+
 **EN:** Two small, targeted additions from reviewing what else from Koha (the
 library software that inspired several existing modules — see "Koha" through
 the CHANGELOG history) would still fit the scale of a reading-community
@@ -54,7 +60,12 @@ with an unpredictable frequency (e.g. "irregular") or with no issue recorded
 yet intentionally show no prediction rather than misleading noise. The count
 of overdue titles also surfaces on the dashboard's "For today" list.
 
-481 теста, 0 провалени / 481 tests, 0 failed, под/under `TZ=UTC` и `TZ=Europe/Sofia`.
+Month arithmetic is clamped to the end of the target month: SQLite overflows
+on plain addition — `date('2026-01-31','+1 month')` yields **March 3**, not
+February 28 — which made a monthly title issued on the 31st skip a month and
+report its delay days late.
+
+485 теста, 0 провалени / 485 tests, 0 failed, под/under `TZ=UTC` и `TZ=Europe/Sofia`.
 
 ## v1.68.1
 
