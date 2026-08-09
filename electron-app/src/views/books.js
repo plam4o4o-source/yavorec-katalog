@@ -26,7 +26,7 @@ function logSearchHistory(kind, q) {
 }
 function booksRowsHtml(shown) {
   return shown.length ? shown.map(b => `
-    <tr>
+    <tr data-id="${b.id}">
       <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
       <td class="num">${b.inv_number ?? ''}</td>
       <td>${esc(b.title)}</td>
@@ -430,9 +430,13 @@ async function saveBook(id) {
   if (!d.title.trim()) return toast('Заглавието е задължително.', 'err');
   if (!d.inv_number) return toast('Инвентарният номер е задължителен.', 'err');
   d.id = id;
+  // books:create връща id на новия запис — пази се, за да светне редът му след
+  // пререндирането (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
+  let savedId = id;
   if (id) await call(window.api.books.update(d), 'Книгата е обновена.');
-  else await call(window.api.books.create(d), 'Книгата е добавена.');
-  closeModal(); RENDERERS[VIEW]();
+  else savedId = await call(window.api.books.create(d), 'Книгата е добавена.');
+  closeModal(); await RENDERERS[VIEW]();
+  if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
 }
 window.saveBook = saveBook;
 async function deleteBook(id) {

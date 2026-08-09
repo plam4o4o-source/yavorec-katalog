@@ -43,6 +43,12 @@ async function route() {
   $('#vTitle').textContent = t[0];
   $('#vSub').textContent = t[1];
   drawNav();
+  // Лек преход (избледняване + плъзгане, v1.69.0) — САМО при истинска смяна
+  // на раздел. Вътрешните пререндирания след запис викат render*() направо,
+  // без route(), затова не мигат. Класът се сваля и слага наново, за да се
+  // рестартира анимацията и при повторно влизане в същия раздел.
+  const v = $('#view');
+  if (v) { v.classList.remove('viewIn'); void v.offsetWidth; v.classList.add('viewIn'); }
   await RENDERERS[VIEW]();
 }
 

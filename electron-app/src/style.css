@@ -103,6 +103,12 @@ body{
   transition:background .12s, color .12s, border-color .12s;
 }
 #nav a .ic{flex:0 0 21px; text-align:center; font-size:15px; line-height:1; opacity:.8; filter:grayscale(.3)}
+/* SVG иконите в навигацията (v1.69.0) се боядисват от цвета на реда
+   (stroke:currentColor) — за разлика от емоджитата, изглеждат еднакво на
+   всяка версия на Windows и следват цветовата тема. */
+#nav a .ic svg{width:17px; height:17px; display:block; margin:0 auto}
+#nav a:has(.ic svg) .ic{opacity:.75; filter:none}
+#nav a:hover:has(.ic svg) .ic, #nav a.on:has(.ic svg) .ic{opacity:1}
 #nav a .tx{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 #nav a:hover{background:var(--spine2); color:#fff}
 #nav a:hover .ic{opacity:1; filter:none}
@@ -574,16 +580,91 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
   #printArea .rcard{break-inside:avoid}
 }
 
-/* ---------- Toasts ---------- */
-#toasts{position:fixed; bottom:20px; right:20px; display:flex; flex-direction:column; gap:8px; z-index:100}
-@keyframes toastIn{from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none}}
-.toast{
-  background:var(--spine2); color:#F4EFDF; padding:10px 16px; border-radius:6px;
-  font-size:13px; box-shadow:0 6px 20px -6px rgba(0,0,0,.45); transition:opacity .3s;
-  border-left:3px solid var(--brassL); animation:toastIn .18s ease-out;
+/* ---------- Toasts (v1.69.0: по-големи, с икона, брояч на време и бутон ×) ----------
+   Два контейнера: #toasts (долу вдясно — успехи и неутрални съобщения) и
+   #toastsTop (горе в центъра — ГРЕШКИ, там където е погледът на библиотекаря).
+   Всички движения са само transform/opacity (GPU) — не пипат layout и не могат
+   да засекат интерфейса дори при 15 000 реда таблица отдолу. */
+#toasts{position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:480px}
+#toastsTop{
+  position:fixed; top:78px; left:50%; transform:translateX(-50%);
+  display:flex; flex-direction:column; gap:10px; z-index:100; max-width:560px; width:max-content;
 }
+@keyframes toastIn{
+  from{opacity:0; transform:translateX(40px)}
+  60%{opacity:1; transform:translateX(-5px)}
+  to{opacity:1; transform:none}
+}
+@keyframes toastInTop{
+  from{opacity:0; transform:translateY(-24px)}
+  60%{opacity:1; transform:translateY(3px)}
+  to{opacity:1; transform:none}
+}
+.toast{
+  position:relative; display:flex; align-items:center; gap:12px;
+  background:var(--spine2); color:#F4EFDF; padding:14px 16px; border-radius:8px;
+  font-size:15px; line-height:1.4; box-shadow:0 10px 30px -8px rgba(0,0,0,.5);
+  border-left:4px solid var(--brassL); animation:toastIn .28s cubic-bezier(.2,.8,.3,1);
+  overflow:hidden; min-width:260px;
+}
+#toastsTop .toast{animation-name:toastInTop}
 .toast.ok{background:var(--green); border-left-color:#B9D8C2}
-.toast.err{background:var(--red); border-left-color:#F0C4BF}
+.toast.err{background:var(--red); border-left-color:#F0C4BF; font-weight:600}
+/* Излизане: плъзгане надолу + избледняване (класът .out се слага от toast() в core.js) */
+.toast.out{opacity:0; transform:translateY(10px); transition:opacity .25s ease-in, transform .25s ease-in}
+.toast .tico{
+  flex:0 0 26px; width:26px; height:26px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(255,255,255,.18); font-size:15px; font-weight:700;
+}
+.toast .tmsg{flex:1; min-width:0}
+.toast .tcount{
+  flex:0 0 auto; font-size:12px; font-weight:700; background:rgba(255,255,255,.22);
+  padding:1px 8px; border-radius:9px;
+}
+.toast .tx{
+  flex:0 0 auto; background:none; border:none; color:inherit; opacity:.75;
+  font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; border-radius:4px;
+}
+.toast .tx:hover{opacity:1; background:rgba(255,255,255,.15)}
+/* Лентичка-брояч в долния ръб: скъсява се за времето на живота на съобщението;
+   при посочване с мишката спира (заедно с изчезването — виж core.js). */
+@keyframes tprogShrink{from{transform:scaleX(1)} to{transform:scaleX(0)}}
+.toast .tprog{
+  position:absolute; left:0; bottom:0; height:3px; width:100%;
+  background:rgba(255,255,255,.45); transform-origin:left;
+  animation:tprogShrink var(--tdur,3500ms) linear forwards;
+}
+.toast:hover .tprog{animation-play-state:paused}
+
+/* ---------- Преход при смяна на раздел (v1.69.0) ----------
+   Слага се от route() в bootstrap.js — само при истинска навигация, НЕ при
+   вътрешните пререндирания след запис (те не минават през route()). */
+@keyframes viewIn{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+#view.viewIn{animation:viewIn .18s ease-out}
+
+/* ---------- Открояване на записания ред (v1.69.0) ----------
+   flashRow() в core.js — след запис редът светва в зелено и избледнява.
+   Анимира се фонът на клетките (не на реда), за да застане НАД зебрата. */
+@keyframes rowFlash{from{background-color:var(--greenL)} to{background-color:transparent}}
+tr.rowFlash td{animation:rowFlash 1.3s ease-out}
+
+/* Пулс на индикатора „Запазено“ — елементът се пресъздава при всеки запис,
+   затова анимацията се пуска сама, без допълнителен код. */
+@keyframes dotPulse{0%{transform:scale(1)} 40%{transform:scale(2.1)} 100%{transform:scale(1)}}
+.savedIndicator .dot{animation:dotPulse .5s ease-out}
+
+/* Затваряне на прозорците — огледално на modalIn (класът .closing от closeModal()) */
+.veil{transition:opacity .13s ease-in}
+.veil.closing{opacity:0}
+.veil.closing .modal{transform:translateY(8px); transition:transform .13s ease-in}
+
+/* Намалено движение (системна настройка за достъпност): без декоративни
+   анимации; лентичката-брояч остава — тя носи информация, не украса. */
+@media (prefers-reduced-motion: reduce){
+  .toast, #view.viewIn, tr.rowFlash td, .savedIndicator .dot, .veil.on .modal{animation:none !important}
+  .toast.out, .veil, .veil.closing .modal{transition:none !important}
+}
 
 /* ============================================================================
    КРАЕЗНАНИЕ: аналитично описание, персоналии, летопис

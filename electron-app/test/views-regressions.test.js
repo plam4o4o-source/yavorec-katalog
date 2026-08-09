@@ -382,6 +382,9 @@ test('отказ (Esc) в askText разрешава обещанието с nul
     new Promise(r => setTimeout(() => r('УВИСНА'), 500))]);
   assert.equal(outcome, 'разрешено');
   assert.equal(calls.length, 0, 'при отказ не трябва да се вика нищо');
+  // v1.69.0: затварянето има кратка анимация — съдържанието се изчиства чак
+  // след ~140 ms (вижте closeModal() в core.js), затова се изчаква преди проверката.
+  await new Promise(r => setTimeout(r, 220));
   assert.equal(window.document.querySelector('#modal input[name="v"]'), null, 'прозорецът остана отворен');
 });
 

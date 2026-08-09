@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
     update: invoke('settings:update'),
     updateLabelFormat: invoke('settings:updateLabelFormat'),
     updateTheme: invoke('settings:updateTheme'),
+    updateScanSound: invoke('settings:updateScanSound'),
     chooseLogo: invoke('settings:chooseLogo'),
     clearLogo: invoke('settings:clearLogo'),
     updateNotices: invoke('settings:updateNotices'),
