@@ -30,8 +30,12 @@ async function renderCirc() {
       const code = el.value.trim(); el.value = ''; if (!code) return;
       const res = await window.api.loans.returnByCode({ code, date_in: today() });
       const log = $('#inLog');
-      if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
+      if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
       const r = res.data;
+      // Двоен нисък тон и при „заделена“/забава — очите са върху книгата, не върху
+      // екрана, а точно тези два случая изискват действие (не се връща на рафта /
+      // има обезщетение). Обикновеното успешно връщане дава кратък висок тон.
+      beep(r.hold || r.daysLate ? 'err' : 'ok');
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
         ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
@@ -139,7 +143,8 @@ async function renderCirc() {
       const code = bs.value.trim(); bs.value = ''; if (!code) return;
       const res = await window.api.loans.checkoutByCode({ reader_id: CIRC.readerId, code, date_out: today() });
       const log = $('#outLog');
-      if (!res.ok) { log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
+      if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
+      beep('ok');
       const l = res.data;
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b></div>`);
       toast('Заемане: инв. № ' + l.inv_number + ' до ' + bg(l.date_due), 'ok');

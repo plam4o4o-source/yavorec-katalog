@@ -105,6 +105,10 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   ipcMain.handle('settings:updateTheme', (e, theme) =>
     run(() => { getDb().prepare('UPDATE settings SET theme=? WHERE id=1').run(String(theme)); })
   );
+  // Звуков сигнал при сканиране (v1.69.0) — вижте beep() в src/views/core.js.
+  ipcMain.handle('settings:updateScanSound', (e, on) =>
+    run(() => { getDb().prepare('UPDATE settings SET scan_sound=? WHERE id=1').run(on ? 1 : 0); })
+  );
 
   return { LOGO_MIME, LOCAL_PHOTO_MAX_BYTES };
 };

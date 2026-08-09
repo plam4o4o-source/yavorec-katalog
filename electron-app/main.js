@@ -183,6 +183,7 @@ function initDb() {
     card_h: 'INTEGER DEFAULT 60',
     logo: 'TEXT',
     theme: "TEXT DEFAULT '1'",
+    scan_sound: 'INTEGER DEFAULT 1',
     catalog_folder: 'TEXT',
     gh_user: 'TEXT',
     gh_repo: 'TEXT',

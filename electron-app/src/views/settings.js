@@ -230,6 +230,10 @@ async function renderSetup() {
           <span style="display:block;padding:6px 8px;font-size:11px;background:${t.paper};color:#1B1813">${esc(t.name)}${s.theme === t.id ? ' ✓' : ''}</span>
         </button>`).join('')}
       </div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" ${s.scan_sound == null || +s.scan_sound ? 'checked' : ''}
+        onchange="setScanSound(this.checked)"><span>Звуков сигнал при сканиране в „Заемане и връщане“ —
+        кратък висок тон при успех, двоен нисък при отказ/забава/заделена книга. Очите са върху книгата,
+        не върху екрана — звукът се забелязва.</span></label>
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Работа в мрежа (няколко компютъра)</h3>

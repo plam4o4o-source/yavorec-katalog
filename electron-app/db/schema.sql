@@ -530,6 +530,7 @@ CREATE TABLE IF NOT EXISTS settings (
   card_h            INTEGER DEFAULT 60,
   logo              TEXT,                   -- лого на организацията, data URI
   theme             TEXT DEFAULT '1',
+  scan_sound        INTEGER DEFAULT 1,      -- звуков сигнал при сканиране (1 = включен)
   catalog_folder    TEXT,
   sru_endpoint      TEXT,     -- SRU каталог за внасяне на записи; празно = LOC по подразбиране
   suspend_per_day   REAL DEFAULT 0,     -- дни преустановено заемане за всеки ден забава; 0 = изключено

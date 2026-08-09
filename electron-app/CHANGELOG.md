@@ -11,6 +11,62 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.69.0
+
+**BG:** Обновяване на външния вид — по-забележими съобщения и по-плавен
+интерфейс, по предложенията от прегледа на визуалния слой.
+
+**Съобщенията са изцяло преработени.** По-големи (15px, с едра икона ✓/✕),
+с бутон × за затваряне и лентичка-брояч, показваща колко време остава.
+Грешките вече излизат **горе в центъра** — там, където е погледът при работа
+с форма — и стоят 10 секунди (успехите — долу вдясно, 3.5 сек). При посочване
+с мишката времето спира. Повторно еднакво съобщение не трупа втора кутийка,
+а вдига брояч „×N“. Влизането е с леко „пружиниране“, излизането — с плъзгане
+надолу; всичко е само transform/opacity (GPU), без риск за скоростта.
+
+**Навигацията е с нови SVG икони** вместо емоджи: боядисват се от цветовата
+тема и изглеждат еднакво на всяка версия на Windows (емоджитата се рисуват
+различно от системния шрифт и не се оцветяват).
+
+**По-плавен интерфейс:** лек преход при смяна на раздел (само при истинска
+навигация — вътрешните обновявания след запис не мигат); прозорците се
+затварят с кратка огледална анимация; след запис на книга/читател редът ѝ
+в таблицата светва в зелено и избледнява — вижда се не само „записано“, а и
+КЪДЕ; индикаторът „Запазено“ в страничната лента пулсира при всеки запис.
+
+**Звуков сигнал при сканиране** в „Заемане и връщане“ (изключва се от
+„Настройки“ → „Външен вид“): кратък висок тон при успех, двоен нисък при
+отказ, забава или заделена книга. При работа с баркод четец очите са върху
+книгата, не върху екрана — звукът е обратната връзка, която се забелязва
+(както в касовите системи и в Koha).
+
+Всички анимации уважават системната настройка за намалено движение
+(prefers-reduced-motion); лентичката-брояч остава — тя носи информация.
+
+**EN:** Visual refresh — more noticeable notifications and a smoother UI,
+following the visual-layer review.
+
+Notifications are fully reworked: bigger (15px, bold ✓/✕ icon), with a close
+button and a countdown strip. Errors now appear **top-center** — where the
+librarian is looking — and stay 10 seconds (successes bottom-right, 3.5s);
+hovering pauses the timer; duplicate messages merge into one box with an
+“×N” counter. Entry has a slight spring, exit slides down; all animation is
+transform/opacity only (GPU-composited).
+
+Navigation gets SVG icons instead of emoji (theme-tinted, identical across
+Windows versions). Section switches get a subtle transition (real navigation
+only — post-save rerenders don't flicker); modals close with a mirrored
+animation; after saving a book/reader its table row flashes green so you see
+not just “saved” but WHERE; the “Saved” indicator pulses on every save.
+
+Optional scan sounds in circulation (Settings → Appearance): short high tone
+on success, double low tone on refusal/overdue/held item — with a barcode
+scanner your eyes are on the book, not the screen. All animations respect
+the OS reduced-motion setting.
+
+**494 теста, 0 провалени / 494 tests, 0 failed**, под/under `TZ=UTC` и `TZ=Europe/Sofia`
+(9 нови в `test/views-ui.test.js`, всичките проверени да падат срещу стария код).
+
 ## v1.68.2
 
 **BG:** Две малки, но конкретни добавки от анализ на кое още от Koha (софтуерът

@@ -6,7 +6,7 @@ const READERS_PAGE_SIZE = 300;
 let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
 function readersRowsHtml(shown) {
   return shown.length ? shown.map(r => `
-    <tr><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
+    <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
       <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
       <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
@@ -144,9 +144,13 @@ async function saveReader(id) {
     return toast('За читател под 14 г. посочете родител/настойник (гарант).', 'err');
   }
   d.id = id;
+  // readers:create връща id на новия запис — редът му светва след пререндирането
+  // (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
+  let savedId = id;
   if (id) await call(window.api.readers.update(d), 'Читателят е обновен.');
-  else await call(window.api.readers.create(d), 'Читателят е добавен.');
-  closeModal(); renderReaders();
+  else savedId = await call(window.api.readers.create(d), 'Читателят е добавен.');
+  closeModal(); await renderReaders();
+  if (savedId) flashRow(`#rBody tr[data-id="${savedId}"]`);
 }
 window.saveReader = saveReader;
 async function deleteReader(id) {

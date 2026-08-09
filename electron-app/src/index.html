@@ -57,7 +57,10 @@
   <div id="veil2" class="veil veil2">
     <div id="modal2" class="modal"></div>
   </div>
-  <div id="toasts"></div>
+  <!-- Съобщения: успехите долу вдясно (polite), грешките горе в центъра
+       (assertive) — вижте toast() в views/core.js. -->
+  <div id="toasts" aria-live="polite"></div>
+  <div id="toastsTop" aria-live="assertive"></div>
   <div id="printArea"></div>
 
   <script src="udk.js"></script>

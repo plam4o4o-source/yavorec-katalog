@@ -22,15 +22,118 @@ const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+/* ---------------- Съобщения (toast) ----------------
+   v1.69.0: по-големи и по-забележими. Грешките излизат ГОРЕ В ЦЕНТЪРА (там е
+   погледът при работа с форма) и стоят 10 сек; успехите — долу вдясно, 3.5 сек.
+   При посочване с мишката броячът спира (и лентичката, и изчезването). Повторно
+   еднакво съобщение не трупа втора кутийка — само вдига брояч „×N“ и рестартира
+   времето. Всяко съобщение има бутон × за незабавно затваряне. */
+const TOAST_MS = { ok: 3500, err: 10000, def: 4500 };
+const TOAST_LIVE = new Map(); // ключ тип|текст → запис на живо съобщение
 function toast(msg, type) {
+  msg = String(msg ?? '');
+  const key = (type || '') + '|' + msg;
+  const live = TOAST_LIVE.get(key);
+  if (live && live.el.isConnected) {
+    live.count++;
+    const c = live.el.querySelector('.tcount');
+    if (c) { c.textContent = '×' + live.count; c.style.display = ''; }
+    clearTimeout(live.timer);
+    live.remaining = live.total;
+    toastStartTimer(key, live);
+    // Рестарт на лентичката-брояч: спира се анимацията, налага се reflow, пуска се пак.
+    const p = live.el.querySelector('.tprog');
+    if (p) { p.style.animation = 'none'; void p.offsetWidth; p.style.animation = ''; }
+    return;
+  }
+  const box = (type === 'err' && $('#toastsTop')) || $('#toasts');
+  if (!box) return;
+  const total = TOAST_MS[type] || TOAST_MS.def;
   const el = document.createElement('div');
   el.className = 'toast ' + (type || '');
-  el.textContent = msg;
-  $('#toasts').appendChild(el);
-  setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 300); }, type === 'err' ? 5000 : 2800);
+  el.setAttribute('role', type === 'err' ? 'alert' : 'status');
+  el.style.setProperty('--tdur', total + 'ms');
+  const ico = type === 'err' ? '✕' : type === 'ok' ? '✓' : 'ℹ';
+  el.innerHTML = `<span class="tico">${ico}</span><div class="tmsg"></div>` +
+    `<span class="tcount" style="display:none"></span>` +
+    `<button class="tx" title="Затвори" aria-label="Затвори">&times;</button><i class="tprog"></i>`;
+  el.querySelector('.tmsg').textContent = msg;
+  const rec = { el, total, remaining: total, started: 0, timer: null, count: 1 };
+  el.querySelector('.tx').addEventListener('click', () => toastClose(key, rec));
+  el.addEventListener('mouseenter', () => {
+    if (!rec.timer) return;
+    clearTimeout(rec.timer); rec.timer = null;
+    rec.remaining -= Date.now() - rec.started;
+  });
+  el.addEventListener('mouseleave', () => { if (!rec.timer && el.isConnected) toastStartTimer(key, rec); });
+  // Най-старото се маха без анимация, ако се натрупат повече от 4 в един контейнер.
+  while (box.children.length >= 4) { box.firstChild.remove(); }
+  box.appendChild(el);
+  TOAST_LIVE.set(key, rec);
+  toastStartTimer(key, rec);
+}
+function toastStartTimer(key, rec) {
+  rec.started = Date.now();
+  rec.timer = setTimeout(() => toastClose(key, rec), Math.max(300, rec.remaining));
+}
+function toastClose(key, rec) {
+  clearTimeout(rec.timer); rec.timer = null;
+  TOAST_LIVE.delete(key);
+  rec.el.classList.add('out');
+  setTimeout(() => rec.el.remove(), 260);
 }
 
+/* Открояване на записания ред в таблица: светва в зелено и избледнява (v1.69.0).
+   Вика се СЛЕД пререндирането, с CSS селектор към <tr data-id="…">. Ако редът
+   не е на екрана (следваща страница на „Покажи още“), просто не прави нищо. */
+function flashRow(sel) {
+  requestAnimationFrame(() => {
+    const el = typeof sel === 'string' ? $(sel) : sel;
+    if (!el) return;
+    el.classList.remove('rowFlash'); void el.offsetWidth;
+    el.classList.add('rowFlash');
+    setTimeout(() => el.classList.remove('rowFlash'), 1400);
+  });
+}
+window.flashRow = flashRow;
+
+/* Звуков сигнал при сканиране (v1.69.0) — кратък висок тон при успех, двоен
+   нисък при отказ. При баркод четец очите са върху книгата, не върху екрана —
+   звукът е обратната връзка, която реално се забелязва (както в касовите
+   системи и в Koha). Изключва се от „Настройки“ → „Външен вид“ (scan_sound).
+   Web Audio API — без звукови файлове; в тестова среда (jsdom) AudioContext
+   липсва и функцията просто мълчи. */
+let AUDIO_CTX = null;
+function beep(kind) {
+  try {
+    const s = SETTINGS_CACHE || {};
+    if (s.scan_sound != null && !+s.scan_sound) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    AUDIO_CTX = AUDIO_CTX || new AC();
+    const t0 = AUDIO_CTX.currentTime;
+    const tone = (freq, start, dur) => {
+      const o = AUDIO_CTX.createOscillator(), g = AUDIO_CTX.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      o.connect(g); g.connect(AUDIO_CTX.destination);
+      g.gain.setValueAtTime(0.0001, t0 + start);
+      g.gain.exponentialRampToValueAtTime(0.2, t0 + start + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+      o.start(t0 + start); o.stop(t0 + start + dur + 0.03);
+    };
+    if (kind === 'err') { tone(220, 0, 0.13); tone(220, 0.17, 0.13); }
+    else tone(880, 0, 0.09);
+  } catch (e) { console.error('Звуков сигнал:', e.message); }
+}
+window.beep = beep;
+
+/* Прозорците се затварят с кратка огледална анимация (v1.69.0). Ако веднага
+   след closeModal() се отвори нов прозорец, отложеното изчистване се отменя —
+   иначе таймерът би изтрил току-що отвореното съдържание. */
+let MODAL_CLOSE_T = null;
 function modal(title, body, footer) {
+  clearTimeout(MODAL_CLOSE_T);
+  $('#veil').classList.remove('closing');
   $('#modal').innerHTML =
     `<header><h2>${esc(title)}</h2><button class="x" onclick="closeModal()">&times;</button></header>
      <div class="body">${body}</div>
@@ -38,26 +141,50 @@ function modal(title, body, footer) {
   $('#veil').classList.add('on');
   setTimeout(() => { const i = $('#modal input,#modal select,#modal textarea'); if (i) i.focus(); }, 40);
 }
-function closeModal() { $('#veil').classList.remove('on'); $('#modal').innerHTML = ''; }
+function closeModal() {
+  const veil = $('#veil');
+  if (!veil.classList.contains('on') || veil.classList.contains('closing')) return;
+  veil.classList.add('closing');
+  clearTimeout(MODAL_CLOSE_T);
+  MODAL_CLOSE_T = setTimeout(() => {
+    veil.classList.remove('on', 'closing');
+    $('#modal').innerHTML = '';
+  }, 140);
+}
 window.closeModal = closeModal;
 
 /* Втори слой — за помощни прозорци върху вече отворена форма (изборът на УДК).
    Първият слой остава непокътнат, за да не се губи попълненото. */
+let MODAL2_CLOSE_T = null;
 function modal2(title, body, footer) {
+  clearTimeout(MODAL2_CLOSE_T);
+  $('#veil2').classList.remove('closing');
   $('#modal2').innerHTML =
     `<header><h2>${esc(title)}</h2><button class="x" onclick="closeModal2()">&times;</button></header>
      <div class="body">${body}</div>
      ${footer ? `<footer>${footer}</footer>` : ''}`;
   $('#veil2').classList.add('on');
 }
-function closeModal2() { $('#veil2').classList.remove('on'); $('#modal2').innerHTML = ''; }
+function closeModal2() {
+  const veil = $('#veil2');
+  if (!veil.classList.contains('on') || veil.classList.contains('closing')) return;
+  veil.classList.add('closing');
+  clearTimeout(MODAL2_CLOSE_T);
+  MODAL2_CLOSE_T = setTimeout(() => {
+    veil.classList.remove('on', 'closing');
+    $('#modal2').innerHTML = '';
+  }, 140);
+}
 window.closeModal2 = closeModal2;
 
-// Esc затваря най-горния отворен прозорец.
+// Esc затваря най-горния отворен прозорец. Прозорец в процес на затваряне
+// (.closing, 140 ms) се брои за вече затворен — иначе две бързи натискания
+// на Esc биха „изяли“ второто, вместо да затворят и долния слой.
+const veilOpen = (sel) => { const v = $(sel); return v.classList.contains('on') && !v.classList.contains('closing'); };
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if ($('#veil2').classList.contains('on')) closeModal2();
-  else if ($('#veil').classList.contains('on')) closeModal();
+  if (veilOpen('#veil2')) closeModal2();
+  else if (veilOpen('#veil')) closeModal();
 });
 
 /* ---------------- askText: заместител на window.prompt() ----------------
@@ -79,7 +206,7 @@ document.addEventListener('keydown', e => {
    домовете се пита върху вече отворената картонена справка). */
 function askText(title, opts) {
   opts = opts || {};
-  const second = $('#veil').classList.contains('on');
+  const second = veilOpen('#veil');
   const show = second ? modal2 : modal;
   const hide = second ? closeModal2 : closeModal;
   const rootSel = second ? '#modal2' : '#modal';
@@ -232,6 +359,12 @@ async function setTheme(id) {
   if (VIEW === 'setup') renderSetup();
 }
 window.setTheme = setTheme;
+async function setScanSound(on) {
+  await call(window.api.settings.updateScanSound(on ? 1 : 0), on ? 'Звукът при сканиране е включен.' : 'Звукът при сканиране е изключен.');
+  await loadSettingsCache();
+  if (on) beep('ok'); // кратка проба, за да се чуе как звучи
+}
+window.setScanSound = setScanSound;
 
 /* ---------------- Code 39 баркод (SVG) ---------------- */
 const C39 = {'0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn',
