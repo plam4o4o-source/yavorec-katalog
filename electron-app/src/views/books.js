@@ -9,6 +9,18 @@ let BOOKS_QUERY = '';
    набор от записи вече е друг и старият избор губи смисъл. */
 let BOOKS_SELECTED = new Set();
 let BOOKS_SORT = 'title';
+/* Филтри по отдел/категория (v1.70.0) — прилагат се НАД вече изтегления/
+   претърсен резултат (window._BOOKS_LIST), без нова обиколка по IPC, по
+   същия принцип като „Покажи още“ по-долу: searchText е малцинствен случай,
+   филтрирането по вече заредени, ясно изброими стойности няма нужда от
+   отделна заявка към базата. '' означава „без филтър“ за съответното поле. */
+let BOOKS_FILTER_DEPT = '';
+let BOOKS_FILTER_CAT = '';
+function booksFilterMatch(b) {
+  if (BOOKS_FILTER_DEPT && (b.department || '') !== BOOKS_FILTER_DEPT) return false;
+  if (BOOKS_FILTER_CAT && String(b.category_id || '') !== String(BOOKS_FILTER_CAT)) return false;
+  return true;
+}
 /* Прозоречен рендер (Фаза 2): при голям фонд (5 000–15 000+ документа) чертаенето
    на ВСИЧКИ редове наведнъж замразява интерфейса за забележимо време. Вместо да
    местим пагинацията в бекенда (books:list се ползва и другаде за пълен списък —
@@ -29,7 +41,7 @@ function booksRowsHtml(shown) {
     <tr data-id="${b.id}">
       <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
       <td class="num">${b.inv_number ?? ''}</td>
-      <td>${esc(b.title)}</td>
+      <td>${esc(b.title)}${b.series ? ` <span class="hint">— ${esc(b.series)}${b.series_no ? ', ' + esc(b.series_no) : ''}</span>` : ''}</td>
       <td>${esc(b.author || '')}</td>
       <td>${esc(b.category_name || '')}</td>
       <td>${esc(b.department || '')}</td>
@@ -53,7 +65,7 @@ function booksMoreHtml(more, total) {
    може да са различни (нова подредба) или засягат целия резултат отвъд
    текущо изтегления прозорец. */
 function renderBooksBody() {
-  const books = window._BOOKS_LIST || [];
+  const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
   const shown = books.slice(0, BOOKS_RENDER_LIMIT);
   const more = books.length - shown.length;
   const body = $('#bBody'); if (body) body.innerHTML = booksRowsHtml(shown);
@@ -72,8 +84,14 @@ async function renderBooks() {
   const visibleIds = new Set(books.map(b => b.id));
   for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
   const n = BOOKS_SELECTED.size;
-  const shown = books.slice(0, BOOKS_RENDER_LIMIT);
-  const more = books.length - shown.length;
+  const filtered = books.filter(booksFilterMatch);
+  const shown = filtered.slice(0, BOOKS_RENDER_LIMIT);
+  const more = filtered.length - shown.length;
+  // Отделите за филтъра идват от вече заредения резултат (реално ползвани стойности),
+  // обединени с фиксираните OTDELI — така филтърът винаги показва само отдели, които
+  // реално имат поне един документ в текущия резултат от търсенето.
+  const deptSeen = [...new Set(books.map(b => b.department).filter(Boolean))];
+  const deptOpts = [...new Set([...OTDELI, ...deptSeen])];
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
@@ -81,6 +99,14 @@ async function renderBooks() {
         <option value="title" ${BOOKS_SORT === 'title' ? 'selected' : ''}>По заглавие</option>
         <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
         <option value="inv" ${BOOKS_SORT === 'inv' ? 'selected' : ''}>По инв. №</option>
+      </select>
+      <select id="bDeptFilter" onchange="BOOKS_FILTER_DEPT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooksBody()" title="Филтър по отдел / местонахождение">
+        <option value="">— всички отдели —</option>
+        ${deptOpts.map(d => `<option value="${esc(d)}" ${BOOKS_FILTER_DEPT === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+      </select>
+      <select id="bCatFilter" onchange="BOOKS_FILTER_CAT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooksBody()" title="Филтър по вид документ (категория)">
+        <option value="">— всички категории —</option>
+        ${(window._CATS || []).map(c => `<option value="${c.id}" ${String(BOOKS_FILTER_CAT) === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>
       <span class="hint" id="bulkCount" ${n ? '' : 'style="display:none"'}>${n} избрани</span>
       <button class="btn" id="bulkBtn" onclick="openBulkEdit()" ${n ? '' : 'disabled'}>Групова редакция…</button>
@@ -90,11 +116,11 @@ async function renderBooks() {
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
-        ${books.length && books.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
+        ${filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
         <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:160px"></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, books.length)}</div>
+    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
   $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; renderBooks(); }, 300));
@@ -106,11 +132,12 @@ function toggleBookSel(id, checked) {
 }
 window.toggleBookSel = toggleBookSel;
 function toggleBookSelAll(checked) {
-  // "Избери всички" означава всички книги от текущия резултат от търсенето — не само
-  // редовете, заредени в момента в таблицата (при windowed рендер може да е само част
-  // от тях), затова минаваме по window._BOOKS_LIST, а не по DOM чек-боксовете. Селекцията
-  // не сменя кои книги съществуват, затова е достатъчен renderBooksBody() (без ново IPC).
-  const ids = (window._BOOKS_LIST || []).map(b => b.id);
+  // "Избери всички" означава всички книги от текущия резултат от търсенето И филтъра —
+  // не само редовете, заредени в момента в таблицата (при windowed рендер може да е само
+  // част от тях), затова минаваме по window._BOOKS_LIST (филтрирано с booksFilterMatch),
+  // а не по DOM чек-боксовете. Селекцията не сменя кои книги съществуват, затова е
+  // достатъчен renderBooksBody() (без ново IPC).
+  const ids = (window._BOOKS_LIST || []).filter(booksFilterMatch).map(b => b.id);
   if (checked) ids.forEach(id => BOOKS_SELECTED.add(id));
   else ids.forEach(id => BOOKS_SELECTED.delete(id));
   renderBooksBody();
@@ -235,6 +262,10 @@ async function bookForm(id, presetAcqId) {
         ${fld('Място на издаване', 'city', { val: v.city || '', list: 'city' })}
         ${fld('Издателство', 'publisher', { val: v.publisher || '', list: 'publisher' })}
         ${fld('Година', 'year', { val: v.year || '' })}
+      </div>
+      <div class="grid g2">
+        ${fld('Поредица', 'series', { val: v.series || '', list: 'series', hint: 'за многотомни/номерирани издания' })}
+        ${fld('№ в поредицата', 'series_no', { val: v.series_no || '', hint: 'напр. „кн. 3“' })}
       </div>
       <div class="grid gIsbn">
         ${fld('Том / част', 'volume', { val: v.volume || '' })}
@@ -426,9 +457,12 @@ async function sruLookup() {
 window.sruLookup = sruLookup;
 
 async function saveBook(id) {
+  // v1.70.0: обща проверка на ВСИЧКИ полета с req:1 (преди се проверяваха ръчно
+  // само заглавие/инв. номер — датата на вписване и цената носеха req:1, но
+  // никога не се проверяваха, ако останеха празни).
+  const missing = firstMissingRequired('#bookF');
+  if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#bookF');
-  if (!d.title.trim()) return toast('Заглавието е задължително.', 'err');
-  if (!d.inv_number) return toast('Инвентарният номер е задължителен.', 'err');
   d.id = id;
   // books:create връща id на новия запис — пази се, за да светне редът му след
   // пререндирането (flashRow, v1.69.0). При неуспех call() връща null → без открояване.

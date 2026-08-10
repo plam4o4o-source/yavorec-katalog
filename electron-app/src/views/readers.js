@@ -4,6 +4,16 @@ let READERS_QUERY = '';
 // съображение важи и за списъка с читатели при голяма библиотека.
 const READERS_PAGE_SIZE = 300;
 let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
+/* Филтри по категория/статус (v1.70.0) — прилагат се НАД вече заредения/
+   претърсен списък (window._READERS_LIST), без ново IPC — виж същия принцип
+   при BOOKS_FILTER_* в books.js. */
+let READERS_FILTER_CAT = '';
+let READERS_FILTER_STATUS = '';
+function readersFilterMatch(r) {
+  if (READERS_FILTER_CAT && (r.category || '') !== READERS_FILTER_CAT) return false;
+  if (READERS_FILTER_STATUS && (r.status || '') !== READERS_FILTER_STATUS) return false;
+  return true;
+}
 function readersRowsHtml(shown) {
   return shown.length ? shown.map(r => `
     <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
@@ -21,7 +31,7 @@ function readersMoreHtml(more, total) {
 /* „Покажи още“ разширява прозореца на вече изтегления window._READERS_LIST,
    без нова обиколка по IPC — виж същия коментар при renderBooksBody() в books.js. */
 function renderReadersBody() {
-  const readers = window._READERS_LIST || [];
+  const readers = (window._READERS_LIST || []).filter(readersFilterMatch);
   const shown = readers.slice(0, READERS_RENDER_LIMIT);
   const more = readers.length - shown.length;
   const body = $('#rBody'); if (body) body.innerHTML = readersRowsHtml(shown);
@@ -34,22 +44,39 @@ async function renderReaders() {
   ]);
   if (!readers) return;
   window._READERS_LIST = readers;
-  const shown = readers.slice(0, READERS_RENDER_LIMIT);
-  const more = readers.length - shown.length;
+  const filtered = readers.filter(readersFilterMatch);
+  const shown = filtered.slice(0, READERS_RENDER_LIMIT);
+  const more = filtered.length - shown.length;
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="rSearch" list="dl_searchReaders" placeholder="Търсене по име, телефон или № карта…" value="${esc(READERS_QUERY)}">
+      <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;READERS_RENDER_LIMIT=READERS_PAGE_SIZE;renderReadersBody()" title="Филтър по категория">
+        <option value="">— всички категории —</option>
+        ${KATEG.map(k => `<option value="${esc(k)}" ${READERS_FILTER_CAT === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
+      </select>
+      <select id="rStatusFilter" onchange="READERS_FILTER_STATUS=this.value;READERS_RENDER_LIMIT=READERS_PAGE_SIZE;renderReadersBody()" title="Филтър по състояние">
+        <option value="">— всички —</option>
+        <option value="активен" ${READERS_FILTER_STATUS === 'активен' ? 'selected' : ''}>активен</option>
+        <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
+      </select>
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
+      <button class="btn" onclick="exportReadersCsv()">Износ CSV</button>
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:290px"></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, readers.length)}</div>
+    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
   $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; renderReaders(); }, 300));
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
 }
+async function exportReadersCsv() {
+  const res = await window.api.readers.exportCsv();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Списъкът с читателите е записан в ' + res.data, 'ok');
+}
+window.exportReadersCsv = exportReadersCsv;
 const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
 async function readerForm(id) {
   const [r, pdp] = await Promise.all([

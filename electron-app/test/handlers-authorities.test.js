@@ -63,6 +63,24 @@ test('authorities:fields returns the fixed set of field labels', async () => {
   assert.equal(result.data.publisher, 'издателство');
 });
 
+test('authorities:fields includes series (v1.70.0 — поредица) so it participates in duplicate control like author/publisher', async () => {
+  const { ipcMain } = setup();
+  const result = await ipcMain.invoke('authorities:fields');
+  assert.equal(result.ok, true);
+  assert.equal(result.data.series, 'поредица');
+});
+
+test('authorities:list groups series values by count, same as any other authority field', async () => {
+  const { db, ipcMain } = setup();
+  insertBook(db, { series: 'Песен за огън и лед' });
+  insertBook(db, { series: 'Песен за огън и лед' });
+  const result = await ipcMain.invoke('authorities:list', 'series');
+  assert.equal(result.ok, true);
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].value, 'Песен за огън и лед');
+  assert.equal(result.data[0].n, 2);
+});
+
 test('authorities:list groups by value and counts, ordered most-frequent first', async () => {
   const { db, ipcMain } = setup();
   insertBook(db, { author: 'Иван Вазов' });

@@ -12,10 +12,12 @@ async function renderPersons() {
       <button class="btn pri" onclick="personForm()">+ Нова персоналия</button>
       <input type="search" placeholder="Търсене по име, дейност, биография…"
         value="${esc(PRS_Q)}" oninput="prsSearch(this.value)">
+      <button class="btn" onclick="printPersons()">Печат / PDF</button>
     </div>
 
     ${rows.length ? `<div class="cardGrid">
-      ${rows.map(p => `<div class="prsCard" onclick="personView(${p.id})">
+      ${rows.map(p => `<div class="prsCard" tabindex="0" role="button" aria-label="${esc(p.name)}"
+        onclick="personView(${p.id})" onkeydown="cardActivate(event, () => personView(${p.id}))">
         <div class="prsPhoto">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<span>без снимка</span>'}</div>
         <div class="prsBody">
           <div class="prsName">${esc(p.name)}</div>
@@ -38,6 +40,21 @@ function personDates(p) {
 }
 function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT); window._prsT = setTimeout(renderPersons, 300); }
 window.prsSearch = prsSearch;
+
+async function printPersons() {
+  const rows = await call(window.api.persons.list(PRS_Q));
+  if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
+  setPrintPage({ name: 'Персоналии', landscape: false, margin: '16mm 14mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2 class="ptitle">ПЕРСОНАЛИИ</h2>
+    ${rows.map(p => `<div style="margin-bottom:10px">
+      <b>${esc(p.name)}</b>${personDates(p) ? ' · ' + esc(personDates(p)) : ''}
+      ${p.activity ? `<div style="font-size:11pt"><i>${esc(p.activity)}</i></div>` : ''}
+      ${p.bio ? `<div style="font-size:10.5pt">${esc(p.bio).replace(/\n/g, '<br>')}</div>` : ''}
+    </div>`).join('')}
+    ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
+}
+window.printPersons = printPersons;
 
 async function personForm(id) {
   const p = id ? await call(window.api.persons.get(id)) : null;

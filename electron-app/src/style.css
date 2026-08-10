@@ -1,7 +1,13 @@
 :root{
   --paper:#F4F0E4; --paper2:#FBF9F3; --paper3:#EAE4D4;
   --rule:#D9D1BD; --rule2:#C4B99E;
-  --ink:#1B1813; --ink2:#5C5344; --ink3:#8A8171;
+  /* --ink3 (v1.70.0): потъмнено от #8A8171 на #676054 — старата стойност
+     даваше само ~2.9-3.4:1 контраст спрямо --paper/--paper3 във всичките
+     6 теми (под изискването на WCAG AA от 4.5:1 за обикновен текст), а се
+     ползва много често (.sub, .fh, .kpi-extra, .empty). Новата стойност
+     дава >=4.68:1 във всяка тема — проверено програмно спрямо всички
+     paper/paper3 комбинации. */
+  --ink:#1B1813; --ink2:#5C5344; --ink3:#676054;
   --spine:#1A1208; --spine2:#241809; --spine3:#3A2A12;
   --brass:#96731F; --brassL:#C9A84C; --brassD:#6E5314;
   --red:#A32B22; --redL:#F0DEDA;
@@ -164,7 +170,13 @@ body{
 }
 .kpi.warn{border-left-color:var(--red)}
 .kpi.ok{border-left-color:var(--green)}
-.kpi-ico{font-size:26px; line-height:1; opacity:.85; flex:0 0 auto}
+.kpi-ico{font-size:26px; line-height:1; opacity:.85; flex:0 0 auto; color:var(--brass)}
+/* SVG иконки на Таблото (v1.70.0) вместо емоджита — същата причина, поради
+   която навигацията мина на SVG в v1.69.0: емоджитата изглеждат различно на
+   всяка версия на Windows и не следват цветовата тема. */
+.kpi-ico svg{width:24px; height:24px; display:block}
+.kpi.warn .kpi-ico{color:var(--red)}
+.kpi.ok .kpi-ico{color:var(--green)}
 .kpi-body{min-width:0}
 .kpi-num{font-family:var(--serif); font-size:30px; font-weight:700; color:var(--brassD); line-height:1.1}
 .kpi.warn .kpi-num{color:var(--red)}
@@ -188,7 +200,8 @@ body{
   font-family:var(--sans); font-size:12.5px; color:var(--ink); cursor:pointer; text-align:center;
   transition:background .12s, border-color .12s, box-shadow .12s, transform .12s;
 }
-.quickBtn span{font-size:20px; line-height:1}
+.quickBtn span{font-size:20px; line-height:1; color:var(--brass)}
+.quickBtn span svg{width:20px; height:20px; display:block; margin:0 auto}
 .quickBtn:hover{background:var(--paper3); border-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
 .quickBtn:active{transform:none; box-shadow:none}
 
@@ -376,6 +389,10 @@ table.ledger .num{font-family:var(--mono)}
 /* ---------- Forms ---------- */
 .field{margin-bottom:12px}
 .field label{display:block; font-size:12px; color:var(--ink2); margin-bottom:4px}
+/* Маркер за задължително поле (v1.70.0) — fld() в core.js добавя <b class="req">
+   при opts.req; преди това required личеше само в HTML атрибута, невидимо
+   за окото и без ефект, защото формите не се предават по стандартния начин. */
+.field label .req{color:var(--red); margin-left:2px; font-weight:700}
 .field input, .field select, .field textarea{
   width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
@@ -391,6 +408,25 @@ table.ledger .num{font-family:var(--mono)}
 /* Вторият слой прозорци стои над първия */
 .veil2{z-index:60; background:rgba(27,24,19,.35)}
 .veil2 .modal{max-width:820px}
+
+/* ---------- Бележки и полски подсказки (.note, .hint) — v1.70.0 ----------
+   Двата класа се ползват в над 30 файла (правни цитати, предупреждения,
+   подсказки под полета), но никога не са имали собствен стил извън модала
+   (само .modal .body .note{margin-bottom} — виж по-горе) — извън модал
+   изглеждаха като обикновен неоформен текст. */
+.note{
+  margin:0 0 12px; padding:9px 13px; border-left:3px solid var(--rule2);
+  background:var(--paper3); border-radius:0 4px 4px 0;
+  font-size:12.5px; color:var(--ink2); line-height:1.5;
+}
+/* Предупредителен вариант (.note.w) — вече ползван на много места чрез
+   ad hoc inline style="border-left-color:..."; сега има собствен стил. */
+.note.w{
+  border-left-color:var(--brass);
+  background:color-mix(in srgb, var(--brass) 12%, var(--paper3));
+  color:var(--ink);
+}
+.hint{display:block; font-size:12px; color:var(--ink3); margin-top:3px; line-height:1.4}
 
 /* ---------- Избор на УДК ---------- */
 .udkSearch{
@@ -409,7 +445,10 @@ table.ledger .num{font-family:var(--mono)}
   cursor:pointer; font-family:var(--sans); font-size:12.5px; color:var(--ink);
 }
 .udkItem:hover{background:var(--paper3); border-color:var(--rule2)}
-.udkCode{font-family:var(--mono); font-weight:700; color:var(--brass); flex:0 0 auto; font-size:12px}
+/* color:var(--brassD), не --brass (v1.70.0) — --brass като цвят на текст
+   пада под WCAG AA (4.5:1) в темите „Бронз“ и „Теракота“; --brassD е
+   >=5.69:1 във всичките 6 теми. Важи и за .prsDates/.chrDate по-долу. */
+.udkCode{font-family:var(--mono); font-weight:700; color:var(--brassD); flex:0 0 auto; font-size:12px}
 .udkLbl{color:var(--ink2); line-height:1.3}
 
 /* ---------- Сливане на дубликати ---------- */
@@ -684,6 +723,9 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
   background:var(--paper); cursor:pointer; transition:border-color .15s, box-shadow .15s, transform .15s;
 }
 .prsCard:hover{border-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
+/* Клавиатурен фокус (v1.70.0) — картите вече имат tabindex="0" (виж persons.js),
+   затова се нуждаят от собствен :focus-visible пръстен като бутоните. */
+.prsCard:focus-visible{outline:2px solid var(--brassL); outline-offset:1px; border-color:var(--brass)}
 .prsPhoto{
   width:64px; height:80px; flex:0 0 auto; border:1px solid var(--rule); border-radius:3px;
   background:var(--paper3); display:flex; align-items:center; justify-content:center; overflow:hidden;
@@ -692,7 +734,7 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 .prsPhoto span{font-size:10px; color:var(--ink2); text-align:center; padding:4px}
 .prsBody{min-width:0; display:flex; flex-direction:column; justify-content:center}
 .prsName{font-family:var(--serif); font-size:14.5px; font-weight:700; color:var(--spine); line-height:1.25}
-.prsDates{font-family:var(--mono); font-size:11.5px; color:var(--brass); margin-top:2px}
+.prsDates{font-family:var(--mono); font-size:11.5px; color:var(--brassD); margin-top:2px}
 .prsAct{font-size:12.5px; color:var(--ink); margin-top:4px; line-height:1.35}
 .prsLinks{font-size:11px; color:var(--ink2); margin-top:5px}
 
@@ -718,9 +760,10 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
   transition:border-left-color .15s, box-shadow .15s, transform .15s;
 }
 .chrItem:hover{border-left-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
+.chrItem:focus-visible{outline:2px solid var(--brassL); outline-offset:1px; border-left-color:var(--brass)}
 .chrThumb{width:74px; height:56px; object-fit:cover; border-radius:3px; border:1px solid var(--rule); flex:0 0 auto}
 .chrBody{min-width:0; flex:1}
 .chrTop{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
 .chrTitle{font-weight:700; font-size:13.5px; color:var(--ink)}
-.chrDate{font-family:var(--mono); font-size:11.5px; color:var(--brass)}
+.chrDate{font-family:var(--mono); font-size:11.5px; color:var(--brassD)}
 .chrText{font-size:12.5px; color:var(--ink2); line-height:1.45; margin-top:4px}

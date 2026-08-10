@@ -146,7 +146,11 @@ async function renderCirc() {
       if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
       beep('ok');
       const l = res.data;
-      log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b></div>`);
+      // v1.70.0: бутон за печат на разписка за заемане — по образец на
+      // printReceiptLine() в account.js (квитанция за платена такса), но за
+      // самото заемане, което дотогава нямаше никакъв печатен документ.
+      log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b>
+        <button class="btn sm" style="margin-left:8px" onclick="printLoanSlip({title:'${jsq(l.title)}',inv_number:${JSON.stringify(l.inv_number)},date_due:'${jsq(l.date_due)}'})">Разписка</button></div>`);
       toast('Заемане: инв. № ' + l.inv_number + ' до ' + bg(l.date_due), 'ok');
       markSaved();
       renderCirc();
@@ -155,12 +159,35 @@ async function renderCirc() {
 }
 function selectCircReader(id) { CIRC.readerId = id; CIRC.mode = 'out'; renderCirc(); }
 window.selectCircReader = selectCircReader;
+
+/* Разписка за заемане (v1.70.0) — по образец на printReceiptLine() в
+   account.js. loan идва директно от резултата на checkoutByCode (title/
+   inv_number/date_due вече ги има), четецът се дозарежда по CIRC.readerId,
+   защото „Разписка“-бутонът стои извън блок-обхвата, в който читателят е
+   бил зареден при първоначалния рендер на екрана. */
+async function printLoanSlip(loan) {
+  const r = await call(window.api.readers.get(CIRC.readerId));
+  if (!r) return;
+  setPrintPage({ name: 'Разписка — ' + r.name + ' — инв. № ' + loan.inv_number, landscape: false, margin: '20mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2 style="font-size:16pt">РАЗПИСКА ЗА ЗАЕМАНЕ</h2>
+    <div class="pmeta">Дата: <b>${bg(today())}</b><br>
+    Читател: <b>${esc(r.name)}</b>${r.card_no ? ' (карта ' + esc(r.card_no) + ')' : ''}<br>
+    Документ: <b>${esc(loan.title)}</b>${loan.inv_number != null ? ' (инв. № ' + esc(loan.inv_number) + ')' : ''}<br>
+    Срок за връщане: <b>${bg(loan.date_due)}</b></div>
+    ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
+}
+window.printLoanSlip = printLoanSlip;
 async function returnBook(id) {
   const res = await window.api.loans.return({ id, date_in: today() });
   if (!res.ok) return toast(res.error, 'err');
   if (res.data && res.data.hold) {
     const h = res.data.hold;
     toast('📌 Заделена за ' + h.reader_name + (h.phone ? ' (тел. ' + h.phone + ')' : '') + ' — не се връща на рафта!', 'err');
+  } else if (res.data && res.data.daysLate) {
+    // v1.70.0: преди тук нямаше никакво съобщение за забава/глоба — само
+    // сканираното връщане ("returnByCode") показваше тази информация.
+    toast('Върната със забава ' + res.data.daysLate + ' дни (' + mny(res.data.fine) + ').', 'err');
   } else {
     toast('Книгата е върната.', 'ok');
   }

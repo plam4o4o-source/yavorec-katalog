@@ -46,8 +46,9 @@ async function acqForm() {
 }
 window.acqForm = acqForm;
 async function saveAcq() {
+  const missing = firstMissingRequired('#acqF');
+  if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#acqF');
-  if (!d.from_source.trim() || !d.total_count) return toast('Попълнете откъде постъпват документите и общия им брой.', 'err');
   const id = await call(window.api.acquisitions.create(d), 'Партидата е заведена в КДБФ част 1.');
   if (id) { closeModal(); renderAcq(); }
 }

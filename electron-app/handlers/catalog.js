@@ -363,7 +363,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
       const rows = getDb().prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
-      const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Място', 'Издателство',
+      const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Поредица', 'Място', 'Издателство',
         'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Цена (лв.)', 'Цена (€)', 'Състояние'];
       // Защита срещу CSV/formula injection (Фаза 3): свободните текстови полета (заглавие,
       // автор и т.н.) идват от каталогизатора и биха могли случайно или нарочно да
@@ -372,7 +372,8 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       // отпред неутрализира изпълнението, без видимо да променя стойността.
       const esc = csvCell;
       const csv = [h.join(';')].concat(rows.map(b => [
-        b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title, b.city, b.publisher,
+        b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title,
+        [b.series, b.series_no].filter(Boolean).join(' '), b.city, b.publisher,
         b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
         (b.price || 0).toFixed(2), ((b.price || 0) / 1.95583).toFixed(2), b.status
       ].map(esc).join(';'))).join('\r\n');

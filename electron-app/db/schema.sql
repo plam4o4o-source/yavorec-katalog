@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS books (
   author_mark       TEXT,
   city              TEXT,
   publisher         TEXT,
+  series            TEXT,               -- поредица (v1.70.0) — за многотомни/номерирани издания
+  series_no         TEXT,               -- номер/книга в поредицата, напр. "кн. 3"
   keywords          TEXT,
   annotation        TEXT,
   cover_url         TEXT,

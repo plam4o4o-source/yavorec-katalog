@@ -241,3 +241,80 @@ test('Читатели: „Покажи още“ разширява прозо�
   assert.equal(window.document.querySelectorAll('#rBody tr').length, 600);
   assert.equal(dom.callCounts['readers.list'], before, 'без ново readers.list извикване');
 });
+
+/* --- Книги / Читатели: филтри по отдел/категория/статус (v1.70.0) --- */
+
+test('Книги: филтърът по отдел стеснява резултата без ново IPC извикване', async () => {
+  const rows = [];
+  for (let i = 1; i <= 20; i++) {
+    rows.push({
+      id: i, inv_number: i, title: 'Заглавие №' + i, author: 'Автор', category_name: 'книга',
+      category_id: (i % 2) + 1, department: i % 2 === 0 ? 'за възрастни' : 'за деца',
+      year: '2010', status: 'наличен', quantity: 1, available: 1
+    });
+  }
+  const cats = [{ id: 1, name: 'Роман' }, { id: 2, name: 'Приказки' }];
+  const dom = buildDom({ 'books.list': rows, 'categories.list': cats });
+  const { window } = dom;
+  await settled(dom);
+  window.location.hash = '#books';
+  await window.route();
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, 20);
+  const before = dom.callCounts['books.list'];
+  const sel = window.document.getElementById('bDeptFilter');
+  sel.value = 'за деца';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const trs = window.document.querySelectorAll('#bBody tr');
+  assert.equal(trs.length, 10, 'филтърът по отдел трябва да стесни резултата наполовина');
+  assert.equal(dom.callCounts['books.list'], before, 'филтърът е клиентски и не бива да праща ново IPC');
+});
+
+test('Книги: филтърът по категория стеснява резултата', async () => {
+  const rows = [];
+  for (let i = 1; i <= 20; i++) {
+    rows.push({
+      id: i, inv_number: i, title: 'Заглавие №' + i, author: 'Автор', category_name: i % 2 === 0 ? 'Приказки' : 'Роман',
+      category_id: (i % 2) + 1, department: 'за възрастни', year: '2010', status: 'наличен', quantity: 1, available: 1
+    });
+  }
+  const cats = [{ id: 1, name: 'Роман' }, { id: 2, name: 'Приказки' }];
+  const dom = buildDom({ 'books.list': rows, 'categories.list': cats });
+  const { window } = dom;
+  await settled(dom);
+  window.location.hash = '#books';
+  await window.route();
+  const sel = window.document.getElementById('bCatFilter');
+  sel.value = '2'; // Приказки
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, 10);
+});
+
+test('Читатели: филтрите по категория и състояние стесняват резултата без ново IPC извикване', async () => {
+  const rows = [];
+  for (let i = 1; i <= 20; i++) {
+    rows.push({
+      id: i, name: 'Читател №' + i, phone: '', card_no: 'K' + i,
+      category: i % 2 === 0 ? 'ученик' : 'възрастен', status: i <= 5 ? 'прекратен' : 'активен'
+    });
+  }
+  const dom = buildDom({ 'readers.list': rows });
+  const { window } = dom;
+  await settled(dom);
+  window.location.hash = '#readers';
+  await window.route();
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, 20);
+  const before = dom.callCounts['readers.list'];
+
+  const catSel = window.document.getElementById('rCatFilter');
+  catSel.value = 'ученик';
+  catSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, 10, 'филтърът по категория трябва да стесни резултата наполовина');
+
+  catSel.value = '';
+  catSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  const statusSel = window.document.getElementById('rStatusFilter');
+  statusSel.value = 'прекратен';
+  statusSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, 5, 'филтърът по състояние трябва да покаже само прекратените');
+  assert.equal(dom.callCounts['readers.list'], before, 'филтрите са клиентски и не бива да пращат ново IPC');
+});
