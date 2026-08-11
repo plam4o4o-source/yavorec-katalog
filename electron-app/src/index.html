@@ -61,6 +61,26 @@
        (assertive) — вижте toast() в views/core.js. -->
   <div id="toasts" aria-live="polite"></div>
   <div id="toastsTop" aria-live="assertive"></div>
+
+  <!-- Преглед преди печат (v1.71.0). Системният печатен диалог на Windows не
+       може да визуализира съдържанието на Electron прозорец („Това приложение
+       не поддържа визуализация на печата“), затова документът се показва ТУК,
+       на екрана, преди изобщо да се стигне до window.print(). Всички печатни
+       пътища минават през doPrint() в views/core.js, който отваря този слой. -->
+  <div id="printPreview" role="dialog" aria-modal="true" aria-label="Преглед преди печат">
+    <div class="ppBox">
+      <header class="ppHead">
+        <h2 id="ppTitle">Преглед преди печат</h2>
+        <button class="x" onclick="ppClose()" title="Затвори" aria-label="Затвори">&times;</button>
+      </header>
+      <div class="ppScroll"><div id="ppSheet"></div></div>
+      <footer class="ppFoot">
+        <span class="hint" id="ppHint"></span>
+        <button class="btn" onclick="ppClose()">Отказ</button>
+        <button class="btn pri" onclick="ppPrint()">Печат…</button>
+      </footer>
+    </div>
+  </div>
   <div id="printArea"></div>
 
   <script src="udk.js"></script>

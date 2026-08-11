@@ -605,6 +605,31 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .pdoc .psig{display:flex; justify-content:space-between; margin-top:14mm; font-size:10pt; gap:20mm}
 .pdoc .psig div{flex:1; border-top:1px solid #000; padding-top:2mm}
 
+/* ---------- Преглед преди печат (v1.71.0) ----------
+   Windows системният печатен диалог не визуализира Electron прозорци
+   („Това приложение не поддържа визуализация на печата“), затова
+   документът се показва на екрана ПРЕДИ window.print(). Слоят е отделен от
+   modal/modal2, за да може печат да се пуска и от вече отворен прозорец
+   (напр. квитанция от формата за плащане), без да се бута modal стекът. */
+#printPreview{
+  display:none; position:fixed; inset:0; z-index:80;
+  background:rgba(27,24,19,.55); align-items:center; justify-content:center; padding:22px;
+}
+#printPreview.on{display:flex}
+.ppBox{
+  background:var(--paper2); border:1px solid var(--rule2); border-radius:6px; box-shadow:var(--shL, 0 10px 40px rgba(0,0,0,.35));
+  display:flex; flex-direction:column; width:min(96vw, 980px); max-height:92vh;
+}
+.ppHead{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--rule)}
+.ppHead h2{margin:0; font-family:var(--serif); font-size:16px; color:var(--spine); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ppHead .x{background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:var(--ink2); padding:2px 8px}
+.ppHead .x:hover{color:var(--red)}
+.ppScroll{overflow:auto; padding:18px; background:var(--paper3); flex:1 1 auto; display:flex; justify-content:safe center; align-items:flex-start}
+/* „Листът“: бял, с размера и полетата от setPrintPage() — виж doPrint() в core.js. */
+#ppSheet{background:#fff; box-shadow:0 2px 14px rgba(0,0,0,.25); box-sizing:border-box; flex:0 0 auto; color:#1B1813}
+.ppFoot{display:flex; align-items:center; gap:10px; padding:12px 16px; border-top:1px solid var(--rule)}
+.ppFoot .hint{flex:1; margin:0}
+
 @media print{
   body *{visibility:hidden}
   #printArea, #printArea *{visibility:visible}

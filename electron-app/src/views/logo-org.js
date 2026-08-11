@@ -54,6 +54,15 @@ async function printCardsAll() {
   printLabelSheet(rows.map(readerCardHtml).join(''), 'card');
 }
 window.printCardsAll = printCardsAll;
+/* Карта само за ЕДИН читател (v1.71.0) — бутон „Карта“ на реда в списъка
+   Читатели. Дотогава картите се печатаха единствено всичките наведнъж, а
+   на практика нова карта трябва най-често на един новозаписан читател. */
+async function printCardOne(id) {
+  const r = await call(window.api.readers.get(id));
+  if (!r) return;
+  printLabelSheet(readerCardHtml(r), 'card');
+}
+window.printCardOne = printCardOne;
 async function printReaderCard(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;

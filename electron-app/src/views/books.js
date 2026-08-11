@@ -48,8 +48,7 @@ function booksRowsHtml(shown) {
       <td class="num">${esc(b.year || '')}</td>
       <td><span class="badge ${b.status === 'наличен' ? 'ok' : 'warn'}">${esc(b.status || '')}</span></td>
       <td><span class="badge ${b.available > 0 ? 'ok' : 'warn'}">${b.available}/${b.quantity}</span></td>
-      <td><button class="btn sm" onclick="bookForm(${b.id})">Редакция</button>
-          <button class="btn sm dgr" onclick="deleteBook(${b.id})">Изтрий</button></td>
+      <td><button class="btn sm dgr" onclick="deleteBook(${b.id})">Изтрий</button></td>
     </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`;
 }
 function booksMoreHtml(more, total) {
@@ -93,6 +92,9 @@ async function renderBooks() {
   const deptSeen = [...new Set(books.map(b => b.department).filter(Boolean))];
   const deptOpts = [...new Set([...OTDELI, ...deptSeen])];
   $('#view').innerHTML = `
+    <div class="note">Редакцията на вече вписан документ става от раздел <b>„Инвентарна книга“</b> —
+    с изрично потвърждение, защото тя е официалният регистър на фонда (v1.71.0). Тук остават
+    търсенето, филтрите, груповата редакция и добавянето на нови документи.</div>
     <div class="toolbar">
       <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
       <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
@@ -117,7 +119,7 @@ async function renderBooks() {
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
         ${filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
-        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:160px"></th></tr></thead>
+        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:90px"></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, filtered.length)}</div>

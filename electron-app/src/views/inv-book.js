@@ -56,7 +56,7 @@ async function renderInvBook() {
     </div>
     <div class="wrap"><table class="ledger ibTable">
       <thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
-        <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th></tr></thead>
+        <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th style="width:90px"></th></tr></thead>
       <tbody id="ibBody"></tbody>
     </table></div>
     <div class="toolbar" id="ibMore" style="justify-content:center"></div>`;
@@ -71,10 +71,10 @@ async function renderInvBook() {
 }
 let INVBOOK_QUERY = '';
 function invBookRowsHtml(rows) {
-  if (!rows.length) return `<tr><td colspan="10" class="empty">Инвентарната книга е празна.</td></tr>`;
+  if (!rows.length) return `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`;
   return rows.map(r => {
     const off = r.status === 'отчислен';
-    return `<tr class="${off ? 'ibOff' : ''}">
+    return `<tr class="${off ? 'ibOff' : ''}" data-id="${r.id}">
       <td class="num">${bg(r.register_date)}</td>
       <td class="num"><b>${r.inv_number ?? ''}</b></td>
       <td style="font-size:11px">${(r.checks || []).map(c => `<span class="badge ok" style="font-size:10px">${bg(c)}</span>`).join(' ')}</td>
@@ -84,9 +84,27 @@ function invBookRowsHtml(rows) {
       <td class="num">${esc(r.call_number || '')}</td>
       <td class="num" style="font-size:11px">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>
       <td>${off ? '<span class="badge warn">отчислен</span>' : '<span class="badge ok">наличен</span>'}</td>
+      <td><button class="btn sm" onclick="invBookEdit(${r.id})">Редакция</button></td>
     </tr>`;
   }).join('');
 }
+/* Редакция на запис — САМО оттук (v1.71.0, по изрично искане): инвентарната
+   книга е официалният регистър на фонда по Наредба № 3, затова преди
+   отваряне на формата се иска изрично потвърждение. Списъкът „Книги“ вече
+   няма бутон „Редакция“ на ред — там остават търсене/филтри/групова
+   редакция/нов документ. */
+function invBookEdit(id) {
+  const r = (window._INVBOOK_ROWS || []).find(x => x.id === id) || {};
+  const what = [r.author, r.title].filter(Boolean).join('. ') || 'този запис';
+  if (!confirm('РЕДАКЦИЯ НА ЗАПИС В ИНВЕНТАРНАТА КНИГА\n\n'
+    + '„' + what + '“ (инв. № ' + (r.inv_number ?? '—') + ')\n\n'
+    + 'Инвентарната книга е официалният регистър на библиотечния фонд по '
+    + 'Наредба № 3 — тя се съхранява безсрочно и промените в записа важат '
+    + 'веднага навсякъде в програмата и в онлайн каталога.\n\n'
+    + 'Да продължа ли към редакция?')) return;
+  bookForm(id);
+}
+window.invBookEdit = invBookEdit;
 /* Редовете, които отговарят на текущото търсене (без ограничението за рендер). */
 function invBookMatches() {
   const t = INVBOOK_QUERY.trim().toLowerCase();
@@ -107,8 +125,8 @@ function paintInvBookRows() {
   if (body) {
     body.innerHTML = rows.length ? invBookRowsHtml(shown)
       : (INVBOOK_QUERY.trim()
-        ? `<tr><td colspan="10" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
-        : `<tr><td colspan="10" class="empty">Инвентарната книга е празна.</td></tr>`);
+        ? `<tr><td colspan="11" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
+        : `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`);
   }
   const bar = $('#ibMore');
   if (bar) {

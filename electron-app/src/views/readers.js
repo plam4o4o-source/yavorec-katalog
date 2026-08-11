@@ -21,6 +21,7 @@ function readersRowsHtml(shown) {
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
       <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
           <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
+          <button class="btn sm" onclick="printCardOne(${r.id})" title="Печат на читателската карта само на този читател">Карта</button>
           <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
           <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
     : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`;
@@ -63,7 +64,7 @@ async function renderReaders() {
       <button class="btn" onclick="exportReadersCsv()">Износ CSV</button>
     </div>
     <div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:290px"></th></tr></thead>
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:345px"></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
