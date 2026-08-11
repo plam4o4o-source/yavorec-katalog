@@ -11,6 +11,57 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.71.0
+
+**BG:** Преглед преди печат за всички документи + печат на карта за отделен
+читател + редакция на книга само от Инвентарната книга, с изрично
+потвърждение.
+
+**Преглед преди печат — навсякъде.** Системният печатен диалог на Windows не
+може да визуализира съдържанието на Electron прозорец — панелът за преглед
+показваше „Това приложение не поддържа визуализация на печата“ и
+библиотекарят натискаше „Печат“ на сляпо, без да вижда какво излиза. Сега
+всеки бутон „Печат“ първо показва документа НА ЕКРАНА: бял „лист“ с точния
+размер и полета на страницата (A4, пейзаж или размера на ролковия етикет),
+заглавната част, таблиците и подписите — и чак след изричното „Печат…“
+се отваря системният диалог. „Отказ“ или Esc затварят прегледа без печат.
+Важи за всички ~14 печатни документа: инвентарна книга, протоколи, актове,
+картони, напомнителни писма, разписки, квитанции, летопис, персоналии,
+аналитично описание, баркод етикети, етикети за сигнатура и читателски
+карти.
+
+**Карта за отделен читател.** Досега читателските карти се печатаха
+единствено всичките наведнъж, а на практика нова карта трябва най-често на
+един новозаписан читател. В списъка „Читатели“ на всеки ред има нов бутон
+„Карта“ — печата (с преглед) картата само на този читател.
+
+**Редакция на книга — само от „Инвентарна книга“, с изрично потвърждение.**
+По изрично искане: списъкът „Книги“ вече няма бутон „Редакция“ на ред — там
+остават търсенето, филтрите, груповата редакция и добавянето на нови
+документи. Редакцията на вече вписан документ става от раздел „Инвентарна
+книга“ (нов бутон „Редакция“ на всеки ред), където преди отваряне на
+формата се показва изрично съобщение, назоваващо конкретния запис и
+напомнящо, че инвентарната книга е официалният регистър на фонда по
+Наредба № 3 — формата се отваря само след потвърждение.
+
+**EN:** Print preview everywhere + single reader card printing + book
+editing restricted to the Inventory book with an explicit confirmation.
+
+Windows' system print dialog cannot render Electron windows ("This app
+doesn't support print preview"), so the librarian printed blind. Every
+print button now first shows the document ON SCREEN — a white "sheet" with
+the exact page size and margins — and the system dialog opens only after an
+explicit "Print…". Applies to all ~14 printable documents including labels
+and reader cards. The Readers list gains a per-row "Карта" button printing
+just that reader's card. Book row editing moved from the Books list to the
+Inventory book, guarded by an explicit confirmation naming the exact record
+(the inventory book is the official fund register under Наредба № 3);
+search, filters, bulk edit and new-book creation stay in Books.
+
+**531 теста, 0 провалени / 531 tests, 0 failed**, под/under `TZ=UTC` и
+`TZ=Europe/Sofia` (8 нови теста, всичките проверени да падат срещу стария
+код преди промяната).
+
 ## v1.70.1
 
 **BG:** Поправка на печата на баркод етикети и читателски карти при ролков

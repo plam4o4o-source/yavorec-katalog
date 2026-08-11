@@ -192,7 +192,9 @@ window.closeModal2 = closeModal2;
 const veilOpen = (sel) => { const v = $(sel); return v.classList.contains('on') && !v.classList.contains('closing'); };
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (veilOpen('#veil2')) closeModal2();
+  const pp = $('#printPreview');
+  if (pp && pp.classList.contains('on')) ppClose(); // прегледът преди печат е най-отгоре (v1.71.0)
+  else if (veilOpen('#veil2')) closeModal2();
   else if (veilOpen('#veil')) closeModal();
 });
 
@@ -498,9 +500,11 @@ function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</di
 // setPrintPage непосредствено преди doPrint. Така не се променят дванайсетте
 // извиквания на doPrint, всяко от които е дълъг вложен шаблон.
 let PRINT_DOC_NAME = '';
+let PRINT_PAGE_OPTS = {}; // пази последните opts за прегледа преди печат (v1.71.0)
 function setPrintPage(opts) {
   opts = opts || {};
   PRINT_DOC_NAME = opts.name || '';
+  PRINT_PAGE_OPTS = opts;
   let st = document.getElementById('dynPrintStyle');
   if (!st) { st = document.createElement('style'); st.id = 'dynPrintStyle'; document.head.appendChild(st); }
   const size = opts.widthMm ? opts.widthMm + 'mm ' + opts.heightMm + 'mm' : 'A4' + (opts.landscape ? ' landscape' : '');
@@ -521,19 +525,53 @@ function safeFileName(name) {
     .slice(0, 120)
     .trim();
 }
+/* ---------- Преглед преди печат (v1.71.0) ----------
+   Системният печатен диалог на Windows НЕ визуализира съдържанието на
+   Electron прозорец — панелът за преглед показва „Това приложение не
+   поддържа визуализация на печата“. Затова doPrint() вече първо показва
+   документа на екрана в #printPreview (бял „лист“ с размера и полетата от
+   setPrintPage), а window.print() се вика чак при натискане на „Печат…“.
+   Всички печатни пътища минават през doPrint(), така прегледът важи
+   навсякъде: протоколи, актове, картони, разписки, етикети, карти. */
+let PRINT_JOB_NAME = '';
+/* Ограничава extraCss от setPrintPage() до листа на прегледа — иначе
+   .lbl/.lblsheet правилата биха застигнали и примерните етикети, показани
+   на екрана в раздел „Баркод етикети“. Форматът на extraCss е наш собствен
+   генериран низ (селектор{...}селектор{...}), без вложени скоби. */
+function ppScopeCss(css) {
+  return String(css || '').replace(/(^|\})\s*([.#\w])/g, '$1 #ppSheet $2');
+}
 function doPrint(html, docName) {
   $('#printArea').innerHTML = html;
-  const name = safeFileName(docName || PRINT_DOC_NAME);
-  if (name) document.title = name;
-  toast(name
-    ? `За PDF файл изберете „Save as PDF“ / „Microsoft Print to PDF“ — файлът ще се казва „${name}“.`
-    : 'За PDF файл: в прозореца за печат изберете „Save as PDF“ / „Microsoft Print to PDF“ вместо принтер.');
+  PRINT_JOB_NAME = safeFileName(docName || PRINT_DOC_NAME);
+  const o = PRINT_PAGE_OPTS || {};
+  const sheet = $('#ppSheet');
+  // Размер и полета на листа — същите, които @page ще наложи при печата.
+  sheet.style.width = (o.widthMm || (o.landscape ? 297 : 210)) + 'mm';
+  sheet.style.minHeight = (o.heightMm || (o.landscape ? 210 : 297)) + 'mm';
+  sheet.style.padding = o.margin || '14mm 12mm';
+  let st = document.getElementById('ppExtraStyle');
+  if (!st) { st = document.createElement('style'); st.id = 'ppExtraStyle'; document.head.appendChild(st); }
+  st.textContent = ppScopeCss(o.extraCss || '');
+  sheet.innerHTML = html;
+  $('#ppTitle').textContent = PRINT_JOB_NAME || 'Преглед преди печат';
+  $('#ppHint').textContent = PRINT_JOB_NAME
+    ? `За PDF: в прозореца за печат изберете „Microsoft Print to PDF“ — файлът ще се казва „${PRINT_JOB_NAME}“.`
+    : 'За PDF: в прозореца за печат изберете „Microsoft Print to PDF“ вместо принтер.';
+  $('#printPreview').classList.add('on');
+}
+function ppClose() { $('#printPreview').classList.remove('on'); }
+window.ppClose = ppClose;
+function ppPrint() {
+  ppClose();
+  if (PRINT_JOB_NAME) document.title = PRINT_JOB_NAME;
   requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
     window.print();
     // Връща се след диалога; в Electron window.print() блокира до затварянето му.
     document.title = APP_TITLE;
   }, 150)));
 }
+window.ppPrint = ppPrint;
 /* Размерите на трите вида етикети се задават в „Баркод етикети“ → „Формат на печат“.
    kind избира кой размер важи: 'fund' — етикет за фонда, 'sig' — етикет за сигнатура
    (гръбче), 'card' — читателска карта. */

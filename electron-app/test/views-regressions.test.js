@@ -642,3 +642,165 @@ test('лентите „Покажи още“ са празни, а не лип
   assert.ok(bar, 'контейнерът трябва да съществува, за да може „Покажи още“ да се появи по-късно');
   assert.equal(bar.innerHTML.trim(), '', 'при 10 реда няма какво да се показва още');
 });
+
+/* --- Преглед преди печат (v1.71.0) ---
+   Системният печатен диалог на Windows не визуализира Electron прозорци
+   („Това приложение не поддържа визуализация на печата“) — библиотекарят
+   натискаше „Печат“ на сляпо. doPrint() вече показва документа на екрана
+   (#printPreview) и вика window.print() чак след изричното „Печат…“. */
+
+test('doPrint() показва преглед на екрана и НЕ вика window.print() преди потвърждение', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  let printed = 0;
+  window.print = () => printed++;
+
+  window.setPrintPage({ name: 'Тестов документ', landscape: false, margin: '14mm 12mm' });
+  window.doPrint('<div class="pdoc"><h2>ТЕСТОВ ДОКУМЕНТ</h2></div>');
+
+  const pp = window.document.getElementById('printPreview');
+  assert.ok(pp.classList.contains('on'), 'прегледът трябва да се отвори');
+  assert.match(window.document.getElementById('ppSheet').innerHTML, /ТЕСТОВ ДОКУМЕНТ/);
+  assert.equal(window.document.getElementById('ppTitle').textContent, 'Тестов документ');
+  assert.equal(printed, 0, 'window.print() не бива да тръгва преди бутона „Печат…“');
+  // Листът на прегледа взима размера на страницата от setPrintPage.
+  assert.equal(window.document.getElementById('ppSheet').style.width, '210mm');
+});
+
+test('бутонът „Печат…“ в прегледа затваря слоя, вика window.print() и връща заглавието на прозореца', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  const appTitle = window.document.title;
+  let printed = 0;
+  window.print = () => {
+    printed++;
+    assert.equal(window.document.title, 'Разписка проба', 'по време на печат заглавието е името на документа (име на PDF файла)');
+  };
+
+  window.setPrintPage({ name: 'Разписка проба', landscape: false, margin: '10mm' });
+  window.doPrint('<div class="pdoc">съдържание</div>');
+  window.ppPrint();
+
+  assert.ok(!window.document.getElementById('printPreview').classList.contains('on'),
+    'прегледът се затваря преди отварянето на системния диалог');
+  await new Promise(r => setTimeout(r, 450)); // двоен rAF + 150 ms в ppPrint()
+  assert.equal(printed, 1, 'window.print() трябва да се извика точно веднъж');
+  assert.equal(window.document.title, appTitle, 'след печата заглавието се връща');
+});
+
+test('„Отказ“/Esc затварят прегледа, без изобщо да се стига до печат', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  let printed = 0;
+  window.print = () => printed++;
+
+  window.setPrintPage({ name: 'Документ', margin: '10mm' });
+  window.doPrint('<div class="pdoc">x</div>');
+  window.ppClose();
+  assert.ok(!window.document.getElementById('printPreview').classList.contains('on'));
+
+  window.doPrint('<div class="pdoc">y</div>');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.ok(!window.document.getElementById('printPreview').classList.contains('on'), 'Esc затваря прегледа');
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(printed, 0);
+});
+
+test('extraCss от setPrintPage важи в прегледа, но ограничен до листа (#ppSheet), не за примерите на екрана', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  window.print = () => {};
+
+  window.setPrintPage({ name: 'Етикети', widthMm: 20, heightMm: 10, margin: '0mm',
+    extraCss: '.lblsheet{display:block}.lbl{width:20mm;height:10mm}' });
+  window.doPrint('<div class="pdoc"><div class="lblsheet"><div class="lbl">A</div></div></div>');
+
+  const st = window.document.getElementById('ppExtraStyle').textContent;
+  assert.match(st, /#ppSheet \.lblsheet\{/, 'правилата трябва да са с префикс #ppSheet');
+  assert.match(st, /#ppSheet \.lbl\{/);
+  assert.doesNotMatch(st, /(^|\})\s*\.lbl\{/, 'не бива да остава неограничено .lbl правило');
+  const sheet = window.document.getElementById('ppSheet');
+  assert.equal(sheet.style.width, '20mm', 'листът взима точния размер на ролката');
+  assert.equal(sheet.style.minHeight, '10mm');
+});
+
+/* --- Карта за отделен читател (v1.71.0) --- */
+
+test('printCardOne() печата карта САМО за посочения читател (бутонът „Карта“ на реда)', async () => {
+  const dom = buildDom({
+    'readers.get': { id: 9, name: 'Георгиева, Мария', card_no: 'B00108', category: 'възрастен',
+      registered_at: '2026-01-10', status: 'активен' },
+    'settings.get': { lib_name: 'Библиотека', place: 'Село', card_w: 90, card_h: 60 }
+  });
+  const { window } = dom;
+  await settled(dom);
+  const printed = [];
+  window.doPrint = (html) => printed.push(html);
+
+  await window.printCardOne(9);
+
+  assert.equal(printed.length, 1);
+  assert.match(printed[0], /Георгиева, Мария/);
+  const cards = (printed[0].match(/class="lbl rcard"/g) || []).length;
+  assert.equal(cards, 1, 'точно една карта — не всички');
+});
+
+test('списъкът Читатели има бутон „Карта“ на всеки ред', async () => {
+  const dom = buildDom({
+    'readers.list': [{ id: 3, name: 'Иванов, Иван', card_no: 'B00001', category: 'възрастен', status: 'активен' }]
+  });
+  const { window } = dom;
+  await settled(dom);
+  await window.renderReaders();
+  const btn = window.document.querySelector('#rBody button[onclick="printCardOne(3)"]');
+  assert.ok(btn, 'редът трябва да предлага печат на картата на конкретния читател');
+});
+
+/* --- Редакция на книга — само от Инвентарна книга, с изрично потвърждение (v1.71.0) --- */
+
+test('списъкът Книги вече НЯМА бутон „Редакция“ на ред (редакцията е в Инвентарна книга)', async () => {
+  const dom = buildDom({
+    'books.list': [{ id: 5, inv_number: 5, title: 'Книга', status: 'наличен', quantity: 1, available: 1 }]
+  });
+  const { window } = dom;
+  await settled(dom);
+  await window.renderBooks();
+  const rows = window.document.getElementById('bBody').innerHTML;
+  assert.doesNotMatch(rows, /bookForm\(\d/, 'редовете не бива да отварят формата за редакция');
+  assert.match(rows, /deleteBook\(5\)/, 'изтриването остава на реда');
+  // „+ Нова книга“ (без id) остава в лентата.
+  assert.ok(window.document.querySelector('#view button[onclick="bookForm()"]'), 'добавянето на нова книга остава');
+});
+
+test('Инвентарна книга: „Редакция“ иска изрично потвърждение и отваря формата само при съгласие', async () => {
+  const dom = buildDom({
+    'invBook.list': [{ id: 7, inv_number: 7, author: 'Вазов', title: 'Под игото', status: 'наличен',
+      register_date: '2026-01-05', price: 12, checks: [] }],
+    'books.get': { id: 7, inv_number: 7, title: 'Под игото', author: 'Вазов', status: 'наличен' }
+  });
+  const { window } = dom;
+  await settled(dom);
+  await window.renderInvBook();
+
+  const btn = window.document.querySelector('#ibBody button[onclick="invBookEdit(7)"]');
+  assert.ok(btn, 'редът в инвентарната книга трябва да има бутон „Редакция“');
+
+  // Отказ — формата не се отваря.
+  let asked = '';
+  window.confirm = (msg) => { asked = msg; return false; };
+  window.invBookEdit(7);
+  assert.match(asked, /ИНВЕНТАРНАТА КНИГА/, 'съобщението назовава изрично инвентарната книга');
+  assert.match(asked, /Под игото/, 'съобщението назовава конкретния запис');
+  assert.ok(!window.document.querySelector('#veil').classList.contains('on'), 'при отказ формата не се отваря');
+
+  // Съгласие — формата се отваря.
+  window.confirm = () => true;
+  window.invBookEdit(7);
+  await new Promise(r => setTimeout(r, 30));
+  assert.ok(window.document.querySelector('#veil').classList.contains('on'), 'при съгласие се отваря формата за редакция');
+  assert.ok(window.document.querySelector('#bookF'), 'отворена е именно формата за книга');
+});
