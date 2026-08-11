@@ -8,7 +8,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, ftsQuery,
     maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit,
-    dialog, getMainWindow, fs, csvCell
+    dialog, getMainWindow, fs, csvCell, normalizeScanCode
   } = deps;
 
   const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
@@ -51,7 +51,12 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('readers:get', (e, id) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id))));
-  ipcMain.handle('readers:byCard', (e, card) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE card_no = ?').get(card))));
+  // normalizeScanCode() (v1.70.1, security-utils.js): баркод четецът въвежда
+  // текста буква по буква като клавиатура, а активна кирилска (фонетична)
+  // разредба на Windows превръща букви от Code 39 картата (напр. B) в
+  // кирилски еквивалент (Б) — картата не се намираше, макар да е сканирана
+  // правилно. Виж и books:byBarcode за същия дефект/поправка.
+  ipcMain.handle('readers:byCard', (e, card) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE card_no = ?').get(normalizeScanCode(card)))));
   ipcMain.handle('readers:create', (e, r) =>
     run(() => {
       const db = getDb();

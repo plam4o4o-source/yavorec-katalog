@@ -13,7 +13,7 @@
 //   - scheduleCatalogWrite() — насрочва (debounced) запис на katalog.json,
 //     за да се отрази промяната при следващото автоматично публикуване
 module.exports = function registerShelvesHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, scheduleCatalogWrite } = deps;
+  const { getDb, run, logAudit, scheduleCatalogWrite, normalizeScanCode } = deps;
 
   ipcMain.handle('shelves:list', () =>
     run(() => getDb().prepare(`
@@ -57,10 +57,13 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
   // подробното обяснение (v1.25.0): така SQLite може да ползва idx_books_barcode
   // и уникалния индекс на inv_number едновременно (MULTI-INDEX OR), вместо да
   // прибегне до пълно сканиране на фонда.
+  // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
+  // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
     run(() => {
+      const c = normalizeScanCode(code);
       const b = getDb().prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)')
-        .get(code, code);
+        .get(c, c);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
       if (b.department === 'служебен') throw new Error('Служебните документи не се публикуват в каталога.');

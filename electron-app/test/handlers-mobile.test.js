@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerMobileHandlers = require('../handlers/mobile');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -39,7 +40,7 @@ function setup() {
       showSaveDialog: async () => savedDialogs.saveDialog || { canceled: false, filePath: path.join(dir, 'out.html') }
     },
     getMainWindow: () => ({}),
-    fs, path
+    fs, path, normalizeScanCode
   };
   registerMobileHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, dir, savedDialogs };

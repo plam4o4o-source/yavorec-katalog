@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerDeaccessionActsHandlers = require('../handlers/deaccession-acts');
+const { normalizeScanCode } = require('../security-utils');
 
 const BOOK_SELECT = `
   SELECT b.*, c.name AS category_name
@@ -44,7 +45,8 @@ function setup() {
     logAudit: (action, detail) => auditLog.push({ action, detail }),
     BOOK_SELECT,
     yearOf: (d) => (d || '2026-08-02').slice(0, 4),
-    scheduleCatalogWrite: () => scheduleCalls.push(true)
+    scheduleCatalogWrite: () => scheduleCalls.push(true),
+    normalizeScanCode
   };
   registerDeaccessionActsHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, scheduleCalls };

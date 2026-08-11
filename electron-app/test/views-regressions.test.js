@@ -349,6 +349,86 @@ test('printAnalytics() отпечатва аналитичните описан�
   assert.match(printed[0], /Местен вестник/);
 });
 
+/* --- Раздел „Баркод етикети“: невалиден (отрицателен) размер на етикета при
+   ролков печат. printLabelSheet() изваждаше lbl_margin ДВА пъти от размера на
+   самия етикет (веднъж чрез @page margin, веднъж от .lbl width/height) — за
+   малък етикет от ролка (напр. 20×10 мм) с подразбиращото се поле от 8 мм
+   резултатът беше `height:-6mm`, невалидна CSS стойност, която браузърът тихо
+   пренебрегва вместо да покаже грешка; етикетът излизаше празен или раздут
+   при печат. Полето „Поле на листа“ важи само за A4 (виж else клона по-долу
+   и hint-а в barcode-labels.js) — ролковите принтери сами калибрират
+   собствения си печатаем участък. */
+
+test('printLabelsAll() при ролков печат не изважда полето от размера на етикета (не се получава отрицателна CSS стойност)', async () => {
+  const dom = buildDom({
+    'settings.get': {
+      org: 'Читалище', lib_name: 'Библиотека', place: 'Село',
+      lbl_mode: 'roll', lbl_w: 20, lbl_h: 10, lbl_margin: 8
+    },
+    'books.list': [{ id: 1, inv_number: 1, barcode: '1', title: 'Кн1', status: 'наличен' }]
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  window.doPrint = (html) => { window._printedHtml = html; };
+
+  await window.printLabelsAll();
+
+  const st = window.document.getElementById('dynPrintStyle');
+  assert.ok(st, 'динамичният стил за печат трябва да съществува');
+  const css = st.textContent;
+  assert.doesNotMatch(css, /-\d+mm/, 'няма отрицателна CSS стойност в мм в стила за печат');
+  assert.match(css, /\.lbl\{width:20mm;height:10mm/,
+    'етикетът трябва да заема пълния зададен размер (20×10 мм), не размера минус полето');
+  assert.match(css, /@page\{size:20mm 10mm;margin:0mm\}/,
+    '@page margin трябва да е 0 при ролков печат — полето не важи там');
+});
+
+test('printLabelsAll() при печат на A4 лист НЕ изважда полето от размера на етикета (само ролковият печат имаше този дефект)', async () => {
+  const dom = buildDom({
+    'settings.get': {
+      org: 'Читалище', lib_name: 'Библиотека', place: 'Село',
+      lbl_mode: 'sheet', lbl_w: 40, lbl_h: 30, lbl_margin: 8, lbl_cols: 3, lbl_gap: 3
+    },
+    'books.list': [{ id: 1, inv_number: 1, barcode: '1', title: 'Кн1', status: 'наличен' }]
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  window.doPrint = (html) => { window._printedHtml = html; };
+
+  await window.printLabelsAll();
+
+  const css = window.document.getElementById('dynPrintStyle').textContent;
+  assert.match(css, /\.lbl\{width:40mm;height:30mm/, 'A4 режимът вече беше правилен — размерът на етикета не се пипа тук');
+});
+
+// Читателските карти минават през СЪЩАТА printLabelSheet()/labelSize('card') функция
+// и СПОДЕЛЯТ настройката lbl_mode с баркод етикетите за фонда — библиотека, която е
+// избрала „Ролков лейбъл принтер“ заради книжните етикети, автоматично печата и
+// читателските карти в ролков режим. Затова същият дефект правеше стандартната
+// карта 90×60 мм по-малка (74×44 мм при подразбиращото се поле от 8 мм).
+test('printCardsAll() при ролков печат дава читателска карта с точния зададен размер (90×60 мм), не размера минус полето', async () => {
+  const dom = buildDom({
+    'settings.get': {
+      org: 'Читалище', lib_name: 'Библиотека', place: 'Село',
+      lbl_mode: 'roll', card_w: 90, card_h: 60, lbl_margin: 8
+    },
+    'readers.list': [{ id: 1, name: 'Иванова, Мария', card_no: '000123', category: 'възрастен', status: 'активен' }]
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  window.doPrint = (html) => { window._printedHtml = html; };
+
+  await window.printCardsAll();
+
+  const css = window.document.getElementById('dynPrintStyle').textContent;
+  assert.doesNotMatch(css, /-\d+mm/, 'няма отрицателна CSS стойност в мм в стила за печат');
+  assert.match(css, /\.lbl\{width:90mm;height:60mm/,
+    'читателската карта трябва да е точно 90×60 мм, не 74×44 мм (90/60 минус 2×8 мм поле)');
+});
+
 // Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
 // правило за `.grid`. Затова, ако класът бъде преименуван/премахнат от
 // style.css, докато разметката още го ползва, редът тихо се разпада на

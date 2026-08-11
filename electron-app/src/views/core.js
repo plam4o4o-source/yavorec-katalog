@@ -553,11 +553,18 @@ function printLabelSheet(cardsHtml, kind) {
   const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
   const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
   if (s.lbl_mode === 'roll') {
-    // Един етикет на страница с точния размер на ролката.
+    // Един етикет на страница с точния размер на ролката. „Поле на листа“ важи
+    // само за A4 (виж else по-долу) — тук НЕ се изважда от размера на етикета:
+    // ролковите принтери сами калибрират собствения си печатаем участък, а
+    // изваждане на полето от малък етикет (напр. 20×10 мм при поле 8 мм) даваше
+    // отрицателна височина — невалидна CSS стойност, която браузърът тихо
+    // пренебрегва, вместо да покаже грешка, и етикетът излизаше празен/раздут
+    // при печат (открито при преглед на „Раздел баркодове — визуален печат“).
+    // @page margin:0 — етикетът запълва цялата зададена площ на ролката.
     setPrintPage({
-      name: docName, widthMm: w, heightMm: h, margin: marg + 'mm',
+      name: docName, widthMm: w, heightMm: h, margin: '0mm',
       extraCss: `.lblsheet{display:block}` +
-        `.lbl{width:${w - 2 * marg}mm;height:${h - 2 * marg}mm;box-sizing:border-box;border:none;` +
+        `.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:none;` +
         `page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center}`
     });
   } else {

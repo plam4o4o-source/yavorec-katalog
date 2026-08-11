@@ -24,4 +24,31 @@ function isValidEmail(email) {
   return EMAIL_RE.test(String(email == null ? '' : email).trim());
 }
 
-module.exports = { csvCell, isValidEmail };
+// Кирилски буквени клавиши от стандартната Windows разредба „Български
+// (фонетичен)“ → латинската буква на СЪЩИЯ физически клавиш (v1.70.1).
+// Баркод четците се държат като физическа клавиатура и изпращат кода буква по
+// буква, без да знаят коя разредба е активна в момента в Windows. Баркодовете
+// тук са Code 39 (виж code39svg() в src/views/core.js) — азбуката му е само
+// 0-9, A-Z и няколко символа, НИКОГА кирилица — затова щом библиотеката е
+// активна с фонетичната кирилска разредба, "B00108" от четеца пристига като
+// "Б00108" в полето: същият клавиш B, но операционната система го превежда
+// през активната разредба, не през тази, за която е калибриран четецът.
+// Открито на живо: читателска карта с код „B00108“ не се намираше при
+// сканиране, защото стигаше до readers:byCard като „Б00108“.
+const CYR_TO_LAT_SCAN = {
+  'Я': 'Q', 'В': 'W', 'Е': 'E', 'Р': 'R', 'Т': 'T', 'Ъ': 'Y', 'У': 'U', 'И': 'I', 'О': 'O', 'П': 'P',
+  'А': 'A', 'С': 'S', 'Д': 'D', 'Ф': 'F', 'Г': 'G', 'Х': 'H', 'Й': 'J', 'К': 'K', 'Л': 'L',
+  'З': 'Z', 'Ь': 'X', 'Ц': 'C', 'Ж': 'V', 'Б': 'B', 'Н': 'N', 'М': 'M'
+};
+// Малки кирилски букви — за да не се чупи баркод, сканиран докато Caps Lock е
+// изключен (Windows превежда клавиша, не регистъра сам по себе си).
+const CYR_TO_LAT_SCAN_LOWER = Object.fromEntries(
+  Object.entries(CYR_TO_LAT_SCAN).map(([cy, la]) => [cy.toLowerCase(), la.toLowerCase()])
+);
+function normalizeScanCode(code) {
+  let s = String(code == null ? '' : code).trim();
+  s = s.replace(/[А-Яа-я]/g, ch => CYR_TO_LAT_SCAN[ch] || CYR_TO_LAT_SCAN_LOWER[ch] || ch);
+  return s;
+}
+
+module.exports = { csvCell, isValidEmail, normalizeScanCode };
