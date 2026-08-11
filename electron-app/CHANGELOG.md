@@ -11,6 +11,33 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.71.1
+
+**BG:** Заглавна част на баркод етикета за фонда — три реда.
+
+По изрично искане етикетът за фонд вече показва заглавната част на три
+реда: „Библиотека при“ (фиксиран свързващ текст), после организацията
+(напр. читалището) от „Настройки“ → „Организация“, после населеното място
+от „Населено място“. Само свързващият текст е вграден в кода — самата
+организация и мястото си остават изцяло настройваеми, така че етикетът
+важи за коя да е библиотека, не само за тази, за която е поискана тази
+подредба. Ако „Организация“ не е попълнена (самостоятелна библиотека извън
+читалищна структура), етикетът пада се към предишното едноредово
+наименование от „Наименование на библиотеката“, както досега.
+
+**EN:** Fund barcode label header — three lines.
+
+Per explicit request, the fund label header now prints three lines: the
+fixed connector text "Библиотека при" ("Library at"), then the
+organisation (e.g. the reading-community chitalishte) from Settings →
+"Организация", then the settlement from "Населено място". Only the
+connector text is hard-coded — the organisation and place remain fully
+settings-driven, so the label stays correct for any library using this
+software, not only the one that requested this layout. When "Организация"
+is empty (a standalone library outside a chitalishte), the label falls
+back to the previous single-line name from "Наименование на
+библиотеката", as before.
+
 ## v1.71.0
 
 **BG:** Преглед преди печат за всички документи + печат на карта за отделен
