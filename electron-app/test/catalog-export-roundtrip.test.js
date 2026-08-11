@@ -194,7 +194,8 @@ test('JSON каталог: записаният файл се разчита о�
   assert.deepEqual(parsed.items[1], { inv: 2, title: '=SUM(A1:A9)', author: 'Омир' });
 });
 
-test('CSV: BOM, 17 колони на всеки ред, кавички и формули оцеляват кръга', async () => {
+test('CSV: BOM, 18 колони на всеки ред, кавички и формули оцеляват кръга', async () => {
+  // v1.70.0: 17 → 18 колони — добавена „Поредица“ (books.series/series_no).
   const { exportTo } = setup();
   const raw = await exportTo('catalog:exportCsv', 'fond.csv');
 
@@ -203,10 +204,11 @@ test('CSV: BOM, 17 колони на всеки ред, кавички и фор
   assert.equal(lines.length, 4); // заглавен ред + 3 книги
 
   const header = lines[0].split(';');
-  assert.equal(header.length, 17);
+  assert.equal(header.length, 18);
+  assert.ok(header.includes('Поредица'));
   assert.equal(header[0], 'Инв. №');
   for (const line of lines.slice(1)) {
-    assert.equal(parseCsvLine(line).length, 17, 'ред с различен брой колони: ' + line);
+    assert.equal(parseCsvLine(line).length, 18, 'ред с различен брой колони: ' + line);
   }
 
   const r1 = parseCsvLine(lines[1]);

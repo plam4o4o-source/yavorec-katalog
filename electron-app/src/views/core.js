@@ -21,6 +21,15 @@ const bgn = (n) => (Number(n) || 0).toFixed(2);
 const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+/* Клавиатурна активация на кликаеми <div> карти (v1.70.0) — .prsCard/.chrItem
+   (Персоналии/Летопис) бяха обикновени <div onclick>, без tabindex и без
+   клавиатурен път за отваряне; вижте tabindex="0" role="button" на самите
+   карти в persons.js/chronicle.js. Enter и Интервал са стандартните клавиши
+   за активиране на елемент с role="button". */
+function cardActivate(e, fn) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
+}
+window.cardActivate = cardActivate;
 
 /* ---------------- Съобщения (toast) ----------------
    v1.69.0: по-големи и по-забележими. Грешките излизат ГОРЕ В ЦЕНТЪРА (там е
@@ -187,6 +196,20 @@ document.addEventListener('keydown', e => {
   else if (veilOpen('#veil')) closeModal();
 });
 
+/* Предпазител при Ctrl+P извън печатните екрани (v1.70.0) — #printArea е
+   празен, докато не мине през doPrint() (виж по-долу); печатната таблица
+   (@media print{body *{visibility:hidden}}) показва само нея. Без този
+   предпазител Ctrl+P на произволен екран (Табло, Книги, Настройки…) даваше
+   празна страница без никакво обяснение защо. window.print() тук НЕ се вика
+   директно — само предупреждава и връща потребителя към собствения бутон
+   „Печат“ на съответния раздел. */
+window.addEventListener('beforeprint', () => {
+  const pa = $('#printArea');
+  if (pa && !pa.innerHTML.trim()) {
+    toast('Тук няма подготвен документ за печат — ползвайте бутона „Печат“ в съответния раздел.', 'err');
+  }
+});
+
 /* ---------------- askText: заместител на window.prompt() ----------------
    Electron НЕ поддържа window.prompt() — извикването хвърля „prompt() is not
    supported.“ право в handler-а на бутона. Проверено с истинския Electron 43
@@ -286,7 +309,7 @@ function fld(label, name, opts) {
       const v = typeof o === 'object' ? o.v : o, t = typeof o === 'object' ? o.t : o;
       return `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(t)}</option>`;
     }).join('');
-    return `<div class="field"><label>${esc(label)}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
+    return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
       ${opts.allowEmpty !== false ? `<option value="">${esc(opts.emptyLabel || '—')}</option>` : ''}${options}</select></div>`;
   }
   if (opts.type === 'textarea') {
@@ -298,10 +321,41 @@ function fld(label, name, opts) {
   const type = opts.type || 'text';
   // opts.list свързва полето със списък за автодовършване (<datalist>) от вече
   // въведените стойности — контрол на авторитетните данни при въвеждане.
-  return `<div class="field"><label>${esc(label)}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
+  // opts.req (v1.70.0): освен HTML атрибута required, добавя и видима звездичка
+  // в етикета — преди това нямаше никакво визуално обозначение (виж
+  // firstMissingRequired() по-долу за защо самият required не стига).
+  return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
       ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''} value="${esc(val)}"></div>`;
 }
+
+/* ---------------- Проверка на задължителните полета преди запис ----------------
+   v1.70.0: атрибутът required не се проверява от браузъра, защото формите тук
+   не се предават по стандартния начин (onsubmit="return false", saveX() чете
+   стойностите директно през formData() и вика IPC) — затова се проверява ръчно
+   тук, вместо всяка saveX() да пази собствен списък кои полета са задължителни.
+   formSel е CSS селектор към <form> (или друг контейнер с полета в .field).
+   Връща етикета на първото празно задължително поле (за съобщение towards
+   потребителя), или null ако всичко е попълнено. */
+function firstMissingRequired(formSel) {
+  const root = $(formSel);
+  if (!root) return null;
+  const els = root.querySelectorAll('[required]');
+  for (const el of els) {
+    const empty = el.type === 'checkbox' ? !el.checked : !String(el.value ?? '').trim();
+    if (empty) return fieldLabelOf(el);
+  }
+  return null;
+}
+function fieldLabelOf(el) {
+  const wrap = el.closest('.field');
+  const lbl = wrap && wrap.querySelector('label');
+  if (!lbl) return el.name || 'Полето';
+  const clone = lbl.cloneNode(true);
+  clone.querySelectorAll('.fh,.req').forEach(n => n.remove());
+  return (clone.textContent || '').trim() || (el.name || 'Полето');
+}
+window.firstMissingRequired = firstMissingRequired;
 
 /* ---------------- Контрол на авторитетните данни ----------------
    Стойностите, вече въведени във фонда, се предлагат при писане. Така „Вазов, Иван“
@@ -327,7 +381,7 @@ function datalistsHtml(sug) {
     `</datalist>`;
   return one('author', sug.author || []) + one('publisher', sug.publisher || []) +
          one('city', sug.city || []) + one('keywords', sug.keywords || []) +
-         one('udk', udkAll);
+         one('series', sug.series || []) + one('udk', udkAll);
 }
 
 /* ---------------- Справочници ---------------- */

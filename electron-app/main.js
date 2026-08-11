@@ -221,6 +221,14 @@ function initDb() {
     cn_sort: 'TEXT'
   });
 
+  // v1.70.0 — поредица (за многотомни/номерирани издания); липсваше напълно
+  // (нито поле, нито таблица) — многотомните заглавия не можеха да се
+  // групират/издирват като поредица.
+  ensureColumns('books', {
+    series: 'TEXT',
+    series_no: 'TEXT'
+  });
+
   ensureColumns('readers', {
     gdpr_consent_date: 'TEXT',
     parent_consent_date: 'TEXT',
@@ -625,7 +633,8 @@ require('./handlers/kdbf')(ipcMain, { getDb: () => db, run, yearOf });
 /* ---------------- Читатели ---------------- */
 require('./handlers/readers')(ipcMain, {
   getDb: () => db, run, logAudit, today, ftsQuery,
-  maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit
+  maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit,
+  dialog, getMainWindow: () => mainWindow, fs, csvCell
 });
 
 /* ---------------- Читателска сметка (Koha: accountlines) ----------------

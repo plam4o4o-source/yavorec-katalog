@@ -31,7 +31,8 @@ async function renderChronicle() {
     ${rows.length ? yearsSorted.map(y => `
       <div class="chrYear">
         <div class="chrYearHead">${esc(y)}</div>
-        ${byYear[y].map(c => `<div class="chrItem" onclick="chronicleView(${c.id})">
+        ${byYear[y].map(c => `<div class="chrItem" tabindex="0" role="button" aria-label="${esc(c.title)}"
+          onclick="chronicleView(${c.id})" onkeydown="cardActivate(event, () => chronicleView(${c.id}))">
           ${c.photo ? `<img class="chrThumb" src="${esc(c.photo)}" alt="">` : ''}
           <div class="chrBody">
             <div class="chrTop">

@@ -11,6 +11,97 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.70.0
+
+**BG:** Голям пакет подобрения от задълбочен преглед на четири области —
+графика, функции, документи (защитата остава извън обхвата на тази версия,
+съзнателно оставена за отделен преглед).
+
+**Графика.** Класовете `.hint`/`.note`, ползвани из целите изгледи за
+подсказки и предупредителни рамки, никога не бяха имали базов стил извън
+модалните прозорци — сега имат постоянен вид навсякъде. Цветът `--ink3`
+(сив текст за дати и подсказки) не покриваше WCAG AA контраст (само
+~2.9–3.4:1 при изисквани 4.5:1) — потъмнен до ≥4.68:1 във всичките 6 теми,
+без да изглежда толкова тъмен, колкото основния текст. Текстовите инв. №/УДК
+кодове и датите в Персоналии/Летопис (`--brass` като цвят на текст) също не
+покриваха контраста в две от темите — минаха на вече съществуващата
+по-тъмна `--brassD`. Задължителните полета вече имат видима звездичка до
+етикета (не само невидимия HTML атрибут `required`, който програмата и без
+това не проверяваше — виж по-долу). Иконите на таблото минаха от емоджи на
+същите контурни SVG икони, които навигацията получи в v1.69.0 — еднакви на
+всяка версия на Windows, боядисани от цветовата тема. Картите в Персоналии и
+Летопис вече се активират и с клавиатура (Enter/Space), не само с мишка.
+Натискане на Ctrl+P извън раздел с подготвен печатен документ вече показва
+съобщение вместо празна страница.
+
+**Функции.** Поправена несъответстваща глоба при връщане: бутонът
+„Върни“ изобщо не пресмяташе и не пазеше глоба в базата (полето `fine`
+оставаше 0 дори при просрочие), а връщането чрез сканиране на баркод
+пресмяташе закъснението с голи календарни дни — различно от затворените
+дни (неделя, официални празници), изключени при пресмятането на
+наказанието-в-дни в СЪЩАТА функция. И двата пътя вече минават през една
+обща сметка. Книгите получиха ново поле „Поредица“ (+ № в поредицата) —
+за многотомни и номерирани издания; полето участва в автоматичното
+допълване, обединяването на дубликати и CSV износа на фонда. Списъците
+Книги и Читатели вече имат филтри (по отдел/категория за книгите, по
+категория/състояние за читателите) — филтрирането е изцяло на вече
+изтегления списък, без ново запитване към базата. Задължителните полета
+вече се проверяват реално преди запис (books, постъпления, актове за
+отчисляване, МЗС) чрез нова обща функция `firstMissingRequired()` — преди
+това по няколко форми проверяваха само 1-2 от действително задължителните
+полета, а останалите минаваха без грешка.
+
+**Документи.** Заемането вече има печатна разписка (бутон „Разписка“ след
+успешно сканиране при заемане) — досега единственият печатен документ в
+цялото заемане беше квитанцията за платен членски внос. Персоналии и
+Аналитично описание получиха бутон „Печат / PDF“ (Летопис вече имаше).
+Читателите вече могат да се изнесат в CSV („Износ CSV“ в раздел Читатели)
+— справочен документ без ЕГН/№ на лична карта (тези остават единствено
+зад защитата на личните данни, ако е зададена).
+
+**Извън обхвата на тази версия, съзнателно:** промените в раздела
+„Защита“ от прегледа (истинска автентикация с парола, криптиране на базата
+по подразбиране, криптирани резервни копия) — оставени за отделен преглед
+по изрично указание. Също така извън обхвата: бюджет/наличности по фондове,
+срокове/лимити на резервации, гратисен период при просрочие, интеграция със
+SMS/имейл шлюз за напомняния, обвързване на МЗС с активното заемане —
+всяко от тях е самостоятелна по-голяма подсистема, а някои изискват външна
+услуга.
+
+**EN:** Large improvement pass from a deep review across four areas —
+graphics, functions, documents (security stays out of scope for this
+release, deliberately deferred to a separate pass).
+
+Graphics: `.hint`/`.note` classes now have base styling everywhere, not just
+inside modals; `--ink3` and text-mode `--brass` now clear WCAG AA contrast
+in all 6 themes; required fields show a visible asterisk; Dashboard icons
+switched from emoji to the same SVG icon set as navigation; Персоналии/
+Летопис cards are keyboard-activatable; Ctrl+P outside a print-ready screen
+shows a message instead of a blank page.
+
+Functions: `loans:return` now computes and stores a fine (it silently never
+did before), and both return paths (button vs. barcode scan) now compute
+overdue days identically (closed-day-adjusted); books gained a "series"
+field; Books/Readers lists gained client-side filters (department/category,
+category/status) with no extra IPC round-trip; required-field validation is
+now real (`firstMissingRequired()`) across several forms that previously
+checked only 1-2 of their actually-required fields.
+
+Documents: loans now print a receipt slip; Персоналии and Аналитично
+описание gained a "Print / PDF" button (Летопис already had one); readers
+can now be exported to CSV (excluding EGN/ID-card numbers by design).
+
+Deliberately out of scope: the "Security" section of the review (real
+password authentication, database encryption by default, encrypted
+backups) — deferred per explicit instruction. Also deferred: budget/fund
+tracking, hold expiry/limits, overdue grace periods, SMS/email notification
+gateway integration, MZS-to-circulation linkage — each is its own larger
+subsystem, and some require an external service.
+
+**512 теста, 0 провалени / 512 tests, 0 failed**, под/under `TZ=UTC` и
+`TZ=Europe/Sofia` (18 нови теста спрямо v1.69.0, всичките проверени да
+падат срещу стария код преди поправката).
+
 ## v1.69.0
 
 **BG:** Обновяване на външния вид — по-забележими съобщения и по-плавен

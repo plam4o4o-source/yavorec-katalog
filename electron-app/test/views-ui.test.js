@@ -242,3 +242,32 @@ test('beep() мълчи без AudioContext (тестова среда) и не 
   window.beep('ok');
   assert.equal(constructed, 0, 'звукът не бива да се пуска при изключена настройка');
 });
+
+/* --- Задължителни полета (v1.70.0) --- */
+
+test('fld() добавя видима звездичка при req:1, а не само атрибута required', async () => {
+  const dom = buildDom({}); await settle();
+  const { window } = dom;
+  const html = window.fld('Заглавие', 'title', { val: '', req: 1 });
+  assert.match(html, /required/, 'HTML атрибутът трябва да остане (полезен за autofill/семантика)');
+  assert.match(html, /<b class="req"[^>]*>\*<\/b>/, 'липсва видимата звездичка в етикета');
+  const htmlNoReq = window.fld('Бележка', 'note', { val: '' });
+  assert.doesNotMatch(htmlNoReq, /class="req"/, 'звездичка не бива да се появява без req:1');
+});
+
+test('firstMissingRequired() намира първото празно задължително поле по видимия етикет (без звездичката/подсказката)', async () => {
+  const dom = buildDom({}); await settle();
+  const { window } = dom;
+  const document = window.document;
+  const box = document.createElement('div');
+  box.id = 'testForm';
+  box.innerHTML = window.fld('Инвентарен номер', 'inv_number', { val: '', req: 1 }) +
+    window.fld('Заглавие', 'title', { val: 'Под игото', req: 1, hint: 'подсказка' });
+  document.body.appendChild(box);
+
+  assert.equal(window.firstMissingRequired('#testForm'), 'Инвентарен номер',
+    'трябва да върне ЧИСТИЯ текст на етикета, без звездичката/hint span-а');
+
+  document.querySelector('#testForm [name=inv_number]').value = '5';
+  assert.equal(window.firstMissingRequired('#testForm'), null, 'всички задължителни полета вече са попълнени');
+});

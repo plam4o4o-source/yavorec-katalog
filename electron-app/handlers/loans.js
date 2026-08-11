@@ -35,13 +35,21 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   // dueDate/inDate — реалните дати (не готово число дни), защото наказанието трябва да
   // извади затворените дни от периода (виж closedDaysBetween) — календарят е по-важен
   // точно тук: несправедливо е падеж в затворен ден да носи наказание за самия него.
+  /* Просрочени дни, изчистени от затворените дни в периода (v1.70.0: извадено
+     от applySuspension в самостоятелна функция, за да я ползва и глобата при
+     връщане — виж бележката при loans:return по-долу за защо преди това
+     двата пресмятания даваха различен резултат). */
+  function effectiveDaysLate(dueDate, inDate) {
+    if (!dueDate || !inDate || inDate <= dueDate) return 0;
+    const rawDaysLate = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+    return Math.max(0, rawDaysLate - closedDaysBetween(dueDate, inDate));
+  }
   function applySuspension(readerId, dueDate, inDate) {
     const db = getDb();
     const rule = circRule(readerCategory(readerId));
     const per = Number(rule.suspend_per_day) || 0;
-    if (per <= 0 || !dueDate || !inDate || inDate <= dueDate) return null;
-    const rawDaysLate = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
-    const effDaysLate = Math.max(0, rawDaysLate - closedDaysBetween(dueDate, inDate));
+    if (per <= 0) return null;
+    const effDaysLate = effectiveDaysLate(dueDate, inDate);
     if (effDaysLate <= 0) return null;
     const penalty = Math.min(Math.ceil(effDaysLate * per), rule.suspend_max || 90);
     const r = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(readerId);
@@ -121,19 +129,33 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   ipcMain.handle('loans:return', (e, { id, date_in }) =>
     run(() => {
       const db = getDb();
-      db.prepare('UPDATE loans SET date_in = ? WHERE id = ?').run(date_in, id);
+      const inDate = date_in || today();
+      const before = db.prepare('SELECT date_due FROM loans WHERE id = ?').get(id);
+      // v1.70.0: тук по-рано fine никога не се пресмяташе/записваше — loans:return
+      // (бутон „Приеми“ в Заемане и връщане/Просрочени) и loans:returnByCode
+      // (сканиране на баркод) са двата пътя за връщане на книга, но само вторият
+      // смяташе глоба, при това по календарни дни (без да изважда затворените —
+      // за разлика от наказанието в дни, което ги изважда още от самото начало).
+      // Резултатът: „Събрани глоби“ в справките зависеше от това кой бутон е
+      // натиснат, и дори когато глоба се пресмяташе, беше с по-малко дни, отколкото
+      // наказанието за същото просрочие. Сега и двата пътя ползват еднакво
+      // effectiveDaysLate() (виж applySuspension по-горе) и еднакво записват fine.
+      const daysLate = before ? effectiveDaysLate(before.date_due, inDate) : 0;
+      const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+      const fine = daysLate * ((s && s.fine_per_day) || 0);
+      db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, id);
       const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
-      if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title);
+      if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
       const hold = l ? activateHoldOnReturn(l.book_id) : null;
       let suspendedUntil = null;
       if (l) {
-        logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: date_in });
-        suspendedUntil = applySuspension(l.reader_id, l.date_due, date_in);
+        logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: inDate });
+        suspendedUntil = applySuspension(l.reader_id, l.date_due, inDate);
       }
       scheduleCatalogWrite();
       return {
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
-        suspendedUntil
+        suspendedUntil, daysLate, fine
       };
     })
   );
@@ -199,8 +221,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
       const inDate = date_in || today();
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
-      const daysLate = loan.date_due ? Math.max(0, Math.round((new Date(inDate) - new Date(loan.date_due)) / 864e5)) : 0;
-      const fine = daysLate * (s.fine_per_day || 0);
+      // v1.70.0: effectiveDaysLate() вместо суров брой календарни дни — виж
+      // бележката при loans:return по-горе; наказанието в дни за същото
+      // просрочие вече ползваше изчистените от затворени дни.
+      const daysLate = effectiveDaysLate(loan.date_due, inDate);
+      const fine = daysLate * ((s && s.fine_per_day) || 0);
       db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
       logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
       logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });

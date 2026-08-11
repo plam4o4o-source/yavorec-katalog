@@ -102,7 +102,8 @@ contextBridge.exposeInMainWorld('api', {
     create: invoke('readers:create'),
     update: invoke('readers:update'),
     delete: invoke('readers:delete'),
-    clearSuspension: invoke('readers:clearSuspension')
+    clearSuspension: invoke('readers:clearSuspension'),
+    exportCsv: invoke('readers:exportCsv')
   },
   pdp: {
     status: invoke('pdp:status'),

@@ -265,6 +265,90 @@ test('квитанцията след плащане се отпечатва (ac
   assert.match(printed[0], /Иван Петров/);
 });
 
+/* --- Разписка за заемане (v1.70.0) — дотогава заемането нямаше никакъв печатен документ --- */
+
+test('printLoanSlip() отпечатва разписка с читателя, заглавието и срока за връщане', async () => {
+  const dom = buildDom({
+    'readers.get': { id: 9, name: 'Мария Георгиева', card_no: '0042' },
+    'settings.get': { lib_name: 'Библиотека', place: 'Град', org: 'Организация' }
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  const printed = [];
+  window.doPrint = (html) => printed.push(html);
+
+  await window.printLoanSlip({ title: "Времеубежище", inv_number: 17, date_due: '2026-09-01' });
+
+  assert.equal(printed.length, 1, 'разписката трябва да се отпечата');
+  assert.match(printed[0], /РАЗПИСКА ЗА ЗАЕМАНЕ/);
+  assert.match(printed[0], /Мария Георгиева/);
+  assert.match(printed[0], /Времеубежище/);
+  assert.match(printed[0], /01\.09\.2026/); // bg() формат за датата на връщане
+});
+
+/* --- Печат на Персоналии и Аналитично описание (v1.70.0) — дотогава тези два раздела
+   бяха единствените краеведски раздели без бутон „Печат“ (Летопис вече имаше). --- */
+
+test('printPersons() отпечатва списък персоналии с имена и дейност', async () => {
+  const dom = buildDom({
+    'persons.list': [
+      { id: 1, name: 'Иван Петров', birth_date: '1930-05-01', activity: 'учител, читалищен деец', bio: 'Роден е в селото.' },
+      { id: 2, name: 'Мария Георгиева', activity: 'краевед' }
+    ]
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  const printed = [];
+  window.doPrint = (html) => printed.push(html);
+
+  await window.printPersons();
+
+  assert.equal(printed.length, 1, 'персоналиите трябва да се отпечатат');
+  assert.match(printed[0], /ПЕРСОНАЛИИ/);
+  assert.match(printed[0], /Иван Петров/);
+  assert.match(printed[0], /Мария Георгиева/);
+  assert.match(printed[0], /учител, читалищен деец/);
+});
+
+test('printPersons() показва предупреждение вместо празен печат, когато няма записи', async () => {
+  const dom = buildDom({ 'persons.list': [] });
+  const { window } = dom;
+  await settled(dom);
+
+  const printed = [];
+  window.doPrint = (html) => printed.push(html);
+  const toasts = [];
+  window.toast = (msg, kind) => toasts.push({ msg, kind });
+
+  await window.printPersons();
+
+  assert.equal(printed.length, 0, 'не трябва да се отпечатва празен документ');
+  assert.equal(toasts.length, 1);
+});
+
+test('printAnalytics() отпечатва аналитичните описания със заглавие и източник', async () => {
+  const dom = buildDom({
+    'analytics.list': [
+      { id: 1, title: 'Читалището през годините', author: 'П. Иванов', year: '2020',
+        is_local: 1, source_kind: 'периодика', periodical_title: 'Местен вестник', pages: '3' }
+    ]
+  });
+  const { window } = dom;
+  await settled(dom);
+
+  const printed = [];
+  window.doPrint = (html) => printed.push(html);
+
+  await window.printAnalytics();
+
+  assert.equal(printed.length, 1, 'аналитичните описания трябва да се отпечатат');
+  assert.match(printed[0], /АНАЛИТИЧНО ОПИСАНИЕ/);
+  assert.match(printed[0], /Читалището през годините/);
+  assert.match(printed[0], /Местен вестник/);
+});
+
 // Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
 // правило за `.grid`. Затова, ако класът бъде преименуван/премахнат от
 // style.css, докато разметката още го ползва, редът тихо се разпада на

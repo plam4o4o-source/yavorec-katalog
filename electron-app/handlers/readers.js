@@ -7,7 +7,8 @@
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, ftsQuery,
-    maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit
+    maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit,
+    dialog, getMainWindow, fs, csvCell
   } = deps;
 
   const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
@@ -88,4 +89,30 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('readers:delete', (e, id) => run(() => getDb().prepare('DELETE FROM readers WHERE id = ?').run(id)));
+
+  // Износ на списъка читатели в CSV (v1.70.0). Нарочно БЕЗ ЕГН/№ на лична карта —
+  // това е справочен документ, не заместител на защитата на личните данни; ЕГН/№ ЛК
+  // и без друго излизат маскирани от readers:list, ако защитата е заключена.
+  ipcMain.handle('readers:exportCsv', async () => {
+    try {
+      const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
+        title: 'Износ на читателите (CSV)',
+        defaultPath: 'chitateli.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }]
+      });
+      if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+      const rows = getDb().prepare('SELECT * FROM readers ORDER BY name').all();
+      const h = ['Читателска карта', 'Име', 'Телефон', 'Адрес', 'Имейл', 'Категория',
+        'Състояние', 'Дата на регистрация', 'Дата на пререгистрация', 'Забележка'];
+      const csv = [h.join(';')].concat(rows.map(r => [
+        r.card_no, r.name, r.phone, [r.address, r.address2].filter(Boolean).join(', '), r.email,
+        r.category, r.status, r.registered_at, r.re_registered_at, r.note
+      ].map(csvCell).join(';'))).join('\r\n');
+      fs.writeFileSync(filePath, '﻿' + csv, 'utf8');
+      logAudit('Износ на читатели (CSV)', filePath + ' — ' + rows.length + ' записа');
+      return { ok: true, data: filePath };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 };

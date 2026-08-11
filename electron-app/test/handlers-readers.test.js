@@ -29,6 +29,7 @@ function setup(overrides = {}) {
 
   const auditLog = [];
   const piiCalls = { prepareWrite: [] };
+  const savedDialogs = { saveDialog: { canceled: false, filePath: path.join(dir, 'out.csv') } };
   const ipcMain = fakeIpcMain();
   const deps = Object.assign({
     getDb: () => db,
@@ -47,16 +48,20 @@ function setup(overrides = {}) {
       fields.forEach(f => { if (!oldObj || oldObj[f] !== newObj[f]) d[f] = [oldObj ? oldObj[f] : undefined, newObj[f]]; });
       return d;
     },
-    checkRecordLimit: () => {}
+    checkRecordLimit: () => {},
+    dialog: { showSaveDialog: async () => savedDialogs.saveDialog },
+    getMainWindow: () => ({}),
+    fs,
+    csvCell: (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"'
   }, overrides);
   registerReadersHandlers(ipcMain, deps);
-  return { db, ipcMain, auditLog, piiCalls };
+  return { db, ipcMain, auditLog, piiCalls, dir, savedDialogs };
 }
 
-test('registerReadersHandlers registers all six readers: IPC channels', () => {
+test('registerReadersHandlers registers all seven readers: IPC channels (v1.70.0 adds exportCsv)', () => {
   const { ipcMain } = setup();
   for (const ch of ['readers:list', 'readers:get', 'readers:byCard', 'readers:create',
-    'readers:update', 'readers:clearSuspension', 'readers:delete']) {
+    'readers:update', 'readers:clearSuspension', 'readers:delete', 'readers:exportCsv']) {
     assert.ok(ipcMain.has(ch), `expected ${ch} to be registered`);
   }
 });
@@ -146,4 +151,45 @@ test('readers:list with a query uses ftsQuery for the FTS5 match and LIKE for ph
   const byPhone = await ipcMain.invoke('readers:list', '0888123456');
   assert.equal(byPhone.data.length, 1);
   assert.equal(byPhone.data[0].name, 'Специално Име');
+});
+
+/* --- readers:exportCsv (v1.70.0) — дотогава списъкът с читатели нямаше никакъв износ --- */
+
+test('readers:exportCsv writes a semicolon-separated CSV with a BOM, one row per reader, ordered by name', async () => {
+  const { ipcMain, auditLog } = setup();
+  await ipcMain.invoke('readers:create', { name: 'Борислав Петров', card_no: 'C2', phone: '0888', category: 'възрастен' });
+  await ipcMain.invoke('readers:create', { name: 'Ана Иванова', card_no: 'C1', phone: '0899', category: 'дете до 14 г.' });
+
+  const result = await ipcMain.invoke('readers:exportCsv');
+  assert.equal(result.ok, true);
+
+  const raw = fs.readFileSync(result.data, 'utf8');
+  assert.equal(raw.charCodeAt(0), 0xFEFF, 'файлът трябва да започва с BOM, за да се отвори коректно в Excel');
+  const lines = raw.slice(1).trim().split('\r\n');
+  assert.equal(lines.length, 3, 'заглавен ред + 2 читатели');
+  assert.match(lines[0], /Читателска карта/);
+  assert.match(lines[0], /Име/);
+  // ordered by name: Ана преди Борислав
+  assert.ok(lines[1].includes('Ана Иванова'));
+  assert.ok(lines[2].includes('Борислав Петров'));
+  assert.equal(auditLog.length, 3, '2 записа за readers:create + 1 за износа');
+  assert.match(auditLog[2].detail, /2 записа/);
+});
+
+test('readers:exportCsv omits egn/id_card_no columns entirely (справочен документ, не заместител на защитата на личните данни)', async () => {
+  const { ipcMain } = setup();
+  await ipcMain.invoke('readers:create', { name: 'С лични данни', egn: '1234567890', id_card_no: '999888777' });
+  const result = await ipcMain.invoke('readers:exportCsv');
+  const raw = fs.readFileSync(result.data, 'utf8');
+  assert.doesNotMatch(raw, /1234567890/);
+  assert.doesNotMatch(raw, /999888777/);
+  assert.doesNotMatch(raw, /ЕГН/i);
+});
+
+test('readers:exportCsv respects a cancelled save dialog', async () => {
+  const { ipcMain, savedDialogs } = setup();
+  savedDialogs.saveDialog = { canceled: true, filePath: null };
+  const result = await ipcMain.invoke('readers:exportCsv');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Отказано/);
 });

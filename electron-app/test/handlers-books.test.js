@@ -79,6 +79,21 @@ test('books:create inserts a book + inventory row, advances next_inv_number, log
   assert.equal(catalogWrites.length, 1);
 });
 
+test('books:create/books:update persist series/series_no (v1.70.0 — поредица); a field missing from BOOK_FIELDS silently never saves', async () => {
+  const { db, ipcMain } = setup();
+  const id = (await ipcMain.invoke('books:create', {
+    title: 'Игра на тронове', series: 'Песен за огън и лед', series_no: 'кн. 1'
+  })).data;
+  const row = db.prepare('SELECT series, series_no FROM books WHERE id = ?').get(id);
+  assert.equal(row.series, 'Песен за огън и лед');
+  assert.equal(row.series_no, 'кн. 1');
+
+  await ipcMain.invoke('books:update', { id, title: 'Игра на тронове', series: 'Друга поредица', series_no: 'кн. 2', quantity: 1 });
+  const updated = db.prepare('SELECT series, series_no FROM books WHERE id = ?').get(id);
+  assert.equal(updated.series, 'Друга поредица');
+  assert.equal(updated.series_no, 'кн. 2');
+});
+
 test('books:create enforces the configured record limit', async () => {
   const { db, ipcMain } = setup();
   db.prepare('UPDATE settings SET limit_books = 1 WHERE id=1').run();

@@ -63,8 +63,9 @@ function printMzsDoc(id) {
 }
 window.printMzsDoc = printMzsDoc;
 async function saveMzs(id) {
+  const missing = firstMissingRequired('#mzsF');
+  if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#mzsF'); d.id = id;
-  if (!d.partner.trim() || !d.title.trim()) return toast('Библиотеката партньор и заглавието са задължителни.', 'err');
   if (id) await call(window.api.mzs.update(d), 'Записано.');
   else await call(window.api.mzs.create(d), 'Записано.');
   closeModal(); renderMzs();

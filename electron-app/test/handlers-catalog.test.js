@@ -267,6 +267,19 @@ test('catalog:exportCsv writes a semicolon-separated CSV of the fund with a BOM'
   assert.ok(content.startsWith('﻿Инв. №;Баркод;'));
 });
 
+test('catalog:exportCsv includes a Поредица column combining series + series_no (v1.70.0)', async () => {
+  const { db, ipcMain, savedDialogs, dir } = setup();
+  db.prepare("INSERT INTO books (title, inv_number, price, series, series_no) VALUES ('Б', 6, 5, 'Игра на тронове', 'кн. 1')").run();
+  const outPath = path.join(dir, 'fond2.csv');
+  savedDialogs.saveDialog = { canceled: false, filePath: outPath };
+  const result = await ipcMain.invoke('catalog:exportCsv');
+  assert.equal(result.ok, true);
+  const content = fs.readFileSync(outPath, 'utf8');
+  const header = content.split('\r\n')[0];
+  assert.match(header, /Поредица/);
+  assert.match(content, /Игра на тронове кн\. 1/);
+});
+
 test('export handlers report cancellation from the save dialog', async () => {
   const { ipcMain, savedDialogs } = setup();
   savedDialogs.saveDialog = { canceled: true, filePath: null };

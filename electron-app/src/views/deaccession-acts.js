@@ -81,6 +81,8 @@ function drawActList() {
     </tbody></table></div>`;
 }
 async function saveAct() {
+  const missing = firstMissingRequired('#actF');
+  if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#actF');
   if (!ACT_LIST.length) return toast('Добавете поне един документ в списъка.', 'err');
   const p = PRICHINI.find(x => x.k == d.reason_code);

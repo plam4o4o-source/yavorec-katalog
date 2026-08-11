@@ -31,6 +31,7 @@ async function renderAnalytics() {
       </select>
       <label class="chk" style="margin:0"><input type="checkbox" ${ANL_LOCAL ? 'checked' : ''}
         onchange="anlLocal(this.checked)"> само краеведски</label>
+      <button class="btn" onclick="printAnalytics()">Печат / PDF</button>
     </div>
 
     <div class="kpis">
@@ -71,6 +72,22 @@ function anlYear(v) { ANL_YEAR = v; renderAnalytics(); }
 window.anlYear = anlYear;
 function anlLocal(v) { ANL_LOCAL = v; renderAnalytics(); }
 window.anlLocal = anlLocal;
+
+async function printAnalytics() {
+  const rows = await call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL }));
+  if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
+  setPrintPage({ name: (ANL_YEAR ? `Аналитично описание ${ANL_YEAR} г.` : 'Аналитично описание'), landscape: false, margin: '16mm 14mm' });
+  doPrint(`<div class="pdoc">${shead()}
+    <h2 class="ptitle">АНАЛИТИЧНО ОПИСАНИЕ${ANL_YEAR ? ' — ' + esc(ANL_YEAR) + ' г.' : ''}${ANL_LOCAL ? ' (краеведски)' : ''}</h2>
+    ${rows.map(a => `<div style="margin-bottom:8px">
+      <b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}${a.year ? ' (' + esc(a.year) + ')' : ''}
+      ${a.is_local ? ' <i>— краеведски</i>' : ''}
+      ${a.author ? `<div style="font-size:10.5pt">${esc(a.author)}</div>` : ''}
+      <div style="font-size:10.5pt">${esc(analyticSource(a))}${a.pages ? ', стр. ' + esc(a.pages) : ''}</div>
+    </div>`).join('')}
+    ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
+}
+window.printAnalytics = printAnalytics;
 
 async function analyticForm(id) {
   const [a, pers, sug] = await Promise.all([
@@ -138,8 +155,9 @@ async function analyticForm(id) {
 }
 window.analyticForm = analyticForm;
 async function saveAnalytic(id) {
+  const missing = firstMissingRequired('#anlF');
+  if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#anlF');
-  if (!d.title.trim()) return toast('Заглавието на статията е задължително.', 'err');
   delete d.book_pick;
   d.id = id;
   if (id) await call(window.api.analytics.update(d), 'Описанието е обновено.');

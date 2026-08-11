@@ -25,7 +25,8 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   `;
   const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
     'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
-    'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
+    'city', 'publisher', 'series', 'series_no', // v1.70.0 — поредица
+    'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
     'status', 'status_date', 'price', 'description', 'acquisition_id', 'cn_sort'];
 
   /* ---------------- Лимит на броя записи ----------------

@@ -219,6 +219,54 @@ test('loans:returnByCode computes a fine for late returns and applies suspension
   assert.ok(result.data.fine > 0);
 });
 
+test('loans:return computes and stores a fine identical to loans:returnByCode for the same overdue scenario (v1.70.0 fix)', async () => {
+  // Преди v1.70.0: loans:return изобщо не пресмяташе/записваше fine (оставаше
+  // NULL/0), докато loans:returnByCode го пресмяташе — двата бутона за връщане
+  // на просрочена книга ("Приеми" срещу сканиране на баркод) даваха различен
+  // резултат за иначе идентично закъснение.
+  const { db, ipcMain } = setup();
+  db.prepare('UPDATE settings SET fine_per_day = 0.10 WHERE id = 1').run();
+  const readerA = db.prepare("INSERT INTO readers (name) VALUES ('Чрез бутон')").run().lastInsertRowid;
+  const readerB = db.prepare("INSERT INTO readers (name) VALUES ('Чрез баркод')").run().lastInsertRowid;
+  const bookA = insertBookWithInventory(db, { inv_number: 20, barcode: 'BC20A' });
+  const bookB = insertBookWithInventory(db, { inv_number: 21, barcode: 'BC20B' });
+  const loanIdA = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
+    .run(bookA, readerA, '2026-07-01', '2026-07-15').lastInsertRowid;
+  db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
+    .run(bookB, readerB, '2026-07-01', '2026-07-15');
+
+  const viaButton = await ipcMain.invoke('loans:return', { id: loanIdA, date_in: '2026-08-02' });
+  const viaBarcode = await ipcMain.invoke('loans:returnByCode', { code: 'BC20B', date_in: '2026-08-02' });
+
+  assert.equal(viaButton.ok, true); assert.equal(viaBarcode.ok, true);
+  assert.ok(viaButton.data.daysLate > 0, 'loans:return should now report daysLate');
+  assert.equal(viaButton.data.daysLate, viaBarcode.data.daysLate, 'identical overdue period should give identical daysLate');
+  assert.equal(viaButton.data.fine, viaBarcode.data.fine, 'identical overdue period should give identical fine');
+
+  const storedFine = db.prepare('SELECT fine FROM loans WHERE id = ?').get(loanIdA).fine;
+  assert.equal(storedFine, viaButton.data.fine, 'loans:return must persist the fine to loans.fine, not just return it');
+  assert.ok(storedFine > 0);
+});
+
+test('loans:return excludes closed days from the fine, matching the suspension calculation', async () => {
+  // И двете пресмятания (наказание в дни, глоба) минават през effectiveDaysLate()
+  // — тук closedDaysBetween връща фиксирано 3, за да се провери, че fine пада
+  // спрямо суровите календарни дни.
+  const { db, ipcMain } = setup({ closedDaysBetween: () => 3 });
+  db.prepare('UPDATE settings SET fine_per_day = 1 WHERE id = 1').run();
+  const bookId = insertBookWithInventory(db, { inv_number: 22 });
+  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Затворени дни')").run().lastInsertRowid;
+  const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
+    .run(bookId, readerId, '2026-07-01', '2026-07-15').lastInsertRowid;
+
+  // Сурово закъснение 2026-07-15 → 2026-08-02 = 18 календарни дни; минус 3
+  // затворени = 15 работни дни закъснение.
+  const result = await ipcMain.invoke('loans:return', { id: loanId, date_in: '2026-08-02' });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.daysLate, 15);
+  assert.equal(result.data.fine, 15);
+});
+
 test('loans:returnByCode refuses a code for a book that is not currently on loan', async () => {
   const { db, ipcMain } = setup();
   insertBookWithInventory(db, { inv_number: 12, barcode: 'BC12' });

@@ -1,4 +1,19 @@
 /* ---------------- Табло ---------------- */
+/* Иконки на Таблото (v1.70.0) — SVG вместо емоджита, по образец на NAV_ICONS
+   в navigation.js. navIco()/NAV_ICONS са достъпни тук без window.-префикс,
+   защото всички изгледи се зареждат като класически <script> тагове в общия
+   лексикален обхват на страницата (виж бележката в bootstrap.js) — точно
+   както esc()/fld()/$() от core.js се ползват навсякъде без внос. Част от
+   иконките преизползват вече изрисуваните за навигацията (визуална
+   последователност); календар и кабарче са нови, за неща без собствен раздел. */
+const DASH_ICONS = {
+  fund: NAV_ICONS.books,
+  loans: NAV_ICONS.circ,
+  overdue: NAV_ICONS.over,
+  upcoming: navIco('<rect x="3" y="4.5" width="18" height="17" rx="2"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><circle cx="12" cy="15.5" r="1.5" fill="currentColor" stroke="none"/>'),
+  holds: navIco('<path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.3"/>'),
+  plus: navIco('<path d="M12 5v14M5 12h14"/>')
+};
 async function renderDash() {
   const r = await call(window.api.dashboard.full());
   if (!r) return;
@@ -14,12 +29,12 @@ async function renderDash() {
     <div id="dashScanResult"></div>
 
     <div class="kpis">
-      ${kpi('📚', r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
-      ${kpi('📖', r.loansOpen, 'Заети в момента', 'при ' + r.activeReaders + ' активни читатели')}
-      ${kpi('⏰', r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
-      ${kpi('📅', r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
+      ${kpi(DASH_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
+      ${kpi(DASH_ICONS.loans, r.loansOpen, 'Заети в момента', 'при ' + r.activeReaders + ' активни читатели')}
+      ${kpi(DASH_ICONS.overdue, r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
+      ${kpi(DASH_ICONS.upcoming, r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
       ${r.holdsReady || r.holdsWaiting
-        ? kpi('📌', r.holdsReady, 'Заделени за читатели', r.holdsReady
+        ? kpi(DASH_ICONS.holds, r.holdsReady, 'Заделени за читатели', r.holdsReady
             ? 'чакат да бъдат взети' + (r.holdsWaiting ? ' · ' + r.holdsWaiting + ' в опашка' : '')
             : r.holdsWaiting + ' в опашка за заета книга', r.holdsReady ? 'warn' : '')
         : ''}
@@ -53,12 +68,12 @@ async function renderDash() {
     <div class="grid g3" style="margin-top:16px">
       <div class="card"><h3 style="margin-top:0">Бързи действия</h3>
         <div class="quickGrid">
-          <button class="quickBtn" onclick="bookForm()"><span>➕</span>Нов документ</button>
-          <button class="quickBtn" onclick="go('circ')"><span>🔄</span>Заемане / връщане</button>
-          <button class="quickBtn" onclick="readerForm()"><span>👤</span>Нов читател</button>
-          <button class="quickBtn" onclick="go('acq')"><span>📦</span>Нова партида</button>
-          <button class="quickBtn" onclick="go('dnevnik')"><span>📝</span>Дневник</button>
-          <button class="quickBtn" onclick="go('labels')"><span>🏷️</span>Етикети</button>
+          <button class="quickBtn" onclick="bookForm()"><span>${DASH_ICONS.plus}</span>Нов документ</button>
+          <button class="quickBtn" onclick="go('circ')"><span>${NAV_ICONS.circ}</span>Заемане / връщане</button>
+          <button class="quickBtn" onclick="readerForm()"><span>${NAV_ICONS.readers}</span>Нов читател</button>
+          <button class="quickBtn" onclick="go('acq')"><span>${NAV_ICONS.acq}</span>Нова партида</button>
+          <button class="quickBtn" onclick="go('dnevnik')"><span>${NAV_ICONS.dnevnik}</span>Дневник</button>
+          <button class="quickBtn" onclick="go('labels')"><span>${NAV_ICONS.labels}</span>Етикети</button>
         </div>
       </div>
       <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
