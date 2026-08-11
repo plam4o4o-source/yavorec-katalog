@@ -2,7 +2,7 @@
 // Зависи от pctRequired/naturalLoss (стабилни function declarations в
 // main.js, hoisted) и getDb/run/logAudit.
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, pctRequired, naturalLoss } = deps;
+  const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -46,12 +46,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       return s;
     })
   );
+  // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
+  // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('inventorySessions:scan', (e, { sessionId, code }) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
       if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
-      const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(code, code);
+      const c = normalizeScanCode(code);
+      const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(c, c);
       if (!b) throw new Error('Непознат баркод/инв. № ' + code);
       const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
       if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');

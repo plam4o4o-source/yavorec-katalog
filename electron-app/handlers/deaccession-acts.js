@@ -5,7 +5,7 @@
 // сменят видимостта на документи в онлайн каталога, затова насрочват
 // запис на katalog.json, точно както shelves.js).
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite } = deps;
+  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, normalizeScanCode } = deps;
 
   ipcMain.handle('deaccessionActs:list', () =>
     run(() => getDb().prepare(`
@@ -30,9 +30,12 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return (row.m || 0) + 1;
     })
   );
-  ipcMain.handle('deaccessionActs:findBook', (e, code) =>
-    run(() => getDb().prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(code, code))
-  );
+  // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
+  // обяснението на кирилско/латинско разминаване при баркод четец.
+  ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
+    const c = normalizeScanCode(code);
+    return getDb().prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(c, c);
+  }));
   ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
     run(() => {
       const db = getDb();

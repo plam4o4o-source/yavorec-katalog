@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerShelvesHandlers = require('../handlers/shelves');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -36,7 +37,8 @@ function setup() {
       catch (err) { return { ok: false, error: err.message }; }
     },
     logAudit: (action, detail) => auditLog.push({ action, detail }),
-    scheduleCatalogWrite: () => scheduleCalls.push(true)
+    scheduleCatalogWrite: () => scheduleCalls.push(true),
+    normalizeScanCode
   };
   registerShelvesHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, scheduleCalls };

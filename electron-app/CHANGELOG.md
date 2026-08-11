@@ -11,6 +11,78 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.70.1
+
+**BG:** Поправка на печата на баркод етикети и читателски карти при ролков
+лейбъл принтер (Zebra/Brother QL/Dymo и др.) — открита веднага след v1.70.0
+при преглед на раздел „Баркод етикети“.
+
+`printLabelSheet()` изваждаше зададеното „Поле на листа“ ДВА пъти от размера
+на самия етикет — веднъж чрез `@page margin`, веднъж и от ширината/височината
+на етикета. За малка ролка (напр. 20 × 10 мм) с подразбиращото се поле от
+8 мм резултатът беше `height:-6mm` — невалидна CSS стойност, която браузърът
+тихо пренебрегва вместо да покаже грешка, и етикетът излизаше празен или
+раздут при печат. Читателската карта минава през СЪЩАТА функция и споделя
+настройката за режим на печат с етикетите за фонда — библиотека, избрала
+ролков режим заради книжните етикети, автоматично печаташе и картите смалени
+(74 × 44 мм вместо стандартните 90 × 60 мм).
+
+Поправено: полето „Поле на листа“ важи само за печат на A4 лист (както вече е
+и при броя колони/разстоянието между етикетите) — ролковите принтери сами
+калибрират собствения си печатаем участък, затова `@page margin` при ролков
+печат вече е 0, а етикетът/картата заемат пълния зададен размер.
+
+**Второ, независимо поправено в тази версия:** сканиране на читателска карта
+или баркод на документ понякога „не намираше“ съществуващ запис — докладвано
+на живо с картата „B00108“. Баркод четецът се държи като физическа клавиатура
+и въвежда декодирания текст буква по буква, без да знае коя клавиатурна
+разредба е активна в момента в Windows. При активна кирилска (фонетична)
+разредба буквите от баркода (Code 39 — само 0-9, A-Z, НИКОГА кирилица)
+пристигат превърнати: „B00108“ става „Б00108“, защото Windows превежда
+физическия клавиш през активната в момента разредба, не през тази, за която
+е калибриран четецът. Ново `normalizeScanCode()` (`security-utils.js`) връща
+кирилските букви от фонетичната разредба обратно към латиница преди всяко
+търсене по баркод/инв. № /читателска карта — приложено в осемте засегнати
+IPC маршрута: читателски карти, баркод на книга (Табло, Заемане и връщане,
+Резервации, Инвентаризация, Отчисляване, Витрини в каталога, телефонно
+сканиране).
+
+**EN:** Fixed roll label printer output (Zebra/Brother QL/Dymo, etc.) for
+both book barcode labels and reader cards — found right after v1.70.0 while
+reviewing the "Barcode labels" section.
+
+`printLabelSheet()` subtracted the configured page margin from the label's
+own size TWICE (once via `@page margin`, once from the label's own
+width/height). For a small roll label (e.g. 20×10mm) with the default 8mm
+margin this produced an invalid negative CSS value, which the browser
+silently ignores — the label printed blank or malformed. Reader cards go
+through the same function and share the print-mode setting with fund
+labels, so a library using roll mode for book labels also printed
+undersized cards (74×44mm instead of the standard 90×60mm).
+
+Fixed: the margin setting now applies only to A4-sheet printing (same as
+column count/gap already did); roll printers calibrate their own printable
+area, so `@page margin` is now 0 in roll mode and the label/card fills the
+full configured size.
+
+**Second, unrelated fix in this version:** scanning a reader card or a book
+barcode sometimes reported "not found" for a record that did exist —
+reported live with card "B00108". A USB barcode scanner behaves like a
+physical keyboard, typing the decoded text letter by letter without knowing
+which OS keyboard layout is active. With the Bulgarian phonetic layout
+active, letters from the barcode (Code 39 — only 0-9, A-Z, never Cyrillic)
+arrive translated: "B00108" becomes "Б00108", because Windows translates the
+physical key through whichever layout is currently active, not the one the
+scanner is calibrated for. A new `normalizeScanCode()` (`security-utils.js`)
+maps phonetic-layout Cyrillic letters back to Latin before every lookup by
+barcode/inv. number/reader card — applied across the eight affected IPC
+routes (reader cards, book barcode lookups in Dashboard, Circulation, Holds,
+Inventory sessions, Deaccessioning, Catalog shelves, and mobile scanning).
+
+**523 теста, 0 провалени / 523 tests, 0 failed**, под/under `TZ=UTC` и
+`TZ=Europe/Sofia` (11 нови теста общо за двете поправки в тази версия,
+всичките проверени да падат срещу стария код преди поправката).
+
 ## v1.70.0
 
 **BG:** Голям пакет подобрения от задълбочен преглед на четири области —

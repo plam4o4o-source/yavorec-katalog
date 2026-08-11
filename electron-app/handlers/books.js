@@ -11,7 +11,7 @@
 // LOAN_SELECT/firstActiveHold и другите вече установени модели за връщане
 // на споделена стойност напред.
 module.exports = function registerBooksHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite } = deps;
+  const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode } = deps;
 
   const BOOK_SELECT = `
     SELECT b.*, c.name AS category_name,
@@ -112,8 +112,10 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
     // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
     // (потвърдено с EXPLAIN QUERY PLAN: с тази форма планът е MULTI-INDEX OR по
-    // двата индекса).
-    run(() => getDb().prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code))
+    // двата индекса). normalizeScanCode() (v1.70.1) — виж security-utils.js:
+    // баркод четецът е клавиатура, а активна кирилска разредба на Windows
+    // превръща букви от Code 39 баркода (напр. B) в кирилски еквивалент (Б).
+    run(() => { const c = normalizeScanCode(code); return getDb().prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c); })
   );
 
   ipcMain.handle('books:create', (e, book) =>

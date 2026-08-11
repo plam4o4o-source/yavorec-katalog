@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerLoansHandlers = require('../handlers/loans');
+const { normalizeScanCode } = require('../security-utils');
 
 const BOOK_SELECT = `
   SELECT b.*, c.name AS category_name
@@ -57,7 +58,8 @@ function setup(overrides = {}) {
     closedDaysBetween: () => 0,
     firstActiveHold: () => null,
     consumeHoldOnCheckout: () => {},
-    activateHoldOnReturn: () => null
+    activateHoldOnReturn: () => null,
+    normalizeScanCode
   }, overrides);
   const returned = registerLoansHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, events, returned };

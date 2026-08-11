@@ -14,7 +14,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
     circRule, readerCategory, nextWorkDay, closedDaysBetween,
-    firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn
+    firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode
   } = deps;
 
   const LOAN_SELECT = `
@@ -185,11 +185,14 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
 
   /* Заемане и връщане чрез баркод четец — четецът въвежда текст и Enter, точно
      както при физическа клавиатура, затова тук се приема inv. номер или баркод. */
+  // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
+  // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
     run(() => {
       const db = getDb();
       const tx = db.transaction(() => {
-        const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(code, code);
+        const c = normalizeScanCode(code);
+        const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c);
         if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
         const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
@@ -215,7 +218,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     run(() => {
       const db = getDb();
-      const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
+      const c = normalizeScanCode(code);
+      const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(c, c);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       const loan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
       if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');

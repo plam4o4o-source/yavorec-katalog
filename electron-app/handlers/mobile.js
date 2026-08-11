@@ -3,7 +3,7 @@
 // на телефона и ползва камерата като баркод четец. Списъкът се пренася
 // обратно като текст или файл и се внася в отворена сесия за инвентаризация.
 module.exports = function registerMobileHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, dialog, getMainWindow, fs, path } = deps;
+  const { getDb, run, logAudit, dialog, getMainWindow, fs, path, normalizeScanCode } = deps;
 
   ipcMain.handle('mobile:generate', async () => {
     try {
@@ -28,7 +28,10 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
       if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
-      const list = [...new Set((codes || []).map(c => String(c).trim()).filter(Boolean))];
+      // normalizeScanCode() (v1.70.1) — предпазна мярка и тук, за случаите, в
+      // които страницата за телефонно сканиране позволи и ръчно въвеждане на
+      // номер (виж books:byBarcode в handlers/books.js за пълното обяснение).
+      const list = [...new Set((codes || []).map(c => normalizeScanCode(c)).filter(Boolean))];
       if (!list.length) throw new Error('Списъкът е празен.');
       const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)');
       const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');

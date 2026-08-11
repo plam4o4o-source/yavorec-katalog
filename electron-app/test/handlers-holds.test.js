@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerHoldsHandlers = require('../handlers/holds');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -34,7 +35,8 @@ function setup() {
       try { return { ok: true, data: fn() }; }
       catch (err) { return { ok: false, error: err.message }; }
     },
-    logAudit: (action, detail) => auditLog.push({ action, detail })
+    logAudit: (action, detail) => auditLog.push({ action, detail }),
+    normalizeScanCode
   };
   const returned = registerHoldsHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, returned };

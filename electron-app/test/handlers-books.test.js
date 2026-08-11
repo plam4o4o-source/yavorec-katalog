@@ -10,6 +10,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL } = require('../search-fts');
 const registerBooksHandlers = require('../handlers/books');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -46,7 +47,8 @@ function setup() {
       for (const f of fields) if ((oldObj ? oldObj[f] : undefined) !== newObj[f]) out[f] = [oldObj ? oldObj[f] : undefined, newObj[f]];
       return out;
     },
-    scheduleCatalogWrite: () => catalogWrites.push(1)
+    scheduleCatalogWrite: () => catalogWrites.push(1),
+    normalizeScanCode
   };
   const returned = registerBooksHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, catalogWrites, returned };
@@ -113,6 +115,17 @@ test('books:get and books:byBarcode resolve via BOOK_SELECT (with category_name 
   assert.equal(got.data.available, 1);
   const byBarcode = await ipcMain.invoke('books:byBarcode', 'BC1');
   assert.equal(byBarcode.data.id, id);
+});
+
+// v1.70.1: баркод четецът въвежда текста буква по буква като физическа
+// клавиатура — при активна кирилска (фонетична) разредба на Windows баркод
+// "BC1" пристига в програмата като "БЦ1" и книгата не се намираше при
+// сканиране, макар да е сканирана правилно. normalizeScanCode() го поправя.
+test('books:byBarcode намира книгата дори баркодът да пристигне с кирилски букви от четеца (v1.70.1)', async () => {
+  const { ipcMain } = setup();
+  const id = (await ipcMain.invoke('books:create', { title: 'Y', barcode: 'BC1', quantity: 1 })).data;
+  const byBarcode = await ipcMain.invoke('books:byBarcode', 'БЦ1');
+  assert.equal(byBarcode.data && byBarcode.data.id, id, 'книгата трябва да се намери въпреки кирилския вход');
 });
 
 test('books:list finds by title/author via FTS, and by ISBN/barcode/inv_number via LIKE', async () => {

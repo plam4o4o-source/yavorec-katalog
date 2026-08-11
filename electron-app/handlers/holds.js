@@ -4,7 +4,7 @@
 // "Заемания" (loans:checkout/return/extend/checkoutByCode/returnByCode) —
 // същият модел, както calendar.js/circ-rules.js по-рано.
 module.exports = function registerHoldsHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit } = deps;
+  const { getDb, run, logAudit, normalizeScanCode } = deps;
 
   const HOLD_ACTIVE = "('чака','заделена')";
   const HOLD_SELECT = `
@@ -50,10 +50,13 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
     run(() => getDb().prepare(`${HOLD_SELECT} WHERE h.status IN ${HOLD_ACTIVE}
       ORDER BY CASE h.status WHEN 'заделена' THEN 0 ELSE 1 END, h.placed_at, h.id`).all())
   );
+  // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
+  // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('holds:add', (e, { reader_id, code }) =>
     run(() => {
       const db = getDb();
-      const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(code, code);
+      const c = normalizeScanCode(code);
+      const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(c, c);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
       const openLoan = db.prepare('SELECT reader_id FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id);

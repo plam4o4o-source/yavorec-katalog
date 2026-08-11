@@ -9,6 +9,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerReadersHandlers = require('../handlers/readers');
 const { ftsQuery, READERS_FTS_SETUP_SQL } = require('../search-fts');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -52,7 +53,8 @@ function setup(overrides = {}) {
     dialog: { showSaveDialog: async () => savedDialogs.saveDialog },
     getMainWindow: () => ({}),
     fs,
-    csvCell: (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"'
+    csvCell: (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"',
+    normalizeScanCode
   }, overrides);
   registerReadersHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog, piiCalls, dir, savedDialogs };
@@ -123,6 +125,19 @@ test('readers:byCard finds a reader by card_no', async () => {
   await ipcMain.invoke('readers:create', { name: 'Търсен', card_no: 'ABC123' });
   const result = await ipcMain.invoke('readers:byCard', 'ABC123');
   assert.equal(result.data.name, 'Търсен');
+});
+
+// v1.70.1: баркод четецът въвежда текста буква по буква като физическа
+// клавиатура — при активна кирилска (фонетична) разредба на Windows картата
+// "B00108" пристига в програмата като "Б00108" и не се намираше при
+// сканиране, макар да е сканирана правилно (докладвано от библиотекаря на
+// живо). normalizeScanCode() връща буквите обратно към латиница.
+test('readers:byCard намира читателя дори кодът да пристигне с кирилски букви от четеца (v1.70.1)', async () => {
+  const { ipcMain } = setup();
+  await ipcMain.invoke('readers:create', { name: 'Мария', card_no: 'B00108' });
+  const result = await ipcMain.invoke('readers:byCard', 'Б00108');
+  assert.ok(result.data, 'читателят трябва да се намери въпреки кирилския вход');
+  assert.equal(result.data.name, 'Мария');
 });
 
 test('readers:delete removes the row', async () => {

@@ -7,7 +7,7 @@ const importers = require('./importers');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
 const { applyEnumTriggers } = require('./db/enum-triggers');
 const { createDebouncer } = require('./debounce');
-const { csvCell, isValidEmail } = require('./security-utils');
+const { csvCell, isValidEmail, normalizeScanCode } = require('./security-utils');
 const { ensureDbFolderAvailable } = require('./db-folder');
 const { ensureHolidaysSeeded } = require('./bg-holidays');
 const { autoUpdater } = require('electron-updater');
@@ -596,7 +596,7 @@ require('./handlers/categories')(ipcMain, { getDb: () => db, run });
    подаден на require(), позициониран СЛЕД това място — същият модел, както
    при LOAN_SELECT/firstActiveHold. */
 const { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit } = require('./handlers/books')(ipcMain, {
-  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite
+  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode
 });
 
 /* ---------------- Контрол на авторитетните данни ----------------
@@ -624,7 +624,7 @@ require('./handlers/acquisitions')(ipcMain, { getDb: () => db, run, logAudit, BO
    Извадени в handlers/deaccession-acts.js (Фаза 4, стъпка 15 от разбиването
    на монолита main.js на модули по домейн). */
 require('./handlers/deaccession-acts')(ipcMain, {
-  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite
+  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, normalizeScanCode
 });
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
@@ -634,7 +634,7 @@ require('./handlers/kdbf')(ipcMain, { getDb: () => db, run, yearOf });
 require('./handlers/readers')(ipcMain, {
   getDb: () => db, run, logAudit, today, ftsQuery,
   maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit,
-  dialog, getMainWindow: () => mainWindow, fs, csvCell
+  dialog, getMainWindow: () => mainWindow, fs, csvCell, normalizeScanCode
 });
 
 /* ---------------- Читателска сметка (Koha: accountlines) ----------------
@@ -707,7 +707,7 @@ function logEvent(kind, opts) {
    consumeHoldOnCheckout/activateHoldOnReturn се връщат обратно тук, защото
    ги ползва домейнът "Заемания" по-долу. */
 const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
-  require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit });
+  require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit, normalizeScanCode });
 
 /* ---------------- Заемания ----------------
    Извадени в handlers/loans.js (Фаза 4, стъпка 22 от разбиването на
@@ -717,7 +717,7 @@ const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
 const { LOAN_SELECT } = require('./handlers/loans')(ipcMain, {
   getDb: () => db, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
   circRule, readerCategory, nextWorkDay, closedDaysBetween,
-  firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn
+  firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode
 });
 
 /* ---------------- Периодика ----------------
@@ -734,7 +734,7 @@ require('./handlers/dashboard')(ipcMain, {
 
 /* ---------------- Инвентаризация ---------------- */
 require('./handlers/inventory-sessions')(ipcMain, {
-  getDb: () => db, run, logAudit, pctRequired, naturalLoss
+  getDb: () => db, run, logAudit, pctRequired, naturalLoss, normalizeScanCode
 });
 
 /* ---------------- Просрочени: напомняния ----------------
@@ -786,7 +786,7 @@ require('./handlers/data-import')(ipcMain, {
    четец. Списъкът се пренася обратно като текст или файл.
    ============================================================================ */
 require('./handlers/mobile')(ipcMain, {
-  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, normalizeScanCode
 });
 
 /* ============================================================================
@@ -921,7 +921,7 @@ function flushCatalogWrite() { return catalogWriteDebouncer.flush(); }
    app.whenReady()/window-all-closed ги викат само вътре в отложени
    callback-и — редът там няма значение. */
 require('./handlers/shelves')(ipcMain, {
-  getDb: () => db, run, logAudit, scheduleCatalogWrite
+  getDb: () => db, run, logAudit, scheduleCatalogWrite, normalizeScanCode
 });
 const { startAutoPushTimer, stopAutoPushTimer } = require('./handlers/catalog')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, execFile,

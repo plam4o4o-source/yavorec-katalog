@@ -13,7 +13,7 @@ async function renderLabels() {
             ${fld('Формат', 'lbl_mode', { type: 'select', allowEmpty: false, val: s.lbl_mode, opts: [{ v: 'sheet', t: 'A4 лист (в колони)' }, { v: 'roll', t: 'Ролков лейбъл принтер' }] })}
             ${fld('Колони на листа', 'lbl_cols', { val: s.lbl_cols ?? 3, type: 'number', hint: 'само за A4 лист' })}
             ${fld('Разстояние между етикетите (мм)', 'lbl_gap', { val: s.lbl_gap ?? 3, type: 'number', hint: 'само за A4 лист' })}
-            ${fld('Поле на листа (мм)', 'lbl_margin', { val: s.lbl_margin ?? 8, type: 'number' })}
+            ${fld('Поле на листа (мм)', 'lbl_margin', { val: s.lbl_margin ?? 8, type: 'number', hint: 'само за A4 лист — ролковият печат запълва целия етикет' })}
           </div>
           <label class="chk"><input type="checkbox" name="lbl_border" ${(s.lbl_border == null || +s.lbl_border) ? 'checked' : ''}>
             Пунктирана рамка около всеки етикет (помага при рязане; изключете я при готови листове с етикети)</label>

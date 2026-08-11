@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerInventorySessionsHandlers = require('../handlers/inventory-sessions');
+const { normalizeScanCode } = require('../security-utils');
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -36,7 +37,8 @@ function setup() {
     },
     logAudit: (action, detail) => auditLog.push({ action, detail }),
     pctRequired: (n) => (n <= 50000 ? 10 : n <= 200000 ? 5 : 2),
-    naturalLoss: (n, freeAccessPct) => (freeAccessPct > 50 ? n * 10 : n * 5) / 1000
+    naturalLoss: (n, freeAccessPct) => (freeAccessPct > 50 ? n * 10 : n * 5) / 1000,
+    normalizeScanCode
   };
   registerInventorySessionsHandlers(ipcMain, deps);
   return { db, ipcMain, auditLog };
