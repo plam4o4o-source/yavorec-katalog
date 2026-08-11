@@ -536,8 +536,9 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 /* ---------- Печат на етикети ---------- */
 .lblsheet{display:grid; grid-template-columns:repeat(3,1fr); gap:3mm}
 .lbl{border:1px dashed #999; padding:2.5mm; text-align:center; break-inside:avoid}
-.lbl .l1{font-size:7pt; font-weight:700; letter-spacing:.02em; line-height:1.2}
-.lbl .l2{font-size:6.5pt; line-height:1.2; margin-bottom:1mm}
+.lbl .lh1{font-size:6pt; font-weight:400; line-height:1.15; color:var(--ink2)}
+.lbl .lh2{font-size:7pt; font-weight:700; letter-spacing:.02em; line-height:1.15}
+.lbl .lh3{font-size:6.5pt; line-height:1.15; margin-bottom:1mm}
 .lbl .l3{font-family:var(--mono); font-size:9pt; font-weight:700; margin-top:.8mm; letter-spacing:.08em}
 .lbl svg{width:100%; height:11mm}
 .lbl-sig{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.6mm; padding:1.8mm 2mm}
