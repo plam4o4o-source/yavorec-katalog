@@ -1,45 +1,171 @@
 # Инвентар — библиотечна система за читалищни и общински библиотеки
 
-„Инвентар“ е безплатна програма с отворен код за управление на фонда на малка
-читалищна или общинска библиотека в България — инвентарна книга, каталог,
-читателски карти и заемане, КДБФ, дневник, краезнание и още, по образеца на
-Наредба № 3 от 18.11.2014 г. за нормите за компектуване на библиотечните
-фондове. Работи офлайн, на Windows, без месечен абонамент.
+[![CI](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml/badge.svg)](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/plam4o4o-source/yavorec-katalog)](https://github.com/plam4o4o-source/yavorec-katalog/releases)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 
-Това хранилище съдържа и публичния онлайн каталог на библиотеката
-([chyavorec.org](https://chyavorec.org)), захранван от `katalog.json`, който
-самата програма публикува тук при всяка промяна във фонда.
+> **English summary.** *Inventar* is a free, open-source library management
+> system (ILS) for small public and community libraries in Bulgaria —
+> particularly the *chitalishte* (community culture center) libraries. It is
+> an offline-first Windows desktop application (Electron + SQLite) covering
+> the full workflow required by the Bulgarian library regulation *Наредба № 3
+> от 18.11.2014 г.*: accession/inventory books, cataloging with UDC and
+> authority control, reader records and circulation, barcode labels and
+> reader cards (Code 39), overdue notices, annual statistics, deaccession
+> acts, stocktaking, MARC exports (UNIMARC/MARCXML, Dublin Core), automatic
+> backups, and a self-hosted public online catalog published via GitHub.
+> The interface is in Bulgarian, since the regulatory domain it implements
+> is Bulgarian. Development happens in the open in this repository: every
+> release is built from tagged source by GitHub Actions, tested by CI (530+
+> tests), and documented in a bilingual [CHANGELOG](electron-app/CHANGELOG.md).
 
-## Аз съм библиотекар — искам да инсталирам и ползвам програмата
+„Инвентар“ е **безплатна програма с отворен код** за управление на фонда на
+малка читалищна или общинска библиотека — инвентарна книга, каталог,
+читатели и заемане, КДБФ, дневник, отчисляване, инвентаризация и още, по
+образеца на **Наредба № 3 от 18.11.2014 г.** Работи **офлайн**, на Windows,
+без месечен абонамент и без изпращане на данни където и да е.
 
-- **Изтегляне:** [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases)
-  → последната версия → `Inventar-Setup-X.Y.Z.exe`.
-- **Наръчник за библиотекаря** (инсталация, ежедневна работа, резервни копия,
-  публикуване на онлайн каталог, отстраняване на проблеми) — вижте
-  `docs/narachnik-za-bibliotekarya.pdf` в това хранилище, или го поискайте от
-  поддръжката.
-- За подробно описание на всеки раздел на програмата — вижте
-  [„Раздели“ в `electron-app/README-bibliotekar.md`](electron-app/README-bibliotekar.md#раздели).
+Това хранилище съдържа и публичния онлайн каталог
+([пример на chyavorec.org](https://chyavorec.org)), захранван от
+`katalog.json`, който самата програма публикува тук при всяка промяна.
 
-## Аз съм разработчик — искам да развивам кода
+## Снимки на екрана (Screenshots)
 
-Пълната техническа документация (структура на проекта, build, схема на
-базата данни, IPC архитектура) е в
-[`electron-app/README.md`](electron-app/README.md). Вижте също:
+| | |
+|---|---|
+| ![Табло](docs/screenshots/01-tablo.png) | ![Книги](docs/screenshots/02-knigi.png) |
+| Табло — състоянието на библиотеката с един поглед | Библиотечен фонд — търсене, филтри, групова редакция |
+| ![Инвентарна книга](docs/screenshots/03-inventarna-kniga.png) | ![Преглед преди печат](docs/screenshots/06-pregled-pechat.png) |
+| Инвентарна книга по Приложение № 4 към чл. 16, ал. 1 | Преглед преди печат — всеки документ първо на екрана |
+| ![Баркод етикети](docs/screenshots/05-barkod-etiketi.png) | ![Онлайн каталог](docs/screenshots/07-onlain-katalog.png) |
+| Баркод етикети (Code 39) и читателски карти | Публичният онлайн каталог на сайта на библиотеката |
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — граници между главния
-  процес и интерфейса, картата на `handlers/*.js`, DI шаблонът, използван при
-  разбиването на `main.js`.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — как се предлагат промени, стил на
-  commit-ите, изисквания към тестовете.
-- [`docs/naredba-3-karta.md`](docs/naredba-3-karta.md) — кой член от
-  Наредба № 3 коя функция в програмата изпълнява.
+*Снимките показват реалния интерфейс, зареден с примерни данни.*
+
+## Основни възможности
+
+- **Инвентарна книга и КДБФ** по образците от Наредба № 3, с печат и PDF
+- **Каталогизация** — УДК класификация, авторитетен контрол на автори и
+  заглавия, авторски знак, внасяне на записи по ISBN (Google Books / SRU)
+- **Читатели и заемане** — читателски карти, срокове и продължения по
+  категория, календар на затворените дни, наказания и обезщетения,
+  напомнителни писма, читателска сметка с квитанции
+- **Баркоди** — етикети за фонда, етикети за сигнатура и читателски карти
+  (Code 39), печат на A4 или ролков лейбъл принтер; работа с USB баркод
+  четец, включително защита срещу сгрешена клавиатурна подредба (кирилица)
+- **Преглед преди печат** на всички ~14 печатни документа
+- **Отчисляване** с актове по чл. 30 – 39 и **инвентаризация** по чл. 40 – 41
+  (включително мобилно сканиране с телефон)
+- **Дневник на библиотеката** (Раздел А/Б) и годишни справки
+- **Краезнание** — аналитично описание на статии, летопис, персоналии
+- **Периодика, МЗС (междубиблиотечно заемане), витрини, предложения за покупка**
+- **Онлайн каталог** — програмата публикува `katalog.json` в GitHub
+  хранилище, а страница на сайта на библиотеката го чете на живо (без
+  сървър, без абонамент); никакви лични данни на читатели не се публикуват
+- **Износ** — UNIMARC/MARCXML, Dublin Core, CSV; **внасяне** от друга система
+- **Защита на данните** — локална SQLite база, шифроване на ЕГН/№ ЛК с
+  парола, анонимизиране на стари заемания, одитна следа по служител,
+  автоматични резервни копия
+- **Работа в локална мрежа** — споделена база данни за няколко компютъра
+- **Автоматично обновяване** от GitHub Releases
+
+## За кого е предназначена
+
+Читалищни библиотеки, малки общински и селски библиотеки, училищни и
+специализирани сбирки, културни институции — всяка малка българска
+библиотека, която води инвентарна книга по Наредба № 3 и няма бюджет за
+скъпа интегрирана система. Програмата е **универсална**: името на
+библиотеката, населеното място, комисията и всички реквизити се въвеждат
+веднъж в „Настройки“ — в кода няма нищо, вписано за конкретна библиотека.
+
+## Инсталиране (за библиотекари)
+
+1. Изтеглете последния `Inventar-Setup-X.Y.Z.exe` от
+   [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases).
+2. Стартирайте инсталатора и следвайте стъпките (на български).
+3. При първо стартиране програмата отваря „Настройки“ — попълнете данните
+   на библиотеката.
+
+Подробният наръчник е в
+[`docs/narachnik-za-bibliotekarya.pdf`](docs/narachnik-za-bibliotekarya.pdf),
+а описание на всеки раздел — в
+[`electron-app/README-bibliotekar.md`](electron-app/README-bibliotekar.md).
+Инсталаторът засега е без цифров подпис — ако Windows SmartScreen или
+антивирусна програма предупреди, вижте
+[какво означава това и какво се прави](electron-app/README-bibliotekar.md#цифров-подпис-и-антивирусни-програми).
+
+### Изисквания
+
+- Windows 10 или 11, 64-bit
+- няколкостотин МБ място на диска; базата данни расте с фонда (SQLite файл)
+- Интернет е нужен само за: автоматично обновяване, търсене по ISBN и
+  публикуване на онлайн каталога — всичко останало работи изцяло офлайн
+
+## Разработка (за програмисти)
+
+```bash
+git clone https://github.com/plam4o4o-source/yavorec-katalog.git
+cd yavorec-katalog/electron-app
+npm install        # включва electron-rebuild за better-sqlite3
+npm start          # стартира програмата в режим за разработка
+npm test           # node:test — всички тестове (530+)
+```
+
+Изисквания за разработка: Node.js 22+, npm. За build на Windows
+инсталатора: `npm run build` (electron-builder; официалните издания се
+строят от GitHub Actions при push на таг `vX.Y.Z`).
+
+## Документация
+
+| Документ | Съдържание |
+|---|---|
+| [`electron-app/README.md`](electron-app/README.md) | техническа документация: структура, build, схема на БД, IPC, версии |
+| [`electron-app/README-bibliotekar.md`](electron-app/README-bibliotekar.md) | за библиотекаря: настройки, раздели, цифров подпис/антивирусни |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | архитектурни решения и извлечени уроци, версия по версия |
+| [`docs/naredba-3-karta.md`](docs/naredba-3-karta.md) | кой член от Наредба № 3 коя функция изпълнява |
+| [`docs/narachnik-za-bibliotekarya.pdf`](docs/narachnik-za-bibliotekarya.pdf) | наръчник за ежедневната работа |
+| [`electron-app/CHANGELOG.md`](electron-app/CHANGELOG.md) | всички издания, двуезично (BG/EN) |
+
+## Принос (Contributing)
+
+Приемат се доклади за грешки, предложения и pull request-и — вижте
+[`CONTRIBUTING.md`](CONTRIBUTING.md) за стила на кода, изискванията към
+тестовете и процеса. Докладвайте грешки през
+[Issues](https://github.com/plam4o4o-source/yavorec-katalog/issues).
+
+## Сигурност
+
+За уязвимости вижте [`SECURITY.md`](SECURITY.md) — предпочитаният канал е
+GitHub Security Advisories (частен доклад), не публичен issue.
 
 ## Лиценз
 
-GNU General Public License — `LICENSE` (английски, меродавен текст) /
-`LICENSE.bg.md` (български, неофициален превод за улеснение). Вижте
-бележката в началото на `LICENSE.bg.md` кой текст е правно обвързващ.
+[GNU General Public License v3.0 or later](LICENSE) (GPL-3.0-or-later).
+Български неофициален превод за улеснение: [`LICENSE.bg.md`](LICENSE.bg.md)
+(меродавен е английският текст в `LICENSE`).
+
+## Пътна карта (Roadmap)
+
+- **Цифров подпис на инсталатора** — премахва предупрежденията на
+  SmartScreen и антивирусните програми; проучени са SignPath Foundation
+  (повторна кандидатура при натрупана публична видимост), Azure Trusted
+  Signing и Certum Open Source ([подробности](electron-app/README-bibliotekar.md#цифров-подпис-и-антивирусни-програми))
+- **Обратна връзка от още библиотеки** — програмата е универсална по
+  замисъл; целта е да бъде изпробвана и от други читалищни/общински
+  библиотеки и развивана по реалните им нужди
+- Подобрения, предлагани от практиката, се вписват и обсъждат в
+  [Issues](https://github.com/plam4o4o-source/yavorec-katalog/issues);
+  идеи се сверяват и с утвърдени системи като Koha (виж
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), раздел „Koha като
+  източник на идеи“)
+
+## Статус на проекта
+
+**В активна разработка и в реална ежедневна употреба** в библиотеката на
+НЧ „Васил Левски – 1922“, с. Яворец (общ. Габрово), чийто публичен каталог
+се захранва от това хранилище. Изданията са редовни (виж
+[Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases)),
+всяко с описание в CHANGELOG и пълен тестов пакет.
 
 ## Автор
 
