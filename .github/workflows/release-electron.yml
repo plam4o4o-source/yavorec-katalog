@@ -96,6 +96,32 @@ jobs:
             Write-Host 'Инсталаторът е НЕПОДПИСАН — виж README, раздел „Цифров подпис“.'
           }
 
+      # SHA-256 контролни суми на публикуваните файлове, качени като
+      # SHA256SUMS.txt в самия release. Две ползи, и двете свързани с това, че
+      # инсталаторът е неподписан: (1) в доклад за фалшива тревога до
+      # антивирусна компания (AVG/Avast и др. — виж README, раздел „Цифров
+      # подпис и антивирусни програми“) сумата идентифицира еднозначно точния
+      # файл; (2) библиотекар може да провери, че изтегленият инсталатор е
+      # байт по байт публикуваният (PowerShell: Get-FileHash <файл>).
+      # Стъпката има смисъл само при пускане от таг — там release-ът съществува.
+      - name: Публикува SHA-256 суми в release-а
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = Get-ChildItem dist -File |
+            Where-Object { $_.Extension -in '.exe', '.blockmap', '.yml' }
+          if (-not $files) { Write-Host 'Няма файлове в dist/ — пропуска се.'; exit 0 }
+          $lines = foreach ($f in $files) {
+            $h = Get-FileHash $f.FullName -Algorithm SHA256
+            "$($h.Hash.ToLower())  $($f.Name)"
+          }
+          $out = Join-Path dist 'SHA256SUMS.txt'
+          $lines | Out-File -FilePath $out -Encoding ascii
+          Get-Content $out
+          gh release upload $env:GITHUB_REF_NAME $out --clobber --repo $env:GITHUB_REPOSITORY
+
       # Взима раздела "## vX.Y.Z" от CHANGELOG.md (ако съществува) и го
       # записва като описание на вече публикуваното GitHub Release, вместо
       # то да остава празно. Не проваля build-а, ако секция липсва.
