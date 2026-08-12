@@ -12,10 +12,11 @@ Copyright © 2026 Пламен Христов - Пачо. Лицензирана
 **GNU General Public License, версия 3 или по-нова, по избор на получателя**
 (GPL-3.0-or-later) — вижте `LICENSE` (текстът на версия 3; неофициален
 превод на български — `LICENSE.bg.md`).
-Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases);
-Windows инсталаторът се подписва безплатно чрез
-[SignPath Foundation](https://signpath.org/)-ната програма за проекти с
-отворен код.
+Изтеглянето става от [GitHub Releases](https://github.com/plam4o4o-source/yavorec-katalog/releases).
+Windows инсталаторът засега е **без цифров подпис** — вариантите за
+подписване (SignPath Foundation, Azure Trusted Signing, Certum) и текущото
+състояние са описани в
+[`README-bibliotekar.md`](README-bibliotekar.md#цифров-подпис-и-антивирусни-програми).
 
 ## Общ преглед / Overview
 
@@ -35,7 +36,7 @@ managing the collection of a small public or community library
 (*chitalishte*) in Bulgaria. It provides full book inventory and cataloging,
 authority control for authors/titles, UDC classification, reader cards and
 lending, overdue-book reminders, export to library formats
-(UNIMARC/MARCXML, Dublin Code), data import from other systems, mobile
+(UNIMARC/MARCXML, Dublin Core), data import from other systems, mobile
 barcode scanning for stocktaking, a self-hosted online catalog via GitHub,
 local-network operation with a shared database, automatic backups, and
 automatic updates. It runs fully offline (except for optional ISBN lookups
@@ -47,8 +48,11 @@ the recipient's option.
   text of version 3; "or later" applies per the notice below) /
   `LICENSE.bg.md` (Bulgarian, unofficial reference translation)
 - **Requirements / Изисквания:** Windows 10/11, 64-bit
-- **Code signing / Подпис на кода:** free, via [SignPath Foundation](https://signpath.org/)
-  for open-source projects (application pending / заявката е подадена)
+- **Code signing / Подпис на кода:** the installer is currently unsigned;
+  options and status are documented in
+  [`README-bibliotekar.md`](README-bibliotekar.md#цифров-подпис-и-антивирусни-програми)
+  / инсталаторът засега е неподписан — вариантите и състоянието са описани
+  в наръчника
 
 > This program is free software: you can redistribute it and/or modify it
 > under the terms of the GNU General Public License as published by the
