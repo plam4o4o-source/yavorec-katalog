@@ -637,6 +637,14 @@ require('./handlers/readers')(ipcMain, {
   dialog, getMainWindow: () => mainWindow, fs, csvCell, normalizeScanCode
 });
 
+/* ---------------- Печат → PDF файл ----------------
+   Директно записване на текущия печатен документ в PDF (printToPDF) —
+   заобикаля системния диалог на Windows, който не визуализира Electron
+   съдържание. Виж коментара в handlers/print.js. */
+require('./handlers/print')(ipcMain, {
+  getMainWindow: () => mainWindow, dialog, fs, path, app, shell, logAudit
+});
+
 /* ---------------- Читателска сметка (Koha: accountlines) ----------------
    amount > 0 = начислено (дължи се), amount < 0 = платено. Балансът е SUM(amount).
    Не е касов модул — само дневник на движенията + квитанция за печат. */

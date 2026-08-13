@@ -11,6 +11,36 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.72.0
+
+**BG:** „Запази PDF…“ в прегледа преди печат + мащабиране на прегледа.
+
+Системният прозорец за печат на Windows не визуализира съдържание от
+Electron приложения („Това приложение не поддържа визуализация на
+печата“) — библиотекарят виждаше документа в прегледа на програмата, но
+след „Печат…“ отново оставаше на сляпо. Нов бутон **„Запази PDF…“** в
+прегледа записва документа директно като PDF файл (през същия печатен
+механизъм — размери, полета и баркоди едно към едно) и го **отваря
+веднага** в PDF четеца, където визуализацията е пълна, страница по
+страница, и откъдето може да се печата с истински преглед. Предложеното
+име на файла е името на документа, папката по подразбиране — „Документи“;
+записът се вписва в одитната следа.
+
+Самият преглед е разширен: почти цял екран, листът се побира автоматично
+по ширината на прозореца, бутони − / % / + за мащабиране (процентният
+бутон връща „по ширина“).
+
+**EN:** "Save as PDF…" in the print preview + preview zoom.
+
+Windows' system print dialog cannot render Electron content, so after the
+in-app preview the librarian still printed blind. A new **"Запази PDF…"**
+button saves the document straight to a PDF file (via the same print
+pipeline — sizes, margins and barcodes are identical to the printer
+output) and opens it immediately in the default PDF viewer, where a full
+page-by-page preview is available and printing works with real preview.
+The preview itself is now near-fullscreen with fit-to-width by default and
+− / % / + zoom controls.
+
 ## v1.71.1
 
 **BG:** Заглавна част на баркод етикета за фонда — три реда.

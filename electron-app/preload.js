@@ -95,6 +95,9 @@ contextBridge.exposeInMainWorld('api', {
   kdbf: {
     report: invoke('kdbf:report')
   },
+  print: {
+    savePdf: invoke('print:savePdf')
+  },
   readers: {
     list: invoke('readers:list'),
     get: invoke('readers:get'),
