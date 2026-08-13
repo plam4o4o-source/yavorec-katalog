@@ -555,13 +555,46 @@ function doPrint(html, docName) {
   st.textContent = ppScopeCss(o.extraCss || '');
   sheet.innerHTML = html;
   $('#ppTitle').textContent = PRINT_JOB_NAME || 'Преглед преди печат';
-  $('#ppHint').textContent = PRINT_JOB_NAME
-    ? `За PDF: в прозореца за печат изберете „Microsoft Print to PDF“ — файлът ще се казва „${PRINT_JOB_NAME}“.`
-    : 'За PDF: в прозореца за печат изберете „Microsoft Print to PDF“ вместо принтер.';
+  // Прозорецът за печат на Windows не показва визуализация на Electron
+  // съдържание — затова подсказката сочи към „Запази PDF…“, а не към
+  // „Microsoft Print to PDF“ (v1.72.0).
+  $('#ppHint').textContent =
+    '„Запази PDF…“ записва документа като PDF файл и го отваря — там се вижда точно какво ще се отпечата.';
   $('#printPreview').classList.add('on');
+  // По подразбиране листът се побира по ширината на прозореца — чак след
+  // като слоят е видим, защото дотогава clientWidth на .ppScroll е 0.
+  requestAnimationFrame(() => ppZoom('fit'));
 }
 function ppClose() { $('#printPreview').classList.remove('on'); }
 window.ppClose = ppClose;
+/* Мащаб на прегледа (v1.72.0). Ползва се CSS свойството zoom (Chromium-only,
+   но програмата Е Chromium) вместо transform:scale — zoom участва в подредбата,
+   затова скроловете и центрирането остават верни. „fit“ побира листа по
+   ширината на видимата област; +/− стъпват по готовите нива. */
+const PP_ZOOM_STEPS = [0.4, 0.55, 0.7, 0.85, 1, 1.25, 1.5, 2, 3];
+let PP_ZOOM = 1;
+function ppApplyZoom(z) {
+  PP_ZOOM = Math.max(PP_ZOOM_STEPS[0], Math.min(PP_ZOOM_STEPS[PP_ZOOM_STEPS.length - 1], z));
+  const sheet = $('#ppSheet');
+  if (sheet) sheet.style.zoom = PP_ZOOM;
+  const pct = $('#ppZoomPct');
+  if (pct) pct.textContent = Math.round(PP_ZOOM * 100) + '%';
+}
+function ppZoom(dir) {
+  if (dir === 'fit') {
+    const scroll = $('.ppScroll'), sheet = $('#ppSheet');
+    if (!scroll || !sheet) return;
+    // offsetWidth е в „нескалирани“ пиксели — zoom не го променя.
+    const avail = scroll.clientWidth - 36; // минус padding на .ppScroll
+    const w = sheet.offsetWidth;
+    ppApplyZoom(w > 0 && avail > 0 ? avail / w : 1);
+    return;
+  }
+  const i = PP_ZOOM_STEPS.findIndex(s => s >= PP_ZOOM - 0.001);
+  const at = i < 0 ? PP_ZOOM_STEPS.length - 1 : i;
+  ppApplyZoom(PP_ZOOM_STEPS[Math.max(0, Math.min(PP_ZOOM_STEPS.length - 1, at + (dir > 0 ? 1 : -1)))]);
+}
+window.ppZoom = ppZoom;
 function ppPrint() {
   ppClose();
   if (PRINT_JOB_NAME) document.title = PRINT_JOB_NAME;
@@ -572,6 +605,28 @@ function ppPrint() {
   }, 150)));
 }
 window.ppPrint = ppPrint;
+/* Запази PDF… (v1.72.0) — печатният документ директно като PDF файл, без
+   системния диалог (който на Windows не визуализира Electron съдържание).
+   printToPDF в главния процес минава през същия печатен рендер (@media
+   print + @page от setPrintPage), т.е. PDF-ът е точно каквото би отпечатал
+   window.print(). #printArea вече е попълнен от doPrint(); слоят на
+   прегледа остава отворен, но в печатния изглед е скрит (visibility). */
+async function ppSavePdf() {
+  const btn = $('#ppPdfBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Запазване…'; }
+  try {
+    const res = await window.api.print.savePdf({ fileName: PRINT_JOB_NAME || 'Документ' });
+    if (!res.ok) {
+      if (res.error !== 'Отказано от потребителя.') toast(res.error, 'err');
+      return;
+    }
+    toast('PDF файлът е записан и отворен: ' + (res.data && res.data.path || ''), 'ok');
+    ppClose();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Запази PDF…'; }
+  }
+}
+window.ppSavePdf = ppSavePdf;
 /* Размерите на трите вида етикети се задават в „Баркод етикети“ → „Формат на печат“.
    kind избира кой размер важи: 'fund' — етикет за фонда, 'sig' — етикет за сигнатура
    (гръбче), 'card' — читателска карта. */

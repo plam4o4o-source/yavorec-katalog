@@ -485,6 +485,74 @@ test('printLabelsAll() пада се към едноредово наимено�
   assert.match(html, /<div class="lh3">с\. Пример<\/div>/, 'мястото продължава да се показва на трети ред');
 });
 
+/* --- „Запази PDF…“ и мащаб в прегледа преди печат (v1.72.0). Системният
+   диалог на Windows не визуализира Electron съдържание — единственият начин
+   библиотекарят да ВИДИ какво излиза е или прегледът в програмата, или
+   готов PDF файл. ppSavePdf() праща името на документа към print:savePdf
+   и затваря прегледа при успех; при отказ от диалога за запис не се показва
+   грешка (отказът е нормално действие). */
+
+test('ppSavePdf() праща името на документа към print:savePdf и затваря прегледа при успех', async () => {
+  const dom = buildDom({
+    'print.savePdf': { path: 'C:\\Users\\b\\Documents\\Инвентарна книга.pdf' }
+  });
+  const { window } = dom;
+  await settled(dom);
+  window.setPrintPage({ name: 'Инвентарна книга — проба', landscape: false });
+  window.doPrint('<div class="pdoc"><h2>ПРОБА</h2></div>');
+  assert.ok(window.document.getElementById('printPreview').classList.contains('on'),
+    'прегледът трябва да е отворен след doPrint()');
+  assert.ok(window.document.getElementById('ppPdfBtn'), 'бутонът „Запази PDF…“ трябва да съществува');
+  await window.ppSavePdf();
+  assert.ok(!window.document.getElementById('printPreview').classList.contains('on'),
+    'при успешен запис прегледът се затваря');
+});
+
+test('ppSavePdf() при отказ от диалога оставя прегледа отворен и не показва грешка', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  // Мокът за api връща ok:true по подразбиране — тук е нужен изричен отказ.
+  window.api = { print: { savePdf: async () => ({ ok: false, error: 'Отказано от потребителя.' }) } };
+  const toasts = [];
+  window.toast = (m, t) => toasts.push([t, m]);
+  window.setPrintPage({ name: 'Проба' });
+  window.doPrint('<div class="pdoc">х</div>');
+  await window.ppSavePdf();
+  assert.ok(window.document.getElementById('printPreview').classList.contains('on'),
+    'при отказ прегледът остава отворен — библиотекарят може да продължи с „Печат…“');
+  assert.equal(toasts.filter(t => t[0] === 'err').length, 0, 'отказът не е грешка');
+});
+
+test('мащабът на прегледа се показва в проценти и се движи по стъпките с +/−', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  window.setPrintPage({ name: 'Проба' });
+  window.doPrint('<div class="pdoc">х</div>');
+  // В jsdom няма реални размери (offsetWidth = 0) — „fit“ пада към 100%.
+  await new Promise(r => setTimeout(r, 30));
+  const pct = () => window.document.getElementById('ppZoomPct').textContent;
+  window.ppZoom('fit');
+  assert.equal(pct(), '100%');
+  window.ppZoom(1);
+  assert.equal(pct(), '125%', 'следващата стъпка нагоре след 100% е 125%');
+  window.ppZoom(-1); window.ppZoom(-1);
+  assert.equal(pct(), '85%', 'две стъпки надолу от 125% дават 85%');
+});
+
+test('подсказката в прегледа сочи към „Запази PDF…“, не към „Microsoft Print to PDF“', async () => {
+  const dom = buildDom({});
+  const { window } = dom;
+  await settled(dom);
+  window.setPrintPage({ name: 'Проба' });
+  window.doPrint('<div class="pdoc">х</div>');
+  const hint = window.document.getElementById('ppHint').textContent;
+  assert.match(hint, /Запази PDF/);
+  assert.doesNotMatch(hint, /Microsoft Print to PDF/,
+    'старата подсказка водеше през системния диалог, който е без визуализация');
+});
+
 // Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
 // правило за `.grid`. Затова, ако класът бъде преименуван/премахнат от
 // style.css, докато разметката още го ползва, редът тихо се разпада на

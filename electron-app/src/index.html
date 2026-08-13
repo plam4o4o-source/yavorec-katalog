@@ -71,12 +71,18 @@
     <div class="ppBox">
       <header class="ppHead">
         <h2 id="ppTitle">Преглед преди печат</h2>
+        <span class="ppZoom" role="group" aria-label="Мащаб на прегледа">
+          <button class="btn sm" onclick="ppZoom(-1)" title="Намаляване" aria-label="Намаляване">−</button>
+          <button class="btn sm" id="ppZoomPct" onclick="ppZoom('fit')" title="Побиране по ширината на прозореца">100%</button>
+          <button class="btn sm" onclick="ppZoom(1)" title="Уголемяване" aria-label="Уголемяване">+</button>
+        </span>
         <button class="x" onclick="ppClose()" title="Затвори" aria-label="Затвори">&times;</button>
       </header>
       <div class="ppScroll"><div id="ppSheet"></div></div>
       <footer class="ppFoot">
         <span class="hint" id="ppHint"></span>
         <button class="btn" onclick="ppClose()">Отказ</button>
+        <button class="btn" id="ppPdfBtn" onclick="ppSavePdf()">Запази PDF…</button>
         <button class="btn pri" onclick="ppPrint()">Печат…</button>
       </footer>
     </div>
