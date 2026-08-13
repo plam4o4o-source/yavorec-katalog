@@ -669,10 +669,20 @@ Gen-семейството (AVG, Avast, Avira, Norton — едно ядро) п�
 Правила, докато няма сертификат:
 
 - Всеки release носи `SHA256SUMS.txt` (стъпка в
-  `.github/workflows/release-electron.yml`, качва се с `gh release upload`
-  само при пускане от таг). Не я местете преди стъпката за описанието от
-  CHANGELOG — редът е без значение технически, но сумите трябва да са от
-  ФИНАЛНИТЕ файлове в dist/, т.е. след build/publish стъпката.
+  `.github/workflows/release-electron.yml`, качва се с `gh release upload`).
+  Не я местете преди стъпката за описанието от CHANGELOG — редът е без
+  значение технически, но сумите трябва да са от ФИНАЛНИТЕ файлове в
+  dist/, т.е. след build/publish стъпката.
+- Изданията се пускат чрез `workflow_dispatch` на `main` (виж README/
+  CONTRIBUTING) — не чрез директно качване на таг; electron-builder сам
+  създава тага/release-а през GitHub API при `--publish always`. Затова
+  `$env:GITHUB_REF_NAME` в тази job-a е ИМЕТО НА BRANCH-а („main“), не
+  версията — стъпка на пускане на таг никога не се задейства тук. Двете
+  стъпки, на които това реално влияе (SHA256SUMS.txt и попълването на
+  описанието от CHANGELOG), ползват отделна стъпка `RELEASE_TAG`, изведена
+  директно от `package.json`, вместо `GITHUB_REF_NAME`. Преди тази поправка
+  описанието от CHANGELOG мълчаливо не се публикуваше на НИТО едно издание
+  досега (release-ите излизаха с празно описание, без грешка в build-а).
 - Блокиране при потребител се решава на два фронта едновременно: изключения
   на място (три папки: `%LOCALAPPDATA%\Programs\Инвентар`,
   `%APPDATA%\Инвентар`, `%LOCALAPPDATA%\inventar-desktop-updater` — третата

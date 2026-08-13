@@ -31,6 +31,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Изданията тук се пускат по установения ред чрез "Actions" →
+      # workflow_dispatch на main (виж README/CONTRIBUTING), не чрез директно
+      # качване на таг — electron-builder сам създава тага и release-а през
+      # GitHub API при "--publish always". При workflow_dispatch GITHUB_REF_NAME
+      # е името на branch-а ("main"), НЕ версията — стъпка, разчитаща на него
+      # за да намери/адресира release-а, мълчаливо не намира нищо и се
+      # пропуска (точно това се случи с описанието от CHANGELOG.md на всяко
+      # издание досега). RELEASE_TAG се извежда директно от package.json и е
+      # верен при двата начина на пускане.
+      - name: Определя тага на изданието (от package.json — верен и при ръчно пускане)
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "v$version"
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Таг на изданието: $tag"
+
       # Цифровият подпис се включва сам, щом в хранилището бъдат добавени двете
       # секретни променливи (Settings → Secrets and variables → Actions):
       #   WINDOWS_CERT_BASE64   — .pfx файлът на сертификата, кодиран в base64
@@ -103,9 +120,11 @@ jobs:
       # подпис и антивирусни програми“) сумата идентифицира еднозначно точния
       # файл; (2) библиотекар може да провери, че изтегленият инсталатор е
       # байт по байт публикуваният (PowerShell: Get-FileHash <файл>).
-      # Стъпката има смисъл само при пускане от таг — там release-ът съществува.
+      # Работи и при workflow_dispatch — виж коментара при стъпката, която
+      # определя RELEASE_TAG. Вътрешната проверка за празен dist/ пази
+      # стъпката безопасна, ако build-ът по някаква причина не е оставил
+      # файлове (не би трябвало да се стигне дотук в такъв случай).
       - name: Публикува SHA-256 суми в release-а
-        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,7 +139,7 @@ jobs:
           $out = Join-Path dist 'SHA256SUMS.txt'
           $lines | Out-File -FilePath $out -Encoding ascii
           Get-Content $out
-          gh release upload $env:GITHUB_REF_NAME $out --clobber --repo $env:GITHUB_REPOSITORY
+          gh release upload $env:RELEASE_TAG $out --clobber --repo $env:GITHUB_REPOSITORY
 
       # Взима раздела "## vX.Y.Z" от CHANGELOG.md (ако съществува) и го
       # записва като описание на вече публикуваното GitHub Release, вместо
@@ -130,7 +149,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
+          $tag = $env:RELEASE_TAG
           $changelogPath = 'CHANGELOG.md'
           if (-not (Test-Path $changelogPath)) {
             Write-Host 'Няма CHANGELOG.md — пропуска се.'
