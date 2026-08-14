@@ -11,6 +11,30 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v1.73.0
+
+**BG:** Настройки → „Помощ и обратна връзка“ — имейл за съобщаване на грешки.
+
+Нова карта в „Настройки“ показва имейла за връзка с разработчика
+(`plam4o.4o@outlook.com`) и бутон **„Съобщи за грешка…“**, който отваря
+пощенския клиент с попълнена тема и текст (версия на програмата, име на
+библиотеката, операционна система) — остава само да се опише какво се е
+случило. До имейла има и бутон „Копирай имейла“ за библиотекари, които
+предпочитат да пишат от телефона си. Програмата се ползва вече и от други
+читалищни библиотеки освен НЧ „Васил Левски 1922“ — Яворец, затова
+директен канал за съобщаване на грешки помага на всички. Писмото изрично
+напомня да не се прилагат файлът на базата данни или лични данни на
+читатели.
+
+**EN:** Settings → "Help and feedback" — bug-report contact email.
+
+A new card in "Settings" shows the developer's contact email
+(`plam4o.4o@outlook.com`) with a **"Report a bug…"** button that opens the
+user's mail client with a pre-filled subject and body (app version, library
+name, operating system) — the librarian only has to describe what happened.
+A "Copy email" button is included as well. The letter explicitly reminds
+not to attach the database file or readers' personal data.
+
 ## v1.72.0
 
 **BG:** „Запази PDF…“ в прегледа преди печат + мащабиране на прегледа.
