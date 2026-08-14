@@ -300,8 +300,10 @@ async function renderSetup() {
       НЧ „Васил Левски 1922“ — Яворец, затова съобщение за забелязана грешка помага на всички.
       <b>Не прилагайте файла на базата данни или лични данни на читатели</b> към съобщението — опишете само
       какво сте направили и какво се случи.</div>
-      <div class="hint" style="margin-bottom:10px">Имейл за връзка с разработчика:
+      <div class="hint" style="margin-bottom:4px">Имейл за връзка с разработчика:
         <b style="font-family:var(--mono)">${esc(DEV_CONTACT_EMAIL)}</b></div>
+      <div class="hint" style="margin-bottom:10px">Уебсайт на програмата:
+        <a href="${esc(DEV_SITE_URL)}" target="_blank" rel="noopener">${esc(DEV_SITE_URL.replace(/^https?:\/\//, ''))}</a></div>
       <div class="toolbar">
         <button type="button" class="btn pri" onclick="reportBug()">Съобщи за грешка…</button>
         <button type="button" class="btn" onclick="copyDevEmail()">Копирай имейла</button>
@@ -720,13 +722,17 @@ async function resetNoticeTemplates() {
   await loadSettingsCache();
 }
 window.resetNoticeTemplates = resetNoticeTemplates;
-/* ---------------- Помощ и обратна връзка (имейл на разработчика) ----------------
+/* ---------------- Помощ и обратна връзка (имейл и уебсайт на разработчика) ----------------
    Статичен, некриптиран контакт на РАЗРАБОТЧИКА на самата програма — не е данни на
    конкретната библиотека, затова нарочно не е поле в базата данни/Настройки, а
-   фиксиран текст тук (както в LICENSE/README). Изпращането минава през същия
+   фиксиран текст тук (както в LICENSE/README). Имейлът се изпраща през същия
    loans:mailto IPC канал, който вече отваря mailto: през shell.openExternal — общ,
-   не специфичен за читатели, само с валидиран формат на адреса. */
+   не специфичен за читатели, само с валидиран формат на адреса. Линкът към сайта
+   е обикновен <a target="_blank"> — main.js вече прихваща такива линкове
+   (setWindowOpenHandler) и ги праща към системния браузър вместо в прозореца на
+   приложението, затова тук не е нужен отделен IPC канал. */
 const DEV_CONTACT_EMAIL = 'plam4o.4o@outlook.com';
+const DEV_SITE_URL = 'https://inventar-two.vercel.app/';
 async function reportBug() {
   const [version, s] = await Promise.all([
     call(window.api.app.getVersion()), call(window.api.settings.get())

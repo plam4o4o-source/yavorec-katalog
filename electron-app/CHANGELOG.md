@@ -11,6 +11,20 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.1.0
+
+**BG:** Настройки → „Помощ и обратна връзка“ — линк към уебсайта на програмата.
+
+Картата „Помощ и обратна връзка“ вече показва и линк към уебсайта на
+програмата (`inventar-two.vercel.app`), до имейла за връзка с разработчика.
+Отваря се в системния браузър, не в прозореца на приложението.
+
+**EN:** Settings → "Help and feedback" — link to the program's website.
+
+The "Help and feedback" card now also shows a link to the program's website
+(`inventar-two.vercel.app`), next to the developer's contact email. It opens
+in the system browser, not inside the application window.
+
 ## v2.0.0
 
 **BG:** Версия 2.0 — без промяна по кода.
