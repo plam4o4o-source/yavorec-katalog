@@ -294,6 +294,19 @@ async function renderSetup() {
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Обновяване</h3>
       ${updateStatusHtml()}
     </div>
+
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Помощ и обратна връзка</h3>
+      <div class="note" style="margin-top:0">Програмата се ползва и от други читалищни библиотеки освен
+      НЧ „Васил Левски 1922“ — Яворец, затова съобщение за забелязана грешка помага на всички.
+      <b>Не прилагайте файла на базата данни или лични данни на читатели</b> към съобщението — опишете само
+      какво сте направили и какво се случи.</div>
+      <div class="hint" style="margin-bottom:10px">Имейл за връзка с разработчика:
+        <b style="font-family:var(--mono)">${esc(DEV_CONTACT_EMAIL)}</b></div>
+      <div class="toolbar">
+        <button type="button" class="btn pri" onclick="reportBug()">Съобщи за грешка…</button>
+        <button type="button" class="btn" onclick="copyDevEmail()">Копирай имейла</button>
+      </div>
+    </div>
     <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
   loadNoticePlaceholders();
   loadAvEditors();
@@ -707,3 +720,33 @@ async function resetNoticeTemplates() {
   await loadSettingsCache();
 }
 window.resetNoticeTemplates = resetNoticeTemplates;
+/* ---------------- Помощ и обратна връзка (имейл на разработчика) ----------------
+   Статичен, некриптиран контакт на РАЗРАБОТЧИКА на самата програма — не е данни на
+   конкретната библиотека, затова нарочно не е поле в базата данни/Настройки, а
+   фиксиран текст тук (както в LICENSE/README). Изпращането минава през същия
+   loans:mailto IPC канал, който вече отваря mailto: през shell.openExternal — общ,
+   не специфичен за читатели, само с валидиран формат на адреса. */
+const DEV_CONTACT_EMAIL = 'plam4o.4o@outlook.com';
+async function reportBug() {
+  const [version, s] = await Promise.all([
+    call(window.api.app.getVersion()), call(window.api.settings.get())
+  ]);
+  const subject = 'Инвентар' + (version ? ' v' + version : '') + ' — съобщение за грешка';
+  const body = 'Опишете какво направихте и какво се случи (може и на кратко):\n\n\n\n' +
+    '---\n' +
+    'Версия на програмата: ' + (version || '?') + '\n' +
+    'Библиотека: ' + ((s && (s.lib_name || s.org)) || '') + '\n' +
+    'Операционна система: ' + navigator.userAgent + '\n\n' +
+    'ВАЖНО: моля, не прилагайте файла на базата данни или лични данни на читатели към това писмо.';
+  const res = await window.api.loans.mailto({ email: DEV_CONTACT_EMAIL, subject, body });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Пощенският клиент е отворен с попълнено писмо.', 'ok');
+}
+window.reportBug = reportBug;
+async function copyDevEmail() {
+  try { await navigator.clipboard.writeText(DEV_CONTACT_EMAIL); }
+  catch (e) { /* най-честата причина е липса на разрешение за системния буфер;
+                 имейлът и без това се вижда в картата, затова само съобщението по-долу отпада мълчаливо */ }
+  toast('Имейлът е копиран: ' + DEV_CONTACT_EMAIL, 'ok');
+}
+window.copyDevEmail = copyDevEmail;

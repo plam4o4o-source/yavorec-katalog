@@ -553,6 +553,77 @@ test('подсказката в прегледа сочи към „Запази
     'старата подсказка водеше през системния диалог, който е без визуализация');
 });
 
+/* --- Помощ и обратна връзка: имейл за съобщаване на грешки (v1.73.0) ---
+   Настройки → нова карта с фиксирания имейл на разработчика. reportBug() отваря
+   пощенския клиент през същия loans:mailto IPC канал, който вече валидира формата
+   на адреса — тук се проверява само, че екранът показва картата и че бутоните
+   подават правилно попълнено писмо/копие, не самата IPC валидация (вече покрита
+   в test/handlers-notices.test.js). */
+
+test('картата „Помощ и обратна връзка“ показва имейла на разработчика в Настройки', async () => {
+  const dom = await settled(buildDom({ 'settings.get': { org: 'НЧ „Васил Левски 1922“', lib_name: '' } }));
+  const { window } = dom;
+  await window.renderSetup();
+  const html = window.document.getElementById('view').innerHTML;
+  assert.match(html, /plam4o\.4o@outlook\.com/, 'картата трябва да показва имейла plam4o.4o@outlook.com');
+  assert.ok(window.document.querySelector('button[onclick="reportBug()"]'), 'трябва да има бутон „Съобщи за грешка…“');
+  assert.ok(window.document.querySelector('button[onclick="copyDevEmail()"]'), 'трябва да има бутон „Копирай имейла“');
+});
+
+test('reportBug() отваря пощенския клиент с имейла на разработчика, версията и организацията', async () => {
+  const calls = [];
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  // apiMock връща фиксирана нова заглушка при всеки достъп до window.api.<домейн> —
+  // затова точковите проверки (напр. window.api.loans.mailto = fn) се губят при
+  // следващото четене. Тук, както при ppSavePdf() по-горе, се подменя целият
+  // window.api с обикновен обект.
+  window.api = {
+    app: { getVersion: async () => ({ ok: true, data: '1.73.0' }) },
+    settings: { get: async () => ({ ok: true, data: { org: 'НЧ „Васил Левски 1922“', lib_name: 'Библиотека при читалището' } }) },
+    loans: { mailto: async (opts) => { calls.push(opts); return { ok: true }; } }
+  };
+  const toasts = [];
+  window.toast = (m, t) => toasts.push([t, m]);
+  await window.reportBug();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].email, 'plam4o.4o@outlook.com');
+  assert.match(calls[0].subject, /Инвентар/);
+  assert.match(calls[0].subject, /1\.73\.0/, 'темата съдържа версията на програмата');
+  assert.match(calls[0].body, /Библиотека при читалището/, 'тялото съдържа името на библиотеката за контекст');
+  assert.doesNotMatch(calls[0].body, /BEGIN.*PRIVATE|password|парола/i, 'писмото не трябва да съдържа чувствителни данни по подразбиране');
+  assert.equal(toasts.filter(t => t[0] === 'err').length, 0, 'успешното отваряне не е грешка');
+});
+
+test('reportBug() показва грешка от toast(), ако mailto: не се отвори (напр. невалиден адрес)', async () => {
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  window.api = {
+    app: { getVersion: async () => ({ ok: true, data: '1.73.0' }) },
+    settings: { get: async () => ({ ok: true, data: {} }) },
+    loans: { mailto: async () => ({ ok: false, error: 'Записаният имейл не изглежда валиден.' }) }
+  };
+  const toasts = [];
+  window.toast = (m, t) => toasts.push([t, m]);
+  await window.reportBug();
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0][0], 'err');
+});
+
+test('copyDevEmail() копира имейла на разработчика в системния буфер и потвърждава с toast()', async () => {
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  const written = [];
+  window.navigator.clipboard = { writeText: async (t) => { written.push(t); } };
+  const toasts = [];
+  window.toast = (m, t) => toasts.push([t, m]);
+  await window.copyDevEmail();
+  assert.deepEqual(written, ['plam4o.4o@outlook.com']);
+  assert.equal(toasts.length, 1);
+  assert.equal(toasts[0][0], 'ok');
+  assert.match(toasts[0][1], /plam4o\.4o@outlook\.com/);
+});
+
 // Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
 // правило за `.grid`. Затова, ако класът бъде преименуван/премахнат от
 // style.css, докато разметката още го ползва, редът тихо се разпада на
