@@ -3,6 +3,7 @@
 [![CI](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml/badge.svg)](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/plam4o4o-source/yavorec-katalog)](https://github.com/plam4o4o-source/yavorec-katalog/releases)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Уебсайт](https://img.shields.io/badge/уебсайт-inventar--two.vercel.app-8b6914)](https://inventar-two.vercel.app/)
 
 > **English summary.** *Inventar* is a free, open-source library management
 > system (ILS) for small public and community libraries in Bulgaria —
@@ -28,6 +29,8 @@
 Това хранилище съдържа и публичния онлайн каталог
 ([пример на chyavorec.org](https://chyavorec.org)), захранван от
 `katalog.json`, който самата програма публикува тук при всяка промяна.
+
+Уебсайт на самата програма: **[inventar-two.vercel.app](https://inventar-two.vercel.app/)**.
 
 ## Снимки на екрана (Screenshots)
 
