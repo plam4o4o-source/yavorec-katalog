@@ -570,6 +570,19 @@ test('картата „Помощ и обратна връзка“ показ�
   assert.ok(window.document.querySelector('button[onclick="copyDevEmail()"]'), 'трябва да има бутон „Копирай имейла“');
 });
 
+/* Линкът към уебсайта на програмата (v2.1.0) е обикновен <a target="_blank">,
+   не бутон/IPC — main.js вече прихваща такива линкове (setWindowOpenHandler) и ги
+   праща към системния браузър вместо в прозореца на приложението, затова тестът
+   проверява само разметката, не открива нов IPC контракт. */
+test('картата „Помощ и обратна връзка“ показва линк към уебсайта на програмата, отварящ се в системния браузър', async () => {
+  const dom = await settled(buildDom({}));
+  const { window } = dom;
+  await window.renderSetup();
+  const link = window.document.querySelector('a[href="https://inventar-two.vercel.app/"]');
+  assert.ok(link, 'трябва да има линк към https://inventar-two.vercel.app/');
+  assert.equal(link.getAttribute('target'), '_blank', 'линкът трябва да се отваря извън прозореца на приложението');
+});
+
 test('reportBug() отваря пощенския клиент с имейла на разработчика, версията и организацията', async () => {
   const calls = [];
   const dom = await settled(buildDom({}));
