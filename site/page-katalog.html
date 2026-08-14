@@ -282,6 +282,46 @@
   background:none;border:0;cursor:pointer;padding:.3rem .7rem;font-family:Georgia,serif;
 }
 .kat-lb-close:hover{color:#e8d5a3;}
+
+/* ── Открояване на съвпаденията при търсене ── */
+.kat-hl{background:rgba(201,168,76,.34);color:inherit;padding:0 .04em;border-radius:1px;}
+
+/* ── Бутон „Изчисти“ — показва се само при активно търсене/филтър ── */
+.kat-clear{
+  background:none;border:1px solid rgba(160,82,45,.4);color:#8f4520;
+  padding:.85rem 1.1rem;font:inherit;font-size:.76rem;font-weight:700;
+  letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border-radius:0;
+  transition:background .22s,border-color .22s;white-space:nowrap;display:none;
+}
+.kat-clear:hover{border-color:#a0522d;background:rgba(160,82,45,.06);}
+.kat-clear.kat-clear-on{display:block;}
+
+/* ── Разгънат запис (клик върху реда) ── */
+.kat-item{cursor:pointer;}
+.kat-item:focus-visible{outline:2px solid #c9a84c;outline-offset:-2px;}
+.kat-x{display:none;margin-top:.6rem;font-size:.86rem;color:#5a4d3d;line-height:1.75;}
+.kat-x b{font-weight:600;color:#3d3028;}
+.kat-item.kat-open{background:rgba(201,168,76,.06);}
+.kat-item.kat-open::before{transform:scaleY(1);}
+.kat-item.kat-open .kat-x{display:block;}
+.kat-item.kat-open .kat-note{display:none;} /* в разгънат вид анотацията е пълна, вътре в .kat-x */
+.kat-copy{
+  background:none;border:1px solid rgba(201,168,76,.45);color:#8b6914;
+  padding:.32rem .85rem;font:inherit;font-size:.68rem;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border-radius:0;
+  margin-top:.55rem;transition:background .22s,color .22s,border-color .22s;
+}
+.kat-copy:hover{border-color:#c9a84c;background:rgba(201,168,76,.08);}
+
+/* ── Плаващ бутон „към началото“ ── */
+.kat-top{
+  position:fixed;right:1.1rem;bottom:1.1rem;z-index:990;width:46px;height:46px;
+  border-radius:50%;border:1px solid #c9a84c;background:#fffbf0;color:#8b6914;
+  font-size:1.15rem;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(26,18,8,.18);
+  opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;transform:translateY(8px);
+}
+.kat-top.kat-top-on{opacity:1;pointer-events:auto;transform:translateY(0);}
+.kat-top:hover{background:#c9a84c;color:#fffbf0;}
 </style>
 
 <div class="kat-page">
@@ -298,15 +338,17 @@
       <svg class="kat-search-ico" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
         <circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>
       </svg>
-      <input id="katQ" placeholder="Търсене по автор, заглавие, ключова дума, УДК…">
+      <input id="katQ" placeholder="Търсене по автор, заглавие, ключова дума, УДК…" aria-label="Търсене в каталога">
     </div>
-    <select id="katF"><option value="">Всички видове</option><option>книга</option><option>продължаващо издание</option><option>графично издание</option><option>картографско издание</option><option>нотно издание</option><option>аудиодокумент</option><option>видеодокумент</option><option>електронен документ</option><option>патент/стандарт</option><option>друго</option></select>
-    <select id="katO"><option value="">Всички отдели</option><option>за възрастни</option><option>за деца</option><option>краеведски</option><option>справочен</option><option>периодика</option></select>
+    <select id="katF" aria-label="Филтър по вид на документа"><option value="">Всички видове</option><option>книга</option><option>продължаващо издание</option><option>графично издание</option><option>картографско издание</option><option>нотно издание</option><option>аудиодокумент</option><option>видеодокумент</option><option>електронен документ</option><option>патент/стандарт</option><option>друго</option></select>
+    <select id="katO" aria-label="Филтър по отдел"><option value="">Всички отдели</option><option>за възрастни</option><option>за деца</option><option>краеведски</option><option>справочен</option><option>периодика</option></select>
+    <select id="katS" aria-label="Подредба на резултатите"><option value="">Подредба: както постъпват</option><option value="a">По автор (А–Я)</option><option value="t">По заглавие (А–Я)</option><option value="y1">По година — новите първо</option><option value="y0">По година — старите първо</option><option value="inv">По инвентарен №</option></select>
+    <button class="kat-clear" id="katX" type="button" title="Премахва търсенето, филтрите и витрината">Изчисти</button>
   </div>
 
   <div class="kat-shelves kat-r" id="katSh" style="display:none"></div>
 
-  <div class="kat-cnt" id="katC"></div>
+  <div class="kat-cnt" id="katC" role="status" aria-live="polite"></div>
   <div id="katR"></div>
   <button class="kat-more" id="katM" style="display:none">Покажи още</button>
 
@@ -329,6 +371,31 @@ var SOURCES=[
 ];
 var FT_BASE="Народно читалище „Васил Левски – 1922\" · с. Яворец, общ. Габрово";
 var D=[],P=0,R=[],LOG=[];
+/* Търсене по думи + подредба + състояние в адреса (за споделяеми връзки).
+   QW — думите от текущото търсене (за открояване); SORT — избраната
+   подредба; ZAPIS — инв. № от споделена връзка (#zapis=…), който да се
+   разгъне и покаже при зареждане; PENDF/PENDO — филтри от адреса, които се
+   прилагат чак след като setupDynamic() построи списъците от самите данни. */
+var QW=[],SORT='',ZAPIS=null,PENDF='',PENDO='';
+function readHash(){
+  try{
+    var p=new URLSearchParams((location.hash||'').slice(1));
+    if(p.get('q'))document.getElementById('katQ').value=p.get('q');
+    PENDF=p.get('vid')||''; PENDO=p.get('otdel')||'';
+    SORT=p.get('podredba')||''; SHELF=p.get('vitrina')||''; ZAPIS=p.get('zapis');
+  }catch(e){}
+}
+function writeHash(){
+  try{
+    var p=new URLSearchParams();
+    var q=document.getElementById('katQ').value.trim();
+    var f=document.getElementById('katF').value,o=document.getElementById('katO').value;
+    if(q)p.set('q',q); if(f)p.set('vid',f); if(o)p.set('otdel',o);
+    if(SORT)p.set('podredba',SORT); if(SHELF)p.set('vitrina',SHELF);
+    var h=p.toString();
+    history.replaceState(null,'',h?'#'+h:location.pathname+location.search);
+  }catch(e){}
+}
 /* Витрини и нови постъпления. SHELVES идва от katalog.json (по избор на библиотекаря);
    „Нови постъпления" се извежда тук от датата на постъпване (поле d на всеки запис,
    добавено от програмата „Инвентар"). Стар katalog.json без тези полета работи без
@@ -389,6 +456,12 @@ async function boot(){
    и всеки нов отдел се появяват сами, без да се пипа тази страница), витрините
    стават бутони, а „Нови постъпления" се смята от датата на постъпване. */
 function setupDynamic(){
+  /* Предварително сглобен низ за търсене на всеки запис — веднъж, не при
+     всяка буква. Включва и анотацията (n) и града (c), които по-рано не
+     се претърсваха. */
+  D.forEach(function(i){
+    i._s=[i.a,i.t,i.s,i.k,i.u,i.p,i.c,i.y,i.n,i.inv].join(' ').toLowerCase();
+  });
   function rebuild(selId,allLabel){
     var sel=document.getElementById(selId),cur=sel.value,seen={},vals=[];
     D.forEach(function(i){var v=(selId==='katF'?i.v:i.o)||'';if(v&&!seen[v]){seen[v]=1;vals.push(v);}});
@@ -399,6 +472,12 @@ function setupDynamic(){
   }
   rebuild('katF','Всички видове');
   rebuild('katO','Всички отдели');
+  /* Филтри/подредба от споделена връзка (#vid=…&otdel=…&podredba=…) се
+     прилагат тук — чак след като списъците са построени от данните. */
+  if(PENDF){document.getElementById('katF').value=PENDF;PENDF='';}
+  if(PENDO){document.getElementById('katO').value=PENDO;PENDO='';}
+  document.getElementById('katS').value=SORT;
+  if(document.getElementById('katS').value!==SORT)SORT='';
 
   NEW_SET=new Set();
   var cutoff=new Date(); cutoff.setDate(cutoff.getDate()-NEW_DAYS);
@@ -429,6 +508,15 @@ function setupDynamic(){
         run();
       });
     });
+    /* Витрина от споделена връзка (#vitrina=…) — отбелязва се активната;
+       ако името вече не съществува в данните, изборът тихо отпада. */
+    var shelfFound=false;
+    Array.prototype.forEach.call(bar.children,function(b2){
+      var on=b2.getAttribute('data-shelf')===SHELF;
+      if(on)shelfFound=true;
+      b2.classList.toggle('kat-shelf-on',on);
+    });
+    if(SHELF&&!shelfFound)SHELF='';
   } else { bar.style.display='none'; SHELF=''; }
 }
 /* Малка, скрита по подразбиране диагностика — вижда се само когато нещо не е наред, за да може
@@ -447,9 +535,15 @@ function finish(gen,note){
   document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+gen+' · '+D.length+' записа'+note;
   run();
 }
+/* „1 намерен запис“, „2 намерени записа“ — броячът в правилното число */
+function cntTxt(n){return n===1?'1 намерен запис':n+' намерени записа';}
 function run(){
   var q=document.getElementById('katQ').value.trim().toLowerCase(),
       f=document.getElementById('katF').value,o=document.getElementById('katO').value;
+  /* Търсене по ДУМИ: всяка дума се търси поотделно, редът е без значение —
+     „вазов иван" намира „Иван Вазов и неговите близки". Претърсва и
+     анотацията и града (виж _s в setupDynamic). */
+  QW=q?q.split(/\s+/).filter(Boolean):[];
   var shelfSet=null;
   if(SHELF==='__new__')shelfSet=NEW_SET;
   else if(SHELF){
@@ -460,13 +554,27 @@ function run(){
   R=D.filter(function(i){
     if(shelfSet&&!shelfSet.has(i.inv))return false;
     if(f&&i.v!==f)return false; if(o&&i.o!==o)return false;
-    if(!q)return true;
-    return (i.a+' '+i.t+' '+i.s+' '+i.k+' '+i.u+' '+i.p+' '+i.y+' '+i.inv).toLowerCase().indexOf(q)>-1;
+    if(!QW.length)return true;
+    var s=i._s!=null?i._s:(i._s=[i.a,i.t,i.s,i.k,i.u,i.p,i.c,i.y,i.n,i.inv].join(' ').toLowerCase());
+    for(var w=0;w<QW.length;w++)if(s.indexOf(QW[w])<0)return false;
+    return true;
   });
-  /* В изгледа „Нови постъпления" най-скорошните застават отгоре */
-  if(SHELF==='__new__')R=R.slice().sort(function(a,b){return (b.d||'')<(a.d||'')?-1:1;});
+  /* В изгледа „Нови постъпления" най-скорошните застават отгоре (освен ако
+     не е избрана изрична подредба) */
+  if(SHELF==='__new__'&&!SORT)R=R.slice().sort(function(a,b){return (b.d||'')<(a.d||'')?-1:1;});
+  if(SORT){
+    R=R.slice();
+    if(SORT==='a')R.sort(function(a,b){return String(a.a||'￿').localeCompare(String(b.a||'￿'),'bg');});
+    else if(SORT==='t')R.sort(function(a,b){return String(a.t||'').localeCompare(String(b.t||''),'bg');});
+    else if(SORT==='y1')R.sort(function(a,b){return String(b.y||'')<String(a.y||'')?-1:1;});
+    else if(SORT==='y0')R.sort(function(a,b){return String(a.y||'￿')<String(b.y||'￿')?-1:1;});
+    else if(SORT==='inv')R.sort(function(a,b){return (a.inv||0)-(b.inv||0);});
+  }
+  writeHash();
+  var hasActive=!!(QW.length||f||o||SHELF||SORT);
+  document.getElementById('katX').classList.toggle('kat-clear-on',hasActive);
   P=0;document.getElementById('katR').innerHTML='';
-  document.getElementById('katC').textContent=R.length+' намерени записа'+
+  document.getElementById('katC').textContent=cntTxt(R.length)+
     (SHELF?(' · '+(SHELF==='__new__'?'нови постъпления':'витрина „'+SHELF+'“')):'');
 
   if(!R.length){
@@ -476,10 +584,64 @@ function run(){
         '<span class="kat-empty-ico">🔍</span>'+
         '<div class="kat-empty-t">Няма намерени записи</div>'+
         '<div class="kat-empty-d">Опитайте с друга дума, по-кратко търсене или премахнете някой от филтрите по вид и отдел.</div>'+
+        (hasActive?'<button class="kat-more" id="katXe" type="button" style="margin-top:1.4rem">Изчисти търсенето и филтрите</button>':'')+
       '</div>';
     return;
   }
   page();
+  revealShared();
+}
+/* Изчистване на всичко активно — от бутона „Изчисти" и от празния екран */
+function clearAll(){
+  document.getElementById('katQ').value='';
+  document.getElementById('katF').value='';
+  document.getElementById('katO').value='';
+  document.getElementById('katS').value='';
+  SORT='';SHELF='';
+  var bar=document.getElementById('katSh');
+  Array.prototype.forEach.call(bar.children,function(b2){b2.classList.remove('kat-shelf-on');});
+  run();
+}
+/* Споделена връзка към конкретен запис (#zapis=инв№): дозарежда страници,
+   докато записът се покаже, разгъва го и го поставя в средата на екрана. */
+function revealShared(){
+  if(ZAPIS==null)return;
+  var target=String(ZAPIS); ZAPIS=null;
+  var idx=-1;
+  for(var i=0;i<R.length;i++)if(String(R[i].inv)===target){idx=i;break;}
+  if(idx<0)return;
+  while(P<=idx&&P<R.length)page();
+  var el=document.querySelector('#katR .kat-item[data-inv="'+target+'"]');
+  if(el){
+    el.classList.add('kat-open','kat-item-in');
+    el.setAttribute('aria-expanded','true');
+    setTimeout(function(){el.scrollIntoView({block:'center',behavior:'smooth'});},120);
+  }
+}
+/* Открояване на думите от търсенето в текста — безопасно: неоткроените
+   части минават през esc(), откроените също, чак после се сглобяват. */
+function hl(s){
+  s=String(s==null?'':s);
+  if(!QW.length||!s)return esc(s);
+  var low=s.toLowerCase(),marks=[];
+  QW.forEach(function(w){
+    var p=0;
+    while((p=low.indexOf(w,p))>-1){marks.push([p,p+w.length]);p+=1;}
+  });
+  if(!marks.length)return esc(s);
+  marks.sort(function(a,b){return a[0]-b[0];});
+  var merged=[];
+  marks.forEach(function(m){
+    var l=merged[merged.length-1];
+    if(l&&m[0]<=l[1])l[1]=Math.max(l[1],m[1]);
+    else merged.push(m.slice());
+  });
+  var out='',pos=0;
+  merged.forEach(function(m){
+    out+=esc(s.slice(pos,m[0]))+'<mark class="kat-hl">'+esc(s.slice(m[0],m[1]))+'</mark>';
+    pos=m[1];
+  });
+  return out+esc(s.slice(pos));
 }
 function page(){
   var s=R.slice(P,P+50),h='';
@@ -504,17 +666,30 @@ function page(){
     if(i.g) chips+='<span class="kat-chip">'+esc(i.g)+'</span>';
     if(i.o) chips+='<span class="kat-chip">'+esc(i.o)+'</span>';
 
-    h+='<div class="kat-item">'+cover+
+    /* Разгънат изглед (клик върху реда): пълната анотация и данните, които
+       не се събират в краткия ред, плюс връзка за споделяне на записа. */
+    var xrows='';
+    if(i.n)xrows+='<div>'+hl(i.n)+'</div>';
+    var facts=[];
+    if(i.l)facts.push('<b>Език:</b> '+esc(i.l));
+    if(i.v)facts.push('<b>Вид:</b> '+esc(i.v));
+    if(i.k)facts.push('<b>Ключови думи:</b> '+hl(i.k));
+    if(i.d)facts.push('<b>Постъпила:</b> '+esc(String(i.d).split('-').reverse().join('.')));
+    if(facts.length)xrows+='<div style="margin-top:.35rem">'+facts.join(' · ')+'</div>';
+    xrows+='<button class="kat-copy" type="button" data-copy="'+esc(i.inv)+'">Копирай връзка към записа</button>';
+
+    h+='<div class="kat-item" data-inv="'+esc(i.inv)+'" tabindex="0" role="button" aria-expanded="false">'+cover+
     '<div class="kat-item-body">'+
-      '<h2>'+esc(i.t)+'</h2>'+
-      (i.a||i.s ? '<div class="kat-m kat-m-author">'+esc(i.a||'')+(i.s?' — '+esc(i.s):'')+'</div>' : '')+
-      (pub ? '<div class="kat-m kat-m-pub">'+esc(pub)+'</div>' : '')+
-      (i.n?'<div class="kat-note">'+esc(i.n).slice(0,220)+'</div>':'')+
+      '<h2>'+hl(i.t)+'</h2>'+
+      (i.a||i.s ? '<div class="kat-m kat-m-author">'+hl(i.a||'')+(i.s?' — '+hl(i.s):'')+'</div>' : '')+
+      (pub ? '<div class="kat-m kat-m-pub">'+hl(pub)+'</div>' : '')+
+      (i.n?'<div class="kat-note">'+hl(String(i.n).slice(0,220))+(String(i.n).length>220?'…':'')+'</div>':'')+
       '<div class="kat-meta-row">'+
         '<span class="kat-av '+(i.av?'kat-y':'kat-n')+'">'+(i.av?'налична':'заета')+'</span>'+
         (NEW_SET&&NEW_SET.has(i.inv)?'<span class="kat-new-badge">нова</span>':'')+
         chips+
       '</div>'+
+      '<div class="kat-x">'+xrows+'</div>'+
     '</div></div>';
   });
 
@@ -540,33 +715,100 @@ function katDebounce(fn,ms){var t=null;return function(){clearTimeout(t);t=setTi
 document.getElementById('katQ').addEventListener('input',katDebounce(run,150));
 document.getElementById('katF').addEventListener('change',run);
 document.getElementById('katO').addEventListener('change',run);
+document.getElementById('katS').addEventListener('change',function(){SORT=this.value;run();});
+document.getElementById('katX').addEventListener('click',clearAll);
 document.getElementById('katM').addEventListener('click',page);
+/* Автоматично дозареждане: когато „Покажи още" наближи екрана, страницата
+   се зарежда сама — бутонът остава като резервен път за стари браузъри. */
+if('IntersectionObserver' in window){
+  var katMoreIo=new IntersectionObserver(function(es){
+    es.forEach(function(en){
+      var btn=document.getElementById('katM');
+      if(en.isIntersecting&&btn.style.display!=='none')page();
+    });
+  },{rootMargin:'500px 0px'});
+  katMoreIo.observe(document.getElementById('katM'));
+}
+/* Плаващ бутон „към началото" при по-дълго превъртане */
+var katTop=document.createElement('button');
+katTop.className='kat-top';katTop.type='button';katTop.textContent='↑';
+katTop.setAttribute('aria-label','Към началото на страницата');katTop.title='Към началото';
+document.body.appendChild(katTop);
+katTop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
+window.addEventListener('scroll',function(){
+  katTop.classList.toggle('kat-top-on',window.scrollY>900);
+},{passive:true});
+/* Копиране на връзка към конкретен запис */
+function katRecordUrl(inv){
+  return location.origin+location.pathname+location.search+'#zapis='+encodeURIComponent(inv);
+}
+function katCopy(btn,inv){
+  var url=katRecordUrl(inv),old=btn.textContent;
+  function done(okTxt){btn.textContent=okTxt;setTimeout(function(){btn.textContent=old;},1600);}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(function(){done('✓ Копирана');},function(){fallback();});
+  }else fallback();
+  function fallback(){
+    var ta=document.createElement('textarea');
+    ta.value=url;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');done('✓ Копирана');}catch(e){done(url);}
+    ta.remove();
+  }
+}
+/* Разгъване на запис с клавиатура (Enter/интервал) — редовете са фокусируеми */
+document.getElementById('katR').addEventListener('keydown',function(e){
+  if(e.key!=='Enter'&&e.key!==' ')return;
+  var item=e.target&&e.target.closest?e.target.closest('.kat-item'):null;
+  if(!item||e.target.closest('.kat-copy'))return;
+  e.preventDefault();
+  item.classList.toggle('kat-open');
+  item.setAttribute('aria-expanded',item.classList.contains('kat-open')?'true':'false');
+});
 
 /* Уголемяване на корицата на цял екран при клик върху нея */
 var katLb=document.createElement('div');
 katLb.className='kat-lightbox'; katLb.id='katLb';
 katLb.innerHTML='<button class="kat-lb-close" id="katLbClose" aria-label="Затвори">&times;</button><img id="katLbImg" src="" alt="">';
 document.body.appendChild(katLb);
+var katLbPrevFocus=null;
 function katLbOpen(src,alt){
   document.getElementById('katLbImg').src=src;
   document.getElementById('katLbImg').alt=alt||'';
   katLb.classList.add('kat-lb-open');
   document.addEventListener('keydown',katLbEsc);
+  /* Достъпност: фокусът влиза в лайтбокса и се връща там, откъдето е дошъл */
+  katLbPrevFocus=document.activeElement;
+  document.getElementById('katLbClose').focus();
 }
 function katLbClose(){
   katLb.classList.remove('kat-lb-open');
   document.removeEventListener('keydown',katLbEsc);
+  if(katLbPrevFocus&&katLbPrevFocus.focus){try{katLbPrevFocus.focus();}catch(e){}}
+  katLbPrevFocus=null;
 }
 function katLbEsc(e){ if(e.key==='Escape')katLbClose(); }
 katLb.addEventListener('click',function(e){ if(e.target===katLb||e.target.id==='katLbClose')katLbClose(); });
 document.getElementById('katR').addEventListener('click',function(e){
-  if(e.target&&e.target.classList&&e.target.classList.contains('kat-cover')){
-    katLbOpen(e.target.src,e.target.alt);
+  var t=e.target;
+  if(t&&t.classList&&t.classList.contains('kat-cover')){
+    katLbOpen(t.src,t.alt);
+    return; /* корицата отваря лайтбокса, не разгъва записа */
+  }
+  var copyBtn=t&&t.closest?t.closest('.kat-copy'):null;
+  if(copyBtn){katCopy(copyBtn,copyBtn.getAttribute('data-copy'));return;}
+  var xeBtn=t&&t.id==='katXe';
+  if(xeBtn){clearAll();return;}
+  var item=t&&t.closest?t.closest('.kat-item'):null;
+  if(item){
+    item.classList.toggle('kat-open');
+    item.setAttribute('aria-expanded',item.classList.contains('kat-open')?'true':'false');
   }
 });
 /* inline onclick="" в диагностиката изпълнява в глобален контекст, не вътре в тази затворена
    функция (IIFE) — затова презареждането се излага изрично тук, вместо да разчита на локалното име. */
 window.katRetry=boot;
+readHash(); /* търсене/филтри/витрина/запис от споделена връзка — преди първото зареждане */
 boot();
 
 /* Reveal при поява — в стила на останалите страници на сайта */
