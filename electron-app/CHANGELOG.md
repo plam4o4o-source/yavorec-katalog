@@ -11,6 +11,28 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.0.0
+
+**BG:** Версия 2.0 — без промяна по кода.
+
+Само номерът на версията се вдига до 2.0.0, по избор на автора — програмата
+е узряла достатъчно през многобройните издания на версия 1.x (инвентарна
+книга, каталогизация, заемане, баркод етикети, отчисляване, инвентаризация,
+онлайн каталог, автоматични резервни копия и още), в реална ежедневна
+употреба. Функционалността, базата данни и файловият формат остават
+напълно съвместими с v1.73.0 — обновяването е безопасно и не изисква нищо
+допълнително от библиотекаря.
+
+**EN:** Version 2.0 — no code changes.
+
+Only the version number moves to 2.0.0, at the author's discretion — the
+application has matured sufficiently across the many v1.x releases
+(accession book, cataloging, circulation, barcode labels, deaccession,
+stocktaking, online catalog, automatic backups, and more), in real daily
+use. Functionality, the database, and the file format remain fully
+compatible with v1.73.0 — the update is safe and requires nothing extra
+from the librarian.
+
 ## v1.73.0
 
 **BG:** Настройки → „Помощ и обратна връзка“ — имейл за съобщаване на грешки.
