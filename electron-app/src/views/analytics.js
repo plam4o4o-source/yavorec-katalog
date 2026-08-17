@@ -13,7 +13,6 @@ async function renderAnalytics() {
     call(window.api.analytics.years())
   ]);
   if (!rows) return;
-  const total = rows.length, local = rows.filter(r => r.is_local).length;
   $('#view').innerHTML = `
     <div class="note"><b>Аналитично описание.</b> Описват се отделни статии от вестници и списания и
     части от книги — това, което не се вижда в обикновения каталог. За малката библиотека тук се
@@ -34,7 +33,12 @@ async function renderAnalytics() {
       <button class="btn" onclick="printAnalytics()">Печат / PDF</button>
     </div>
 
-    <div class="kpis">
+    <div id="anlList">${analyticsListHtml(rows)}</div>`;
+}
+/* Броячите и таблицата — единственото, което зависи от търсенето. */
+function analyticsListHtml(rows) {
+  const total = rows.length, local = rows.filter(r => r.is_local).length;
+  return `<div class="kpis">
       ${kpi('📰', total, 'Описани статии', ANL_YEAR ? 'за ' + ANL_YEAR + ' г.' : 'общо в базата')}
       ${kpi('🏡', local, 'Краеведски', 'за селото и района')}
     </div>
@@ -56,6 +60,15 @@ async function renderAnalytics() {
         <p>Започнете от най-близкото: статии за селото в областния вестник, материали в читалищни
         сборници, глави от краеведски книги.</p></div>`}`;
 }
+/* Търсенето пипа само #anlList — полето за търсене НЕ се пресъздава, иначе
+   курсорът изчезва при всяка пауза над 300 ms (моделът от inv-book.js). */
+async function refreshAnalytics() {
+  const rows = await call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL }));
+  if (!rows) return;
+  const box = $('#anlList');
+  if (box) box.innerHTML = analyticsListHtml(rows); else renderAnalytics();
+}
+window.refreshAnalytics = refreshAnalytics;
 function analyticSource(a) {
   if (a.source_kind === 'периодика' && a.periodical_title) {
     return a.periodical_title + (a.issue ? ', бр. ' + a.issue : '') + (a.issue_date ? ' от ' + bg(a.issue_date) : '');
@@ -66,7 +79,7 @@ function analyticSource(a) {
   }
   return a.source_text || '—';
 }
-function anlSearch(v) { ANL_Q = v; clearTimeout(window._anlT); window._anlT = setTimeout(renderAnalytics, 300); }
+function anlSearch(v) { ANL_Q = v; clearTimeout(window._anlT); window._anlT = setTimeout(refreshAnalytics, 300); }
 window.anlSearch = anlSearch;
 function anlYear(v) { ANL_YEAR = v; renderAnalytics(); }
 window.anlYear = anlYear;
@@ -160,8 +173,11 @@ async function saveAnalytic(id) {
   const d = formData('#anlF');
   delete d.book_pick;
   d.id = id;
-  if (id) await call(window.api.analytics.update(d), 'Описанието е обновено.');
-  else await call(window.api.analytics.create(d), 'Описанието е добавено.');
+  // Затваря се само при успех (v2.2.0) — иначе отказаният запис губеше цялото
+  // аналитично описание, набирано на ръка от статията.
+  const ok = id ? await call(window.api.analytics.update(d), 'Описанието е обновено.')
+    : await call(window.api.analytics.create(d), 'Описанието е добавено.');
+  if (ok === null) return;
   closeModal(); renderAnalytics(); markSaved();
 }
 window.saveAnalytic = saveAnalytic;

@@ -24,6 +24,22 @@ function auditDiffHtml(diffJson) {
     `<div><b>${esc(FIELD_LABELS[d.field] || d.field)}:</b> ${esc(d.before ?? '—')} → ${esc(d.after ?? '—')}</div>`
   ).join('')}</div>`;
 }
+function auditRowsHtml(rows) {
+  return rows.length ? rows.map(a => `<tr><td class="num">${new Date(a.ts).toLocaleString('bg-BG')}</td><td>${esc(a.user || '—')}</td>
+    <td><span class="badge">${esc(a.action)}</span></td><td style="font-size:12.5px">${esc(a.detail)}${auditDiffHtml(a.diff)}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="empty">Няма записи.</td></tr>`;
+}
+/* Търсенето пипа само тялото на таблицата и брояча — полето #oditSearch НЕ се
+   пресъздава. Дотогава debounce-ът викаше цялата renderOdit() и подменяше #view
+   заедно с полето: при пауза над 300 ms фокусът изчезваше по средата на думата
+   (същият модел като в inv-book.js). */
+async function refreshAudit() {
+  const rows = await call(window.api.audit.list(ODIT_Q));
+  if (!rows) return;
+  const body = $('#oditBody'); if (body) body.innerHTML = auditRowsHtml(rows);
+  const cnt = $('#oditCount'); if (cnt) cnt.textContent = rows.length + ' записа';
+}
+window.refreshAudit = refreshAudit;
 async function renderOdit() {
   const rows = await call(window.api.audit.list(ODIT_Q));
   if (!rows) return;
@@ -33,15 +49,12 @@ async function renderOdit() {
     <div class="toolbar">
       <input id="oditSearch" placeholder="Търсене по служител, действие, подробност…" value="${esc(ODIT_Q)}">
       <span style="flex:1"></span>
-      <span class="hint">${rows.length} записа</span>
+      <span class="hint" id="oditCount">${rows.length} записа</span>
       <button class="btn sm" onclick="exportAuditCSV()">CSV</button>
     </div>
-    <div class="wrap"><table class="ledger"><thead><tr><th>Дата/час</th><th>Служител</th><th>Действие</th><th>Подробност</th></tr></thead><tbody>
-    ${rows.length ? rows.map(a => `<tr><td class="num">${new Date(a.ts).toLocaleString('bg-BG')}</td><td>${esc(a.user || '—')}</td>
-      <td><span class="badge">${esc(a.action)}</span></td><td style="font-size:12.5px">${esc(a.detail)}${auditDiffHtml(a.diff)}</td></tr>`).join('')
-      : `<tr><td colspan="4" class="empty">Няма записи.</td></tr>`}
-    </tbody></table></div>`;
-  $('#oditSearch').addEventListener('input', debounce(e => { ODIT_Q = e.target.value; renderOdit(); }, 300));
+    <div class="wrap"><table class="ledger"><thead><tr><th>Дата/час</th><th>Служител</th><th>Действие</th><th>Подробност</th></tr></thead>
+    <tbody id="oditBody">${auditRowsHtml(rows)}</tbody></table></div>`;
+  $('#oditSearch').addEventListener('input', debounce(e => { ODIT_Q = e.target.value; refreshAudit(); }, 300));
 }
 async function exportAuditCSV() {
   const rows = await call(window.api.audit.list(ODIT_Q));

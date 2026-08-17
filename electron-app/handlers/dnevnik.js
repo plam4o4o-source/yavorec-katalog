@@ -13,6 +13,11 @@
 // присвоена, когато stats.js я ползва — няма TDZ проблем.
 module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs } = deps;
+  // Общата защита срещу CSV formula-injection (виж security-utils.js). Взима се с
+  // require, а не от deps, защото main.js подава csvCell само на модулите, които
+  // са го поискали при извеждането си; тук е нужна веднага — всички останали CSV
+  // пътища в програмата минават именно през нея.
+  const { csvCell } = require('../security-utils');
 
   const DNEVNIK_A_FIELDS = [
     'a_hours', 'a_age_u14', 'a_age_15_18', 'a_age_19_28', 'a_age_o28',
@@ -161,13 +166,17 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ? ORDER BY date')
         .all(`${y}-${pad(m)}-01`, `${y}-${pad(m)}-${pad(dim)}`);
       const byDate = {}; rows.forEach(r => { byDate[r.date] = r; });
-      const esc = (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"';
       const h = ['Дата', ...DNEVNIK_FIELDS];
       const csv = [h.join(';')].concat(
         Array.from({ length: dim }, (_, i) => {
           const date = `${y}-${pad(m)}-${pad(i + 1)}`;
           const row = byDate[date] || {};
-          return [date, ...DNEVNIK_FIELDS.map(f => row[f] || 0)].map(esc).join(';');
+          // csvCell вместо собствен esc(): собственият само ограждаше в кавички и
+          // пропускаше защитата срещу formula-injection (клетка, започваща с
+          // '=', '+', '-', '@' — напр. дата, въведена като „-2026…", или бъдещо
+          // текстово поле в дневника — се изпълнява като формула при отваряне в
+          // Excel/LibreOffice).
+          return [date, ...DNEVNIK_FIELDS.map(f => row[f] || 0)].map(csvCell).join(';');
         })
       ).join('\r\n');
       fs.writeFileSync(filePath, '﻿' + csv, 'utf8');

@@ -4,7 +4,10 @@ async function renderKdbf() {
   const y = KDBF_YEAR || yr();
   const r = await call(window.api.kdbf.report(y));
   if (!r) return;
-  const years = [...new Set([y, yr()])];
+  // Текущата година и няколко назад (yearOptions в core.js). Дотогава списъкът
+  // беше [избраната, текущата] — една опция, и КДБФ за миналата година оставаше
+  // недостижима след 1 януари.
+  const years = yearOptions(y);
   const razbivka = (rows, key) => {
     const m = {}; rows.forEach(x => { const k = x[key] || '—'; m[k] = (m[k] || 0) + 1; });
     return Object.entries(m).map(([k, v]) => `${esc(k)}: ${v}`).join(', ');

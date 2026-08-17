@@ -69,9 +69,37 @@ function renderBooksBody() {
   const more = books.length - shown.length;
   const body = $('#bBody'); if (body) body.innerHTML = booksRowsHtml(shown);
   const moreBox = $('#bMore'); if (moreBox) moreBox.innerHTML = booksMoreHtml(more, books.length);
-  const chkAll = $('#chkAll'); if (chkAll) chkAll.checked = books.length > 0 && books.every(b => BOOKS_SELECTED.has(b.id));
+  syncChkAll();
 }
 window.renderBooksBody = renderBooksBody;
+/* Заглавната отметка следва реалния избор (v2.2.0): ✓ само когато са избрани
+   ВСИЧКИ редове от текущия резултат, „частично“ (indeterminate) при част от тях.
+   Дотогава toggleBookSel() не я пипаше — след „Избери всички“ и махане на един
+   ред отметката оставаше ✓ и показваше нещо, което не е вярно. */
+function syncChkAll() {
+  const chkAll = $('#chkAll');
+  if (!chkAll) return;
+  const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
+  const sel = books.filter(b => BOOKS_SELECTED.has(b.id)).length;
+  chkAll.checked = books.length > 0 && sel === books.length;
+  chkAll.indeterminate = sel > 0 && sel < books.length;
+}
+window.syncChkAll = syncChkAll;
+/* Ново търсене: данните се вземат наново от базата (търсенето е сървърно), но се
+   пипат САМО тялото на таблицата и лентата под нея — полето #bSearch НЕ се
+   пресъздава. Дотогава debounce-ът викаше цялата renderBooks() и подменяше
+   #view заедно със самото поле: при писане „Иван Вазов“ с пауза над 300 ms
+   фокусът изчезваше и следващите знаци отиваха в нищото. */
+async function refreshBooksList() {
+  const books = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT));
+  if (!books) return;
+  window._BOOKS_LIST = books;
+  const visibleIds = new Set(books.map(b => b.id));
+  for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
+  renderBooksBody();
+  updateBulkBar();
+}
+window.refreshBooksList = refreshBooksList;
 async function renderBooks() {
   const [books, cats, searchSuggest] = await Promise.all([
     call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT)), call(window.api.categories.list()),
@@ -125,11 +153,13 @@ async function renderBooks() {
     <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
-  $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; renderBooks(); }, 300));
+  $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList(); }, 300));
   $('#bSearch').addEventListener('change', e => logSearchHistory('books', e.target.value));
+  syncChkAll(); // и при пълен рендер отметката отразява частичен избор
 }
 function toggleBookSel(id, checked) {
   if (checked) BOOKS_SELECTED.add(id); else BOOKS_SELECTED.delete(id);
+  syncChkAll(); // иначе заглавната отметка остава ✓ след махане на един ред
   updateBulkBar();
 }
 window.toggleBookSel = toggleBookSel;
@@ -468,9 +498,12 @@ async function saveBook(id) {
   d.id = id;
   // books:create връща id на новия запис — пази се, за да светне редът му след
   // пререндирането (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
+  // v2.2.0: формата се затваря САМО при успех (модел от saveAcq/saveAct/savePayment).
+  // Дотогава closeModal() беше безусловен: при дублиран инв. номер тостът светваше,
+  // но формата вече беше затворена и всички попълнени полета — изгубени.
   let savedId = id;
-  if (id) await call(window.api.books.update(d), 'Книгата е обновена.');
-  else savedId = await call(window.api.books.create(d), 'Книгата е добавена.');
+  if (id) { if (await call(window.api.books.update(d), 'Книгата е обновена.') === null) return; }
+  else { savedId = await call(window.api.books.create(d), 'Книгата е добавена.'); if (savedId === null) return; }
   closeModal(); await RENDERERS[VIEW]();
   if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
 }

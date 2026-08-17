@@ -18,10 +18,20 @@ function fakeIpcMain() {
   };
 }
 
-const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
-  'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
-  'city', 'publisher', 'keywords', 'annotation', 'cover_url', 'department', 'permanent_location',
-  'status', 'status_date', 'price', 'description', 'acquisition_id', 'cn_sort'];
+/* BOOK_FIELDS се ВЗИМА от продукционния handlers/books.js, а не се преписва тук.
+   Преписаното копие беше дефект само по себе си: през v1.70.0 в истинския списък
+   влязоха series/series_no, копието остана с 28 полета, и целият внос на данни
+   гърмеше в продукцията („Missing named parameter «series»" за всеки ред, „0
+   добавени"), докато този тест светеше зелено — тестваше конфигурация, която
+   main.js никога не подава. Сега всяко ново поле в BOOK_FIELDS чупи теста веднага.
+   registerBooksHandlers се вика с минимални заглушки — интересува ни само
+   върнатият BOOK_FIELDS, не самите handler-и. */
+const BOOK_FIELDS = require('../handlers/books')(
+  { handle: () => {} },
+  { getDb: () => null, run: (fn) => fn, logAudit: () => {}, today: () => '2026-01-01',
+    logEvent: () => {}, scheduleCatalogWrite: () => {}, cnSortKey: () => null,
+    normalizeScanCode: (x) => x, checkRecordLimit: () => {} }
+).BOOK_FIELDS;
 
 function setup() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-test-'));

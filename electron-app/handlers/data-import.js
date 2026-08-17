@@ -19,7 +19,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     author_mark: 'Авторски знак', keywords: 'Ключови думи', annotation: 'Анотация',
     price: 'Цена', department: 'Отдел', category_name: 'Вид документ', status: 'Състояние',
     volume: 'Том / част', barcode: 'Баркод', register_date: 'Дата на вписване',
-    description: 'Забележка'
+    description: 'Забележка', series: 'Поредица', series_no: '№ в поредицата'
   };
   let IMPORT_CACHE = null; // прочетеният файл се пази между прегледа и внасянето
 
@@ -184,6 +184,14 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               // (prev == null там): permanent_location е незадължително поле, празно
               // при внос, ако не идва от файла; status_date е днешна дата (нов запис);
               // cn_sort се смята от сигнатурата, ако е налична.
+              /* v2.2.0: и series/series_no повториха съвсем същата история — добавени
+                 са в BOOK_FIELDS през v1.70.0, но не и тук, затова better-sqlite3
+                 хвърляше „Missing named parameter «series»" за ВСЕКИ ред и вносът
+                 връщаше „0 добавени, N пропуснати" при всеки файл. Тестът не го хвана,
+                 защото преписваше собствено (остаряло) копие на BOOK_FIELDS — вече
+                 взима истинското от handlers/books.js, за да не се повтори трети път. */
+              series: cell(row, 'series') || null,
+              series_no: cell(row, 'series_no') || null,
               permanent_location: null,
               status: knownStatus ? rawStatus : 'наличен',
               status_date: today(),

@@ -16,7 +16,8 @@ async function renderReports() {
         ${catalog.map(c => `<option value="${c.id}" ${c.id === id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}
       </select>
       ${def && def.needsYear ? `<select onchange="REPORT_YEAR=this.value;renderReports()">
-        ${[y, yr()].filter((v, i, a) => a.indexOf(v) === i).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
+        ${/* текущата и няколко назад — справките се подават и за минали години */
+          yearOptions(y).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
       </select>` : ''}
       <span style="flex:1"></span>
       <button class="btn" onclick="printReportDoc()">Печат / PDF</button>

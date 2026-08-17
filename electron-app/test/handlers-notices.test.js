@@ -44,7 +44,15 @@ function setup(overrides = {}) {
     LOAN_SELECT,
     EUR_RATE: 1.95583,
     isValidEmail: (e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e),
-    shell: { openExternal: (url) => shellCalls.push(url) }
+    shell: { openExternal: (url) => shellCalls.push(url) },
+    /* v2.2.0: напомнянията вече смятат обезщетението със същата функция, с която то
+       реално се начислява при връщане (effectiveDaysLate, върната от handlers/loans.js),
+       вместо със собствен SQL израз с ДРОБНИ дни от julianday('now'). Тук се подава
+       същата логика при closedDaysBetween = 0, както в тестовете на заеманията. */
+    effectiveDaysLate: (dueDate, inDate) => {
+      if (!dueDate || !inDate || inDate <= dueDate) return 0;
+      return Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+    }
   }, overrides);
   const returned = registerNoticesHandlers(ipcMain, deps);
   return { db, ipcMain, shellCalls, returned };

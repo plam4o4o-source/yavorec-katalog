@@ -17,7 +17,16 @@ document.addEventListener('dragover', e => { e.preventDefault(); });
 document.addEventListener('drop', async e => {
   e.preventDefault();
   const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (!f || !f.path) return;
+  if (!f) return;
+  // Electron 32 премахна File.path, а програмата е на Electron 43 — пътят до
+  // провлачения файл вече не се вижда от прозореца (нужен е мост през
+  // webUtils.getPathForFile в preload.js). Дотогава тук стоеше тих return и
+  // влаченето просто не правеше нищо — библиотекарят влачи файла, нищо не се
+  // случва и няма как да разбере защо. Затова: ясно съобщение и посока накъде.
+  if (!f.path) {
+    return toast('Влаченето на файлове не се поддържа в тази версия на програмата. '
+      + 'Ползвайте бутона „Избери файл за внасяне…“.', 'err');
+  }
   if (!/\.(csv|txt|tsv|xlsx)$/i.test(f.path)) {
     return toast('Приемат се файлове CSV, TXT, TSV и XLSX.', 'err');
   }

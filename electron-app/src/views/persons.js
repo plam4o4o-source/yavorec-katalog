@@ -15,7 +15,10 @@ async function renderPersons() {
       <button class="btn" onclick="printPersons()">Печат / PDF</button>
     </div>
 
-    ${rows.length ? `<div class="cardGrid">
+    <div id="prsList">${personsListHtml(rows)}</div>`;
+}
+function personsListHtml(rows) {
+  return rows.length ? `<div class="cardGrid">
       ${rows.map(p => `<div class="prsCard" tabindex="0" role="button" aria-label="${esc(p.name)}"
         onclick="personView(${p.id})" onkeydown="cardActivate(event, () => personView(${p.id}))">
         <div class="prsPhoto">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<span>без снимка</span>'}</div>
@@ -28,8 +31,17 @@ async function renderPersons() {
       </div>`).join('')}
     </div>`
     : `<div class="empty"><h3>Няма вписани персоналии</h3>
-        <p>Започнете от хората, за които читалището вече пази сведения на хартия.</p></div>`}`;
+        <p>Започнете от хората, за които читалището вече пази сведения на хартия.</p></div>`;
 }
+/* Търсенето пипа само #prsList — полето за търсене НЕ се пресъздава, иначе при
+   пауза над 300 ms курсорът изчезва по средата на името (моделът от inv-book.js). */
+async function refreshPersons() {
+  const rows = await call(window.api.persons.list(PRS_Q));
+  if (!rows) return;
+  const box = $('#prsList');
+  if (box) box.innerHTML = personsListHtml(rows); else renderPersons();
+}
+window.refreshPersons = refreshPersons;
 function personDates(p) {
   const b = p.birth_date ? bg(p.birth_date) : '';
   const d = p.death_date ? bg(p.death_date) : '';
@@ -38,7 +50,7 @@ function personDates(p) {
   if (d) return 'п. ' + d;
   return '';
 }
-function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT); window._prsT = setTimeout(renderPersons, 300); }
+function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT); window._prsT = setTimeout(refreshPersons, 300); }
 window.prsSearch = prsSearch;
 
 async function printPersons() {
@@ -91,14 +103,17 @@ async function savePerson(id) {
   const d = formData('#prsF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
   d.id = id;
-  if (id) await call(window.api.persons.update(d), 'Персоналията е обновена.');
-  else {
-    const newId = await call(window.api.persons.create(d), 'Персоналията е добавена.');
-    closeModal(); await renderPersons(); markSaved();
-    if (newId) personView(newId);
+  // Затваря се само при успех (v2.2.0) — иначе отказаният запис отнасяше със
+  // себе си и биографията, която библиотекарят току-що е преписал от хартия.
+  if (id) {
+    if (await call(window.api.persons.update(d), 'Персоналията е обновена.') === null) return;
+    closeModal(); renderPersons(); markSaved();
     return;
   }
-  closeModal(); renderPersons(); markSaved();
+  const newId = await call(window.api.persons.create(d), 'Персоналията е добавена.');
+  if (newId === null) return;
+  closeModal(); await renderPersons(); markSaved();
+  if (newId) personView(newId);
 }
 window.savePerson = savePerson;
 

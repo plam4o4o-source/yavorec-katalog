@@ -22,8 +22,11 @@ window.categoryForm = categoryForm;
 async function saveCategory(id) {
   const d = formData('#catF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
-  if (id) await call(window.api.categories.update({ id, name: d.name }), 'Категорията е обновена.');
-  else await call(window.api.categories.create(d.name), 'Категорията е добавена.');
+  // Затваря се само при успех (v2.2.0) — напр. при дублирано име прозорецът
+  // остава отворен с въведеното, за да се поправи.
+  const ok = id ? await call(window.api.categories.update({ id, name: d.name }), 'Категорията е обновена.')
+    : await call(window.api.categories.create(d.name), 'Категорията е добавена.');
+  if (ok === null) return;
   closeModal(); renderSetup();
 }
 window.saveCategory = saveCategory;

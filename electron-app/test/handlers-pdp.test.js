@@ -58,18 +58,22 @@ test('pdp:status reports not configured/not unlocked before any setup', async ()
   assert.deepEqual(result.data, { configured: false, unlocked: false });
 });
 
-test('pdp:setup rejects a short password and requires at least 4 characters', async () => {
+// v2.2.0: минималната дължина на НОВА парола е 10 знака (солта и проверителят
+// стоят в самата база, която живее на споделен мрежов дял — четиризначна парола
+// се намира офлайн за секунди). Старите бази продължават да се отключват както
+// преди; затова и паролите в тестовете по-долу вече са с достатъчна дължина.
+test('pdp:setup rejects a short password and requires at least 10 characters', async () => {
   const { ipcMain } = setup();
   const result = await ipcMain.invoke('pdp:setup', 'abc');
   assert.equal(result.ok, false);
-  assert.match(result.error, /поне 4 знака/);
+  assert.match(result.error, /поне 10 знака/);
 });
 
 test('pdp:setup configures protection, encrypts existing plaintext egn/id_card_no, and unlocks', async () => {
   const { db, ipcMain, auditLog } = setup();
   const readerId = db.prepare("INSERT INTO readers (name, egn, id_card_no) VALUES ('Иван', '1234567890', '999888777')").run().lastInsertRowid;
 
-  const result = await ipcMain.invoke('pdp:setup', 'parola1');
+  const result = await ipcMain.invoke('pdp:setup', 'parola1-dylga');
   assert.equal(result.ok, true);
   const status = await ipcMain.invoke('pdp:status');
   assert.deepEqual(status.data, { configured: true, unlocked: true });
@@ -79,23 +83,23 @@ test('pdp:setup configures protection, encrypts existing plaintext egn/id_card_n
   assert.ok(auditLog.some(a => a.action === 'Защита на лични данни' && /1 читатели засегнати/.test(a.detail)));
 
   // Setting up twice should fail.
-  const again = await ipcMain.invoke('pdp:setup', 'parola2');
+  const again = await ipcMain.invoke('pdp:setup', 'parola2-dylga');
   assert.equal(again.ok, false);
   assert.match(again.error, /вече е зададена/);
 });
 
 test('pdp:lock clears the unlocked key; pdp:unlock requires the correct password', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('pdp:setup', 'parola1');
+  await ipcMain.invoke('pdp:setup', 'parola1-dylga');
   await ipcMain.invoke('pdp:lock');
   let status = await ipcMain.invoke('pdp:status');
   assert.equal(status.data.unlocked, false);
 
-  const wrong = await ipcMain.invoke('pdp:unlock', 'wrongpass');
+  const wrong = await ipcMain.invoke('pdp:unlock', 'wrongpass-dylga');
   assert.equal(wrong.ok, false);
   assert.match(wrong.error, /Грешна парола/);
 
-  const right = await ipcMain.invoke('pdp:unlock', 'parola1');
+  const right = await ipcMain.invoke('pdp:unlock', 'parola1-dylga');
   assert.equal(right.ok, true);
   status = await ipcMain.invoke('pdp:status');
   assert.equal(status.data.unlocked, true);
@@ -111,24 +115,24 @@ test('pdp:unlock reports an error when protection was never configured', async (
 test('pdp:changePassword requires the correct old password, then re-encrypts with the new key', async () => {
   const { db, ipcMain, returned } = setup();
   const readerId = db.prepare("INSERT INTO readers (name, egn) VALUES ('Мария', '1112223334')").run().lastInsertRowid;
-  await ipcMain.invoke('pdp:setup', 'oldpass1');
+  await ipcMain.invoke('pdp:setup', 'oldpass1-dylga');
 
-  const wrongOld = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'nope', newPassword: 'newpass1' });
+  const wrongOld = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'nope', newPassword: 'newpass1-dylga' });
   assert.equal(wrongOld.ok, false);
   assert.match(wrongOld.error, /Текущата парола е грешна/);
 
-  const shortNew = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'oldpass1', newPassword: 'x' });
+  const shortNew = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'oldpass1-dylga', newPassword: 'x' });
   assert.equal(shortNew.ok, false);
   assert.match(shortNew.error, /Новата парола/);
 
-  const ok = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'oldpass1', newPassword: 'newpass1' });
+  const ok = await ipcMain.invoke('pdp:changePassword', { oldPassword: 'oldpass1-dylga', newPassword: 'newpass1-dylga' });
   assert.equal(ok.ok, true);
 
   // Old password no longer unlocks after the change; new one does.
   await ipcMain.invoke('pdp:lock');
-  const oldFails = await ipcMain.invoke('pdp:unlock', 'oldpass1');
+  const oldFails = await ipcMain.invoke('pdp:unlock', 'oldpass1-dylga');
   assert.equal(oldFails.ok, false);
-  const newWorks = await ipcMain.invoke('pdp:unlock', 'newpass1');
+  const newWorks = await ipcMain.invoke('pdp:unlock', 'newpass1-dylga');
   assert.equal(newWorks.ok, true);
 
   // Data still decrypts correctly with the new key via the returned maskReaderRow.
@@ -140,14 +144,14 @@ test('pdp:changePassword requires the correct old password, then re-encrypts wit
 test('maskReaderRow shows a placeholder for encrypted fields while locked, and real values while unlocked', async () => {
   const { db, ipcMain, returned } = setup();
   const readerId = db.prepare("INSERT INTO readers (name, egn) VALUES ('Петър', '5556667778')").run().lastInsertRowid;
-  await ipcMain.invoke('pdp:setup', 'secret12');
+  await ipcMain.invoke('pdp:setup', 'secret12-dylga');
   await ipcMain.invoke('pdp:lock');
 
   const lockedRow = db.prepare('SELECT * FROM readers WHERE id=?').get(readerId);
   returned.maskReaderRow(lockedRow);
   assert.equal(lockedRow.egn, 'Защитени данни');
 
-  await ipcMain.invoke('pdp:unlock', 'secret12');
+  await ipcMain.invoke('pdp:unlock', 'secret12-dylga');
   const unlockedRow = db.prepare('SELECT * FROM readers WHERE id=?').get(readerId);
   returned.maskReaderRow(unlockedRow);
   assert.equal(unlockedRow.egn, '5556667778');
@@ -162,14 +166,14 @@ test('preparePiiForWrite: no-ops when protection isn\'t configured, encrypts whe
 
 test('preparePiiForWrite blocks writing egn on a NEW reader while locked (no prev row to fall back to)', async () => {
   const { ipcMain, returned } = setup();
-  await ipcMain.invoke('pdp:setup', 'secret12');
+  await ipcMain.invoke('pdp:setup', 'secret12-dylga');
   await ipcMain.invoke('pdp:lock');
   assert.throws(() => returned.preparePiiForWrite({ egn: '9998887776' }, null), /Отключете защитата/);
 });
 
 test('preparePiiForWrite preserves the previous encrypted value on an EXISTING reader while locked', async () => {
   const { ipcMain, returned } = setup();
-  await ipcMain.invoke('pdp:setup', 'secret12');
+  await ipcMain.invoke('pdp:setup', 'secret12-dylga');
   await ipcMain.invoke('pdp:lock');
   const prev = { egn: 'PDPv1:something-encrypted' };
   const out = { egn: 'attempted-new-plaintext' };

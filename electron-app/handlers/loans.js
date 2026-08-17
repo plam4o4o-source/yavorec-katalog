@@ -44,6 +44,21 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     const rawDaysLate = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
     return Math.max(0, rawDaysLate - closedDaysBetween(dueDate, inDate));
   }
+  /* Прибавяне на дни към дата — изцяло в UTC („T00:00:00Z" + setUTCDate), НЕ през
+     new Date(низ) + setDate(). Датите в базата са голи низове „ГГГГ-ММ-ДД": new Date()
+     ги чете като UTC полунощ, setDate() смята в МЕСТНО време, а toISOString() връща
+     пак UTC — и при преминаване през смяната на лятното часово време (последната
+     неделя на март/октомври) резултатът излизаше с ДЕН ПО-РАНО. Проверено: заемане
+     на 05.03.2026 с 30-дневен срок даваше падеж 03.04 вместо 04.04, тоест читателят
+     получаваше ден по-малко от обявения срок и просрочваше ден по-рано. Точно този
+     дефект вече беше поправен в handlers/calendar.js (виж коментара при isWorkDay),
+     но тук — при заемане, продължение и наказание — беше останал. Тестовете не го
+     хващаха, защото ползваха август, който не пресича смяната на часа. */
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
   function applySuspension(readerId, dueDate, inDate) {
     const db = getDb();
     const rule = circRule(readerCategory(readerId));
@@ -51,12 +66,21 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     if (per <= 0) return null;
     const effDaysLate = effectiveDaysLate(dueDate, inDate);
     if (effDaysLate <= 0) return null;
-    const penalty = Math.min(Math.ceil(effDaysLate * per), rule.suspend_max || 90);
     const r = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(readerId);
     const base = (r && r.suspended_until && r.suspended_until > today()) ? r.suspended_until : today();
-    const until = new Date(base);
-    until.setDate(until.getDate() + penalty);
-    const untilStr = until.toISOString().slice(0, 10);
+    let untilStr = addDays(base, Math.ceil(effDaysLate * per));
+    /* Таванът важи за ОБЩОТО натрупано наказание, а не за всяко връщане поотделно.
+       По-рано Math.min се прилагаше само върху добавката, затова три книги, върнати
+       в един ден с по 90 дни забава при таван 90 дни, даваха 270 дни — три пъти
+       тавана, точно обратното на обещаното два реда по-горе. А типичният случай е
+       именно този: закъснелите книги се връщат накуп, не една по една.
+       suspend_max = 0 означава „без таван" (същата уговорка като при останалите
+       лимити в програмата — виж loans:extend по-долу). */
+    const cap = rule.suspend_max == null ? 90 : Number(rule.suspend_max);
+    if (cap > 0) {
+      const maxUntil = addDays(today(), cap);
+      if (untilStr > maxUntil) untilStr = maxUntil;
+    }
     db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run(untilStr, readerId);
     logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + effDaysLate + ' работни дни забава)');
     return untilStr;
@@ -88,18 +112,32 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   ipcMain.handle('loans:byBook', (e, bookId) =>
     run(() => getDb().prepare(`${LOAN_SELECT} WHERE l.book_id = ? ORDER BY l.date_out DESC`).all(bookId))
   );
+  /* Обезщетението тук се смята С ЪЩАТА функция, с която реално се начислява при
+     връщане (effectiveDaysLate), а не със SQL израза, който стоеше на това място:
+     `(julianday('now') - julianday(date_due)) * fine_per_day` дава ДРОБНИ дни,
+     защото julianday('now') включва и часа, и при това не изважда затворените дни.
+     Резултатът беше три различни суми за едно и също просрочие — писмото искаше
+     0.77 лв., екранът показваше 0.70 лв., а на гишето се начисляваха 0.50 лв. —
+     и официалното напомнително писмо по чл. 43, ал. 2 показваше различна сума
+     според ЧАСА, в който е отпечатано. v1.70.0 уеднакви двата пътя за връщане;
+     справката и напомнянията бяха останали настрани. */
   ipcMain.handle('loans:overdueByReader', () =>
     run(() => {
       const db = getDb();
+      const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
+      const perDay = Number(s.fine_per_day) || 0;
       const rows = db.prepare(`
-        SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, SUM(1) AS n,
-               SUM((julianday('now') - julianday(l.date_due)) * s.fine_per_day) AS fine
-        FROM loans l JOIN readers r ON r.id = l.reader_id, settings s
-        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') AND s.id = 1
+        SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, COUNT(*) AS n
+        FROM loans l JOIN readers r ON r.id = l.reader_id
+        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
         GROUP BY l.reader_id
       `).all();
       const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.reader_id, l.date_due`).all();
-      rows.forEach(r => { r.loans = detail.filter(d => d.reader_id === r.reader_id); });
+      const now = today();
+      rows.forEach(r => {
+        r.loans = detail.filter(d => d.reader_id === r.reader_id);
+        r.fine = r.loans.reduce((sum, d) => sum + effectiveDaysLate(d.date_due, now) * perDay, 0);
+      });
       return rows;
     })
   );
@@ -130,7 +168,19 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const inDate = date_in || today();
-      const before = db.prepare('SELECT date_due FROM loans WHERE id = ?').get(id);
+      const before = db.prepare('SELECT date_due, date_in FROM loans WHERE id = ?').get(id);
+      /* Защита срещу повторно връщане на едно и също заемане. Пътят през баркод
+         (loans:returnByCode) винаги е проверявал за ОТВОРЕН заем; бутонът „Приеми"
+         в „Заемане и връщане"/„Просрочени" — не, и не се заключваше след клик.
+         Второ извикване значеше: applySuspension стъпва върху ВЕЧЕ наложеното
+         наказание (base = suspended_until) и го удвоява, а logEvent('връщане') се
+         вписва повторно и изкривява дневника. Проверено: 16 дни забава при 1 ден
+         наказание на ден давà 02.09; двоен клик — 18.09, и двата пъти с ok:true. */
+      if (!before) throw new Error('Заемането не е намерено.');
+      if (before.date_in) {
+        throw new Error('Това заемане вече е върнато на ' +
+          before.date_in.split('-').reverse().join('.') + ' — не се приема втори път.');
+      }
       // v1.70.0: тук по-рано fine никога не се пресмяташе/записваше — loans:return
       // (бутон „Приеми“ в Заемане и връщане/Просрочени) и loans:returnByCode
       // (сканиране на баркод) са двата пътя за връщане на книга, но само вторият
@@ -140,10 +190,14 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       // натиснат, и дори когато глоба се пресмяташе, беше с по-малко дни, отколкото
       // наказанието за същото просрочие. Сега и двата пътя ползват еднакво
       // effectiveDaysLate() (виж applySuspension по-горе) и еднакво записват fine.
-      const daysLate = before ? effectiveDaysLate(before.date_due, inDate) : 0;
+      const daysLate = effectiveDaysLate(before.date_due, inDate);
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
       const fine = daysLate * ((s && s.fine_per_day) || 0);
-      db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, id);
+      // `AND date_in IS NULL` е втората (атомарна) половина на защитата по-горе:
+      // ако два прозореца натиснат „Приеми" едновременно, само първият ще запише.
+      const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
+        .run(inDate, fine, id);
+      if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
       const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
       if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
       const hold = l ? activateHoldOnReturn(l.book_id) : null;
@@ -173,9 +227,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         throw new Error('Книгата е резервирана от ' + h.reader_name + ' — срокът не може да се продължи.');
       }
       const base = l.date_due || today();
-      const next = new Date(base);
-      next.setDate(next.getDate() + (s.extension_days || 30));
-      const newDue = nextWorkDay(next.toISOString().slice(0, 10));
+      const newDue = nextWorkDay(addDays(base, s.extension_days || 30));
       db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
       logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
       logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
@@ -195,16 +247,30 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c);
         if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
-        const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
-        if (openLoan) throw new Error('Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + openLoan.date_due + '.');
+        /* Свободна бройка, а не „има ли изобщо отворен заем". Моделът на данните
+           изрично поддържа няколко екземпляра на едно заглавие (inventory.quantity),
+           а самата схема има тригер trg_loans_capacity, чийто коментар гласи, че
+           правилото е „активните заемания не надвишават бройките", и уникален индекс
+           нарочно НЕ се слага, „защото би забранил легитимните втори бройки". Тази
+           проверка обаче отказваше при какъвто и да е отворен заем — второто копие
+           на учебник си стоеше незаемаемо, докато таблото показва „налично 1/2".
+           loans:checkout (заемане без баркод) винаги е броял правилно. */
+        const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
+        const qty = inv ? inv.quantity : 0;
+        const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id).n;
+        if (outCount >= qty) {
+          const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL ORDER BY l.date_due`).get(b.id);
+          throw new Error(qty <= 1 && openLoan
+            ? 'Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + openLoan.date_due + '.'
+            : 'Няма свободна бройка от инв. № ' + b.inv_number + ' — заети са всички ' + qty + '.');
+        }
         const s = circRule(readerCategory(reader_id));
         const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
         if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
         checkSuspended(reader_id);
         consumeHoldOnCheckout(b.id, reader_id);
         const out = date_out || today();
-        const due = new Date(out); due.setDate(due.getDate() + (s.loan_days || 30));
-        const dueStr = nextWorkDay(due.toISOString().slice(0, 10));
+        const dueStr = nextWorkDay(addDays(out, s.loan_days || 30));
         const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
         logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
         logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
@@ -245,5 +311,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
 
   // LOAN_SELECT се връща обратно към main.js — ползва се и от все още
   // неизвадените домейни "Табло" и "Просрочени: напомняния".
-  return { LOAN_SELECT };
+  // effectiveDaysLate се връща по същата причина: напомнянията трябва да искат
+  // ТОЧНО сумата, която после ще се начисли на гишето (виж loans:overdueByReader).
+  return { LOAN_SELECT, effectiveDaysLate };
 };

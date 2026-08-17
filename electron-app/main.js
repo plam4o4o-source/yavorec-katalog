@@ -277,12 +277,11 @@ function initDb() {
   seedAuthorisedValues('language', ['български', 'руски', 'английски', 'немски', 'френски', 'друг']);
   seedAuthorisedValues('location', []);
 
-  // Еднократна поправка на данни, внесена от версии 1.7.0 – 1.7.3: тогава миграция
-  // презаписваше населеното място на „с. Яворец, обл. Габрово“ по погрешното
-  // допускане, че селото е в община Севлиево (то е в община Габрово, ЕКАТТЕ 87120).
-  // Условието е за точно тази стойност, затова не засяга никоя друга библиотека.
-  // Може да отпадне, след като всички инсталации минат през версия 1.7.4 или по-нова.
-  db.prepare("UPDATE settings SET place = 'с. Яворец, общ. Габрово' WHERE id = 1 AND place = 'с. Яворец, обл. Габрово'").run();
+  // (v2.2.0) Тук стоеше еднократна поправка на данни от версии 1.7.0 – 1.7.3, зашита
+  // за конкретно населено място. Отпада: всички инсталации отдавна са минали през
+  // 1.7.4+, а програмата е универсална — в кода ѝ не бива да фигурира нито една
+  // библиотека поименно. Настройките на всяка библиотека се попълват само през
+  // „Настройки" и се пазят в нейната собствена база.
 
   runMigrations();
 
@@ -722,7 +721,7 @@ const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
    монолита main.js на модули по домейн) — един от "големите пет".
    LOAN_SELECT се връща обратно, защото го ползват и все още неизвадените
    домейни "Табло" и "Просрочени: напомняния". */
-const { LOAN_SELECT } = require('./handlers/loans')(ipcMain, {
+const { LOAN_SELECT, effectiveDaysLate } = require('./handlers/loans')(ipcMain, {
   getDb: () => db, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
   circRule, readerCategory, nextWorkDay, closedDaysBetween,
   firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode
@@ -752,7 +751,7 @@ require('./handlers/inventory-sessions')(ipcMain, {
    ползва все още неизвадената "Настройки" (settings:noticeDefaults). */
 const { DEFAULT_NOTICE_SUBJECT, DEFAULT_NOTICE_BODY, DEFAULT_NOTICE_SMS, NOTICE_PLACEHOLDERS } =
   require('./handlers/notices')(ipcMain, {
-    getDb: () => db, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell
+    getDb: () => db, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate
   });
 
 /* ---------------- МЗС ---------------- */
@@ -835,7 +834,12 @@ function publicBookFields(b, opacMap) {
     inv: b.inv_number, a: b.author || '', t: b.title || '', s: b.subtitle || '',
     c: b.city || '', p: b.publisher || '', y: b.year || '', v: b.category_name || '',
     l: pub('language', b.language), u: b.udk || '', g: b.call_number || '', o: pub('department', b.department),
-    k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '', av: b.available > 0 ? 1 : 0,
+    // „Налична" зависи и от състоянието, не само от свободните бройки: книга със
+    // статус „липсващ" или „за реставрация" физически я няма на рафта, а публичният
+    // каталог я обявяваше за налична само защото по нея няма отворено заемане —
+    // читателят идва специално за книга, за която библиотеката вече знае, че липсва.
+    k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '',
+    av: (b.available > 0 && (b.status == null || b.status === 'наличен')) ? 1 : 0,
     // d = дата на постъпване: страницата извежда „Нови постъпления" сама от нея.
     // Старите версии на страницата не познават ключа и просто го подминават.
     d: b.register_date || ''

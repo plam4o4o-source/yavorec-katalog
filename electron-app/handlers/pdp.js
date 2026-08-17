@@ -20,6 +20,17 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
 
   let PDP_KEY = null;
   const PDP_PLACEHOLDER = 'Защитени данни';
+  /* Минимална дължина на НОВА парола. Беше 4 знака — при сол и проверител, които
+     стоят в самата база, а базата по документиран сценарий е на споделен мрежов
+     дял, четиризначна парола се намира офлайн за секунди дори с по-скъпото
+     извеждане на ключа (виж pii-crypto.js). Съществуващите пароли не се пипат:
+     старите бази се отключват както преди, изискването важи само при задаване на
+     нова и при смяна. */
+  const PDP_MIN_PASSWORD = 10;
+  /* Ключът и паролата се оставят и в общото състояние на сесията (pii-crypto.js),
+     за да може автоматичното дневно копие да се криптира, докато защитата е
+     отключена — виж autoBackupIfNeeded в handlers/backup.js. Само в паметта. */
+  function setPdpKey(password, key) { PDP_KEY = key; pii.setSession(password, key); }
   function pdpSettingsRow() {
     return getDb().prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id = 1').get() || {};
   }
@@ -88,9 +99,12 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   ipcMain.handle('pdp:setup', (e, password) =>
     run(() => {
       const db = getDb();
-      if (!password || String(password).length < 4) throw new Error('Паролата трябва да е поне 4 знака.');
+      if (!password || String(password).length < PDP_MIN_PASSWORD) {
+        throw new Error('Паролата трябва да е поне ' + PDP_MIN_PASSWORD + ' знака.');
+      }
       if (pdpConfigured()) throw new Error('Защитата вече е зададена — за смяна на паролата ползвайте смяната на паролата.');
-      const salt = pii.generateSalt();
+      // Новите соли носят версията на параметрите на scrypt (виж pii-crypto.js).
+      const salt = pii.generateSalt(pii.CURRENT_KDF_VERSION);
       const key = pii.deriveKey(password, salt);
       const verifier = pii.makeVerifier(key);
       let n = 0;
@@ -99,7 +113,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(salt.toString('base64'), verifier);
         n = reencryptAllReaders(null, key);
       })();
-      PDP_KEY = key;
+      setPdpKey(password, key);
       logAudit('Защита на лични данни', 'зададена е парола за защита на ЕГН/№ ЛК (' + n + ' читатели засегнати)');
       return true;
     })
@@ -110,20 +124,24 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
       const key = pii.deriveKey(password, Buffer.from(s.pdp_salt, 'base64'));
       if (!pii.checkVerifier(s.pdp_verifier, key)) throw new Error('Грешна парола.');
-      PDP_KEY = key;
+      setPdpKey(password, key);
       return true;
     })
   );
-  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; }));
+  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; pii.clearSession(); }));
   ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
       const s = pdpSettingsRow();
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
-      if (!newPassword || String(newPassword).length < 4) throw new Error('Новата парола трябва да е поне 4 знака.');
+      if (!newPassword || String(newPassword).length < PDP_MIN_PASSWORD) {
+        throw new Error('Новата парола трябва да е поне ' + PDP_MIN_PASSWORD + ' знака.');
+      }
       const oldKey = pii.deriveKey(oldPassword, Buffer.from(s.pdp_salt, 'base64'));
       if (!pii.checkVerifier(s.pdp_verifier, oldKey)) throw new Error('Текущата парола е грешна.');
-      const newSalt = pii.generateSalt();
+      // Смяната на паролата вдига и версията на параметрите на scrypt — стара
+      // база минава на по-скъпото извеждане на ключа без отделна миграция.
+      const newSalt = pii.generateSalt(pii.CURRENT_KDF_VERSION);
       const newKey = pii.deriveKey(newPassword, newSalt);
       const newVerifier = pii.makeVerifier(newKey);
       db.transaction(() => {
@@ -131,7 +149,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(newSalt.toString('base64'), newVerifier);
         reencryptAllReaders(oldKey, newKey);
       })();
-      PDP_KEY = newKey;
+      setPdpKey(newPassword, newKey);
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;
     })

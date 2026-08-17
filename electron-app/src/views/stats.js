@@ -21,7 +21,8 @@ async function renderStats() {
   $('#view').innerHTML = `
     <div class="toolbar">
       <select onchange="STATS_YEAR=this.value;renderStats()">
-        ${[y, yr()].filter((v, i, a) => a.indexOf(v) === i).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
+        ${/* текущата и няколко назад — годишният отчет се прави за минала година */
+          yearOptions(y).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
       </select>
       <span class="hint">отчетен период 01.01.${y} – 31.12.${y}</span>
       <span style="flex:1"></span>
@@ -115,7 +116,9 @@ window.addVisits = addVisits;
 async function saveVisits() {
   const d = formData('#vsF');
   if (!d.count) return;
-  await call(window.api.visits.add(d), 'Посещенията са вписани.');
+  // Затваря се само при успех (v2.2.0) — при отказан запис въведените дата и
+  // брой остават на екрана.
+  if (await call(window.api.visits.add(d), 'Посещенията са вписани.') === null) return;
   closeModal(); renderStats();
 }
 window.saveVisits = saveVisits;

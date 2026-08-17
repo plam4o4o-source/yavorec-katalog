@@ -165,9 +165,31 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       scheduleCatalogWrite();
     })
   );
+  /* loans.book_id е с ON DELETE CASCADE (db/schema.sql): изтриването на документ
+     мълчаливо трие и заеманията му — и текущите (книгата остава физически у
+     читателя, но в програмата изчезва всяка следа за това), и цялата минала
+     история, от която живее статистиката за минали години. Затова изтриването се
+     отказва по вече установения в програмата модел (acquisitions:delete,
+     periodicals:delete): свързаните записи спират изтриването и съобщението казва
+     кой е правилният път. Отказва се И при само затворена история — документ,
+     който някога е бил заеман, се маха от фонда с АКТ за отчисляване (същата
+     логика, поради която books:bulkUpdate не позволява статус „отчислен“), а не с
+     тихо изтриване на реда заедно с историята му. */
   ipcMain.handle('books:delete', (e, id) =>
     run(() => {
-      getDb().prepare('DELETE FROM books WHERE id = ?').run(id);
+      const db = getDb();
+      const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(id).n;
+      if (open > 0) {
+        throw new Error('Документът е зает в момента (' +
+          (open === 1 ? '1 незавършено заемане' : open + ' незавършени заемания') +
+          ') и не може да бъде изтрит. Първо приемете върнатия документ от „Заемане и връщане“.');
+      }
+      const past = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ?').get(id).n;
+      if (past > 0) {
+        throw new Error('Документът има ' + past + ' записа в историята на заеманията и изтриването би заличило и тях '
+          + '(статистиката за минали години ще се промени). Извадете го от фонда с акт за отчисляване (раздел „Отчисляване“).');
+      }
+      db.prepare('DELETE FROM books WHERE id = ?').run(id);
       scheduleCatalogWrite();
     })
   );
