@@ -11,6 +11,37 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.2.1
+
+**BG:** Довършва трите неща, оставени отворени в v2.2.0.
+
+- **Влаченето на файл за внасяне отново работи.** От Electron 32 нататък
+  прозорецът вече не вижда пътя на провлачен файл; сега той се чете през
+  моста към главния процес. Досега влаченето или мълчеше (до v2.1.0), или
+  само съветваше да се ползва бутонът (v2.2.0).
+- **Състоянието на автоматичното резервно копие се вижда в „Настройки“.**
+  Картата „Резервно копие“ вече казва дали дневното копие е криптирано, а
+  ако не е — защо и какво да се направи (бутон към защитата на личните
+  данни). Дотогава предупреждението стигаше само до одитната следа, където
+  библиотекарят на практика не поглежда. Съобщението се обновява веднага
+  щом защитата бъде включена, отключена или заключена.
+- **„Спазване на сроковете“ се брои по година на връщане**, а не на
+  заемане — както вече е при обезщетенията. Книга, заета през декември и
+  върната със забава през февруари, е събитие от новата година; отчетът за
+  миналата вече е предаден и не бива да се променя със задна дата. В същата
+  карта се показват вече и начислените, и събраните обезщетения, с
+  пояснение каква е разликата.
+
+**EN:** Completes the three items deliberately left open in v2.2.0.
+
+Drag-and-drop file import works again (Electron 32+ removed `File.path`;
+the path now comes through the preload bridge). The automatic-backup
+encryption status — and what to do about it — is now visible in Settings →
+Backup instead of only in the audit trail. "Deadline compliance" statistics
+are now counted by year of return rather than year of loan, matching the
+compensation figures, and the card shows charged and collected amounts
+separately.
+
 ## v2.2.0
 
 **BG:** Голяма поправка по целия код след задълбочен одит — 30 намерени

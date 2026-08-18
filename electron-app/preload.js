@@ -1,6 +1,22 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
+
+/* Пътят на файл, влачен в прозореца. До Electron 31 се четеше направо като
+   File.path в изгледа; в Electron 32 това свойство е ПРЕМАХНАТО и замяната е
+   webUtils.getPathForFile(), достъпна само тук, в preload — затова минава през
+   моста. Проектът е на Electron 43, тоест влаченето на файл за внасяне
+   („Приемане на данни от друга система") просто не правеше нищо, при това
+   мълчаливо, заради `if (!f.path) return;`. Пази се и резервен път към старото
+   свойство, за да не зависи резултатът от версията на Electron. */
+function filePath(file) {
+  try {
+    if (webUtils && typeof webUtils.getPathForFile === 'function') {
+      return webUtils.getPathForFile(file) || '';
+    }
+  } catch (e) { /* пада към старото свойство по-долу */ }
+  return (file && file.path) || '';
+}
 
 contextBridge.exposeInMainWorld('api', {
   app: {
@@ -38,7 +54,11 @@ contextBridge.exposeInMainWorld('api', {
     list: invoke('backup:list'),
     now: invoke('backup:now'),
     restoreFromList: invoke('backup:restoreFromList'),
-    restoreBrowse: invoke('backup:restoreBrowse')
+    restoreBrowse: invoke('backup:restoreBrowse'),
+    // Криптирано ли е днешното автоматично копие и ако не — защо. Показва се в
+    // „Настройки“ → „Резервно копие“ (v2.2.1); дотогава предупреждението стигаше
+    // до библиотекаря само през одитната следа.
+    autoStatus: invoke('backup:autoStatus')
   },
   limits: {
     usage: invoke('limits:usage'),
@@ -248,7 +268,10 @@ contextBridge.exposeInMainWorld('api', {
   importData: {
     choose: invoke('import:choose'),
     load: invoke('import:load'),
-    run: invoke('import:run')
+    run: invoke('import:run'),
+    // Пътят на влачен файл — вижте filePath() в началото на този файл за защо
+    // не може да се прочете направо от изгледа в Electron 32+.
+    pathOf: (file) => filePath(file)
   },
   mobile: {
     generate: invoke('mobile:generate')

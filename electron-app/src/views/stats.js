@@ -75,8 +75,12 @@ async function renderStats() {
           <div class="statRows" style="margin-top:12px">
             <div><span>Върнати в срок</span><b style="color:var(--green)">${r.returnedOnTime}</b></div>
             <div><span>Върнати със забава</span><b style="color:var(--red)">${r.returnedLate}</b></div>
+            <div><span>Начислени обезщетения</span><b>${mny(r.finesCharged || 0)}</b></div>
             <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
-          </div>`
+          </div>
+          <div class="hint" style="margin-top:8px">Броят се връщанията <b>през</b> отчетната
+          година, независимо кога е заета книгата. „Начислени“ е сумата, начислена при
+          връщането; „събрани“ — реално платеното от читателя на касата.</div>`
         : '<span class="hint">Няма върнати документи през периода.</span>'}
       </div>
 

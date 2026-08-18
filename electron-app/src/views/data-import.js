@@ -18,19 +18,20 @@ document.addEventListener('drop', async e => {
   e.preventDefault();
   const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (!f) return;
-  // Electron 32 премахна File.path, а програмата е на Electron 43 — пътят до
-  // провлачения файл вече не се вижда от прозореца (нужен е мост през
-  // webUtils.getPathForFile в preload.js). Дотогава тук стоеше тих return и
-  // влаченето просто не правеше нищо — библиотекарят влачи файла, нищо не се
-  // случва и няма как да разбере защо. Затова: ясно съобщение и посока накъде.
-  if (!f.path) {
-    return toast('Влаченето на файлове не се поддържа в тази версия на програмата. '
+  /* Electron 32 премахна File.path, а програмата е на Electron 43 — пътят на
+     провлачения файл вече НЕ се вижда от самия прозорец. Взима се през моста
+     (importData.pathOf → webUtils.getPathForFile в preload.js, v2.2.1).
+     До v2.2.0 тук стоеше тих `return`: библиотекарят влачеше файла, не се
+     случваше нищо и нямаше как да разбере защо. */
+  const p = (window.api.importData.pathOf && window.api.importData.pathOf(f)) || f.path || '';
+  if (!p) {
+    return toast('Пътят до провлачения файл не можа да бъде разчетен. '
       + 'Ползвайте бутона „Избери файл за внасяне…“.', 'err');
   }
-  if (!/\.(csv|txt|tsv|xlsx)$/i.test(f.path)) {
+  if (!/\.(csv|txt|tsv|xlsx)$/i.test(p)) {
     return toast('Приемат се файлове CSV, TXT, TSV и XLSX.', 'err');
   }
-  const res = await window.api.importData.load(f.path);
+  const res = await window.api.importData.load(p);
   if (!res.ok) return toast(res.error, 'err');
   IMPORT_INFO = res.data;
   importMapModal();

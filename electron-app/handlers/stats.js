@@ -22,6 +22,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         SELECT i.* FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
       `).all(y);
       const loansYear = db.prepare(`SELECT * FROM loans WHERE substr(date_out,1,4) = ?`).all(y);
+      // Върнатите ПРЕЗ тази година — независимо кога са заети (виж returnedOnTime).
+      const returnedYear = db.prepare(`SELECT * FROM loans WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?`).all(y);
       const readersYear = db.prepare(`
         SELECT * FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?
       `).all(y, y);
@@ -77,8 +79,14 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         loansCount: loansYear.length,
         readersCount: readersYear.length,
         visits: visitsYear || loansYear.length,
-        returnedOnTime: loansYear.filter(l => l.date_in && l.date_due && l.date_in <= l.date_due).length,
-        returnedLate: loansYear.filter(l => l.date_in && l.date_due && l.date_in > l.date_due).length,
+        /* „Спазване на сроковете" се брои по годината на ВРЪЩАНЕ, не на заемане —
+           същата поправка като при глобите (finesCharged) в v2.2.0. Книга, заета
+           през декември и върната със забава през февруари, е събитие от новата
+           година: показателят за миналата вече е отпечатан в годишния отчет и не
+           бива да се променя със задна дата. Дотогава `loansYear` (филтриран по
+           date_out) означаваше точно това. */
+        returnedOnTime: returnedYear.filter(l => l.date_due && l.date_in <= l.date_due).length,
+        returnedLate: returnedYear.filter(l => l.date_due && l.date_in > l.date_due).length,
         finesCollected, finesCharged,
         fundByLanguage: byGroup(fund, 'language'),
         fundByDepartment: byGroup(fund, 'department'),
