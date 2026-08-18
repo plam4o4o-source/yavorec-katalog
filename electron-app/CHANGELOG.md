@@ -11,6 +11,34 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.2.2
+
+**BG:** Вътрешният идентификатор на програмата за Windows вече е неутрален.
+
+Досега програмата се представяше пред Windows като `org.chyavorec.inventar` —
+идентификатор, зашит за домейна на една конкретна библиотека, макар самата
+програма да е универсална. Вече е `bg.inventar.app`.
+
+Идентификаторът не се вижда никъде в интерфейса; Windows го ползва, за да
+разпознае дали програмата вече е инсталирана. Затова **инсталаторът на тази
+версия премахва старата инсталация автоматично** — иначе на компютъра щяха да
+останат две икони и два записа в „Програми и компоненти“.
+
+**Данните не се засягат по никакъв начин.** Папката с базата данни се извежда
+от друго поле (`name`), не от този идентификатор, и остава същата. Старият
+деинсталатор по построение не пипа тази папка. Въпреки това, както винаги
+преди обновяване: направете резервно копие.
+
+**EN:** The Windows application identifier is now neutral.
+
+`build.appId` changed from `org.chyavorec.inventar` (tied to one specific
+library's domain) to `bg.inventar.app`. Because Windows treats a different
+appId as a different application, the installer now silently removes the
+previous installation via a `customInit` hook in `build/installer.nsh`, so
+users are not left with two entries. **No data is affected** — the user-data
+folder derives from the package `name`, not from `appId`, and the old
+uninstaller is built with `deleteAppDataOnUninstall: false`.
+
 ## v2.2.1
 
 **BG:** Довършва трите неща, оставени отворени в v2.2.0.

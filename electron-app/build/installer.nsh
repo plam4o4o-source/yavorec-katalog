@@ -54,3 +54,43 @@
   LangString reinstallUpgrade 1026 "Ще бъде преинсталирана/обновена."
   LangString uninstall 1026 "Ще бъде премахната."
 !macroend
+
+; ============================================================================
+; Еднократно премахване на инсталацията отпреди смяната на appId (v2.2.2)
+;
+; До v2.2.1 приложението се идентифицираше пред Windows като
+; „org.chyavorec.inventar“ — вътрешен идентификатор, зашит за домейна на една
+; конкретна библиотека. Програмата е универсална, затова от v2.2.2 нататък е
+; „bg.inventar.app“.
+;
+; За Windows това е РАЗЛИЧНА програма: без намеса новият инсталатор не вижда
+; старата инсталация и я оставя на място — втора икона, втори запис в
+; „Програми и компоненти“, две папки. Затова тук старата се премахва тихо,
+; преди новата да се инсталира.
+;
+; Ключът в регистъра е GUID, изведен от стария appId (uuid v5 с пространството
+; на electron-builder, 50e065bc-3134-11e6-9bab-38c9862bdaf3):
+;     org.chyavorec.inventar → 206e886b-e2ed-5520-b4f5-822cfc3c92d5
+; Стойността е проверена и е закована с тест (test/fixes-appid.test.js), за да
+; не се разминат двете места при бъдеща промяна.
+;
+; ДАННИТЕ НЕ СЕ ЗАСЯГАТ. Папката с базата се извежда от полето `name` в
+; package.json (`inventar-desktop`), не от appId — тоест %APPDATA%\inventar-desktop
+; остава същата и за двата идентификатора. Освен това старият деинсталатор е
+; изграден с deleteAppDataOnUninstall:false и по построение не пипа тази папка.
+;
+; Търси се и в двата кошера: perMachine е false (ключът отива в HKCU), но
+; подробният инсталатор позволява и „за всички потребители“ (HKLM).
+; ============================================================================
+!macro customInit
+  StrCpy $R7 ""
+  ReadRegStr $R7 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\206e886b-e2ed-5520-b4f5-822cfc3c92d5" "QuietUninstallString"
+  ${If} $R7 == ""
+    ReadRegStr $R7 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\206e886b-e2ed-5520-b4f5-822cfc3c92d5" "QuietUninstallString"
+  ${EndIf}
+  ${If} $R7 != ""
+    DetailPrint "Премахване на предишната инсталация на Инвентар…"
+    ; QuietUninstallString вече съдържа кавичките около пътя и ключа /S.
+    ExecWait '$R7'
+  ${EndIf}
+!macroend
