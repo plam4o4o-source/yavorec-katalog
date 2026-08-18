@@ -277,6 +277,10 @@ async function renderSetup() {
       <b>автоматично резервно копие веднъж на ден</b> (при първото стартиране за деня) в подпапка <code>backups</code>
       до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата,
       или за пренасяне на данните на друг компютър със същата програма.</div>
+      <!-- Състоянието на автоматичното копие: криптирано ли е и ако не — защо.
+           До v2.2.0 предупреждението се вписваше само в одитната следа, където
+           библиотекарят на практика никога не поглежда. -->
+      <div id="autoBkBox"></div>
       <div class="toolbar">
         <button class="btn pri" onclick="backupNowForm()">Направи резервно копие сега…</button>
         <button class="btn" onclick="restoreBackupBrowse()">Възстанови от файл…</button>
@@ -316,7 +320,39 @@ async function renderSetup() {
   loadPdpBox();
   loadCircRulesBox();
   loadCalendarBox();
+  loadAutoBackupBox();
 }
+/* ---------------- Състояние на автоматичното резервно копие ----------------
+   Дневното копие се криптира само когато защитата на личните данни е
+   конфигурирана И отключена (тогава ползва нейната парола). Иначе на диска —
+   по документирания сценарий често в СПОДЕЛЕНА мрежова папка — стоят 30 дневни
+   копия с имената, адресите и телефоните на всички читатели в чист текст.
+   Затова състоянието се показва тук, до самите копия, а не само в одита. */
+async function loadAutoBackupBox() {
+  const el = $('#autoBkBox'); if (!el) return;
+  const st = await call(window.api.backup.autoStatus());
+  if (!st) { el.innerHTML = ''; return; }
+  if (st.encrypted) {
+    el.innerHTML = `<div class="note" style="margin-top:0">🔒 Автоматичните дневни копия се
+      <b>криптират</b> с паролата за защита на личните данни.
+      ${st.last ? 'Последно копие: ' + esc(st.last.date) + '.' : ''}</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="note ${st.pdpConfigured ? 'w' : 'd'}" style="margin-top:0">
+    <b>${st.pdpConfigured ? '⚠ Копията не се криптират в момента.' : '⚠ Копията НЕ са криптирани.'}</b>
+    ${esc(st.warning || '')}
+    ${st.pdpConfigured
+      ? '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button></div>'
+      : '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn pri" onclick="pdpSetupForm()">Включи защита на личните данни…</button></div>'}
+  </div>`;
+}
+window.loadAutoBackupBox = loadAutoBackupBox;
+// Само превърта до картата за защитата — тя е по-нагоре в същия екран.
+function pdpFocus() {
+  const box = $('#pdpBox');
+  if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+window.pdpFocus = pdpFocus;
 /* ---------------- Номенклатури (редактор) ---------------- */
 async function loadAvEditors() {
   const box = $('#avEditors'); if (!box) return;
@@ -416,6 +452,7 @@ async function pdpDoSetup() {
   closeModal();
   toast('Защитата е зададена — ЕГН/№ ЛК вече са криптирани.', 'ok');
   loadPdpBox();
+  loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
 window.pdpDoSetup = pdpDoSetup;
 async function pdpDoUnlock() {
@@ -425,11 +462,13 @@ async function pdpDoUnlock() {
   if (!res.ok) return toast(res.error, 'err');
   toast('Отключено.', 'ok');
   loadPdpBox();
+  loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
 window.pdpDoUnlock = pdpDoUnlock;
 async function pdpDoLock() {
   await window.api.pdp.lock();
   loadPdpBox();
+  loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
 window.pdpDoLock = pdpDoLock;
 function pdpChangePasswordForm() {
@@ -453,6 +492,7 @@ async function pdpDoChangePassword() {
   closeModal();
   toast('Паролата е сменена.', 'ok');
   loadPdpBox();
+  loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
 window.pdpDoChangePassword = pdpDoChangePassword;
 /* ---------------- Правила за обслужване по категория ---------------- */

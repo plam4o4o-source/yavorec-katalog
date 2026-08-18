@@ -565,13 +565,30 @@ test('запис в PDF също се брои за изпратено напо�
 });
 
 /* ============================================================================
-   6) Влачене на файл: ясно съобщение вместо мълчание (Electron 32+ няма File.path)
+   6) Влачене на файл: НИКОГА мълчаливо нищо (Electron 32+ няма File.path)
+
+   v2.2.0 можеше само да покаже съобщение „ползвайте бутона" — мостът в
+   preload.js беше извън обхвата ѝ. v2.2.1 добави importData.pathOf
+   (webUtils.getPathForFile) и влаченето реално проработи, затова тук остава
+   само общото изискване: каквото и да стане, библиотекарят вижда резултат —
+   или файлът се зарежда, или излиза обяснение. Конкретните пътища (успешно
+   влачене през моста, липсващ път, неподдържано разширение) са в
+   test/fixes-v221.test.js.
    ============================================================================ */
 
-test('влачене на файл без File.path показва съобщение, а не мълчи', async () => {
+test('влачене на файл без File.path не остава без никакъв резултат', async () => {
   const dom = buildDom({});
   const { window } = dom;
   await settled(dom);
+  const loaded = [];
+  // Целият api се подменя, а не само api.importData: мокът е Proxy, чийто get
+  // трап връща нов възел при всяко четене и заглушава присвояване на подобект.
+  window.api = {
+    importData: {
+      pathOf: () => '',          // мостът не може да разчете пътя
+      load: async (p) => { loaded.push(p); return { ok: true, data: {} }; }
+    }
+  };
   const ev = new window.Event('drop', { bubbles: true, cancelable: true });
   // Точно каквото дава Electron 32+: File обект без свойство path.
   ev.dataTransfer = { files: [{ name: 'knigi.csv', size: 10 }] };
@@ -580,6 +597,7 @@ test('влачене на файл без File.path показва съобще�
 
   const toasts = window.document.getElementById('toasts').textContent
     + window.document.getElementById('toastsTop').textContent;
+  assert.equal(loaded.length, 0);
   assert.notEqual(toasts.trim(), '', 'мълчаливото нищо е най-лошият изход — трябва да има съобщение');
   assert.match(toasts, /Избери файл за внасяне/,
     'съобщението трябва да насочва към бутона, който върши работа');
