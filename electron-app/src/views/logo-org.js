@@ -94,7 +94,11 @@ async function printOverdueNotices() {
   // със степента от подготвените текстове (ако прозорецът с тях е отворен).
   const levels = {};
   for (const r of (window._REMINDERS || [])) levels[r.reader_id] = r.level || 1;
-  rows.forEach(r => window.api.notices.log({
+  // v2.2.0: вписва се ЧАК след потвърден печат (или запис в PDF). От v1.71.0
+  // doPrint() само отваря преглед с бутон „Отказ“ — дотогава при отказ в
+  // регистъра вече стоеше „изпратено напомняне“ на всички просрочили читатели
+  // и следващото напомняне тръгваше от грешна степен.
+  const logNotices = () => rows.forEach(r => window.api.notices.log({
     reader_id: r.reader_id, level: levels[r.reader_id] || 1, channel: 'печат', loans_count: r.n
   }));
   setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
@@ -109,6 +113,6 @@ async function printOverdueNotices() {
     ${r.loans.map(l => `<tr><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td><td>${bg(l.date_out)}</td><td>${bg(l.date_due)}</td></tr>`).join('')}
     </tbody></table>
     <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b> (${s.fine_per_day} лв./ден забава по чл. 43, ал. 2).</div>
-    ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''));
+    ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''), null, logNotices);
 }
 window.printOverdueNotices = printOverdueNotices;

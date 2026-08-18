@@ -119,7 +119,11 @@ test('backup:now with a password produces an encrypted (INVBAK01) backup', async
 test('backup:restoreFromList replaces the active db file and relaunches the app', async () => {
   const { ipcMain, dir, dbPath, relaunchCalls, exitCalls, getDb } = setup();
   // Направи различима "резервна" база данни, различна от текущата.
-  const backupPath = path.join(dir, 'to-restore.db');
+  // v2.2.0: backup:restoreFromList приема само файл ОТ ПАПКАТА с резервните копия
+  // (произволен път от renderer-а вече не се инсталира като активна база), затова
+  // и подготвеният тук файл стои там.
+  fs.mkdirSync(path.join(dir, 'backups'), { recursive: true });
+  const backupPath = path.join(dir, 'backups', 'to-restore.db');
   const bdb = new Database(backupPath);
   bdb.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');
   bdb.prepare('INSERT INTO t (v) VALUES (?)').run('от-резервно-копие');
@@ -145,7 +149,8 @@ test('backup:restoreFromList on an encrypted backup without a password reports n
   const pdb = new Database(plainSrc);
   pdb.exec('CREATE TABLE t (id INTEGER PRIMARY KEY)');
   pdb.close();
-  const encPath = path.join(dir, 'enc-backup.invbak');
+  fs.mkdirSync(path.join(dir, 'backups'), { recursive: true }); // виж бележката за v2.2.0 по-горе
+  const encPath = path.join(dir, 'backups', 'enc-backup.invbak');
   encryptBackupFile(plainSrc, encPath, 'парола1');
 
   const result = await ipcMain.invoke('backup:restoreFromList', { path: encPath, password: undefined });
@@ -156,7 +161,7 @@ test('backup:restoreFromList on an encrypted backup without a password reports n
 
 test('backup:restoreFromList reports a friendly error for a missing file instead of throwing', async () => {
   const { ipcMain, dir } = setup();
-  const result = await ipcMain.invoke('backup:restoreFromList', { path: path.join(dir, 'nope.db'), password: undefined });
+  const result = await ipcMain.invoke('backup:restoreFromList', { path: path.join(dir, 'backups', 'nope.db'), password: undefined });
   assert.equal(result.ok, false);
   assert.match(result.error, /не е намерен/);
 });
@@ -215,7 +220,8 @@ test('провалено копиране при възстановяване н
       return fs.copyFileSync(src, dest);
     }
   });
-  const backupPath = path.join(dir, 'to-restore.db');
+  fs.mkdirSync(path.join(dir, 'backups'), { recursive: true }); // виж бележката за v2.2.0 по-горе
+  const backupPath = path.join(dir, 'backups', 'to-restore.db');
   const bdb = new Database(backupPath);
   bdb.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');
   bdb.prepare('INSERT INTO t (v) VALUES (?)').run('от-резервно-копие');

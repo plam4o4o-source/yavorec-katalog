@@ -13,16 +13,31 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('mzs:create', (e, m) =>
     run(() => {
-      const info = getDb().prepare(`
-        INSERT INTO mzs_requests (no, year, date, direction, partner, author, title, isbn, requester, status, due_date, note)
-        VALUES (@no, @year, @date, @direction, @partner, @author, @title, @isbn, @requester, @status, @due_date, @note)
-      `).run({
-        no: parseInt(m.no, 10), year: yearOf(m.date), date: m.date, direction: m.direction || 'изходящо',
-        partner: m.partner, author: m.author || null, title: m.title, isbn: m.isbn || null,
-        requester: m.requester || null, status: m.status || 'заявено', due_date: m.due_date || null, note: m.note || null
+      const db = getDb();
+      const no = parseInt(m.no, 10);
+      const year = yearOf(m.date);
+      /* Същото като при актовете за отчисляване и партидите на постъпленията:
+         номерът се предлага с MAX(no)+1 при отваряне на формата, схемата няма
+         UNIQUE(year, no), а две работни места към една мрежова база получават
+         един и същ номер. Проверката се повтаря при самия запис, в транзакция с
+         .immediate() (правото на запис се взима преди проверката). */
+      const tx = db.transaction(() => {
+        if (db.prepare('SELECT 1 FROM mzs_requests WHERE year = ? AND no = ?').get(year, no)) {
+          throw new Error('Заявка № ' + no + '/' + year + ' вече съществува — най-вероятно е създадена от друго работно място '
+            + 'към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
+        }
+        const info = db.prepare(`
+          INSERT INTO mzs_requests (no, year, date, direction, partner, author, title, isbn, requester, status, due_date, note)
+          VALUES (@no, @year, @date, @direction, @partner, @author, @title, @isbn, @requester, @status, @due_date, @note)
+        `).run({
+          no, year, date: m.date, direction: m.direction || 'изходящо',
+          partner: m.partner, author: m.author || null, title: m.title, isbn: m.isbn || null,
+          requester: m.requester || null, status: m.status || 'заявено', due_date: m.due_date || null, note: m.note || null
+        });
+        logAudit('Нова МЗС заявка', '№ ' + m.no + ' — ' + m.title + ' (' + m.direction + ')');
+        return info.lastInsertRowid;
       });
-      logAudit('Нова МЗС заявка', '№ ' + m.no + ' — ' + m.title + ' (' + m.direction + ')');
-      return info.lastInsertRowid;
+      return tx.immediate();
     })
   );
   ipcMain.handle('mzs:update', (e, m) =>

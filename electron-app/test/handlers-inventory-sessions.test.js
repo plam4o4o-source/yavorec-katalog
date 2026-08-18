@@ -127,7 +127,11 @@ test('inventorySessions:close finds missing books but excludes ones currently on
   const sessionId = (await startSession(ipcMain)).data;
   await ipcMain.invoke('inventorySessions:scan', { sessionId, code: 'BC1' });
 
-  const result = await ipcMain.invoke('inventorySessions:close', sessionId);
+  /* v2.2.0: приключването вече иска ИЗРИЧЕН вид на проверката. Този тест описва
+     ПЪЛНАТА инвентаризация (несканираното = липсващо), затова подава mode:'full'.
+     Представителната (10% по чл. 40, т. 2 — вече и подразбиращата се, защото е
+     безопасната) не пипа статуси; за нея виж test/fixes-core.test.js. */
+  const result = await ipcMain.invoke('inventorySessions:close', { sessionId, mode: 'full' });
   assert.equal(result.ok, true);
   assert.equal(result.data.scanned, 1);
   assert.equal(result.data.missing, 1, 'only the truly missing book counts — the on-loan one is excluded');
@@ -142,7 +146,9 @@ test('inventorySessions:close finds missing books but excludes ones currently on
   assert.ok(missingSessionRow);
 
   assert.equal(auditLog.length, 1);
-  assert.match(auditLog[0].detail, /проверени 1, липсващи 1 от 3/);
+  // Видът вече се вписва в одитната следа — по протокола после се вижда дали
+  // проверката е била пълна, или представителна.
+  assert.match(auditLog[0].detail, /пълна — проверени 1, липсващи 1 от 3/);
 
   const sessionRow = db.prepare('SELECT closed FROM inventory_sessions WHERE id = ?').get(sessionId);
   assert.equal(sessionRow.closed, 1);

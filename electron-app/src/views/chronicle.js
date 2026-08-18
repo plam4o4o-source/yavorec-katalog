@@ -7,10 +7,6 @@ async function renderChronicle() {
     call(window.api.chronicle.years())
   ]);
   if (!rows) return;
-  // Записите се групират по година, за да се чете като истински летопис.
-  const byYear = {};
-  for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
-  const yearsSorted = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
   $('#view').innerHTML = `
     <div class="note"><b>Летопис.</b> Хронология на читалищната дейност — по години и събития.
     Това, което по традиция се води в летописната книга, тук се търси, допълва и свързва със
@@ -28,7 +24,14 @@ async function renderChronicle() {
       <button class="btn" onclick="printChronicle()">Печат / PDF</button>
     </div>
 
-    ${rows.length ? yearsSorted.map(y => `
+    <div id="chrList">${chronicleListHtml(rows)}</div>`;
+}
+function chronicleListHtml(rows) {
+  // Записите се групират по година, за да се чете като истински летопис.
+  const byYear = {};
+  for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
+  const yearsSorted = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
+  return rows.length ? yearsSorted.map(y => `
       <div class="chrYear">
         <div class="chrYearHead">${esc(y)}</div>
         ${byYear[y].map(c => `<div class="chrItem" tabindex="0" role="button" aria-label="${esc(c.title)}"
@@ -47,9 +50,18 @@ async function renderChronicle() {
       </div>`).join('')
     : `<div class="empty"><h3>Летописът е празен</h3>
         <p>Впишете първото събитие — основаването на читалището, откриването на библиотеката,
-        юбилей, дарение, ремонт.</p></div>`}`;
+        юбилей, дарение, ремонт.</p></div>`;
 }
-function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(renderChronicle, 300); }
+/* Търсенето пипа само #chrList — полето за търсене НЕ се пресъздава, иначе при
+   пауза над 300 ms курсорът изчезва по средата на думата (моделът от inv-book.js). */
+async function refreshChronicle() {
+  const rows = await call(window.api.chronicle.list({ q: CHR_Q, year: CHR_YEAR }));
+  if (!rows) return;
+  const box = $('#chrList');
+  if (box) box.innerHTML = chronicleListHtml(rows); else renderChronicle();
+}
+window.refreshChronicle = refreshChronicle;
+function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(refreshChronicle, 300); }
 window.chrSearch = chrSearch;
 function chrYear(v) { CHR_YEAR = v; renderChronicle(); }
 window.chrYear = chrYear;
@@ -81,14 +93,17 @@ async function saveChronicle(id) {
   if (!d.title.trim()) return toast('Заглавието на събитието е задължително.', 'err');
   if (!d.year.trim() && !d.date) return toast('Годината е задължителна.', 'err');
   d.id = id;
-  if (id) { await call(window.api.chronicle.update(d), 'Записът е обновен.'); }
-  else {
-    const newId = await call(window.api.chronicle.create(d), 'Записът е добавен.');
-    closeModal(); await renderChronicle(); markSaved();
-    if (newId) chronicleView(newId);
+  // Затваря се само при успех (v2.2.0) — иначе отказаният запис изтриваше и
+  // дългия текст на летописното събитие.
+  if (id) {
+    if (await call(window.api.chronicle.update(d), 'Записът е обновен.') === null) return;
+    closeModal(); renderChronicle(); markSaved();
     return;
   }
-  closeModal(); renderChronicle(); markSaved();
+  const newId = await call(window.api.chronicle.create(d), 'Записът е добавен.');
+  if (newId === null) return;
+  closeModal(); await renderChronicle(); markSaved();
+  if (newId) chronicleView(newId);
 }
 window.saveChronicle = saveChronicle;
 

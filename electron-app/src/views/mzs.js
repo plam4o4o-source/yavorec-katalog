@@ -66,8 +66,10 @@ async function saveMzs(id) {
   const missing = firstMissingRequired('#mzsF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#mzsF'); d.id = id;
-  if (id) await call(window.api.mzs.update(d), 'Записано.');
-  else await call(window.api.mzs.create(d), 'Записано.');
+  // Затваря се само при успех (v2.2.0) — при отказан запис попълненото остава.
+  const ok = id ? await call(window.api.mzs.update(d), 'Записано.')
+    : await call(window.api.mzs.create(d), 'Записано.');
+  if (ok === null) return;
   closeModal(); renderMzs();
 }
 window.saveMzs = saveMzs;

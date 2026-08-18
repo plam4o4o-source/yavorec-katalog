@@ -296,8 +296,8 @@ async function renderSetup() {
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Помощ и обратна връзка</h3>
-      <div class="note" style="margin-top:0">Програмата се ползва и от други читалищни библиотеки освен
-      НЧ „Васил Левски 1922“ — Яворец, затова съобщение за забелязана грешка помага на всички.
+      <div class="note" style="margin-top:0">Програмата се ползва от читалищни и общински библиотеки в
+      цялата страна — съобщение за забелязана грешка помага на всички.
       <b>Не прилагайте файла на базата данни или лични данни на читатели</b> към съобщението — опишете само
       какво сте направили и какво се случи.</div>
       <div class="hint" style="margin-bottom:4px">Имейл за връзка с разработчика:
@@ -456,10 +456,18 @@ async function pdpDoChangePassword() {
 }
 window.pdpDoChangePassword = pdpDoChangePassword;
 /* ---------------- Правила за обслужване по категория ---------------- */
+/* Третият елемент е подсказката под полето. „Празно" и „0" НЕ значат едно и също,
+   а разликата беше необяснена никъде в интерфейса: празно наследява общата стойност,
+   а 0 при лимитите значи „без ограничение" — библиотекар, който впише 0 в „Максимум
+   документи" с намерение да ЗАБРАНИ заемането за тази категория, получаваше точно
+   обратното. Затова подсказката вече е за всяко поле поотделно. */
 const CIRC_RULE_FIELDS = [
-  ['loan_days', 'Срок (дни)'], ['max_books', 'Максимум документи'],
-  ['extensions_count', 'Продължения'], ['extension_days', 'Дни на продължение'],
-  ['suspend_per_day', 'Наказание (дни/ден забава)'], ['suspend_max', 'Таван на наказанието']
+  ['loan_days', 'Срок (дни)', 'празно = общото'],
+  ['max_books', 'Максимум документи', 'празно = общото · 0 = без ограничение'],
+  ['extensions_count', 'Продължения', 'празно = общото · 0 = без ограничение'],
+  ['extension_days', 'Дни на продължение', 'празно = общото'],
+  ['suspend_per_day', 'Наказание (дни/ден забава)', 'празно = общото · 0 = изключено'],
+  ['suspend_max', 'Таван на наказанието', 'празно = общото · 0 = без таван']
 ];
 async function loadCircRulesBox() {
   const box = $('#circRulesBox'); if (!box) return;
@@ -485,7 +493,7 @@ function addCircRule(category) {
           ? `<input type="hidden" name="category" value="${esc(category)}"><div class="hint" style="margin-bottom:8px">Категория: <b>${esc(category)}</b></div>`
           : fld('Категория', 'category', { type: 'select', opts: KATEG, allowEmpty: false })}
         <div class="grid g2">
-          ${CIRC_RULE_FIELDS.map(([k, l]) => fld(l, k, { type: 'number', val: r && r[k] != null ? r[k] : '', hint: 'празно = общото' })).join('')}
+          ${CIRC_RULE_FIELDS.map(([k, l, h]) => fld(l, k, { type: 'number', val: r && r[k] != null ? r[k] : '', hint: h || 'празно = общото' })).join('')}
         </div>
       </form>`,
       `<button class="btn" onclick="closeModal2()">Отказ</button>

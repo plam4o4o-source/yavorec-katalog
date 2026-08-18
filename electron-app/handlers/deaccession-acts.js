@@ -7,6 +7,24 @@
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, normalizeScanCode } = deps;
 
+  /* Кои заемания са били ПРИНУДИТЕЛНО закрити от акт за отчисляване. Без този
+     белег анулирането на акта връщаше книгата „наличен“, но заемът оставаше
+     закрит: книгата се водеше свободна и можеше да бъде заета на втори читател,
+     докато реално е у първия. Датата на закриване не е достатъчна за разпознаване
+     (книга, върната нормално в деня на акта, изглежда по същия начин), затова
+     заемите се отбелязват изрично при закриването.
+     Колоната се добавя тук, а не с миграция в main.js — модулът трябва да работи
+     и когато е зареден самостоятелно (тестове), а ALTER TABLE ... ADD COLUMN е
+     идемпотентно защитен с PRAGMA table_info, точно както ensureColumns() в
+     main.js. Проверката е евтина и се прави само при запис/анулиране на акт. */
+  let loanActColumnChecked = null;
+  function ensureLoanActColumn(db) {
+    if (loanActColumnChecked === db) return;
+    const has = db.prepare('PRAGMA table_info(loans)').all().some(c => c.name === 'deaccession_act_id');
+    if (!has) db.exec('ALTER TABLE loans ADD COLUMN deaccession_act_id INTEGER');
+    loanActColumnChecked = db;
+  }
+
   ipcMain.handle('deaccessionActs:list', () =>
     run(() => getDb().prepare(`
       SELECT a.*, (SELECT COUNT(*) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
@@ -39,12 +57,28 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
     run(() => {
       const db = getDb();
+      ensureLoanActColumn(db);
+      const no = parseInt(act.no, 10);
+      const year = yearOf(act.date);
       const tx = db.transaction(() => {
+        /* Номерът на акта се предлага с MAX(no)+1 при ОТВАРЯНЕ на формата, а
+           schema.sql няма UNIQUE(year, no) (не може да се добави наготово —
+           съществуващи бази вече може да имат дубликати и миграцията би счупила
+           стартирането). При два компютъра към една мрежова база (изрично
+           поддържан режим) и двамата получават № 5 и записват два акта № 5/2026.
+           Затова номерът се проверява ОТНОВО тук, в самата транзакция на записа;
+           транзакцията се пуска с .immediate() (виж долу) — правото на запис се
+           взима ПРЕДИ проверката, така че между проверката и INSERT-а никой друг
+           не може да вмъкне същия номер. */
+        if (db.prepare('SELECT 1 FROM deaccession_acts WHERE year = ? AND no = ?').get(year, no)) {
+          throw new Error('Акт № ' + no + '/' + year + ' вече съществува — най-вероятно е създаден от друго работно място '
+            + 'към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
+        }
         const info = db.prepare(`
           INSERT INTO deaccession_acts (no, year, date, order_no, reason_code, reason_text, disposal, attach, committee1, committee2, committee3)
           VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach, @committee1, @committee2, @committee3)
         `).run({
-          no: parseInt(act.no, 10), year: yearOf(act.date), date: act.date, order_no: act.order_no || null,
+          no, year, date: act.date, order_no: act.order_no || null,
           reason_code: parseInt(act.reason_code, 10), reason_text: act.reason_text,
           disposal: act.disposal || null, attach: act.attach || null,
           committee1: act.committee1 || null, committee2: act.committee2 || null, committee3: act.committee3 || null
@@ -54,7 +88,9 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language)
           VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language)
         `);
-        const closeLoans = db.prepare(`UPDATE loans SET date_in = ? WHERE book_id = ? AND date_in IS NULL`);
+        // Принудително закритите заемания се отбелязват с номера на акта — за да
+        // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
+        const closeLoans = db.prepare(`UPDATE loans SET date_in = ?, deaccession_act_id = ? WHERE book_id = ? AND date_in IS NULL`);
         bookIds.forEach(bookId => {
           const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
           if (!b) return;
@@ -65,14 +101,15 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           });
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
             .run('отчислен', act.date, actId, act.date, b.id);
-          closeLoans.run(act.date, b.id);
+          closeLoans.run(act.date, actId, b.id);
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
         logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text);
         return actId;
       });
-      const actId = tx();
+      // .immediate() — виж проверката на номера в транзакцията по-горе.
+      const actId = tx.immediate();
       scheduleCatalogWrite();
       return actId;
     })
@@ -80,6 +117,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   ipcMain.handle('deaccessionActs:revoke', (e, id) =>
     run(() => {
       const db = getDb();
+      ensureLoanActColumn(db);
       const tx = db.transaction(() => {
         const items = db.prepare('SELECT book_id FROM deaccession_items WHERE act_id = ?').all(id);
         items.forEach(it => {
@@ -88,8 +126,15 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
               .run(it.book_id);
           }
         });
+        /* Заеманията, закрити принудително от този акт (най-често при причина
+           „невърнати от ползватели“), се отварят обратно. Иначе книгата се връща
+           във фонда като „наличен“ и свободна за заемане, макар реално да е у
+           първия читател — а следата, че той я държи, е изчезнала. */
+        const reopened = db.prepare('UPDATE loans SET date_in = NULL, deaccession_act_id = NULL WHERE deaccession_act_id = ?')
+          .run(id).changes;
         db.prepare('DELETE FROM deaccession_acts WHERE id = ?').run(id);
-        logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда');
+        logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда'
+          + (reopened ? ' (' + reopened + ' заемания са отворени обратно)' : ''));
       });
       tx();
       scheduleCatalogWrite();

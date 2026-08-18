@@ -65,17 +65,45 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       return { inv_number: b.inv_number, title: b.title };
     })
   );
-  ipcMain.handle('inventorySessions:close', (e, sessionId) =>
+  /* Приключване на сесията. `mode` е задължителен избор на библиотекаря:
+
+     'full'          — ПЪЛНА проверка: всичко несканирано (и незаето) се смята за
+                       липсващо, вписва се в протокола и получава статус „липсващ".
+     'representative'— ПРЕДСТАВИТЕЛНА проверка по чл. 40, т. 2 (минимум 10% годишно):
+                       протоколът важи САМО за сканираното; несканираното НЕ се пипа.
+
+     До v2.1.0 разлика нямаше — close() винаги се държеше като 'full'. А самата
+     програма представя проверката като представителна (полето „Обхват" е
+     предпопълнено с този текст, таблото мери напредък към 10% цел), затова
+     библиотекар, изпълнил ТОЧНО нормативното изискване и натиснал „Приключи",
+     получаваше протокол с 90% липси и презаписани статуси на почти целия фонд —
+     връщането им беше само ръчно, книга по книга. Проверено: 100 книги, сканирани
+     целевите 10 → 90 маркирани „липсващ".
+
+     Стойността по подразбиране НЕ е 'full': по-безопасно е приключване без изричен
+     избор да не пипа статуси, отколкото да ги презапише масово. */
+  ipcMain.handle('inventorySessions:close', (e, arg) =>
     run(() => {
       const db = getDb();
+      // Приема и голо id (стар подпис), и {sessionId, mode} — за съвместимост.
+      const sessionId = (arg && typeof arg === 'object') ? arg.sessionId : arg;
+      const mode = (arg && typeof arg === 'object' && arg.mode) ? arg.mode : 'representative';
+      if (mode !== 'full' && mode !== 'representative') {
+        throw new Error('Непознат вид инвентаризация: ' + mode);
+      }
       const tx = db.transaction(() => {
         const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
         if (!s) throw new Error('Няма такава сесия.');
+        if (s.closed) throw new Error('Тази инвентаризация вече е приключена.');
         const scannedIds = db.prepare('SELECT book_id FROM inventory_session_scans WHERE session_id = ?').all(sessionId).map(r => r.book_id);
         const pool = db.prepare(`SELECT * FROM books WHERE status != 'отчислен' ${s.department ? 'AND department = ?' : ''}`)
           .all(...(s.department ? [s.department] : []));
         const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
-        const missing = pool.filter(b => !scannedIds.includes(b.id) && !openLoanIds.has(b.id));
+        const scannedSet = new Set(scannedIds);
+        const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id));
+        // При представителна проверка непроверените НЕ са липсващи — те просто не
+        // са влизали в обхвата на тазгодишната извадка.
+        const missing = mode === 'full' ? unchecked : [];
         const insMissing = db.prepare(`
           INSERT INTO inventory_session_missing (session_id, book_id, inv_number, title, author, price)
           VALUES (?, ?, ?, ?, ?, ?)
@@ -85,10 +113,12 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           if (b.status !== 'отчислен') db.prepare("UPDATE books SET status='липсващ', status_date=date('now') WHERE id=?").run(b.id);
         });
         db.prepare('UPDATE inventory_sessions SET closed = 1 WHERE id = ?').run(sessionId);
-        logAudit('Инвентаризация', 'проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
+        logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
+          ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
         return {
-          scanned: scannedIds.length, missing: missing.length, pool: pool.length,
+          mode, scanned: scannedIds.length, missing: missing.length, pool: pool.length,
+          unchecked: unchecked.length,
           allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
         };
       });

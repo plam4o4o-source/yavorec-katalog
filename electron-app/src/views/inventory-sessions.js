@@ -141,25 +141,69 @@ async function renderInventRun() {
     if (rg) rg.innerHTML = ringSvg(nPct, 'проверени от обхвата');
   });
 }
+/* Приключването пита за ВИДА на проверката, защото последицата е много различна и
+   необратима на практика: при пълна проверка всеки несканиран документ получава
+   статус „липсващ" (връщането е ръчно, книга по книга). До v2.1.0 въпрос нямаше и
+   се изпълняваше винаги пълният вариант — библиотекар, сканирал нормативните 10%
+   по чл. 40, т. 2, получаваше протокол с 90% липси. */
 async function closeInvent() {
-  const res = await window.api.inventorySessions.close(INVENT_SESSION.id);
+  const s = await call(window.api.inventorySessions.get(INVENT_SESSION.id));
+  if (!s) return;
+  const unchecked = Math.max(0, (s.pool_size || 0) - s.scans.length);
+  modal('Какъв е видът на тази инвентаризация?', `
+    <div class="note" style="margin-top:0">Проверени са <b>${s.scans.length.toLocaleString('bg-BG')}</b>
+    от <b>${(s.pool_size || 0).toLocaleString('bg-BG')}</b> документа в обхвата.
+    Останалите <b>${unchecked.toLocaleString('bg-BG')}</b> не са сканирани.</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label class="chk" style="align-items:flex-start">
+        <input type="radio" name="ivMode" value="representative" checked>
+        <span><b>Представителна проверка</b> (чл. 40, т. 2) — минимум 10% от фонда годишно.
+        Протоколът важи <b>само за проверените</b> ${s.scans.length.toLocaleString('bg-BG')} документа.
+        Несканираните <b>не се пипат</b> — те просто не са влизали в тазгодишната извадка.</span>
+      </label>
+      <label class="chk" style="align-items:flex-start">
+        <input type="radio" name="ivMode" value="full">
+        <span><b>Пълна проверка</b> на целия обхват — всички
+        ${unchecked.toLocaleString('bg-BG')} несканирани (без заетите в момента) се вписват в
+        протокола като липсващи и получават статус <b>„липсващ"</b>.</span>
+      </label>
+    </div>
+    ${unchecked > 0 ? `<div class="note w">Изберете „пълна" само ако наистина сте минали през целия
+    обхват. При ${unchecked.toLocaleString('bg-BG')} несканирани документа статусът им ще бъде
+    презаписан наведнъж, а връщането е ръчно.</div>` : ''}`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="doCloseInvent()">Приключи и състави протокол</button>`);
+}
+window.closeInvent = closeInvent;
+async function doCloseInvent() {
+  const sel = document.querySelector('[name=ivMode]:checked');
+  const mode = sel ? sel.value : 'representative';
+  const res = await window.api.inventorySessions.close({ sessionId: INVENT_SESSION.id, mode });
   if (!res.ok) return toast(res.error, 'err');
   markSaved();
   const r = res.data;
   INVENT_SESSION = null;
+  closeModal();
   const over = Math.max(0, r.missing - r.allowedLoss);
   modal('Инвентаризацията е приключена', `
+    <div class="hint" style="margin-bottom:10px">Вид: <b>${r.mode === 'full' ? 'пълна проверка' : 'представителна проверка (чл. 40, т. 2)'}</b></div>
     <div class="cards" style="margin-bottom:14px">
       <div class="card"><div class="num">${r.scanned}</div><div class="lbl">Проверени</div></div>
       <div class="card"><div class="num">${r.missing}</div><div class="lbl">Липсващи</div></div>
       <div class="card"><div class="num">${r.allowedLoss.toFixed(1)}</div><div class="lbl">Допустими</div></div>
     </div>
-    ${over > 0
-      ? `<div class="note d">Липсите надвишават нормативите за естествени загуби с ${over.toFixed(1)} документа (чл. 51 – 53).</div>`
-      : `<div class="note">Липсите са в рамките на допустимите естествени загуби (чл. 41, ал. 1).</div>`}
-    <p style="font-size:13px">Липсващите документи са отбелязани със статус „липсващ“. Отчислете ги с акт по
-    <b>чл. 30, т. 6</b>, ако е приложимо.</p>`,
+    ${r.mode === 'full'
+      ? (over > 0
+        ? `<div class="note d">Липсите надвишават нормативите за естествени загуби с ${over.toFixed(1)} документа (чл. 51 – 53).</div>`
+        : `<div class="note">Липсите са в рамките на допустимите естествени загуби (чл. 41, ал. 1).</div>`)
+      : `<div class="note">Протоколът важи за проверените ${r.scanned} документа.
+         Непроверените ${r.unchecked.toLocaleString('bg-BG')} остават с непроменен статус —
+         те влизат в следваща проверка.</div>`}
+    ${r.mode === 'full'
+      ? `<p style="font-size:13px">Липсващите документи са отбелязани със статус „липсващ“. Отчислете ги с акт по
+         <b>чл. 30, т. 6</b>, ако е приложимо.</p>`
+      : ''}`,
     `<button class="btn pri" onclick="closeModal()">Затвори</button>`);
   renderInvent();
 }
-window.closeInvent = closeInvent;
+window.doCloseInvent = doCloseInvent;

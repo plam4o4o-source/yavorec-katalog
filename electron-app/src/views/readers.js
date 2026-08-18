@@ -39,6 +39,18 @@ function renderReadersBody() {
   const moreBox = $('#rMore'); if (moreBox) moreBox.innerHTML = readersMoreHtml(more, readers.length);
 }
 window.renderReadersBody = renderReadersBody;
+/* Ново търсене: списъкът се тегли наново (търсенето е сървърно), но се пипат
+   САМО тялото на таблицата и лентата под нея — полето #rSearch НЕ се пресъздава.
+   Дотогава debounce-ът викаше цялата renderReaders() и подменяше #view заедно с
+   полето: при пауза над 300 ms по време на писане фокусът изчезваше и следващите
+   знаци отиваха в нищото (виж същия модел в inv-book.js). */
+async function refreshReadersList() {
+  const readers = await call(window.api.readers.list(READERS_QUERY));
+  if (!readers) return;
+  window._READERS_LIST = readers;
+  renderReadersBody();
+}
+window.refreshReadersList = refreshReadersList;
 async function renderReaders() {
   const [readers, searchSuggest] = await Promise.all([
     call(window.api.readers.list(READERS_QUERY)), call(window.api.searchHistory.suggest('readers'))
@@ -69,7 +81,7 @@ async function renderReaders() {
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
-  $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; renderReaders(); }, 300));
+  $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; refreshReadersList(); }, 300));
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
 }
 async function exportReadersCsv() {
@@ -174,9 +186,11 @@ async function saveReader(id) {
   d.id = id;
   // readers:create връща id на новия запис — редът му светва след пререндирането
   // (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
+  // v2.2.0: прозорецът се затваря САМО при успех — иначе отхвърлен запис
+  // (напр. дублирана карта №) изтриваше цялата попълнена регистрационна карта.
   let savedId = id;
-  if (id) await call(window.api.readers.update(d), 'Читателят е обновен.');
-  else savedId = await call(window.api.readers.create(d), 'Читателят е добавен.');
+  if (id) { if (await call(window.api.readers.update(d), 'Читателят е обновен.') === null) return; }
+  else { savedId = await call(window.api.readers.create(d), 'Читателят е добавен.'); if (savedId === null) return; }
   closeModal(); await renderReaders();
   if (savedId) flashRow(`#rBody tr[data-id="${savedId}"]`);
 }

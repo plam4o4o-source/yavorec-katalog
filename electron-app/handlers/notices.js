@@ -5,7 +5,7 @@
 // (по стойност), isValidEmail (стабилен модулен export от
 // security-utils.js), shell (Electron, стабилен) и today.
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
-  const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell } = deps;
+  const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
 
   const DEFAULT_NOTICE_SUBJECT = 'Просрочени материали от {library}';
   const DEFAULT_NOTICE_BODY =
@@ -81,12 +81,19 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       const db = getDb();
       const s = db.prepare(`SELECT lib_name, org, place, librarian, notice_subject, notice_body, notice_sms,
         remind2_days, remind3_days FROM settings WHERE id = 1`).get() || {};
+      /* Сумата в писмото се смята със същата функция, с която после реално се
+         начислява на гишето (effectiveDaysLate от handlers/loans.js). Тук по-рано
+         стоеше `SUM((julianday('now') - julianday(date_due)) * fine_per_day)`:
+         дробни дни (julianday('now') включва часа!) и без изваждане на затворените
+         дни. Едно и също официално напомнително писмо по чл. 43, ал. 2, отпечатано
+         в 09:00 и в 17:00, искаше различни суми — и двете различни от касовата. */
+      const fpd = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
+      const perDay = Number(fpd.fine_per_day) || 0;
       const rows = db.prepare(`
         SELECT l.reader_id, r.name, r.phone, r.email, COUNT(*) AS n,
-               MIN(l.date_due) AS oldest_due,
-               SUM((julianday('now') - julianday(l.date_due)) * st.fine_per_day) AS fine
-        FROM loans l JOIN readers r ON r.id = l.reader_id, settings st
-        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') AND st.id = 1
+               MIN(l.date_due) AS oldest_due
+        FROM loans l JOIN readers r ON r.id = l.reader_id
+        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
         GROUP BY l.reader_id ORDER BY r.name
       `).all();
       const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
@@ -94,6 +101,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       const lastNoticeQ = db.prepare(`SELECT level, ts FROM notice_log WHERE reader_id = ? ORDER BY ts DESC LIMIT 1`);
       for (const r of rows) {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);
+        r.fine = r.loans.reduce((sum, d) => sum + effectiveDaysLate(d.date_due, today()) * perDay, 0);
         const overdueDays = Math.round((new Date(today()) - new Date(r.oldest_due)) / 864e5);
         r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
         const last = lastNoticeQ.get(r.reader_id);

@@ -26,7 +26,14 @@ function periodicalNextHtml(p) {
     ? `<span class="badge warn" title="Няма нов брой ${p.issue_overdue_days} дни след очакваната дата">${bg(p.next_expected)}</span>`
     : bg(p.next_expected);
 }
-function periodicalForm(p) {
+/* Приема САМО id (v2.2.0) и сам зарежда записа, както другите форми. Дотогава
+   бутонът „Редактирай“ вграждаше целия обект в onclick атрибута с ръчно
+   екраниране (JSON.stringify(p).replace(/"/g,'&quot;')), което заобикаляше
+   jsq() — и заедно с това вкарваше в атрибута и p.issues, тоест цялата история
+   на изданието (стотици килобайта при дълга поредица от броеве). */
+async function periodicalForm(id) {
+  const p = id ? await call(window.api.periodicals.get(id)) : null;
+  if (id && !p) return;
   const v = p || { freq: 'месечно', department: 'периодика' };
   modal(p ? 'Редакция на периодично издание' : 'Ново периодично издание', `
     <form id="perF" onsubmit="return false">
@@ -46,8 +53,10 @@ window.periodicalForm = periodicalForm;
 async function savePeriodical(id) {
   const d = formData('#perF'); d.id = id;
   if (!d.title.trim()) return toast('Заглавието е задължително.', 'err');
-  if (id) await call(window.api.periodicals.update(d), 'Записано.');
-  else await call(window.api.periodicals.create(d), 'Записано.');
+  // Затваря се само при успех (v2.2.0) — при отказан запис попълненото остава.
+  const ok = id ? await call(window.api.periodicals.update(d), 'Записано.')
+    : await call(window.api.periodicals.create(d), 'Записано.');
+  if (ok === null) return;
   closeModal(); renderPeriodika();
 }
 window.savePeriodical = savePeriodical;
@@ -70,7 +79,7 @@ async function openPeriodical(id) {
       <td class="num">${mny(i.price)}</td><td><button type="button" class="btn sm dgr" onclick="delIssue(${i.id},${id})">×</button></td></tr>`).join('')}
       </tbody></table></div>` : '<div class="hint">Все още няма вписани броеве.</div>'}`,
     `<button class="btn dgr" onclick="delPeriodical(${id})">Изтрий изданието</button>
-     <button class="btn" onclick="closeModal();periodicalForm(${JSON.stringify(p).replace(/"/g, '&quot;')})">Редактирай</button>
+     <button class="btn" onclick="closeModal();periodicalForm(${id})">Редактирай</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
 }
 window.openPeriodical = openPeriodical;

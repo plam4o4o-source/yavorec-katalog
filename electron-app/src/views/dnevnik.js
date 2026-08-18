@@ -51,7 +51,10 @@ async function renderDnevnik() {
   if (!r) return;
   window._DNEVNIK = r;
   const cols = DNEVNIK_TAB === 'b' ? DNEVNIK_B_COLS : DNEVNIK_A_COLS;
-  const years = [...new Set([y, parseInt(yr(), 10)])].sort((a, b) => b - a);
+  // Текущата година и няколко назад (yearOptions в core.js), като числа. Дотогава
+  // менюто имаше една опция и на 5 януари дневникът за декември предната година
+  // не можеше да се отвори — а точно тогава се приключва и разпечатва.
+  const years = yearOptions(y, true);
   const todayStr = today();
   // Всяка клетка е поле за въвеждане — попълва се направо в таблицата, като в хартиения
   // дневник. Изчислените колони („Всичко“) и двата обобщителни реда остават само за четене,

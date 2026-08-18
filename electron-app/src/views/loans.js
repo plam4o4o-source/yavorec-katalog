@@ -56,6 +56,10 @@ async function renderCirc() {
   }
 
   let col1, col2, table = '';
+  // Данни за текущия читател, изнесени извън блока по-долу: слушателят на #bScan
+  // се закача в края на функцията и му трябват името/картата (за разписката) и
+  // броят заети (за точковото обновяване след заемане, без пълен пререндер).
+  let circReader = null, circOpen = 0, circMax = 0;
   if (CIRC.readerId) {
     const [r, acc] = await Promise.all([
       call(window.api.readers.get(CIRC.readerId)), call(window.api.account.get(CIRC.readerId))
@@ -64,9 +68,11 @@ async function renderCirc() {
     const rule = await call(window.api.circRules.effective(r.category)) || s;
     const myLoans = await call(window.api.loans.byReader(CIRC.readerId)) || [];
     const openMine = myLoans.filter(l => !l.date_in);
+    circReader = r; circOpen = openMine.length; circMax = rule.max_books || 0;
     col1 = `<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1">
       <b style="font-size:17px">${esc(r.name)}</b>
-      <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} · заети: ${openMine.length}${rule.max_books ? ' / ' + rule.max_books : ''}</div></div>
+      <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} ·
+        <span id="circCount">заети: ${circOpen}${circMax ? ' / ' + circMax : ''}</span></div></div>
       <button class="btn sm" onclick="accountModal(${r.id})" title="Читателска сметка">💰</button>
       <button class="btn sm" onclick="houseboundModal(${r.id})" title="Обслужване по домовете — график и посещения">🏠</button>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
@@ -149,11 +155,25 @@ async function renderCirc() {
       // v1.70.0: бутон за печат на разписка за заемане — по образец на
       // printReceiptLine() в account.js (квитанция за платена такса), но за
       // самото заемане, което дотогава нямаше никакъв печатен документ.
+      // v2.2.0: читателят и инв. номерът се вграждат СЕГА, с jsq() навсякъде.
+      // Дотогава printLoanSlip четеше CIRC.readerId чак при клика (междувременно
+      // читателят може да е сменен → разписка на грешно име), а инв. номерът
+      // минаваше през JSON.stringify — текстов баркод с кавичка чупеше onclick.
+      const slip = `{title:'${jsq(l.title)}',inv_number:'${jsq(l.inv_number ?? '')}',`
+        + `date_due:'${jsq(l.date_due)}',reader_name:'${jsq(circReader ? circReader.name : '')}',`
+        + `reader_card:'${jsq(circReader ? (circReader.card_no || '') : '')}'}`;
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ok"><b>${esc(l.title)}</b> (инв. ${l.inv_number}) — заета до <b>${bg(l.date_due)}</b>
-        <button class="btn sm" style="margin-left:8px" onclick="printLoanSlip({title:'${jsq(l.title)}',inv_number:${JSON.stringify(l.inv_number)},date_due:'${jsq(l.date_due)}'})">Разписка</button></div>`);
+        <button class="btn sm" style="margin-left:8px" onclick="printLoanSlip(${slip})">Разписка</button></div>`);
       toast('Заемане: инв. № ' + l.inv_number + ' до ' + bg(l.date_due), 'ok');
       markSaved();
-      renderCirc();
+      // БЕЗ renderCirc(): пълният пререндер триеше журнала заедно с току-що
+      // добавения бутон „Разписка“ (той мигваше и изчезваше) и подменяше #bScan
+      // по средата на следващото сканиране — баркод четецът губеше знаци.
+      // Променил се е само броят заети книги, затова се обновява само той.
+      circOpen++;
+      const cnt = $('#circCount');
+      if (cnt) cnt.textContent = 'заети: ' + circOpen + (circMax ? ' / ' + circMax : '');
+      bs.focus(); // курсорът остава в полето за сканиране
     });
   }
 }
@@ -162,18 +182,23 @@ window.selectCircReader = selectCircReader;
 
 /* Разписка за заемане (v1.70.0) — по образец на printReceiptLine() в
    account.js. loan идва директно от резултата на checkoutByCode (title/
-   inv_number/date_due вече ги има), четецът се дозарежда по CIRC.readerId,
-   защото „Разписка“-бутонът стои извън блок-обхвата, в който читателят е
-   бил зареден при първоначалния рендер на екрана. */
+   inv_number/date_due вече ги има).
+   v2.2.0: името и картата на читателя се вграждат в бутона още при заемането
+   (reader_name/reader_card). Дотогава читателят се дозареждаше по CIRC.readerId
+   чак при клика — а журналът остава на екрана и след смяна на читателя, тоест
+   разписката излизаше на името на СЛЕДВАЩИЯ читател. Дозареждането остава само
+   като резерва за извиквания без вградени данни. */
 async function printLoanSlip(loan) {
-  const r = await call(window.api.readers.get(CIRC.readerId));
+  const r = loan && loan.reader_name
+    ? { name: loan.reader_name, card_no: loan.reader_card }
+    : await call(window.api.readers.get(CIRC.readerId));
   if (!r) return;
   setPrintPage({ name: 'Разписка — ' + r.name + ' — инв. № ' + loan.inv_number, landscape: false, margin: '20mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:16pt">РАЗПИСКА ЗА ЗАЕМАНЕ</h2>
     <div class="pmeta">Дата: <b>${bg(today())}</b><br>
     Читател: <b>${esc(r.name)}</b>${r.card_no ? ' (карта ' + esc(r.card_no) + ')' : ''}<br>
-    Документ: <b>${esc(loan.title)}</b>${loan.inv_number != null ? ' (инв. № ' + esc(loan.inv_number) + ')' : ''}<br>
+    Документ: <b>${esc(loan.title)}</b>${loan.inv_number != null && loan.inv_number !== '' ? ' (инв. № ' + esc(loan.inv_number) + ')' : ''}<br>
     Срок за връщане: <b>${bg(loan.date_due)}</b></div>
     ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
 }

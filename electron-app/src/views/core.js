@@ -14,6 +14,24 @@ const jsq = (s) => esc(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'
 const today = () => new Date().toISOString().slice(0, 10);
 const yr = (d) => (d || today()).slice(0, 4);
 const bg = (d) => d ? d.split('-').reverse().join('.') : '';
+/* Годините за падащите менюта на Дневника, КДБФ, статистиката и справките (v2.2.0).
+   Дотогава списъкът се строеше като [избраната, текущата] — тоест менюто имаше
+   ЕДНА опция и избраната година можеше да се смени само през самото меню. На
+   05.01.2027 г. библиотекарят нямаше как да отвори дневника за декември 2026 или
+   КДБФ за 2026. Затова: текущата и YEAR_SPAN_BACK назад, плюс избраната, ако е
+   извън обхвата (стара година, отворена по друг път), подредени низходящо.
+   numeric=true връща числа — дневникът работи с числови години. */
+const YEAR_SPAN_BACK = 5;
+function yearOptions(selected, numeric) {
+  const cur = parseInt(yr(), 10);
+  const list = [];
+  for (let i = 0; i <= YEAR_SPAN_BACK; i++) list.push(cur - i);
+  const s = parseInt(selected, 10);
+  if (Number.isFinite(s) && !list.includes(s)) list.push(s);
+  list.sort((a, b) => b - a);
+  return numeric ? list : list.map(String);
+}
+window.yearOptions = yearOptions;
 /* Фиксиран, необратим курс лев–евро по Регламент (ЕС) 2025/1409 на Съвета — БНБ,
    в сила от 01.01.2026 г. Не е борсов курс и не се обновява. */
 const EUR_RATE = 1.95583;
@@ -541,7 +559,23 @@ let PRINT_JOB_NAME = '';
 function ppScopeCss(css) {
   return String(css || '').replace(/(^|\})\s*([.#\w])/g, '$1 #ppSheet $2');
 }
-function doPrint(html, docName) {
+/* Действие, което трябва да се случи САМО ако печатът наистина е потвърден
+   (v2.2.0). От v1.71.0 doPrint() отваря преглед с бутон „Отказ“ — печат може и
+   да не последва. Дотогава напр. напомнителните писма се вписваха в регистъра
+   на напомнянията още преди прегледа и при отказ на всички просрочили читатели
+   стоеше „изпратено напомняне“, което не е било изпратено. Обратното извикване
+   се задава при doPrint(html, docName, onConfirmed) и се изпълнява веднъж — при
+   „Печат…“ (ppPrint) или при успешно „Запази PDF…“ (ppSavePdf); „Отказ“/Esc го
+   изхвърля. */
+let PRINT_DONE_CB = null;
+function ppConfirmed() {
+  const cb = PRINT_DONE_CB;
+  PRINT_DONE_CB = null;
+  // Грешка във вписването не бива да спира самия печат — той вече е тръгнал.
+  if (cb) { try { cb(); } catch (e) { console.error(e); } }
+}
+function doPrint(html, docName, onConfirmed) {
+  PRINT_DONE_CB = typeof onConfirmed === 'function' ? onConfirmed : null;
   $('#printArea').innerHTML = html;
   PRINT_JOB_NAME = safeFileName(docName || PRINT_DOC_NAME);
   const o = PRINT_PAGE_OPTS || {};
@@ -565,7 +599,8 @@ function doPrint(html, docName) {
   // като слоят е видим, защото дотогава clientWidth на .ppScroll е 0.
   requestAnimationFrame(() => ppZoom('fit'));
 }
-function ppClose() { $('#printPreview').classList.remove('on'); }
+/* „Отказ“ (и Esc) отменя отложеното действие — печат не е бил направен. */
+function ppClose() { PRINT_DONE_CB = null; $('#printPreview').classList.remove('on'); }
 window.ppClose = ppClose;
 /* Мащаб на прегледа (v1.72.0). Ползва се CSS свойството zoom (Chromium-only,
    но програмата Е Chromium) вместо transform:scale — zoom участва в подредбата,
@@ -596,6 +631,7 @@ function ppZoom(dir) {
 }
 window.ppZoom = ppZoom;
 function ppPrint() {
+  ppConfirmed(); // преди ppClose(), който изхвърля отложеното действие
   ppClose();
   if (PRINT_JOB_NAME) document.title = PRINT_JOB_NAME;
   requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
@@ -621,6 +657,7 @@ async function ppSavePdf() {
       return;
     }
     toast('PDF файлът е записан и отворен: ' + (res.data && res.data.path || ''), 'ok');
+    ppConfirmed(); // записаният PDF е равностоен на отпечатан документ
     ppClose();
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Запази PDF…'; }

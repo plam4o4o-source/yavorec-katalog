@@ -51,9 +51,29 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
         doCopy = (response === 2);
       }
 
+      /* Редът тук е важен — същият модел като performRestore() в handlers/backup.js.
+         Досега базата се затваряше ПРЕДИ копирането: ако копирането се провалеше
+         (мрежов дял само за четене, пълен диск, изчезнала папка), програмата
+         оставаше жива, но със ЗАТВОРЕНА база — всяко следващо действие гърми с
+         „The database connection is not open", а рестарт няма, защото config.json
+         не е записан. Сега копието се прави настрани (в ЦЕЛЕВАТА папка, за да е
+         преименуването на същото устройство — атомарно), докато базата още работи;
+         базата се затваря чак когато новият файл вече е на мястото си. Провал на
+         който и да е етап оставя работеща база и непроменена настройка. */
       const db = getDb();
-      if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); db.close(); }
-      if (doCopy && fs.existsSync(oldPath)) fs.copyFileSync(oldPath, newPath);
+      if (db) db.pragma('wal_checkpoint(TRUNCATE)');
+      if (doCopy && fs.existsSync(oldPath)) {
+        const stagedPath = newPath + '.copy-tmp';
+        try {
+          fs.copyFileSync(oldPath, stagedPath);
+          fs.renameSync(stagedPath, newPath);
+        } catch (err) {
+          try { if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath); } catch (e) { /* нищо за чистене */ }
+          return { ok: false, error: 'Базата данни не можа да бъде копирана в избраната папка — нищо не е променено '
+            + 'и програмата продължава да работи с текущата база. Грешка: ' + err.message };
+        }
+      }
+      if (db) db.close();
       const cfg = readConfig();
       cfg.dbFolder = newDir;
       writeConfig(cfg);

@@ -31,10 +31,39 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + 1; });
         return Object.entries(m).sort((a, b) => b[1] - a[1]);
       };
+      // „Най-търсени документи“ стои в справка за отчетен период 01.01–31.12, а
+      // дотук се броеше за ЦЯЛАТА история на базата — заглавие, търсено само през
+      // 2019 г., излизаше начело в отчета за 2026 г. Филтрира се по годината на
+      // заемане, както всичко останало в тази справка.
       const topLoans = db.prepare(`
         SELECT b.title, COUNT(*) AS n FROM loans l JOIN books b ON b.id = l.book_id
+        WHERE substr(l.date_out,1,4) = ?
         GROUP BY l.book_id ORDER BY n DESC LIMIT 10
-      `).all();
+      `).all(y);
+      /* „Събрани обезщетения“ (така пише в интерфейса) сумираше loans.fine —
+         НАЧИСЛЕНИ глоби, и то по годината на ЗАЕМАНЕ: глоба за книга, заета през
+         декември и върната през февруари, влизаше в миналата година, а пари, които
+         никой не е плащал, се водеха „събрани“.
+         Реалните пари са в account_lines (единственото място, където се записва
+         плащане) — точно както ги смята справката „Приходи от такси“ по-долу.
+         Плащанията в програмата не носят вид (account:pay записва type='плащане'),
+         затова към обезщетения се отнася платеното до размера на начислените
+         обезщетения на същия читател за същата година — предпазливо отчитане,
+         което никога не приписва на глобите пари, платени за годишна такса.
+         Начисленото не се губи — излиза като finesCharged, вече по годината на
+         ВРЪЩАНЕ (тогава се начислява глобата). */
+      const finesCollected = db.prepare(`
+        SELECT COALESCE(SUM(MIN(p.paid, c.charged)), 0) AS val
+        FROM (SELECT reader_id, SUM(-amount) AS paid FROM account_lines
+               WHERE kind = 'плащане' AND substr(date,1,4) = ? GROUP BY reader_id) p
+        JOIN (SELECT reader_id, SUM(amount) AS charged FROM account_lines
+               WHERE kind = 'начисление' AND type = 'обезщетение' AND substr(date,1,4) = ? GROUP BY reader_id) c
+          ON c.reader_id = p.reader_id
+      `).get(y, y).val;
+      const finesCharged = db.prepare(`
+        SELECT COALESCE(SUM(fine), 0) AS val FROM loans
+        WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?
+      `).get(y).val;
       const fundByCategory = db.prepare(`
         SELECT COALESCE(c.name,'—') AS k, COUNT(*) AS n FROM books b LEFT JOIN categories c ON c.id=b.category_id
         WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
@@ -50,7 +79,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         visits: visitsYear || loansYear.length,
         returnedOnTime: loansYear.filter(l => l.date_in && l.date_due && l.date_in <= l.date_due).length,
         returnedLate: loansYear.filter(l => l.date_in && l.date_due && l.date_in > l.date_due).length,
-        finesCollected: loansYear.reduce((s, l) => s + (l.fine || 0), 0),
+        finesCollected, finesCharged,
         fundByLanguage: byGroup(fund, 'language'),
         fundByDepartment: byGroup(fund, 'department'),
         fundByCategory,
