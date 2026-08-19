@@ -220,7 +220,7 @@ async function returnBook(id) {
     toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(res.data.suspendedUntil) + '.', 'err');
   }
   markSaved();
-  if (VIEW === 'over') renderOver(); else renderCirc();
+  if (VIEW === 'over') renderOver(true); else renderCirc();
 }
 window.returnBook = returnBook;
 /* Брояч „читалня" — едно натискане = едно ползване на място. Влиза в потока от

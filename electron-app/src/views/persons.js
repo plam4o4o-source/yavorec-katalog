@@ -15,11 +15,26 @@ async function renderPersons() {
       <button class="btn" onclick="printPersons()">Печат / PDF</button>
     </div>
 
-    <div id="prsList">${personsListHtml(rows)}</div>`;
+    <div id="prsList"></div>`;
+  drawPersonsList(rows);
 }
-function personsListHtml(rows) {
-  return rows.length ? `<div class="cardGrid">
-      ${rows.map(p => `<div class="prsCard" tabindex="0" role="button" aria-label="${esc(p.name)}"
+/* Прозоречен рендер (v2.3.1) по общия модел от core.js (paintRowWindow/
+   RENDER_PAGE_SIZE). ЗАЩО тук: картотеката на местните дейци само се допълва —
+   персоналия не се отчислява като книга и не се връща като заемане. При това
+   всяка карта носи <img> снимка, тоест цената на реда не е само разметка:
+   браузърът тръгва да чете от диска толкова файла, колкото карти са изчертани.
+   Измерено (jsdom върху истинския изглед, 1 500 персоналии): 1 500 карти и
+   917 КБ разметка в #prsList наведнъж.
+
+   Тук „редът“ е <div class="prsCard"> — пряко дете на .cardGrid. Затова мрежата
+   получава собствено id и точно ТЯ е тялото, което paintRowWindow пълни: иначе
+   проверката „в тялото стоят точно толкова деца, колкото са изчертани“ не би
+   могла да важи и добавянето би се изродило в пълно пририсуване. */
+const PRS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let PRS_RENDER_LIMIT = PRS_PAGE_SIZE;
+let PRS_PAINTED = 0;
+function personsRowsHtml(rows) {
+  return rows.map(p => `<div class="prsCard" tabindex="0" role="button" aria-label="${esc(p.name)}"
         onclick="personView(${p.id})" onkeydown="cardActivate(event, () => personView(${p.id}))">
         <div class="prsPhoto">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<span>без снимка</span>'}</div>
         <div class="prsBody">
@@ -28,18 +43,49 @@ function personsListHtml(rows) {
           ${p.activity ? `<div class="prsAct">${esc(p.activity)}</div>` : ''}
           <div class="prsLinks">${p.links ? p.links + ' свързани материала' : 'няма свързани материали'}</div>
         </div>
-      </div>`).join('')}
-    </div>`
+      </div>`).join('');
+}
+/* Броячът се пририсува заедно с картите и казва „показани са N от M“ — скъсена
+   картотека, която изглежда пълна, кара краеведа да мисли, че записите му ги няма. */
+function personsMoreHtml(more, total) {
+  const shown = total - more;
+  return `<span class="hint">Показани са ${shown} от ${total} персоналии.</span>`
+    + (more > 0 ? ` <button class="btn" onclick="PRS_RENDER_LIMIT+=${PRS_PAGE_SIZE};paintPersonsRows(true)">Покажи още (${more} от общо ${total})</button>` : '');
+}
+/* append=true идва САМО от „Покажи още“. Търсенето остава пълен рендер — там
+   резултатът е ДРУГ набор и добавяне би долепило новите карти към старите. */
+function paintPersonsRows(append) {
+  PRS_PAINTED = paintRowWindow({
+    body: '#prsGrid', bar: '#prsMore', rows: window._PRS_LIST || [], limit: PRS_RENDER_LIMIT,
+    painted: append ? PRS_PAINTED : 0,
+    rowsHtml: personsRowsHtml, moreHtml: personsMoreHtml
+  });
+}
+window.paintPersonsRows = paintPersonsRows;
+function personsListHtml(rows) {
+  return rows.length
+    ? `<div class="cardGrid" id="prsGrid"></div>
+       <div class="toolbar" id="prsMore" style="justify-content:center"></div>`
     : `<div class="empty"><h3>Няма вписани персоналии</h3>
         <p>Започнете от хората, за които читалището вече пази сведения на хартия.</p></div>`;
+}
+/* Едно място за рисуване на списъка — и от пълния рендер, и от търсенето, за да
+   не се разминат в това колко карти стоят изчертани (PRS_PAINTED). */
+function drawPersonsList(rows) {
+  window._PRS_LIST = rows;
+  PRS_RENDER_LIMIT = PRS_PAGE_SIZE; // нов резултат — пак от първата порция
+  const box = $('#prsList');
+  if (!box) return false;
+  box.innerHTML = personsListHtml(rows);
+  paintPersonsRows(false);
+  return true;
 }
 /* Търсенето пипа само #prsList — полето за търсене НЕ се пресъздава, иначе при
    пауза над 300 ms курсорът изчезва по средата на името (моделът от inv-book.js). */
 async function refreshPersons() {
   const rows = await call(window.api.persons.list(PRS_Q));
   if (!rows) return;
-  const box = $('#prsList');
-  if (box) box.innerHTML = personsListHtml(rows); else renderPersons();
+  if (!drawPersonsList(rows)) renderPersons();
 }
 window.refreshPersons = refreshPersons;
 function personDates(p) {

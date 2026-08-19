@@ -1,20 +1,56 @@
-/* ---------------- Постъпления ---------------- */
+/* ---------------- Постъпления ----------------
+   Прозоречен рендер (v2.3.1) по общия модел от core.js (paintRowWindow/
+   RENDER_PAGE_SIZE). ЗАЩО тук: КДБФ част 1 е РЕГИСТЪР — вписаната партида остава
+   в него завинаги (отчисляването е отделен регистър), тоест списъкът само расте.
+   Колко бързо се вижда от самия фонд: 15 000 документа, постъпили на партиди по
+   няколко десетки, са към 750 вписвания — вече над порцията от 300. Измерено
+   (jsdom върху истинския изглед, 800 партиди): 800 изчертани реда и 319 КБ.
+   Разделът няма търсачка, затова броячът отдолу е и единственото място, от което
+   се вижда колко партиди изобщо има. */
+const ACQ_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let ACQ_RENDER_LIMIT = ACQ_PAGE_SIZE;
+let ACQ_PAINTED = 0;
+function acqRowsHtml(rows) {
+  return rows.length ? rows.map(a => `<tr><td class="num">${a.no} / ${a.year}</td><td class="num">${bg(a.date)}</td>
+      <td>${esc(a.from_source || '')}</td><td>${esc(a.how || '')}</td>
+      <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}</td>
+      <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
+      <td><button class="btn sm" onclick="openAcq(${a.id})">Отвори</button></td></tr>`).join('')
+    : `<tr><td colspan="9" class="empty">Няма заведени партиди.</td></tr>`;
+}
+function acqMoreHtml(more, total) {
+  // При празен регистър таблицата вече казва „Няма заведени партиди." — „Показани са
+  // 0 от 0 партиди." под нея е второ съобщение за същото и звучи като повреда.
+  // (Останалите растящи екрани заменят цялата таблица и лентата им изобщо не се строи.)
+  if (!total) return '';
+  const shown = total - more;
+  return `<span class="hint">Показани са ${shown} от ${total} партиди.</span>`
+    + (more > 0 ? ` <button class="btn" onclick="ACQ_RENDER_LIMIT+=${ACQ_PAGE_SIZE};paintAcqRows(true)">Покажи още (${more} от общо ${total})</button>` : '');
+}
+/* append=true идва САМО от „Покажи още“; след завеждане или изтриване на партида
+   renderAcq() минава наново с пълен рендер — там наборът е друг. */
+function paintAcqRows(append) {
+  ACQ_PAINTED = paintRowWindow({
+    body: '#acqBody', bar: '#acqMore', rows: window._ACQ_LIST || [], limit: ACQ_RENDER_LIMIT,
+    painted: append ? ACQ_PAINTED : 0,
+    rowsHtml: acqRowsHtml, moreHtml: acqMoreHtml
+  });
+}
+window.paintAcqRows = paintAcqRows;
 async function renderAcq() {
   const rows = await call(window.api.acquisitions.list());
   if (!rows) return;
+  window._ACQ_LIST = rows;
+  ACQ_RENDER_LIMIT = ACQ_PAGE_SIZE; // ново влизане — пак от първата порция
   $('#view').innerHTML = `
     <div class="note"><b>Чл. 3 – 14</b> — документите постъпват чрез закупуване, депозит, обмен или дарение,
     винаги с първичен счетоводен документ.</div>
     <div class="toolbar"><button class="btn pri" onclick="acqForm()">+ Нова партида</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>№/год.</th><th>Дата</th><th>Откъде</th><th>Как</th>
-      <th>Документ</th><th>Брой</th><th>Инвентирани</th><th>Стойност</th><th></th></tr></thead><tbody>
-    ${rows.length ? rows.map(a => `<tr><td class="num">${a.no} / ${a.year}</td><td class="num">${bg(a.date)}</td>
-      <td>${esc(a.from_source || '')}</td><td>${esc(a.how || '')}</td>
-      <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}</td>
-      <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
-      <td><button class="btn sm" onclick="openAcq(${a.id})">Отвори</button></td></tr>`).join('')
-      : `<tr><td colspan="9" class="empty">Няма заведени партиди.</td></tr>`}
-    </tbody></table></div>`;
+      <th>Документ</th><th>Брой</th><th>Инвентирани</th><th>Стойност</th><th></th></tr></thead>
+      <tbody id="acqBody"></tbody></table></div>
+    <div class="toolbar" id="acqMore" style="justify-content:center"></div>`;
+  paintAcqRows(false);
 }
 async function acqForm() {
   const y = yr();
