@@ -25,6 +25,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   } = deps;
   const { isEncryptedBackup, encryptBackupFile, decryptBackupBuffer } = require('../backup-crypto');
   const pii = require('../pii-crypto');
+  const crypto = require('crypto'); // само за отпечатък на паролата в паметта, виж todayEncryptedWith
 
   const AUTO_BACKUP_KEEP_DAYS = 30;
 
@@ -105,33 +106,126 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   // Последно състояние на автоматичното копие — интерфейсът го чете с
   // backup:autoStatus, за да покаже предупреждението (виж по-долу).
   let lastAutoBackup = null;
+  /* Провален ОПИТ за криптиране на днешното копие. Дотук такъв провал отиваше
+     само в console.error — тоест никъде: библиотекарят виждаше „🔒 копията се
+     криптират“, докато на диска стои копие в чист текст. Пази се и денят, за да
+     не се влачи вчерашният провал в днешното състояние. */
+  let lastAutoBackupError = null;
+  /* Отпечатък на паролата, с която ТОЗИ процес е записал днешното криптирано
+     копие. Служи само за бърза пътека: съвпада ли — файлът със сигурност се
+     отваря с текущата парола и няма нужда от проверка. Пази се отпечатък, а не
+     самата парола, за да няма второ копие на паролата в паметта. */
+  let todayEncryptedWith = null;
+  const fingerprint = (password) => crypto.createHash('sha256').update(String(password)).digest('hex');
+
+  function todayStr() { return new Date().toISOString().slice(0, 10); }
+  function todayPaths() {
+    const today = todayStr();
+    const dir = backupsDir();
+    return {
+      date: today,
+      plainDest: path.join(dir, `auto-${today}.db`),
+      encDest: path.join(dir, `auto-${today}.invbak`)
+    };
+  }
+
+  /* Отваря ли се даден .invbak с ТАЗИ парола. Форматът нарочно не носи нищо, по
+     което паролата да се познае отвън, затова единствената честна проверка е
+     опит за разкриптиране — прави се най-много веднъж на сесия (после отговорът
+     се помни по отпечатъка по-горе). Пълното разкриптиране проверява и
+     целостта (GCM етикета), тоест хваща и повредено копие, не само чужда
+     парола. */
+  function opensWith(filePath, password) {
+    try {
+      return decryptBackupBuffer(filePath, password).subarray(0, 15).toString('utf8') === 'SQLite format 3';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* Записва криптирано копие на мястото на encDest ПО БЕЗОПАСЕН НАЧИН — тук се
+     пипат файлове с данни, затова редът е: пиши настрани → провери, че новият
+     файл наистина се отваря с паролата → чак тогава преименувай (атомарно, в
+     същата папка) → и чак накрая махни некриптирания близнак. При провал на
+     който и да е етап старото копие си остава непокътнато: по-добре копие със
+     стара парола (или в чист текст), отколкото никакво копие за деня. */
+  function writeEncryptedDaily(encDest, plainDest, password) {
+    const staged = encDest + '.tmp';
+    try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* ще гръмне по-долу, ако наистина пречи */ }
+    try {
+      doBackupTo(staged, password); // от живата база — тя е поне толкова нова
+      if (!opensWith(staged, password)) {
+        throw new Error('новото копие не се отваря с паролата за защита на личните данни');
+      }
+      fs.renameSync(staged, encDest);
+    } catch (err) {
+      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* нищо за чистене */ }
+      throw err;
+    }
+    // Некриптираният близнак пада чак сега — той съдържа личните данни на всички
+    // читатели, но докато криптираният не е налице и проверен, е единственото копие.
+    if (plainDest && fs.existsSync(plainDest)) {
+      try { fs.unlinkSync(plainDest); } catch (e) { /* остава; одитът казва какво е станало */ }
+    }
+  }
+
+  /* Известие към интерфейса, че състоянието на дневното копие се е променило —
+     прекриптирано е (смяна на паролата) или опитът се е провалил. Без това
+     провалът стигаше само до console.error. Прозорецът може още да не
+     съществува (копието се прави при стартиране) — тогава просто няма кого да
+     известим, картата в „Настройки“ ще прочете състоянието при отваряне. */
+  function notifyAutoBackup(level, message) {
+    try {
+      const win = getMainWindow();
+      if (!win || !win.webContents || (win.isDestroyed && win.isDestroyed())) return;
+      win.webContents.send('backup:autoStatusChanged', { level, message });
+    } catch (e) { /* интерфейсът не е готов — не е причина да се проваля копието */ }
+  }
+
+  function recordAutoBackupFailure(date, message, detail) {
+    lastAutoBackupError = { date, message, at: new Date().toISOString() };
+    try { logAudit('Резервно копие', detail); } catch (e) { /* одитът не бива да проваля копието */ }
+    notifyAutoBackup('err', 'Днешното резервно копие НЕ можа да бъде криптирано: ' + message
+      + ' Копието съдържа лични данни на читателите в чист текст — вижте „Настройки“ → „Резервно копие“.');
+  }
 
   function autoBackupIfNeeded() {
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const dir = backupsDir();
-      const plainDest = path.join(dir, `auto-${today}.db`);
-      const encDest = path.join(dir, `auto-${today}.invbak`);
+      const { date: today, plainDest, encDest } = todayPaths();
       if (fs.existsSync(plainDest) || fs.existsSync(encDest)) return;
       const password = autoBackupPassword();
-      const dest = password ? encDest : plainDest;
-      doBackupTo(dest, password);
-      pruneOldAutoBackups();
-      lastAutoBackup = { path: dest, encrypted: !!password, date: today };
       if (password) {
-        logAudit('Резервно копие', 'автоматично криптирано копие: ' + dest
-          + ' (с паролата за защита на личните данни)');
-      } else {
-        /* Авто-копието съдържа ЦЕЛИЯ фонд от лични данни на читателите — адреси и
-           телефони винаги в чист текст, ЕГН в чист текст, ако защитата не е
-           включена — и стои 30 дни в папката на базата, която по документиран
-           сценарий е споделен мрежов дял. Затова провалът да се криптира не минава
-           тихо: вписва се в одитната следа и се показва в интерфейса. */
-        logAudit('Резервно копие', 'ВНИМАНИЕ: автоматичното копие ' + dest
-          + ' НЕ е криптирано и съдържа лични данни на читателите. Включете „Защита на лични данни“ '
-          + 'в „Настройки“ и я дръжте отключена, за да се криптират и дневните копия.');
+        /* Провалено криптиране не бива да остави деня БЕЗ копие: вписва се,
+           съобщава се и се пада към некриптирано копие (по-долу). */
+        try {
+          writeEncryptedDaily(encDest, null, password);
+          pruneOldAutoBackups();
+          lastAutoBackup = { path: encDest, encrypted: true, date: today };
+          lastAutoBackupError = null;
+          todayEncryptedWith = { date: today, fp: fingerprint(password) };
+          logAudit('Резервно копие', 'автоматично криптирано копие: ' + encDest
+            + ' (с паролата за защита на личните данни)');
+          console.log('Автоматично резервно копие:', encDest, '(криптирано)');
+          return;
+        } catch (err) {
+          recordAutoBackupFailure(today, err.message,
+            'ВНИМАНИЕ: криптирането на автоматичното копие за деня се провали (' + err.message
+            + '). Прави се НЕкриптирано копие, за да не остане денят без резервно копие — то съдържа '
+            + 'лични данни на читателите в чист текст.');
+        }
       }
-      console.log('Автоматично резервно копие:', dest, password ? '(криптирано)' : '(некриптирано)');
+      doBackupTo(plainDest, '');
+      pruneOldAutoBackups();
+      lastAutoBackup = { path: plainDest, encrypted: false, date: today };
+      /* Авто-копието съдържа ЦЕЛИЯ фонд от лични данни на читателите — адреси и
+         телефони винаги в чист текст, ЕГН в чист текст, ако защитата не е
+         включена — и стои 30 дни в папката на базата, която по документиран
+         сценарий е споделен мрежов дял. Затова провалът да се криптира не минава
+         тихо: вписва се в одитната следа и се показва в интерфейса. */
+      logAudit('Резервно копие', 'ВНИМАНИЕ: автоматичното копие ' + plainDest
+        + ' НЕ е криптирано и съдържа лични данни на читателите. Включете „Защита на лични данни“ '
+        + 'в „Настройки“ и я дръжте отключена, за да се криптират и дневните копия.');
+      console.log('Автоматично резервно копие:', plainDest, '(некриптирано)');
     } catch (err) {
       console.error('Автоматично резервно копие — грешка:', err.message);
     }
@@ -143,43 +237,79 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      функцията вече го намира направено и не прави нищо. Затова, щом защитата бъде
      отключена, днешното копие се преправя криптирано и некриптираното се изтрива
      (то съдържа личните данни на всички читатели). */
-  function upgradeTodayAutoBackup() {
+  /* Второто, което тази функция трябва да улови, е СМЯНАТА на паролата: дотук
+     проверката беше само „има ли вече .invbak за днес“ и при смяна функцията
+     излизаше веднага. Копието от деня на смяната оставаше със СТАРАТА парола —
+     тоест библиотекар, който е сменил временната парола с истинската (или е
+     сменил компрометирана парола), държи копие, което не се отваря с паролата,
+     която знае, но продължава да се отваря с онази, която е изоставил. Затова
+     сега се проверява самият ФАЙЛ: отваря ли се с текущата парола. */
+  function upgradeTodayAutoBackup(meta) {
     const password = autoBackupPassword();
     if (!password) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const dir = backupsDir();
-    const encDest = path.join(dir, `auto-${today}.invbak`);
-    if (fs.existsSync(encDest)) return; // вече е криптирано
-    const plainDest = path.join(dir, `auto-${today}.db`);
-    if (!fs.existsSync(plainDest)) { autoBackupIfNeeded(); return; }
-    // Пише се настрани и се преименува: прекъснато криптиране (пълен диск,
-    // паднал мрежов дял) не бива да остави наполовина записан .invbak, който
-    // изглежда като готово копие и спира следващите опити.
-    const staged = encDest + '.tmp';
-    try {
-      doBackupTo(staged, password); // от живата база — тя е поне толкова нова
-      fs.renameSync(staged, encDest);
-    } catch (err) {
-      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* нищо за чистене */ }
-      throw err; // некриптираното копие остава на място — по-добре от никакво
+    const { date: today, plainDest, encDest } = todayPaths();
+    const fp = fingerprint(password);
+    const changed = !!(meta && meta.reason === 'change');
+    let why = 'след отключване на защитата на личните данни';
+    if (fs.existsSync(encDest)) {
+      // Ние ли го записахме, и то със същата парола → няма какво да се прави.
+      if (!changed && todayEncryptedWith && todayEncryptedWith.date === today && todayEncryptedWith.fp === fp) return;
+      if (changed) {
+        why = 'след смяна на паролата за защита на личните данни';
+      } else if (opensWith(encDest, password)) {
+        todayEncryptedWith = { date: today, fp }; // наред е — запомня се, за да не се проверява пак
+        return;
+      } else {
+        // Копие от друг компютър/от преди смяна на паролата, или повредено.
+        why = 'защото не се отваряше с текущата парола за защита на личните данни';
+      }
+    } else if (!fs.existsSync(plainDest)) {
+      autoBackupIfNeeded(); // няма никакво копие за днес — направи го наготово криптирано
+      return;
     }
-    try { fs.unlinkSync(plainDest); } catch (e) { /* остава; одитът по-долу казва какво е станало */ }
+    try {
+      writeEncryptedDaily(encDest, plainDest, password);
+    } catch (err) {
+      /* Старото копие (криптирано със старата парола или некриптирано) е още на
+         място — денят не остава без копие. Но библиотекарят трябва да научи, че
+         то НЕ е това, което мисли: и в одита, и в картата в „Настройки“. */
+      recordAutoBackupFailure(today, err.message,
+        'ВНИМАНИЕ: днешното автоматично копие не можа да бъде прекриптирано ' + why
+        + ' (' + err.message + '). На диска остава предишното копие — то НЕ се отваря с текущата парола '
+        + 'или изобщо не е криптирано.');
+      return;
+    }
     lastAutoBackup = { path: encDest, encrypted: true, date: today };
-    logAudit('Резервно копие', 'автоматичното копие за деня е презаписано криптирано след отключване '
-      + 'на защитата на личните данни: ' + encDest);
+    lastAutoBackupError = null;
+    todayEncryptedWith = { date: today, fp };
+    logAudit('Резервно копие', 'автоматичното копие за деня е презаписано криптирано '
+      + why + ': ' + encDest);
+    notifyAutoBackup('ok', changed
+      ? 'Днешното резервно копие беше прекриптирано с новата парола.'
+      : 'Днешното резервно копие вече е криптирано с паролата за защита на личните данни.');
   }
-  pii.onSession(() => {
-    try { upgradeTodayAutoBackup(); }
+  pii.onSession((meta) => {
+    try { upgradeTodayAutoBackup(meta); }
     catch (err) { console.error('Криптиране на дневното копие след отключване — грешка:', err.message); }
   });
 
   /* Състояние на автоматичното копие, готово за показване в интерфейса: дали
      дневните копия се криптират и, ако не — защо, на човешки език.
-     Днес предупреждението стига до библиотекаря по вече работещия път — вписва се
-     в одитната следа при всяко направено некриптирано копие и се вижда в раздел
-     „Одитна следа“. Този канал е другата половина: „Резервни копия“ да го покаже
-     на видно място. Остава да се добави ред в preload.js (backup.autoStatus) и
-     показването в src/views — и двете са извън обхвата на тази поправка. */
+
+     Дотук отговорът се смяташе САМО от настройките („защитата е конфигурирана и
+     отключена → значи копията се криптират“) и картата в „Настройки“ показваше
+     „🔒 копията се криптират“ дори когато точно днешното копие е в чист текст —
+     провалено криптиране, копие, направено преди отключването, или копие от
+     друга сесия. Затова сега водещо е СЪСТОЯНИЕТО НА ФАЙЛА за днес: кой файл
+     реално стои на диска. Настройките остават в отговора, защото от тях зависи
+     какво да предложим на библиотекаря (да включи защитата или да я отключи).
+
+     state дава на изгледа четирите различими случая:
+       'encrypted' — днешното копие е криптирано (или ще бъде, ако още не е правено);
+       'failed'    — опитахме и не се получи (или файлът е в чист текст въпреки
+                     отключената защита) — причината е в warning;
+       'locked'    — защитата е включена, но заключена;
+       'off'       — защитата изобщо не е включена. */
   ipcMain.handle('backup:autoStatus', () =>
     run(() => {
       let configured = false;
@@ -189,19 +319,69 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         configured = !!(s.pdp_salt && s.pdp_verifier);
       } catch (e) { configured = false; }
       const unlocked = !!pii.getSessionPassword();
-      const encrypted = configured && unlocked;
+
+      const { date, plainDest, encDest } = todayPaths();
+      let today = null;
+      if (fs.existsSync(encDest) && isEncryptedBackup(encDest)) {
+        today = { date, path: encDest, encrypted: true };
+      } else if (fs.existsSync(plainDest)) {
+        today = { date, path: plainDest, encrypted: false };
+      }
+      // Вчерашен провал не описва днешното състояние.
+      const failure = lastAutoBackupError && lastAutoBackupError.date === date ? lastAutoBackupError : null;
+      // Ако за днес още няма файл (копието се прави при стартиране), се пада към
+      // намерението — какво ЩЕ стане при следващото копие.
+      const encrypted = today ? today.encrypted : (configured && unlocked);
+
+      let state, warning;
+      if (encrypted) {
+        state = 'encrypted';
+        warning = null;
+      } else if (failure) {
+        state = 'failed';
+        warning = 'Опитът днешното копие да се криптира не се получи: ' + failure.message + '. '
+          + (today && !today.encrypted
+            ? 'На диска стои копие в ЧИСТ ТЕКСТ (' + today.path + ') с имената, адресите, телефоните и ЕГН '
+              + 'на читателите. '
+            : '')
+          + 'Направете ръчно криптирано копие („Направи резервно копие“ с парола) и вижте одитната следа.';
+      } else if (!configured) {
+        state = 'off';
+        warning = 'Автоматичните дневни копия НЕ са криптирани и съдържат личните данни на читателите '
+          + '(имена, адреси, телефони, ЕГН). Включете „Защита на лични данни“ в „Настройки“, '
+          + 'за да се криптират и те, особено ако папката с базата е в мрежа.';
+      } else if (!unlocked) {
+        state = 'locked';
+        warning = 'Автоматичните дневни копия не се криптират, докато защитата на личните данни е заключена. '
+          + 'Отключете я от „Настройки“, за да се криптират с нейната парола.';
+      } else {
+        // Защитата е отключена, но днешният файл е в чист текст и няма записан
+        // провал — например копие, направено от друга програма/сесия.
+        state = 'failed';
+        warning = 'Днешното автоматично копие е в ЧИСТ ТЕКСТ (' + (today ? today.path : '') + '), '
+          + 'въпреки че защитата на личните данни е отключена. Заключете и отключете защитата, '
+          + 'за да бъде презаписано криптирано.';
+      }
+      /* Колко НЕкриптирани дневни копия стоят на диска в момента. Одитът отбеляза,
+         че 30-те копия при изключена защита са пълен регистър от лични данни в
+         незащитен файл, често на споделен мрежов дял. Едно число е по-разбираемо
+         от общото „копията не са криптирани“ и не е поредното натрапчиво
+         съобщение, което библиотекарят се научава да пропуска. */
+      let plainDailyCount = 0;
+      try {
+        plainDailyCount = fs.readdirSync(backupsDir())
+          .filter(f => f.startsWith('auto-') && f.endsWith('.db')).length;
+      } catch (e) { plainDailyCount = 0; }
       return {
         encrypted,
+        state,
         pdpConfigured: configured,
         pdpUnlocked: unlocked,
+        today,
+        plainDailyCount,
         last: lastAutoBackup,
-        warning: encrypted ? null
-          : (configured
-            ? 'Автоматичните дневни копия не се криптират, докато защитата на личните данни е заключена. '
-              + 'Отключете я от „Настройки“, за да се криптират с нейната парола.'
-            : 'Автоматичните дневни копия НЕ са криптирани и съдържат личните данни на читателите '
-              + '(имена, адреси, телефони, ЕГН). Включете „Защита на лични данни“ в „Настройки“, '
-              + 'за да се криптират и те, особено ако папката с базата е в мрежа.')
+        failure,
+        warning
       };
     })
   );

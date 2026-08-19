@@ -29,6 +29,19 @@ function auditRowsHtml(rows) {
     <td><span class="badge">${esc(a.action)}</span></td><td style="font-size:12.5px">${esc(a.detail)}${auditDiffHtml(a.diff)}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty">Няма записи.</td></tr>`;
 }
+/* audit:list връща най-много толкова реда (ORDER BY id DESC LIMIT 500 в
+   handlers/audit.js) — тоест този изглед Е ограничен и не може да замрази
+   интерфейса при 12 000 записа в одитната следа. Дефектът беше друг: броячът
+   пишеше „500 записа“ и това се четеше като ЦЕЛИЯ брой записи, тоест мълчаливо
+   скъсеният списък изглеждаше пълен — библиотекарят би заключил, че по-стари
+   действия просто не са записвани. Затова, когато редовете са точно колкото е
+   таванът, се казва изрично, че списъкът е скъсен. */
+const AUDIT_LIMIT = 500;
+function auditCountText(n) {
+  return n >= AUDIT_LIMIT
+    ? 'показани са последните ' + AUDIT_LIMIT + ' записа (има и по-стари — стеснете с търсенето)'
+    : n + ' записа';
+}
 /* Търсенето пипа само тялото на таблицата и брояча — полето #oditSearch НЕ се
    пресъздава. Дотогава debounce-ът викаше цялата renderOdit() и подменяше #view
    заедно с полето: при пауза над 300 ms фокусът изчезваше по средата на думата
@@ -37,7 +50,7 @@ async function refreshAudit() {
   const rows = await call(window.api.audit.list(ODIT_Q));
   if (!rows) return;
   const body = $('#oditBody'); if (body) body.innerHTML = auditRowsHtml(rows);
-  const cnt = $('#oditCount'); if (cnt) cnt.textContent = rows.length + ' записа';
+  const cnt = $('#oditCount'); if (cnt) cnt.textContent = auditCountText(rows.length);
 }
 window.refreshAudit = refreshAudit;
 async function renderOdit() {
@@ -49,7 +62,7 @@ async function renderOdit() {
     <div class="toolbar">
       <input id="oditSearch" placeholder="Търсене по служител, действие, подробност…" value="${esc(ODIT_Q)}">
       <span style="flex:1"></span>
-      <span class="hint" id="oditCount">${rows.length} записа</span>
+      <span class="hint" id="oditCount">${esc(auditCountText(rows.length))}</span>
       <button class="btn sm" onclick="exportAuditCSV()">CSV</button>
     </div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Дата/час</th><th>Служител</th><th>Действие</th><th>Подробност</th></tr></thead>

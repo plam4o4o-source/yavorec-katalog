@@ -1,5 +1,30 @@
 /* ---------------- КДБФ ---------------- */
 let KDBF_TAB = 'p1', KDBF_YEAR = null;
+/* Разбивка по видове документи в едно постъпление — „книга: 12, периодично
+   издание: 3“. Връща ЧИСТ текст; екранирането е на мястото на вграждането. */
+function kdbfByKind(rows) {
+  const m = {};
+  (rows || []).forEach(x => { const k = (x && x.category_name) || 'без вид'; m[k] = (m[k] || 0) + 1; });
+  return Object.entries(m).map(([k, v]) => k + ': ' + v).join(', ');
+}
+/* ЗАЩО отделна заявка: колоната „По вид“ е задължителен реквизит на Приложение
+   № 1 (чл. 13, ал. 3, т. 1), но kdbf:report връща само общите бройки и стойност
+   на партидата — вид документ там няма. Дотогава в кода стоеше дефинирана и
+   НИКОГА неизвиквана функция razbivka(), колоната на екрана се чертаеше празна
+   (<td></td>), а в разпечатката липсваше изцяло — тоест изискваният по наредбата
+   реквизит отсъстваше мълчаливо и това се виждаше едва при проверка.
+   Данните ги има: acquisitions:get връща записите на партидата заедно с
+   category_name (видът документ от „Категории“). Тегли се по една заявка на
+   ПАРТИДА за избраната година — партидите са няколко десетки годишно, а не по
+   целия фонд от 15 000 книги. Резултатът се закача на самия ред (a.by_kind),
+   за да го ползва и разпечатката, която винаги съдържа Част № 1. */
+async function kdbfLoadByKind(part1) {
+  await Promise.all((part1 || []).map(async (a) => {
+    if (a.by_kind != null) return;
+    const acq = await call(window.api.acquisitions.get(a.id));
+    a.by_kind = kdbfByKind(acq && acq.items);
+  }));
+}
 async function renderKdbf() {
   const y = KDBF_YEAR || yr();
   const r = await call(window.api.kdbf.report(y));
@@ -8,10 +33,7 @@ async function renderKdbf() {
   // беше [избраната, текущата] — една опция, и КДБФ за миналата година оставаше
   // недостижима след 1 януари.
   const years = yearOptions(y);
-  const razbivka = (rows, key) => {
-    const m = {}; rows.forEach(x => { const k = x[key] || '—'; m[k] = (m[k] || 0) + 1; });
-    return Object.entries(m).map(([k, v]) => `${esc(k)}: ${v}`).join(', ');
-  };
+  await kdbfLoadByKind(r.part1);
   window._KDBF_REPORT = r;
   $('#view').innerHTML = `
     <div class="toolbar">
@@ -31,7 +53,8 @@ async function renderKdbf() {
         <td>${esc(a.from_source || '')}<div class="hint">${esc(a.how || '')}</div></td>
         <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}<br>${bg(a.doc_date)}</td>
         <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
-        <td class="num">${a.inv_from ? a.inv_from + ' – ' + a.inv_to : '—'}</td><td></td></tr>`).join('')
+        <td class="num">${a.inv_from ? a.inv_from + ' – ' + a.inv_to : '—'}</td>
+        <td style="font-size:12px">${esc(a.by_kind || '') || '—'}</td></tr>`).join('')
         : `<tr><td colspan="9" class="empty">Няма постъпления за ${y} г.</td></tr>`}
       </tbody></table></div>`
     : KDBF_TAB === 'p3' ? `
@@ -113,10 +136,11 @@ function printKdbfDoc() {
      <div class="pmeta"><b>Част № 1. Регистриране на постъпили книги, периодични издания и други материали</b><br>
      Приложение № 1 към чл. 13, ал. 3, т. 1 · ${y} г.</div>
      <table><thead><tr><th>Дата</th><th>№</th><th>Откъде и как</th><th>Вид, № и дата на документа</th><th>Общо</th>
-     <th>Инвентирани</th><th>Стойност</th><th>Инв. № от – до</th></tr></thead><tbody>
+     <th>Инвентирани</th><th>Стойност</th><th>Инв. № от – до</th><th>По вид документи</th></tr></thead><tbody>
      ${r.part1.map(a => `<tr><td>${bg(a.date)}</td><td>${a.no}</td><td>${esc(a.from_source || '')} / ${esc(a.how || '')}</td>
      <td>${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} / ${bg(a.doc_date)}</td><td>${a.total_count}</td><td>${a.registered_count}</td>
-     <td>${mny(a.registered_value)}</td><td>${a.inv_from ? a.inv_from + '–' + a.inv_to : ''}</td></tr>`).join('')}
+     <td>${mny(a.registered_value)}</td><td>${a.inv_from ? a.inv_from + '–' + a.inv_to : ''}</td>
+     <td>${esc(a.by_kind || '')}</td></tr>`).join('')}
      </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>

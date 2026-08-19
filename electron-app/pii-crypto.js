@@ -98,13 +98,22 @@ let pdpSession = { key: null, password: null };
 /* Абонати за „защитата току-що беше отключена“. Нужно е на handlers/backup.js:
    дневното копие се прави при стартиране на програмата, когато защитата още е
    заключена, така че без това известие копието практически никога не би било
-   криптирано (виж upgradeTodayAutoBackup там). */
+   криптирано (виж upgradeTodayAutoBackup там).
+
+   Абонатът получава и КАКВО е предизвикало известието (meta.reason: 'setup' —
+   първо задаване, 'unlock' — отключване със същата парола, 'change' — СМЯНА на
+   паролата). Разликата е съществена точно за резервните копия: при смяна
+   днешното криптирано копие е останало със старата парола и трябва да се
+   прекриптира, докато при обикновено отключване файлът обикновено е наред.
+   Аргументът е незадължителен — извиквания с два аргумента (включително от
+   тестове) продължават да работят както преди. */
 const sessionListeners = new Set();
 function onSession(cb) { sessionListeners.add(cb); return () => sessionListeners.delete(cb); }
-function setSession(password, key) {
+function setSession(password, key, meta) {
   pdpSession = { key: key || null, password: password == null ? null : String(password) };
+  const info = meta || {};
   // Провален абонат никога не бива да проваля самото отключване.
-  sessionListeners.forEach(cb => { try { cb(); } catch (e) { console.error('Известие за отключена защита:', e.message); } });
+  sessionListeners.forEach(cb => { try { cb(info); } catch (e) { console.error('Известие за отключена защита:', e.message); } });
 }
 function clearSession() { pdpSession = { key: null, password: null }; }
 function getSessionKey() { return pdpSession.key; }

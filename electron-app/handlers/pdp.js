@@ -29,8 +29,12 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   const PDP_MIN_PASSWORD = 10;
   /* Ключът и паролата се оставят и в общото състояние на сесията (pii-crypto.js),
      за да може автоматичното дневно копие да се криптира, докато защитата е
-     отключена — виж autoBackupIfNeeded в handlers/backup.js. Само в паметта. */
-  function setPdpKey(password, key) { PDP_KEY = key; pii.setSession(password, key); }
+     отключена — виж autoBackupIfNeeded в handlers/backup.js. Само в паметта.
+     Подава се и ПОВОДЪТ ('setup' / 'unlock' / 'change'): при СМЯНА на паролата
+     днешното криптирано копие е останало със старата парола и трябва да се
+     прекриптира — иначе копието от деня на смяната се отваря само с паролата,
+     която библиотекарят е изоставил (или с компрометираната). */
+  function setPdpKey(password, key, reason) { PDP_KEY = key; pii.setSession(password, key, { reason }); }
   function pdpSettingsRow() {
     return getDb().prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id = 1').get() || {};
   }
@@ -113,7 +117,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(salt.toString('base64'), verifier);
         n = reencryptAllReaders(null, key);
       })();
-      setPdpKey(password, key);
+      setPdpKey(password, key, 'setup');
       logAudit('Защита на лични данни', 'зададена е парола за защита на ЕГН/№ ЛК (' + n + ' читатели засегнати)');
       return true;
     })
@@ -124,7 +128,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
       const key = pii.deriveKey(password, Buffer.from(s.pdp_salt, 'base64'));
       if (!pii.checkVerifier(s.pdp_verifier, key)) throw new Error('Грешна парола.');
-      setPdpKey(password, key);
+      setPdpKey(password, key, 'unlock');
       return true;
     })
   );
@@ -149,7 +153,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(newSalt.toString('base64'), newVerifier);
         reencryptAllReaders(oldKey, newKey);
       })();
-      setPdpKey(newPassword, newKey);
+      setPdpKey(newPassword, newKey, 'change');
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;
     })

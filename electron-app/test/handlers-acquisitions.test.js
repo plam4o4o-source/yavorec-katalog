@@ -9,14 +9,27 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerAcquisitionsHandlers = require('../handlers/acquisitions');
+/* BOOK_SELECT — истинският от handlers/books.js (виж test/helpers/prod-values.js).
+   Преписаното копие беше без изчисленото поле available. */
+const { BOOK_SELECT } = require('./helpers/prod-values.js');
 
-const BOOK_SELECT = `
-  SELECT b.*, c.name AS category_name,
-         COALESCE(i.quantity, 0) AS quantity
-  FROM books b
-  LEFT JOIN categories c ON c.id = b.category_id
-  LEFT JOIN inventory i ON i.book_id = b.id
-`;
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -28,7 +41,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-acquisitions-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-acquisitions-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');

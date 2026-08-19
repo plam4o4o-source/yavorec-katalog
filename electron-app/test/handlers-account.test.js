@@ -9,6 +9,24 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerAccountHandlers = require('../handlers/account');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function fakeIpcMain() {
   const handlers = new Map();
   return {
@@ -19,7 +37,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-account-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-account-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -102,4 +120,38 @@ test('account:get defaults date to today() when not provided', async () => {
   await ipcMain.invoke('account:charge', { reader_id: readerId, amount: 1 });
   const got = await ipcMain.invoke('account:get', readerId);
   assert.equal(got.data.lines[0].date, '2026-08-02');
+});
+
+/* ЗАЩО: в този дневник ЗНАКЪТ носи смисъла — плюс се дължи, минус е платено.
+   Начисление, подадено с отрицателна сума (изтървано „-" при въвеждане, или
+   стойност, дошла наготово от друга справка), без Math.abs би влязло като
+   ПЛАЩАНЕ и би НАМАЛИЛО дълга на читателя. Проверката съществува в кода, но
+   не беше покрита от нито един тест. */
+test('account:charge привежда отрицателна сума към начисление (дългът РАСТЕ, не намалява)', async () => {
+  const { db, ipcMain, readerId } = setup();
+  await ipcMain.invoke('account:charge', { reader_id: readerId, type: 'обезщетение', amount: -4.5 });
+  const line = db.prepare('SELECT kind, amount FROM account_lines WHERE reader_id = ?').get(readerId);
+  assert.equal(line.kind, 'начисление');
+  assert.ok(line.amount > 0, 'начислението трябва да е положително, а е ' + line.amount);
+  const res = await ipcMain.invoke('account:get', readerId);
+  assert.equal(res.data.balance, 4.5, 'балансът трябва да покаже дълг 4,50 лв., а не кредит');
+});
+
+test('account:charge отказва нула, празно и нечислова сума', async () => {
+  const { ipcMain, readerId } = setup();
+  for (const amount of [0, '', null, undefined, 'абв', NaN]) {
+    const res = await ipcMain.invoke('account:charge', { reader_id: readerId, type: 'друго', amount });
+    assert.equal(res.ok, false, 'сума ' + JSON.stringify(amount) + ' не бива да минава');
+    assert.match(res.error, /положителна/);
+  }
+});
+
+test('account:pay също привежда знака — плащане с отрицателна сума пак намалява дълга', async () => {
+  const { db, ipcMain, readerId } = setup();
+  await ipcMain.invoke('account:charge', { reader_id: readerId, type: 'обезщетение', amount: 10 });
+  await ipcMain.invoke('account:pay', { reader_id: readerId, amount: -3 });
+  const res = await ipcMain.invoke('account:get', readerId);
+  assert.equal(res.data.balance, 7);
+  // amount се пази закръглено до стотинка (toCents), но в ЛЕВА, не в стотинки.
+  assert.equal(db.prepare("SELECT amount FROM account_lines WHERE kind = 'плащане'").get().amount, -3);
 });

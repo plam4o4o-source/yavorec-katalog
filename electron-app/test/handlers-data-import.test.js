@@ -34,7 +34,7 @@ const BOOK_FIELDS = require('../handlers/books')(
 ).BOOK_FIELDS;
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-data-import-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -130,7 +130,7 @@ test('import:run requires a title column mapping', async () => {
 // реално записва реда, вместо да документира счупеното поведение.
 test('import:run successfully inserts a row (regression test for the fixed permanent_location/status_date/cn_sort bug)', async () => {
   const { db, ipcMain } = setup();
-  const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-run-'));
+  const realDir = mkTmpDir(path.join(os.tmpdir(), 'inv-data-import-run-'));
   const csv = [
     'Инвентарен №;Заглавие;Автор;Език;Сигнатура',
     '1;Под игото;Вазов, Иван;български;Ч-9',
@@ -153,7 +153,7 @@ test('import:run successfully inserts a row (regression test for the fixed perma
 test('import:run with skipDuplicates=true still reaches the duplicate-skip check before the insert', async () => {
   const { db, ipcMain } = setup();
   db.prepare("INSERT INTO books (inv_number, title) VALUES (10, 'Стар')").run();
-  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-data-import-dup-'));
+  const dir2 = mkTmpDir(path.join(os.tmpdir(), 'inv-data-import-dup-'));
   fs.writeFileSync(path.join(dir2, 'in.csv'), 'Инвентарен №;Заглавие\r\n10;Дублиран внос\r\n', 'utf8');
   await ipcMain.invoke('import:load', path.join(dir2, 'in.csv'));
   const result = await ipcMain.invoke('import:run', { mapping: { 0: 'inv_number', 1: 'title' }, options: { skipDuplicates: true } });
@@ -178,10 +178,28 @@ test('import:run with skipDuplicates=true still reaches the duplicate-skip check
    --------------------------------------------------------------------------- */
 const { applyEnumTriggers } = require('../db/enum-triggers');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 test('колона „Състояние“ с физическо състояние не проваля вноса — пази се в забележката', async () => {
   const { db, ipcMain } = setup();
   applyEnumTriggers(db); // както прави main.js при всяко стартиране
-  const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-import-status-'));
+  const realDir = mkTmpDir(path.join(os.tmpdir(), 'inv-import-status-'));
   const csv = [
     'Инвентарен №;Заглавие;Състояние;Забележка',
     '1;Под игото;добро;дарение',

@@ -16,13 +16,27 @@ const Database = require('better-sqlite3');
 const registerLoansHandlers = require('../handlers/loans');
 const registerInventoryHandlers = require('../handlers/inventory-sessions');
 const registerNoticesHandlers = require('../handlers/notices');
-const { normalizeScanCode } = require('../security-utils');
+/* BOOK_SELECT/pctRequired/naturalLoss идват от продукцията, не се преписват —
+   вж. test/helpers/prod-values.js за причината. */
+const { BOOK_SELECT, pctRequired, naturalLoss, normalizeScanCode } = require('./helpers/prod-values.js');
 
-const BOOK_SELECT = `
-  SELECT b.*, c.name AS category_name
-  FROM books b
-  LEFT JOIN categories c ON c.id = b.category_id
-`;
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -33,7 +47,7 @@ function fakeIpcMain() {
   };
 }
 function freshDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-fixes-core-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fixes-core-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
@@ -151,7 +165,15 @@ test('таванът на наказанието важи за ОБЩОТО на
   assert.equal(until, '2026-09-01', 'три връщания при таван 30 дни не бива да дават 90 дни наказание');
 });
 
-test('suspend_max = 0 означава „без таван", а не таван 90 дни', async () => {
+/* ОБЪРНАТ във v2.3.0. Тук стоеше твърдението „suspend_max = 0 означава «без таван»".
+   То кодираше регресия, въведена със самата поправка на v2.2.0: до нея изразът беше
+   `rule.suspend_max || 90`, тоест вписана нула значеше „таван 90 дни", а v2.2.0 я
+   преобърна на „без таван". Ефектът в реална база с нула в полето: 779 дни забава →
+   преустановено заемане до 2028 г. вместо до +90 дни.
+   Нулата в това поле не значи „без ограничение" — никой библиотекар не вписва 0 с
+   намерение „наказвай неограничено". Изключването на наказанието става с
+   suspend_per_day = 0, както пише и подсказката на съседното поле. */
+test('suspend_max = 0 се третира като тавана по подразбиране, не като „без таван"', async () => {
   const { db, ipcMain } = setupLoans({
     circRule: () => ({ loan_days: 14, max_books: 5, extensions_count: 2, extension_days: 14, suspend_per_day: 1, suspend_max: 0 })
   });
@@ -161,7 +183,7 @@ test('suspend_max = 0 означава „без таван", а не таван
     .run(readerId, bookId, '2026-01-01', '2026-01-11').lastInsertRowid; // 203 дни забава
   await ipcMain.invoke('loans:return', { id: loanId });
   const until = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(readerId).suspended_until;
-  assert.ok(until > '2026-11-01', 'при изключен таван наказанието не се реже на 90 дни, а беше ' + until);
+  assert.equal(until, '2026-10-31', 'today (02.08.2026) + 90 дни по подразбиране');
 });
 
 /* --- Находка 10: смяна на лятното часово време ---
@@ -252,8 +274,10 @@ function setupInvent() {
   registerInventoryHandlers(ipcMain, {
     getDb: () => db, run,
     logAudit: (a, d) => auditLog.push({ action: a, detail: d }),
-    pctRequired: () => 10,
-    naturalLoss: (pool) => pool * 0.002,
+    // Нормативните формули по Наредба № 3 идват от main.js (виж заглавието на
+    // файла) — преписаното тук `pool * 0.002` беше вече РАЗМИНАТО с нормата.
+    pctRequired,
+    naturalLoss,
     normalizeScanCode
   });
   return { db, ipcMain, auditLog };

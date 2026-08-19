@@ -2,7 +2,7 @@
 let READERS_QUERY = '';
 // Прозоречен рендер (Фаза 2) — виж коментара при BOOKS_PAGE_SIZE по-горе; същото
 // съображение важи и за списъка с читатели при голяма библиотека.
-const READERS_PAGE_SIZE = 300;
+const READERS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
 /* Филтри по категория/статус (v1.70.0) — прилагат се НАД вече заредения/
    претърсен списък (window._READERS_LIST), без ново IPC — виж същия принцип
@@ -27,16 +27,21 @@ function readersRowsHtml(shown) {
     : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`;
 }
 function readersMoreHtml(more, total) {
-  return more > 0 ? `<button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReadersBody()">Покажи още (${more} от общо ${total})</button>` : '';
+  return more > 0 ? `<button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReadersBody(true)">Покажи още (${more} от общо ${total})</button>` : '';
 }
 /* „Покажи още“ разширява прозореца на вече изтегления window._READERS_LIST,
-   без нова обиколка по IPC — виж същия коментар при renderBooksBody() в books.js. */
-function renderReadersBody() {
+   без нова обиколка по IPC — виж същия коментар при renderBooksBody() в books.js.
+   v2.3.0: append=true добавя САМО новата порция през paintRowWindow() в core.js,
+   вместо да презаписва целия <tbody> — същият квадратичен модел като в „Книги“,
+   тук при 3 000 читатели. Търсене/филтър остават пълен рендер. */
+let READERS_PAINTED = 0;
+function renderReadersBody(append) {
   const readers = (window._READERS_LIST || []).filter(readersFilterMatch);
-  const shown = readers.slice(0, READERS_RENDER_LIMIT);
-  const more = readers.length - shown.length;
-  const body = $('#rBody'); if (body) body.innerHTML = readersRowsHtml(shown);
-  const moreBox = $('#rMore'); if (moreBox) moreBox.innerHTML = readersMoreHtml(more, readers.length);
+  READERS_PAINTED = paintRowWindow({
+    body: '#rBody', bar: '#rMore', rows: readers, limit: READERS_RENDER_LIMIT,
+    painted: append ? READERS_PAINTED : 0,
+    rowsHtml: readersRowsHtml, moreHtml: readersMoreHtml
+  });
 }
 window.renderReadersBody = renderReadersBody;
 /* Ново търсене: списъкът се тегли наново (търсенето е сървърно), но се пипат
@@ -81,6 +86,9 @@ async function renderReaders() {
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
+  // Таблицата е изчертана направо в #view — броячът трябва да съответства, за да
+  // може следващото „Покажи още“ само да ДОБАВИ порция (виж renderReadersBody).
+  READERS_PAINTED = shown.length;
   $('#rSearch').addEventListener('input', debounce(e => { READERS_QUERY = e.target.value; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; refreshReadersList(); }, 300));
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
 }
@@ -196,10 +204,9 @@ async function saveReader(id) {
 }
 window.saveReader = saveReader;
 async function deleteReader(id) {
-  if (!confirm('Да изтрия ли този читател?')) return;
-  const res = await window.api.readers.delete(id);
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Читателят е изтрит.', 'ok'); markSaved();
-  renderReaders();
+  // Виж confirmDangerousDelete в views/books.js — второто щракване показва дословно
+  // предупреждението от отказа, вместо пак безобидното „Да изтрия ли…".
+  await confirmDangerousDelete('reader:' + id, 'Да изтрия ли този читател?',
+    () => window.api.readers.delete(id), 'Читателят е изтрит.', () => renderReaders());
 }
 window.deleteReader = deleteReader;

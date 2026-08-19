@@ -39,7 +39,7 @@ const RUN = (fn) => {
   try { return { ok: true, data: fn() }; }
   catch (err) { return { ok: false, error: err.message }; }
 };
-function tmpDir(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'inv-' + tag + '-')); }
+function tmpDir(tag) { return mkTmpDir(path.join(os.tmpdir(), 'inv-' + tag + '-')); }
 function freshDb(dir, extraSql) {
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
@@ -47,12 +47,27 @@ function freshDb(dir, extraSql) {
   if (extraSql) db.exec(extraSql);
   return db;
 }
-// Опростен BOOK_SELECT — както в handlers-deaccession-acts.test.js.
-const BOOK_SELECT = `
-  SELECT b.*, c.name AS category_name
-  FROM books b
-  LEFT JOIN categories c ON c.id = b.category_id
-`;
+/* Истинският BOOK_SELECT от handlers/books.js — „опростеното" копие тук беше
+   без quantity/available (вж. test/helpers/prod-values.js). */
+const { BOOK_SELECT, diffFields, csvCell } = require('./helpers/prod-values.js');
+
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 /* ===========================================================================
    1) books:delete / readers:delete не проверяваха за заемания.
@@ -66,7 +81,7 @@ function setupBooks() {
   const ipcMain = fakeIpcMain();
   registerBooksHandlers(ipcMain, {
     getDb: () => db, run: RUN, logAudit: () => {}, today: () => '2026-08-02', ftsQuery,
-    cnSortKey: (s) => String(s || ''), diffFields: () => ({}), scheduleCatalogWrite: () => {}, normalizeScanCode
+    cnSortKey: (s) => String(s || ''), diffFields, scheduleCatalogWrite: () => {}, normalizeScanCode
   });
   return { db, ipcMain };
 }
@@ -77,9 +92,9 @@ function setupReaders() {
   registerReadersHandlers(ipcMain, {
     getDb: () => db, run: RUN, logAudit: () => {}, today: () => '2026-08-02', ftsQuery,
     maskReaderRow: (r) => r, maskReaderRows: (rows) => rows, preparePiiForWrite: () => {},
-    diffFields: () => ({}), checkRecordLimit: () => {},
+    diffFields, checkRecordLimit: () => {},
     dialog: { showSaveDialog: async () => ({ canceled: true }) }, getMainWindow: () => ({}), fs,
-    csvCell: (x) => '"' + String(x ?? '') + '"', normalizeScanCode
+    csvCell, normalizeScanCode
   });
   return { db, ipcMain };
 }
@@ -175,7 +190,7 @@ function setupDbLocation(fsPatch) {
 
   let config = {};
   const relaunchCalls = [], exitCalls = [];
-  const newDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-fix-dbloc-target-'));
+  const newDir = mkTmpDir(path.join(os.tmpdir(), 'inv-fix-dbloc-target-'));
   const ipcMain = fakeIpcMain();
   registerDbLocationHandlers(ipcMain, {
     app: { isPackaged: false, relaunch: () => relaunchCalls.push(true), exit: (c) => exitCalls.push(c) },

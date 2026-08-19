@@ -6,13 +6,19 @@ async function accountModal(readerId) {
   if (!r || !acc) return;
   window._ACC_READER = r;
   window._ACC_LINES = acc.lines;
-  const balColor = acc.balance > 0 ? 'var(--red)' : (acc.balance < 0 ? 'var(--green)' : 'inherit');
+  /* Сравнява се закръглената до стотинки сума, а не суровата. account:get вече
+     закръгля, но балансът минава и през стари/чужди пътища (кеширани данни от
+     предишна версия), а разликата от порядъка на 1e-16 е достатъчна, за да се
+     изпише „0.00 лв. (дължи)" в червено на платена докрай сметка. Показва се
+     същата закръглена стойност, която се и сравнява. */
+  const bal = Math.round((Number(acc.balance) || 0) * 100) / 100;
+  const balColor = bal > 0 ? 'var(--red)' : (bal < 0 ? 'var(--green)' : 'inherit');
   const fee = (s && s.annual_fee) ? Number(s.annual_fee) : 0;
   modal('Сметка — ' + r.name, `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div class="hint">Карта ${esc(r.card_no || '—')}</div>
-      <div style="font-size:1.1rem"><b style="color:${balColor}">${mny(acc.balance)}</b>
-        <span class="hint">${acc.balance > 0 ? ' (дължи)' : acc.balance < 0 ? ' (надплатено)' : ''}</span></div>
+      <div style="font-size:1.1rem"><b style="color:${balColor}">${mny(bal)}</b>
+        <span class="hint">${bal > 0 ? ' (дължи)' : bal < 0 ? ' (надплатено)' : ''}</span></div>
     </div>
     <div class="toolbar">
       <button class="btn sm" onclick="chargeAnnualFee(${readerId}, ${fee})" ${fee ? '' : 'disabled title="Годишната такса в Настройки е 0"'}>

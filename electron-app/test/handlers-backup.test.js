@@ -12,6 +12,24 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerBackupHandlers = require('../handlers/backup');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function fakeIpcMain() {
   const handlers = new Map();
   return {
@@ -22,7 +40,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-backup-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-backup-test-'));
   const dbPath = path.join(dir, 'library.db');
   let db = new Database(dbPath);
   db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');
@@ -178,7 +196,7 @@ test('backup:restoreFromList reports a friendly error for a missing file instead
    се затваря и се преименува (атомарна операция на едно и също устройство).
    --------------------------------------------------------------------------- */
 function setupWithFs(fsPatch) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-backup-fail-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-backup-fail-'));
   const dbPath = path.join(dir, 'library.db');
   let db = new Database(dbPath);
   db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)');

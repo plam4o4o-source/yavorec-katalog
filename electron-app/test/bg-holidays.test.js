@@ -13,10 +13,28 @@ const { orthodoxEaster, bulgarianHolidays, seedYear, ensureHolidaysSeeded, FIXED
   require('../bg-holidays');
 const registerCalendarHandlers = require('../handlers/calendar');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 function freshDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-holidays-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-holidays-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
   // Мигрираната колона (v6 в main.js) — тук я добавяме направо.
@@ -50,10 +68,20 @@ test('2026 г.: фиксирани празници, Великденски дн
   assert.equal(byDate.get('2026-04-12'), 'Великден');
   assert.equal(byDate.get('2026-04-13'), 'Великден — втори ден');
 
-  // 24 май и 6 септември 2026 са неделя, 26 декември — събота.
-  assert.match(byDate.get('2026-05-25') || '', /Почивен ден за „Ден на светите братя/);
-  assert.match(byDate.get('2026-09-07') || '', /Почивен ден за „Ден на Съединението/);
-  assert.match(byDate.get('2026-12-28') || '', /Почивен ден за „Рождество Христово — втори ден/);
+  /* 24 май и 6 септември 2026 са неделя, 26 декември — събота.
+     Проверява се СМИСЪЛЪТ на автоматично сглобения текст: че денят е обявен за
+     ПОЧИВЕН и че се вижда ЗА КОЙ празник е. Точната формулировка (кавичките,
+     тирето, скобата „(пада се в събота или неделя)") е форматиране и
+     заковаването ѝ дума по дума дава фалшив провал при всяко преформулиране. */
+  const substitute = (date, forHoliday) => {
+    const reason = byDate.get(date) || '';
+    assert.match(reason, /почивен ден/i, date + ': липсва указание, че денят е почивен');
+    assert.ok(reason.includes(forHoliday),
+      date + ': от текста „' + reason + '" не личи за кой празник е заместващият ден (очаква се „' + forHoliday + '")');
+  };
+  substitute('2026-05-25', 'Ден на светите братя');
+  substitute('2026-09-07', 'Ден на Съединението');
+  substitute('2026-12-28', 'Рождество Христово');
   assert.equal(days.length, 4 + FIXED_HOLIDAYS.length + 3);
 });
 
@@ -69,8 +97,15 @@ test('Великденските дни не пораждат заместващ
 test('2022 г.: декемврийската група поражда ДВА заместващи дни — 27 и 28 декември', () => {
   // 24.12.2022 бе събота, 25.12 — неделя: реално почивни бяха 27 и 28 декември.
   const byDate = new Map(bulgarianHolidays(2022).map(d => [d.date, d.reason]));
-  assert.match(byDate.get('2022-12-27') || '', /Почивен ден за „Бъдни вечер/);
-  assert.match(byDate.get('2022-12-28') || '', /Почивен ден за „Рождество Христово“/);
+  // Пак по смисъл, не по буква — виж бележката при теста за 2026 г.
+  for (const [date, forHoliday] of [['2022-12-27', 'Бъдни вечер'], ['2022-12-28', 'Рождество Христово']]) {
+    const reason = byDate.get(date) || '';
+    assert.match(reason, /почивен ден/i, date);
+    assert.ok(reason.includes(forHoliday), date + ': „' + reason + '" не сочи ' + forHoliday);
+  }
+  // 26.12 (вторият ден) е ПОНЕДЕЛНИК през 2022 г. и не поражда заместващ ден —
+  // затова 28-и е за ПЪРВИЯ ден на Рождество, не за втория.
+  assert.doesNotMatch(byDate.get('2022-12-28') || '', /втори ден/);
   assert.equal(byDate.has('2022-12-29'), false);
 });
 

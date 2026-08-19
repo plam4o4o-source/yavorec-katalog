@@ -10,6 +10,24 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerKdbfHandlers = require('../handlers/kdbf');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function fakeIpcMain() {
   const handlers = new Map();
   return {
@@ -20,7 +38,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-kdbf-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-kdbf-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');

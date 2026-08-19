@@ -102,6 +102,21 @@ async function printAnalytics() {
 }
 window.printAnalytics = printAnalytics;
 
+/* Полето „Книга от фонда“ се попълва точно в записа, който links:search връща
+   („инв. № 5 · Автор. Заглавие“). Дотук се попълваше „Автор. Заглавие“ — формат,
+   който търсенето НИКОГА не връща, затова сравнението по-долу не намираше нищо и
+   book_id се изпразваше само от докосване на полето: връзката към книгата се
+   късаше мълчаливо при всяка редакция. Липсващ инв. № се пропуска — точно както
+   го пропуска и COALESCE в самата заявка. */
+function bookPickLabel(v) {
+  if (!v || !v.book_id) return '';
+  return (v.book_inv ? 'инв. № ' + v.book_inv + ' · ' : '') +
+    (v.book_author ? v.book_author + '. ' : '') + (v.book_title || '');
+}
+// Сравнението е устойчиво на излишни интервали и на главни/малки букви —
+// баркод четец и ръчно писане не дават един и същ низ до знак.
+const bookPickKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
 async function analyticForm(id) {
   const [a, pers, sug] = await Promise.all([
     id ? call(window.api.analytics.get(id)) : null,
@@ -133,7 +148,7 @@ async function analyticForm(id) {
         ${fld('Брой', 'issue', { val: v.issue || '' })}
         ${fld('Дата на броя', 'issue_date', { val: v.issue_date || '', type: 'date' })}
       </div>
-      ${fld('Книга от фонда (инв. № или заглавие)', 'book_pick', { val: v.book_id ? (v.book_author ? v.book_author + '. ' : '') + (v.book_title || '') : '',
+      ${fld('Книга от фонда (инв. № или заглавие)', 'book_pick', { val: bookPickLabel(v),
         hint: 'попълва се само при вид „книга“ — изберете от списъка' , list: 'anlBooks' })}
       <input type="hidden" name="book_id" value="${esc(v.book_id || '')}">
       ${fld('Описание на източника със свободен текст', 'source_text', { val: v.source_text || '',
@@ -162,7 +177,7 @@ async function analyticForm(id) {
     const found = await call(window.api.links.search({ kind: 'книга', q }));
     const dl = $('#dl_anlBooks');
     dl.innerHTML = (found || []).map(f => `<option value="${esc(f.label)}"></option>`).join('');
-    const exact = (found || []).find(f => f.label === q);
+    const exact = (found || []).find(f => bookPickKey(f.label) === bookPickKey(q));
     hidden.value = exact ? exact.id : '';
   });
 }

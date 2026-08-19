@@ -91,9 +91,88 @@ test('guessMapping leaves unrecognisable headers unmapped', () => {
   assert.equal(map[0], undefined);
 });
 
-test('HEADER_MAP covers the fields importers.js claims to support', () => {
-  assert.ok(HEADER_MAP.title && HEADER_MAP.author && HEADER_MAP.isbn);
+/* ЗАЩО тестът е такъв, какъвто е: заглавието му обещаваше „HEADER_MAP покрива
+   полетата, които importers.js твърди, че поддържа", а тялото проверяваше
+   съществуването на три ключа (title/author/isbn) — тоест не проверяваше нищо.
+   Мутационен одит махна price/udk/barcode/register_date от HEADER_MAP и това
+   мина незабелязано: разпознаването на тези колони при внос от чужда система
+   мълчаливо спира, а библиотекарят вижда празни цени и УДК след внос на
+   няколко хиляди записа.
+
+   Двата списъка се СРАВНЯВАТ, а не се преписват:
+     • HEADER_MAP (importers.js) — по кои заглавия на колони се РАЗПОЗНАВА поле;
+     • IMPORT_FIELDS (handlers/data-import.js) — кои полета изобщо се предлагат
+       за ръчно съотнасяне в екрана „Приемане на данни".
+   IMPORT_FIELDS не се изнася от модула, затова се взима оттам, откъдето го
+   получава и самият интерфейс — от отговора на канала import:load. */
+function importFieldsFromChannel() {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-import-fields-'));
+  test.after(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* няма значение */ } });
+  const file = path.join(dir, 'primer.csv');
+  fs.writeFileSync(file, 'Заглавие;Автор\nПод игото;Вазов\n', 'utf8');
+
+  const handlers = new Map();
+  require('../handlers/data-import')({ handle: (c, fn) => handlers.set(c, fn) }, {
+    getDb: () => { throw new Error('import:load не докосва базата'); },
+    run: (fn) => ({ ok: true, data: fn() }), logAudit: () => {},
+    dialog: {}, getMainWindow: () => ({}), fs, path,
+    BOOK_FIELDS: [], today: () => '2026-08-02', cnSortKey: () => ''
+  });
+  const res = handlers.get('import:load')({}, file);
+  assert.equal(res.ok, true, res.error);
+  return res.data.fields;
+}
+
+test('HEADER_MAP и IMPORT_FIELDS не се разминават — всяко разпознавано поле може и да се съотнесе', () => {
+  const IMPORT_FIELDS = importFieldsFromChannel();
+  const mapFields = Object.keys(HEADER_MAP).sort();
+  const offered = Object.keys(IMPORT_FIELDS).sort();
+
+  // Посока 1: няма поле, което авто-разпознаването намира, а екранът не предлага.
+  const recognisedButNotOffered = mapFields.filter(f => !offered.includes(f));
+  assert.deepEqual(recognisedButNotOffered, [],
+    'HEADER_MAP разпознава поле, което „Приемане на данни" не предлага — колоната се '
+    + 'разпознава, но потребителят не може нито да я види, нито да я поправи');
+
+  /* Посока 2: няма поле, което екранът предлага, а авто-разпознаването да не намира.
+     До v2.3.0 такива бяха „Поредица"/„№ в поредицата" — можеха да се съотнесат само
+     РЪЧНО, затова колоната мълчаливо оставаше празна, ако библиотекарят не я посочи.
+     Списъкът е нарочно ПРАЗЕН: всяко ново поле за внос трябва да получи и заглавия в
+     HEADER_MAP, иначе този тест пада, вместо пропускът да си замине мълчаливо —
+     точно както стана със series при самия внос. */
+  const offeredWithoutAutodetect = offered.filter(f => !mapFields.includes(f));
+  assert.deepEqual(offeredWithoutAutodetect, [],
+    'поле се предлага за внос, но никое заглавие не го разпознава автоматично — '
+    + 'добавете му заглавия в HEADER_MAP (importers.js)');
 });
+
+test('всяко поле в HEADER_MAP наистина се разпознава по всяко от изброените си заглавия', () => {
+  /* Не просто „ключът съществува", а поведението: подава се заглавието на
+     колона и се проверява, че guessMapping връща точно това поле. Така орязан
+     списък заглавия също се хваща, не само липсващ ключ. */
+  for (const [field, names] of Object.entries(HEADER_MAP)) {
+    assert.ok(Array.isArray(names) && names.length, field + ': празен списък заглавия');
+    for (const name of names) {
+      const map = guessMapping([name]);
+      assert.equal(map[0], field, `колона „${name}" трябва да се разпознае като ${field}, а се разпозна като ${map[0]}`);
+    }
+  }
+});
+
+test('ключовите полета от истински износ на чужда система се разпознават наведнъж', () => {
+  /* Точно колоните, които мутационният одит махна (price/udk/barcode/
+     register_date), плюс основните — в един ред, както идват от файл. */
+  const headers = ['Инвентарен №', 'Заглавие', 'Автор', 'Издателство', 'Година',
+    'ISBN', 'Цена', 'УДК', 'Баркод', 'Дата на постъпване', 'Отдел', 'Състояние'];
+  const map = guessMapping(headers);
+  assert.deepEqual(Object.values(map), ['inv_number', 'title', 'author', 'publisher', 'year',
+    'isbn', 'price', 'udk', 'barcode', 'register_date', 'department', 'status'],
+    'разпознаването на цялата шапка на типичен износ не бива да губи нито една колона');
+});
+
 
 /* ---------------- Ръчно писан ZIP/XLSX парсер ---------------- */
 

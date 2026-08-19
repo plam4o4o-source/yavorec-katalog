@@ -10,6 +10,24 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerDbLocationHandlers = require('../handlers/db-location');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function fakeIpcMain() {
   const handlers = new Map();
   return {
@@ -20,7 +38,7 @@ function fakeIpcMain() {
 }
 
 function setup(opts = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-test-'));
   const dbFolder = path.join(dir, 'defaultdb');
   fs.mkdirSync(dbFolder, { recursive: true });
   const dbPath = path.join(dbFolder, 'library.db');
@@ -76,7 +94,7 @@ test('dbLocation:get reports the default folder and isDefault=true when no custo
 });
 
 test('dbLocation:get reports isDefault=false when a custom dbFolder is already configured', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-custom-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-custom-'));
   const { ipcMain } = setup({ initialConfig: { dbFolder: dir } });
   const result = await ipcMain.invoke('dbLocation:get');
   assert.equal(result.data.isDefault, false);
@@ -98,7 +116,7 @@ test('dbLocation:choose rejects choosing the same folder the database is already
 });
 
 test('dbLocation:choose copies the db to a new empty folder, writes config, closes db, and relaunches', async () => {
-  const newDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-newdir-'));
+  const newDir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-newdir-'));
   const { ipcMain, relaunchCalls, exitCalls, getConfig, getDb } = setup({
     showOpenDialog: async () => ({ canceled: false, filePaths: [newDir] })
   });
@@ -117,7 +135,7 @@ test('dbLocation:choose copies the db to a new empty folder, writes config, clos
 });
 
 test('dbLocation:choose, when the target folder already has a library.db, asks the user and honors "use existing" (no overwrite)', async () => {
-  const newDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-existing-'));
+  const newDir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-existing-'));
   const existingDb = new Database(path.join(newDir, 'library.db'));
   existingDb.exec("CREATE TABLE marker (id INTEGER PRIMARY KEY); INSERT INTO marker (id) VALUES (42)");
   existingDb.close();
@@ -135,7 +153,7 @@ test('dbLocation:choose, when the target folder already has a library.db, asks t
 });
 
 test('dbLocation:choose, when the user cancels the "folder already has a db" prompt, reports a friendly error', async () => {
-  const newDir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-existing2-'));
+  const newDir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-existing2-'));
   new Database(path.join(newDir, 'library.db')).close();
   const { ipcMain, getConfig } = setup({
     showOpenDialog: async () => ({ canceled: false, filePaths: [newDir] }),
@@ -148,7 +166,7 @@ test('dbLocation:choose, when the user cancels the "folder already has a db" pro
 });
 
 test('dbLocation:resetDefault clears the configured dbFolder and relaunches', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dbloc-reset-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-dbloc-reset-'));
   const { ipcMain, relaunchCalls, exitCalls, getConfig } = setup({ initialConfig: { dbFolder: dir } });
   const result = await ipcMain.invoke('dbLocation:resetDefault');
   assert.equal(result.ok, true);

@@ -27,7 +27,7 @@ function booksFilterMatch(b) {
    експорти, справки, GDPR анонимизация — където трябва целият резултат), тук само
    ограничаваме КОЛКО реда се изчертават в таблицата наведнъж, с бутон „Покажи още“,
    по същия установен модел като публичния каталог (site/page-katalog.html: R/P/page()). */
-const BOOKS_PAGE_SIZE = 300;
+const BOOKS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE;
 function searchListDatalist(id, values) {
   return `<datalist id="${id}">${(values || []).map(v => `<option value="${esc(v)}"></option>`).join('')}</datalist>`;
@@ -52,7 +52,9 @@ function booksRowsHtml(shown) {
     </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`;
 }
 function booksMoreHtml(more, total) {
-  return more > 0 ? `<button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooksBody()">Покажи още (${more} от общо ${total})</button>` : '';
+  // append=true → renderBooksBody ДОБАВЯ следващата порция, вместо да презаписва
+  // и вече изчертаните редове (виж paintRowWindow в core.js).
+  return more > 0 ? `<button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooksBody(true)">Покажи още (${more} от общо ${total})</button>` : '';
 }
 /* „Покажи още“ само разширява прозореца на вече изтеглените от сървъра книги
    (window._BOOKS_LIST) — БЕЗ нова обиколка по IPC. По-рано всяко натискане на
@@ -62,13 +64,25 @@ function booksMoreHtml(more, total) {
    толкова пъти, колкото пъти е натиснат бутонът. Смяна на подредбата и
    „Избери всички“ остават през пълния renderBooks() — данните там наистина
    може да са различни (нова подредба) или засягат целия резултат отвъд
-   текущо изтегления прозорец. */
-function renderBooksBody() {
+   текущо изтегления прозорец.
+
+   v2.3.0: append=true (само от бутона „Покажи още“) добавя САМО новата порция.
+   Дотогава всяко натискане презаписваше целия <tbody> с rows.slice(0, LIMIT) и
+   изчертаваше наново и вече показаните редове — квадратична работа: измерено
+   при 15 000 книги, 49 натискания от 300 до 15 000 реда = 112 462 ms, като
+   първите натискания бяха ~250 ms, а последните 5 691 ms всяко.
+   Всички останали извиквания (търсене, филтър, „Избери всички“, презареждане)
+   остават пълен рендер — там наборът от редове е ДРУГ и добавяне би долепило
+   нови редове към стар резултат. BOOKS_PAINTED пази колко реда стоят в тялото;
+   paintRowWindow() допълнително проверява това срещу самия DOM. */
+let BOOKS_PAINTED = 0;
+function renderBooksBody(append) {
   const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
-  const shown = books.slice(0, BOOKS_RENDER_LIMIT);
-  const more = books.length - shown.length;
-  const body = $('#bBody'); if (body) body.innerHTML = booksRowsHtml(shown);
-  const moreBox = $('#bMore'); if (moreBox) moreBox.innerHTML = booksMoreHtml(more, books.length);
+  BOOKS_PAINTED = paintRowWindow({
+    body: '#bBody', bar: '#bMore', rows: books, limit: BOOKS_RENDER_LIMIT,
+    painted: append ? BOOKS_PAINTED : 0,
+    rowsHtml: booksRowsHtml, moreHtml: booksMoreHtml
+  });
   syncChkAll();
 }
 window.renderBooksBody = renderBooksBody;
@@ -153,6 +167,9 @@ async function renderBooks() {
     <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, filtered.length)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
+  // Таблицата е изчертана направо в #view — броячът трябва да знае колко реда
+  // има вътре, за да може следващото „Покажи още“ само да ДОБАВИ порция.
+  BOOKS_PAINTED = shown.length;
   $('#bSearch').addEventListener('input', debounce(e => { BOOKS_QUERY = e.target.value; BOOKS_SELECTED.clear(); BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList(); }, 300));
   $('#bSearch').addEventListener('change', e => logSearchHistory('books', e.target.value));
   syncChkAll(); // и при пълен рендер отметката отразява частичен избор
@@ -508,11 +525,33 @@ async function saveBook(id) {
   if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
 }
 window.saveBook = saveBook;
+/* Второто щракване НЕ бива да минава през същия безобиден въпрос. Главният процес
+   позволява изтриване на запис със затворена история при повторно натискане до 2
+   минути; ако тук стоеше пак „Да изтрия ли тази книга?", най-естественият рефлекс
+   („не стана — да натисна пак") щеше да заличава историята на заеманията, а път за
+   връщане назад няма. Затова предупреждението от отказа се показва като истински
+   въпрос, дословно, преди второто изпращане. */
+const PENDING_DELETE = new Map(); // ключ „вид:id" → текстът на отказа
+async function confirmDangerousDelete(key, plainQuestion, send, okMsg, after) {
+  const pending = PENDING_DELETE.get(key);
+  if (pending) {
+    PENDING_DELETE.delete(key);
+    if (!confirm('НЕОБРАТИМО\n\n' + pending + '\n\nНаистина ли да продължа?')) return;
+  } else if (!confirm(plainQuestion)) {
+    return;
+  }
+  const res = await send();
+  if (!res.ok) {
+    // Отказът заради история носи изричното „натиснете още веднъж" — само него помним.
+    if (/още веднъж/.test(res.error || '')) PENDING_DELETE.set(key, res.error);
+    return toast(res.error, 'err');
+  }
+  toast(okMsg, 'ok'); markSaved();
+  after();
+}
+window.confirmDangerousDelete = confirmDangerousDelete;
 async function deleteBook(id) {
-  if (!confirm('Да изтрия ли тази книга?')) return;
-  const res = await window.api.books.delete(id);
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Книгата е изтрита.', 'ok'); markSaved();
-  RENDERERS[VIEW]();
+  await confirmDangerousDelete('book:' + id, 'Да изтрия ли тази книга?',
+    () => window.api.books.delete(id), 'Книгата е изтрита.', () => RENDERERS[VIEW]());
 }
 window.deleteBook = deleteBook;

@@ -47,7 +47,7 @@ async function renderDash() {
         <th>Читател</th><th>Документ</th><th>Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
         ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
         <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
-        <td class="num warn">${Math.round((new Date(today()) - new Date(l.date_due)) / 864e5)}</td></tr>`).join('')}
+        <td class="num warn">${l.daysLate ?? ''}</td></tr>`).join('')}
         </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
       </div>
       <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>

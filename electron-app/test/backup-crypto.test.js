@@ -8,6 +8,24 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 const {
   isEncryptedBackup,
   encryptBackupFile,
@@ -15,7 +33,7 @@ const {
 } = require('../backup-crypto');
 
 function tmpFile(name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-crypto-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-crypto-test-'));
   return path.join(dir, name);
 }
 
