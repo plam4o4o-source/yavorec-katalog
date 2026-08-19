@@ -10,7 +10,29 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL } = require('../search-fts');
 const registerBooksHandlers = require('../handlers/books');
-const { normalizeScanCode } = require('../security-utils');
+/* diffFields идва от main.js, не се преписва: тукашният двойник връщаше ОБЕКТ,
+   а продукцията връща МАСИВ [{field,before,after}] — заради което всяко
+   твърдение върху одитния diff проверяваше фалшификата, не програмата.
+   Вж. test/helpers/prod-values.js. */
+const { diffFields, normalizeScanCode } = require('./helpers/prod-values.js');
+
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -22,7 +44,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-books-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-books-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -42,11 +64,7 @@ function setup() {
     today: () => '2026-08-02',
     ftsQuery,
     cnSortKey: (s) => String(s || '').toUpperCase().trim().replace(/\d+/g, m => m.padStart(6, '0')),
-    diffFields: (oldObj, newObj, fields) => {
-      const out = {};
-      for (const f of fields) if ((oldObj ? oldObj[f] : undefined) !== newObj[f]) out[f] = [oldObj ? oldObj[f] : undefined, newObj[f]];
-      return out;
-    },
+    diffFields,
     scheduleCatalogWrite: () => catalogWrites.push(1),
     normalizeScanCode
   };
@@ -166,7 +184,9 @@ test('books:update records a diff in the audit log and only touches status_date 
   const afterTitleOnly = db.prepare('SELECT title, status_date FROM books WHERE id=?').get(id);
   assert.equal(afterTitleOnly.title, 'Нов');
   assert.equal(afterTitleOnly.status_date, created.status_date);
-  assert.ok(auditLog.some(a => a.action === 'Редакция на документ' && a.diff && a.diff.title));
+  assert.ok(auditLog.some(a => a.action === 'Редакция на документ'
+    && Array.isArray(a.diff) && a.diff.some(d => d.field === 'title' && d.before === 'Стар' && d.after === 'Нов')),
+    'diff-ът в одита е масив [{field,before,after}] — точно както го записва main.js');
 
   // Status change: status_date should now be set (today() stub).
   await ipcMain.invoke('books:update', { id, title: 'Нов', status: 'липсващ', quantity: 1 });
@@ -230,4 +250,39 @@ test('limits:usage reports current counts and configured limits; limits:update c
   assert.equal(usage.data.readers, 1);
   assert.equal(usage.data.limitBooks, 0);
   assert.equal(usage.data.limitReaders, 10);
+});
+
+/* ЗАЩО: BOOK_FIELDS е списъкът колони, които books:create/update реално
+   записват. Мутационен одит махна от него 'price' и цялата поредица остана
+   зелена — а последицата е, че цената спира да се записва за ВСЕКИ НОВ запис:
+   инвентарната книга и „стойност на фонда" показват 0,00 лв. само за новите
+   документи, което изглежда като счетоводна грешка, а не като софтуерна.
+   Затова проверката е през реалния запис в базата, не през списъка. */
+test('books:create и books:update записват ВСЯКО поле от BOOK_FIELDS, включително цената', async () => {
+  const { db, ipcMain, returned } = setup();
+  assert.ok(returned.BOOK_FIELDS.includes('price'), 'price трябва да е сред записваните полета');
+
+  const id = (await ipcMain.invoke('books:create', {
+    title: 'Под игото', inv_number: 1, price: 12.5, udk: '886.7-31',
+    barcode: 'BC-1', register_date: '2026-03-04', series: 'Библиотека', series_no: '7'
+  })).data;
+  const created = db.prepare('SELECT price, udk, barcode, register_date, series, series_no FROM books WHERE id=?').get(id);
+  assert.equal(created.price, 12.5, 'цената трябва да стигне до базата — иначе стойността на фонда е 0,00 лв.');
+  assert.equal(created.udk, '886.7-31');
+  assert.equal(created.barcode, 'BC-1');
+  assert.equal(created.register_date, '2026-03-04');
+  assert.equal(created.series, 'Библиотека');
+  assert.equal(created.series_no, '7');
+
+  await ipcMain.invoke('books:update', { id, title: 'Под игото', price: 19.99, quantity: 1 });
+  assert.equal(db.prepare('SELECT price FROM books WHERE id=?').get(id).price, 19.99, 'редакцията също трябва да пише цената');
+});
+
+test('всяко име в BOOK_FIELDS е истинска колона в таблицата books', () => {
+  /* Обратната посока: излишно/сгрешено име в BOOK_FIELDS чупи целия запис на
+     документ с „no such column", а списъкът се пипа при всяко ново поле. */
+  const { db, returned } = setup();
+  const columns = new Set(db.prepare('PRAGMA table_info(books)').all().map(c => c.name));
+  const unknown = returned.BOOK_FIELDS.filter(f => !columns.has(f));
+  assert.deepEqual(unknown, [], 'BOOK_FIELDS съдържа полета, каквито таблицата books няма');
 });

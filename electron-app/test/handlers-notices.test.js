@@ -8,13 +8,26 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerNoticesHandlers = require('../handlers/notices');
+/* LOAN_SELECT — истинският от handlers/loans.js (вж. test/helpers/prod-values.js). */
+const { LOAN_SELECT } = require('./helpers/prod-values.js');
 
-const LOAN_SELECT = `
-  SELECT l.*, b.title, b.author, b.inv_number, r.name AS reader_name, r.card_no
-  FROM loans l
-  JOIN books b ON b.id = l.book_id
-  JOIN readers r ON r.id = l.reader_id
-`;
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -26,7 +39,7 @@ function fakeIpcMain() {
 }
 
 function setup(overrides = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-notices-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-notices-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -154,4 +167,75 @@ test('loans:mailto refuses a missing or invalid email, and opens mailto: via she
   assert.equal(good.ok, true);
   assert.equal(shellCalls.length, 1);
   assert.match(shellCalls[0], /^mailto:reader%40example\.com/);
+});
+
+/* ЗАЩО: степента на напомнянето се определя с `>=`, а не с `>`. Разликата е
+   точно един ден: при праг „второ напомняне на 14-ия ден" мутация към `>`
+   отлага второто и третото напомняне с ден за ВСЕКИ читател. Мутационен одит
+   смени и двете сравнения, без нито един провал — досега се тестваше само
+   първата степен и текстовете, не и самите прагове. */
+function overdueSetup(dbSettings = {}) {
+  const ctx = setup();
+  const { db } = ctx;
+  const cols = Object.entries(Object.assign({ fine_per_day: 0.1 }, dbSettings));
+  for (const [k, v] of cols) db.prepare(`UPDATE settings SET ${k} = ? WHERE id = 1`).run(v);
+  return ctx;
+}
+/* Заемане, просрочено с точно N дни спрямо заместителя today() = 2026-08-02.
+   Степента се смята от today(), а филтърът „просрочено" в SQL — от date('now');
+   и двете са изпълнени, защото датите тук са преди 02.08.2026. */
+const STUB_TODAY = '2026-08-02';
+function overdueByDays(db, days, inv) {
+  const readerId = db.prepare('INSERT INTO readers (name, card_no) VALUES (?, ?)')
+    .run('Читател ' + inv, 'K' + inv).lastInsertRowid;
+  const bookId = db.prepare('INSERT INTO books (inv_number, title) VALUES (?, ?)').run(inv, 'Кн. ' + inv).lastInsertRowid;
+  db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bookId);
+  const base = new Date(STUB_TODAY + 'T00:00:00Z').getTime();
+  const due = new Date(base - days * 864e5).toISOString().slice(0, 10);
+  const out = new Date(base - (days + 14) * 864e5).toISOString().slice(0, 10);
+  db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?,?,?,?)').run(bookId, readerId, out, due);
+  return readerId;
+}
+
+test('степента на напомнянето сменя праговете ТОЧНО на 14-ия и 30-ия ден (>=, не >)', async () => {
+  const { db, ipcMain } = overdueSetup({ remind2_days: 14, remind3_days: 30 });
+  const r13 = overdueByDays(db, 13, 1);
+  const r14 = overdueByDays(db, 14, 2);
+  const r29 = overdueByDays(db, 29, 3);
+  const r30 = overdueByDays(db, 30, 4);
+
+  const res = await ipcMain.invoke('loans:reminders');
+  assert.equal(res.ok, true, res.error);
+  const lvl = Object.fromEntries(res.data.map(r => [r.reader_id, r.level]));
+  assert.equal(lvl[r13], 1, '13 дни просрочие — още първо напомняне');
+  assert.equal(lvl[r14], 2, 'на самия 14-и ден вече е ВТОРО напомняне, не на 15-ия');
+  assert.equal(lvl[r29], 2, '29 дни — още второ');
+  assert.equal(lvl[r30], 3, 'на самия 30-и ден вече е ТРЕТО напомняне');
+});
+
+test('праговете идват от настройките, а не са заковани в кода', async () => {
+  const { db, ipcMain } = overdueSetup({ remind2_days: 5, remind3_days: 9 });
+  const r4 = overdueByDays(db, 4, 11);
+  const r5 = overdueByDays(db, 5, 12);
+  const r9 = overdueByDays(db, 9, 13);
+
+  const res = await ipcMain.invoke('loans:reminders');
+  const lvl = Object.fromEntries(res.data.map(r => [r.reader_id, r.level]));
+  assert.equal(lvl[r4], 1);
+  assert.equal(lvl[r5], 2);
+  assert.equal(lvl[r9], 3);
+});
+
+test('текстът на напомнянето следва степента (ред „ВТОРО/ТРЕТО напомняне")', async () => {
+  const { db, ipcMain } = overdueSetup({ remind2_days: 14, remind3_days: 30 });
+  const r1 = overdueByDays(db, 1, 21);
+  const r2 = overdueByDays(db, 20, 22);
+  const r3 = overdueByDays(db, 40, 23);
+  const res = await ipcMain.invoke('loans:reminders');
+  const byId = Object.fromEntries(res.data.map(r => [r.reader_id, r]));
+  // Редът за степента се влива в тялото на писмото през {level_line}.
+  assert.equal(byId[r1].level, 1);
+  assert.doesNotMatch(byId[r1].body, /ВТОРО|ТРЕТО/, 'първото напомняне е само любезна подкана');
+  assert.match(byId[r2].body, /ВТОРО/);
+  assert.match(byId[r3].body, /ТРЕТО/);
 });

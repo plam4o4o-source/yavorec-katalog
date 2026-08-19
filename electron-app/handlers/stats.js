@@ -54,14 +54,48 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          което никога не приписва на глобите пари, платени за годишна такса.
          Начисленото не се губи — излиза като finesCharged, вече по годината на
          ВРЪЩАНЕ (тогава се начислява глобата). */
-      const finesCollected = db.prepare(`
-        SELECT COALESCE(SUM(MIN(p.paid, c.charged)), 0) AS val
-        FROM (SELECT reader_id, SUM(-amount) AS paid FROM account_lines
-               WHERE kind = 'плащане' AND substr(date,1,4) = ? GROUP BY reader_id) p
-        JOIN (SELECT reader_id, SUM(amount) AS charged FROM account_lines
-               WHERE kind = 'начисление' AND type = 'обезщетение' AND substr(date,1,4) = ? GROUP BY reader_id) c
-          ON c.reader_id = p.reader_id
-      `).get(y, y).val;
+      /* v2.3.0 — предишната сметка (SUM(MIN(платено, начислено)) за годината) беше
+         грешна в двете посоки, проверено с изпълнение:
+           • читател дължи 12 лв. такса и 2 лв. обезщетение, плаща само таксата →
+             отчетът показваше 2,00 лв. „събрани обезщетения", които никой не е плащал
+             (p.paid сумира ВСИЧКИ плащания, а плащанията не носят вид);
+           • обезщетение, начислено през декември и платено през януари, изчезваше и
+             от двете години (вътрешно съединение).
+         Плащанията наистина не носят вид, затова се разнасят по начисленията по реда
+         на възникването им — както се води всяка сметка: най-старото задължение се
+         покрива първо. Така парите попадат в годината, в която реално са платени, и
+         никога не се приписват на обезщетение, докато има по-старо задължение. */
+      /* В рамките на ЕДИН ДЕН начисленията се подреждат преди плащанията. На гишето
+         редът на вписване е произволен — библиотекарят често взима парите и записва
+         плащането първо, а начислението веднага след него. При подреждане само по
+         `id` тези пари увисваха като „аванс" и не влизаха в отчета. Между различните
+         дни редът си остава хронологичен, а вътре в деня — по id. */
+      const lines = db.prepare(`
+        SELECT reader_id, date, kind, type, amount FROM account_lines
+        ORDER BY reader_id, date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
+      `).all();
+      let finesCollected = 0;
+      const outstanding = new Map(); // reader_id → [{type, left}] по реда на възникване
+      for (const l of lines) {
+        const q = outstanding.get(l.reader_id) || [];
+        if (l.kind === 'начисление') {
+          q.push({ type: l.type || 'друго', left: Number(l.amount) || 0 });
+        } else if (l.kind === 'плащане') {
+          let money = Math.abs(Number(l.amount) || 0);
+          const inYear = String(l.date || '').slice(0, 4) === String(y);
+          while (money > 0.0001 && q.length) {
+            const head = q[0];
+            const used = Math.min(money, head.left);
+            if (inYear && head.type === 'обезщетение') finesCollected += used;
+            head.left -= used;
+            money -= used;
+            if (head.left <= 0.0001) q.shift();
+          }
+          // Надплатеното (аванс) не се приписва на нищо — остава извън отчета.
+        }
+        outstanding.set(l.reader_id, q);
+      }
+      finesCollected = Math.round(finesCollected * 100) / 100;
       const finesCharged = db.prepare(`
         SELECT COALESCE(SUM(fine), 0) AS val FROM loans
         WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?
@@ -104,7 +138,12 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
     { id: 'readers_by_category', title: 'Читатели по възрастови категории', needsYear: true,
       hint: 'Брой активни читатели по категория и новорегистрирани през годината.' },
     { id: 'fund_movement', title: 'Движение на фонда — постъпления и отчисления', needsYear: true,
-      hint: 'Обобщено по начин на придобиване/причина за отчисляване — извадка от КДБФ за прилагане към годишния отчет.' },
+      /* Изрично уточнение (v2.3.0): тази справка чете ДЕКЛАРИРАНОТО в партидите
+         (acquisitions.total_count / sum) — колона „Общо" на КДБФ Част № 1. КДБФ Част
+         № 2 брои реално инвентираните книги. Двете законно се разминават, докато
+         партида не е инвентирана докрай, и двете се прилагат към годишния отчет —
+         затова разликата трябва да е написана, а не да изглежда като грешка. */
+      hint: 'По начин на придобиване/причина за отчисляване, по ДЕКЛАРИРАНОТО в партидите (както Част № 1 на КДБФ). Част № 2 брои реално инвентираните — при неинвентирана докрай партида двете законно се различават.' },
     { id: 'mzs_annual', title: 'Междубиблиотечно заемане (МЗС) — обобщение', needsYear: true,
       hint: 'Брой заявки по посока и състояние през годината.' },
     { id: 'fees_income', title: 'Приходи от такси и обезщетения', needsYear: true,

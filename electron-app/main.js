@@ -353,7 +353,20 @@ const MIGRATIONS = [
   // calendar_closed (виж bg-holidays.js). Пази се списък, а не флаг, за да
   // се засява всяка нова година точно веднъж и изтритото от библиотекаря да
   // не се връща само.
-  { version: 6, run: () => { ensureColumns('settings', { holidays_seeded: 'TEXT' }); } }
+  { version: 6, run: () => { ensureColumns('settings', { holidays_seeded: 'TEXT' }); } },
+  /* v7 (v2.3.0) — два пропуска, намерени с измерване и с одит:
+     1) books(acquisition_id) нямаше индекс, макар „Постъпления" да прави по две
+        корелирани подзаявки на партида точно по това поле. Измерено при 15 000
+        книги: 1317 ms за 400 реда; със същия индекс — 9 ms (146× по-бързо).
+     2) inventory_sessions.mode: видът на проверката (пълна / представителна по
+        чл. 40, т. 2) се решаваше при приключване, но никъде не се пазеше — в
+        списъка приключена представителна с 0 липсващи изглеждаше точно като пълна
+        с 0 липсващи, а при проверка от регионалната библиотека няма как да се
+        докаже кое е било. Старите сесии остават NULL — за тях просто не се знае. */
+  { version: 7, run: () => {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_books_acquisition ON books(acquisition_id)');
+    ensureColumns('inventory_sessions', { mode: 'TEXT' });
+  } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
@@ -459,6 +472,21 @@ ipcMain.handle('app:checkForUpdates', () =>
 ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall(); }));
 
 let mainWindow;
+
+/* Само едно копие на програмата наведнъж. Без това всяко следващо щракване върху
+   иконата вдига нов процес срещу СЪЩИЯ файл на базата; а при неуспешен старт (виж
+   .catch по-долу) тези процеси остават невидими и заключват файла един по един.
+   Второто стартиране само изважда напред вече отворения прозорец. */
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
+
 app.whenReady().then(() => {
   pruneOldLogs();
   // Преди каквото и да е докосване на базата — виж askAboutMissingDbFolder по-горе.
@@ -478,6 +506,27 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });
+}).catch((err) => {
+  /* Без този .catch всяка грешка при старта (най-често повредена или недостъпна
+     база — прекъснато писане по мрежов дял, антивирус, лош сектор) се превръщаше в
+     необработено отхвърляне на promise: createWindow() никога не се стигаше, прозорец
+     не се появяваше, съобщение нямаше, а процесът оставаше жив завинаги. За
+     библиотекаря това изглежда като „щраквам иконата и не се случва нищо".
+     Проверено: повредена база → 0 прозореца, 0 диалога, процесът виси.
+     Затова тук: разбираемо съобщение, точния технически текст в дневника, и изход. */
+  const detail = (err && err.message) ? err.message : String(err);
+  try { logToFile('error', 'Стартирането пропадна: ' + detail); } catch (e) { /* дневникът е последната ни грижа тук */ }
+  try {
+    dialog.showErrorBox('Инвентар не можа да се стартира',
+      'Базата данни не можа да бъде отворена.\n\n' + detail + '\n\n' +
+      'Най-честата причина е повреден файл или недостъпна папка (изключен мрежов диск).\n' +
+      'Какво да направите:\n' +
+      '• Проверете дали мрежовият диск с базата е включен и достъпен.\n' +
+      '• Ако е повреден файлът — възстановете последното резервно копие от подпапка „backups" ' +
+      'до базата данни (копирайте го върху library.db).\n' +
+      '• Ако проблемът остава, изпратете дневника от папката „logs" на разработчика.');
+  } catch (e) { /* ако и диалогът не тръгне, поне не увисваме */ }
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => {
@@ -713,7 +762,7 @@ function logEvent(kind, opts) {
    монолита main.js на модули по домейн). firstActiveHold/
    consumeHoldOnCheckout/activateHoldOnReturn се връщат обратно тук, защото
    ги ползва домейнът "Заемания" по-долу. */
-const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
+const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, freeCopies, activeHolds } =
   require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit, normalizeScanCode });
 
 /* ---------------- Заемания ----------------
@@ -724,7 +773,8 @@ const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn } =
 const { LOAN_SELECT, effectiveDaysLate } = require('./handlers/loans')(ipcMain, {
   getDb: () => db, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
   circRule, readerCategory, nextWorkDay, closedDaysBetween,
-  firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode
+  firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
+  freeCopies, activeHolds
 });
 
 /* ---------------- Периодика ----------------
@@ -736,7 +786,8 @@ const { countOverduePeriodicals } =
 
 /* ---------------- Табло ---------------- */
 require('./handlers/dashboard')(ipcMain, {
-  getDb: () => db, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals
+  getDb: () => db, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
+  effectiveDaysLate
 });
 
 /* ---------------- Инвентаризация ---------------- */

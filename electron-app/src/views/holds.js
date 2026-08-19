@@ -15,32 +15,50 @@ async function renderHolds(tabs) {
         <td><button class="btn sm" onclick="cancelHold(${h.id})">Откажи</button></td></tr>`).join('')}
     </tbody></table></div>`}`;
 }
-async function holdPrompt() {
-  let readerId = CIRC.readerId;
-  if (!readerId) {
+/* Чия е резервацията се вижда ВИНАГИ — и във формата преди записа, и в
+   потвърждението. CIRC.readerId (разделът „Заемане“) оцелява при смяна на
+   подраздела, а формата питаше само за книгата: резервацията мълчаливо се
+   записваше на читателя, останал избран отпреди, и нито едно съобщение не
+   издаваше на кого. Затова името се изписва изрично, с бутон за смяна до него.
+   readerId се подава при смяна на читателя (null = питай наново). */
+async function holdPrompt(readerId) {
+  let reader = null;
+  const rid = readerId === undefined ? CIRC.readerId : readerId;
+  if (rid) reader = await call(window.api.readers.get(rid));
+  if (!reader) {
     const cardOrName = await askText('Нова резервация', {
       label: 'Читател', hint: 'номер на карта или име', okLabel: 'Напред'
     });
     if (!cardOrName || !cardOrName.trim()) return;
-    const byCard = await call(window.api.readers.byCard(cardOrName.trim()));
-    if (byCard) { readerId = byCard.id; }
-    else {
-      const found = (await call(window.api.readers.list(cardOrName.trim())) || [])[0];
-      if (!found) return toast('Няма такъв читател.', 'err');
-      readerId = found.id;
-    }
+    reader = await call(window.api.readers.byCard(cardOrName.trim()));
+    if (!reader) reader = (await call(window.api.readers.list(cardOrName.trim())) || [])[0];
+    if (!reader) return toast('Няма такъв читател.', 'err');
   }
-  const code = await askText('Нова резервация', {
-    label: 'Заета книга', hint: 'баркод или инв. №', okLabel: 'Резервирай'
-  });
-  if (!code || !code.trim()) return;
-  const res = await window.api.holds.add({ reader_id: readerId, code: code.trim() });
+  window._HOLD_READER = reader;
+  modal('Нова резервация', `
+    <div class="note">Резервацията ще се запише на <b>${esc(reader.name)}</b>${reader.card_no ? ' · карта ' + esc(reader.card_no) : ''}.</div>
+    <form id="holdF" onsubmit="return false">
+      ${fld('Заета книга', 'code', { val: '', hint: 'баркод или инв. №', req: 1 })}
+    </form>`,
+    `<button class="btn l" onclick="holdChangeReader()">Друг читател…</button>
+     <button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn pri" onclick="saveHold(${reader.id})">Резервирай</button>`);
+}
+window.holdPrompt = holdPrompt;
+async function holdChangeReader() { closeModal(); await holdPrompt(null); }
+window.holdChangeReader = holdChangeReader;
+async function saveHold(readerId) {
+  const code = (formData('#holdF').code || '').trim();
+  if (!code) return toast('Въведете баркод или инв. № на книгата.', 'err');
+  const res = await window.api.holds.add({ reader_id: readerId, code });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Резервирана: инв. № ' + res.data.inv_number + ' — на опашката е ' + res.data.queue + '-ри.', 'ok');
+  const who = (window._HOLD_READER || {}).name || '';
+  closeModal();
+  toast('Резервирана: инв. № ' + res.data.inv_number + ' за ' + who + ' — на опашката е ' + res.data.queue + '-ри.', 'ok');
   markSaved();
   renderCirc();
 }
-window.holdPrompt = holdPrompt;
+window.saveHold = saveHold;
 async function cancelHold(id) {
   if (!confirm('Отказ от резервацията?')) return;
   const res = await window.api.holds.cancel(id);

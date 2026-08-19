@@ -57,7 +57,16 @@ async function renderInvent() {
         <span class="hint">${sp}%</span></div></td>
       <td class="num">${s.closed ? `<b style="color:${s.missing ? 'var(--red)' : 'var(--green)'}">${s.missing || 0}</b>` : '<span class="hint">—</span>'}</td>
       <td style="font-size:12px">${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ')}</td>
-      <td>${s.closed ? '<span class="badge ok">приключена</span>' : '<span class="badge warn">отворена</span>'}</td></tr>`;
+      <td>${s.closed
+        ? `<span class="badge ok">приключена</span> ${
+            /* Видът се показва тук (v2.3.0): приключена ПРЕДСТАВИТЕЛНА проверка с 0
+               липсващи изглеждаше точно като ПЪЛНА с 0 липсващи, а разликата е
+               нормативна (чл. 40, т. 2) и трябва да се вижда и след години. Сесиите
+               отпреди v2.3.0 нямат записан вид — за тях не се твърди нищо. */
+            s.mode === 'full' ? '<span class="badge">пълна</span>'
+            : s.mode === 'representative' ? '<span class="badge">представителна</span>'
+            : '<span class="hint" title="Сесия отпреди v2.3.0 — видът не е записван">вид: —</span>'}`
+        : '<span class="badge warn">отворена</span>'}</td></tr>`;
     }).join('')
       : `<tr><td colspan="7" class="empty">Няма извършени проверки.</td></tr>`}
     </tbody></table></div>`;

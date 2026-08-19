@@ -9,7 +9,29 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerInventorySessionsHandlers = require('../handlers/inventory-sessions');
-const { normalizeScanCode } = require('../security-utils');
+/* pctRequired/naturalLoss са НОРМАТИВНИ формули по Наредба № 3 и живеят в
+   main.js. Преписани тук, те правят теста сляп за промяна в самата норма —
+   мутационният одит смени 10 % на 1 % и 10 ‰ на 1 ‰ без нито един провал.
+   Вж. test/helpers/prod-values.js. */
+const { pctRequired, naturalLoss, normalizeScanCode } = require('./helpers/prod-values.js');
+
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -21,7 +43,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-sessions-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-sessions-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -36,8 +58,8 @@ function setup() {
       catch (err) { return { ok: false, error: err.message }; }
     },
     logAudit: (action, detail) => auditLog.push({ action, detail }),
-    pctRequired: (n) => (n <= 50000 ? 10 : n <= 200000 ? 5 : 2),
-    naturalLoss: (n, freeAccessPct) => (freeAccessPct > 50 ? n * 10 : n * 5) / 1000,
+    pctRequired,
+    naturalLoss,
     normalizeScanCode
   };
   registerInventorySessionsHandlers(ipcMain, deps);
@@ -146,9 +168,17 @@ test('inventorySessions:close finds missing books but excludes ones currently on
   assert.ok(missingSessionRow);
 
   assert.equal(auditLog.length, 1);
-  // Видът вече се вписва в одитната следа — по протокола после се вижда дали
-  // проверката е била пълна, или представителна.
-  assert.match(auditLog[0].detail, /пълна — проверени 1, липсващи 1 от 3/);
+  /* Видът вече се вписва в одитната следа — по протокола после се вижда дали
+     проверката е била пълна, или представителна. Проверява се СЪДЪРЖАНИЕТО
+     (вид + трите числа), а не точното изречение: дотук цялата фраза беше
+     закована дума по дума и всяко преформулиране на съобщението щеше да
+     счупи теста, без нищо в програмата да се е повредило. */
+  const detail = auditLog[0].detail;
+  assert.match(detail, /пълна/, 'видът на инвентаризацията трябва да личи в одита');
+  assert.doesNotMatch(detail, /представителна/);
+  assert.match(detail, /(^|\D)1(\D|$)/, 'броят проверени (1) трябва да е в записа');
+  assert.match(detail, /(^|\D)3(\D|$)/, 'обхватът (3 документа) трябва да е в записа');
+  assert.match(detail, /липсващ/i, 'липсващите трябва да са назовани');
 
   const sessionRow = db.prepare('SELECT closed FROM inventory_sessions WHERE id = ?').get(sessionId);
   assert.equal(sessionRow.closed, 1);

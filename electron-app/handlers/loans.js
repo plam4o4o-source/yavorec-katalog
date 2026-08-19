@@ -14,7 +14,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
     circRule, readerCategory, nextWorkDay, closedDaysBetween,
-    firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode
+    firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
+    freeCopies, activeHolds
   } = deps;
 
   const LOAN_SELECT = `
@@ -74,13 +75,23 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
        в един ден с по 90 дни забава при таван 90 дни, даваха 270 дни — три пъти
        тавана, точно обратното на обещаното два реда по-горе. А типичният случай е
        именно този: закъснелите книги се връщат накуп, не една по една.
-       suspend_max = 0 означава „без таван" (същата уговорка като при останалите
-       лимити в програмата — виж loans:extend по-долу). */
-    const cap = rule.suspend_max == null ? 90 : Number(rule.suspend_max);
-    if (cap > 0) {
-      const maxUntil = addDays(today(), cap);
-      if (untilStr > maxUntil) untilStr = maxUntil;
-    }
+       ВНИМАНИЕ за значението на нулата (поправено в v2.3.0). До v2.2.0 изразът беше
+       `rule.suspend_max || 90`, тоест вписана 0 значеше „таван 90 дни". v2.2.0 я
+       преобърна на „без таван" — и библиотека с нула в полето получаваше наказания
+       от над две години (проверено: 779 дни забава → преустановено заемане до
+       2028 г. вместо до +90 дни). Нулата в това поле не значи „без ограничение":
+       никой библиотекар не вписва 0 с намерение „наказвай неограничено". Затова 0 и
+       празно се третират еднакво — таванът по подразбиране. Изключването на
+       наказанието става с suspend_per_day = 0 (полето точно над него), както пише и
+       подсказката му. */
+    const capRaw = Number(rule.suspend_max);
+    const cap = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : 90;
+    /* Таванът е „днес + cap", но НИКОГА под вече наложеното наказание: база, минала
+       през v2.1.0, носи натрупани стойности отвъд тавана (3 книги × 90 дни = 270), и
+       безусловното клампване ги дърпаше НАДОЛУ — тоест читател печелеше от това, че
+       е закъснял пак. Затова горницата е по-голямото от двете. */
+    const ceiling = addDays(today(), cap) > base ? addDays(today(), cap) : base;
+    if (untilStr > ceiling) untilStr = ceiling;
     db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run(untilStr, readerId);
     logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + effDaysLate + ' работни дни забава)');
     return untilStr;
@@ -100,8 +111,27 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       return db.prepare(`${LOAN_SELECT} ORDER BY l.date_out DESC`).all();
     })
   );
+  /* Дните забава и обезщетението се смятат ТУК, със същата функция, с която се
+     начисляват при връщане (effectiveDaysLate — цели дни, минус затворените дни от
+     календара). Дотогава екранът „Просрочени" ги смяташе сам, по сурови календарни
+     дни, и показваше сума, различна от касовата и от исканата в напомнителното
+     писмо. v2.2.0 уеднакви справката и напомнянията, но самият екран остана
+     настрани — тоест сумите пак бяха две. Сега източникът е един за всички.
+     Забележка: `date_due < date('now')` е нарочно строго — книга с падеж ДНЕС още
+     не е просрочена и не бива да влиза нито в напомнянията, нито в обезщетенията. */
   ipcMain.handle('loans:overdue', () =>
-    run(() => getDb().prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all())
+    run(() => {
+      const db = getDb();
+      const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
+      const perDay = Number(s.fine_per_day) || 0;
+      const now = today();
+      const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+      rows.forEach(r => {
+        r.daysLate = effectiveDaysLate(r.date_due, now);
+        r.fine = r.daysLate * perDay;
+      });
+      return rows;
+    })
   );
   ipcMain.handle('loans:byReader', (e, readerId) =>
     run(() => getDb().prepare(`${LOAN_SELECT} WHERE l.reader_id = ? ORDER BY l.date_out DESC`).all(readerId))
@@ -222,9 +252,20 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
       const used = l.renewals || 0;
       if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
-      const h = firstActiveHold(l.book_id);
-      if (h && h.reader_id !== l.reader_id) {
-        throw new Error('Книгата е резервирана от ' + h.reader_name + ' — срокът не може да се продължи.');
+      /* Резервацията се преценява срещу СВОБОДНИТЕ бройки, точно както при заемане
+         (consumeHoldOnCheckout в handlers/holds.js). Дотогава тук стоеше проверка на
+         ниво заглавие: при 5 екземпляра, 1 зает и 1 резервация трети читател можеше
+         да вземе бройка от рафта, но държащият не можеше да продължи своята — двете
+         места се разминаваха, след като заемането мина на бройки. Продължението
+         отнема една бройка от наличните, затова се отказва само когато свободните не
+         стигат за чакащите пред този читател. */
+      const holds = activeHolds ? activeHolds(l.book_id) : (firstActiveHold(l.book_id) ? [firstActiveHold(l.book_id)] : []);
+      const others = holds.filter(x => x.reader_id !== l.reader_id);
+      const free = freeCopies ? freeCopies(l.book_id) : 0;
+      if (others.length && free < others.length) {
+        const h = others[0];
+        throw new Error('Книгата е резервирана от ' + h.reader_name + ' и няма свободна бройка за нея — ' +
+          'срокът не може да се продължи.');
       }
       const base = l.date_due || today();
       const newDue = nextWorkDay(addDays(base, s.extension_days || 30));

@@ -11,13 +11,31 @@ const Database = require('better-sqlite3');
 const { JSDOM, VirtualConsole } = require('jsdom');
 const registerStatsHandlers = require('../handlers/stats');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 const SRC_DIR = path.join(__dirname, '..', 'src');
 const VIEWS_DIR = path.join(SRC_DIR, 'views');
 
 /* --- 1. Статистика: спазване на сроковете по година на връщане --- */
 
 function statsSetup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-fixes-221-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fixes-221-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
@@ -166,8 +184,12 @@ test('картата „Резервно копие" предупреждава,
   };
   await window.loadAutoBackupBox();
   const html = window.document.getElementById('autoBkBox').innerHTML;
-  assert.match(html, /НЕ са криптирани/, 'предупреждението трябва да се вижда в екрана, не само в одита');
-  assert.match(html, /Включи защита на личните данни/, 'дава се и посока какво да се направи');
+  /* Проверява се СМИСЪЛЪТ, не буквата: че предупреждението стига до екрана и че
+     до него стои действието „включи защитата". Точните надписи на бутоните са
+     кандидат № 1 за преформулиране и заковаването им дава фалшиви провали. */
+  assert.match(html, /не са криптирани/i, 'предупреждението трябва да се вижда в екрана, не само в одита');
+  assert.match(html, /pdpSetupForm/, 'предлага се именно действието „включване на защитата"');
+  assert.match(html, /защита(та)? на личните данни/i, 'и то назовано разбираемо за библиотекаря');
 });
 
 test('когато защитата е включена, но заключена, предупреждението сочи към отключването', async () => {
@@ -185,8 +207,9 @@ test('когато защитата е включена, но заключена
   await window.loadAutoBackupBox();
   const html = window.document.getElementById('autoBkBox').innerHTML;
   assert.match(html, /заключена/);
-  assert.match(html, /Към защитата на личните данни/);
-  assert.doesNotMatch(html, /Включи защита/, 'защитата вече е включена — не се предлага пак');
+  // Пак по смисъл: сочи се към ОТКЛЮЧВАНЕТО (pdpFocus), а не към включването.
+  assert.match(html, /pdpFocus/, 'посочва се къде се отключва защитата');
+  assert.doesNotMatch(html, /pdpSetupForm/, 'защитата вече е включена — не се предлага пак да се включва');
 });
 
 test('при криптирано копие се показва потвърждение, без предупреждение', async () => {

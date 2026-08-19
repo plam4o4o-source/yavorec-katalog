@@ -77,7 +77,9 @@ async function renderSetup() {
         <div class="grid g2">
           ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
             { val: s.suspend_per_day ?? 0, type: 'number', step: '0.5', hint: '0 = изключено. По-приложимо от глоба в стотинки.' })}
-          ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number' })}
+          ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number',
+            hint: 'общо за читателя, не за всяко връщане. Празно или 0 = 90 дни по подразбиране; ' +
+                  'за изключване ползвайте полето вляво.' })}
         </div>
         <div class="grid g2">
           ${fld('2-ро напомняне след (дни просрочие)', 'remind2_days', { val: s.remind2_days ?? 14, type: 'number' })}
@@ -330,23 +332,66 @@ async function renderSetup() {
    Затова състоянието се показва тук, до самите копия, а не само в одита. */
 async function loadAutoBackupBox() {
   const el = $('#autoBkBox'); if (!el) return;
+  subscribeAutoBackupEvents();
   const st = await call(window.api.backup.autoStatus());
   if (!st) { el.innerHTML = ''; return; }
-  if (st.encrypted) {
+  /* Четирите случая идват готови от main процеса (backup:autoStatus), който ги
+     смята по ДЕЙСТВИТЕЛНИЯ файл за деня, а не по настройките. Резервното
+     извеждане тук е заради по-стар main (и заради тестове, които подават само
+     encrypted/pdpConfigured): тогава „провалено криптиране“ просто не се знае. */
+  const state = st.state || (st.encrypted ? 'encrypted' : (st.pdpConfigured ? 'locked' : 'off'));
+  /* Колко некриптирани дневни копия лежат на диска ТОЧНО СЕГА. Общото „копията не
+     се криптират“ се чете като бъдещо време; числото показва вече натрупаната
+     експозиция — всяко от тези копия е пълен списък с имена, адреси, телефони и
+     ЕГН на читателите. */
+  const plainNote = st.plainDailyCount > 0
+    ? ` В папката с резервните копия в момента има <b>${Number(st.plainDailyCount)}</b> некриптирани дневни копия
+        (всяко е пълен списък с личните данни на читателите).`
+    : '';
+  if (state === 'encrypted') {
     el.innerHTML = `<div class="note" style="margin-top:0">🔒 Автоматичните дневни копия се
       <b>криптират</b> с паролата за защита на личните данни.
       ${st.last ? 'Последно копие: ' + esc(st.last.date) + '.' : ''}</div>`;
     return;
   }
-  el.innerHTML = `<div class="note ${st.pdpConfigured ? 'w' : 'd'}" style="margin-top:0">
-    <b>${st.pdpConfigured ? '⚠ Копията не се криптират в момента.' : '⚠ Копията НЕ са криптирани.'}</b>
-    ${esc(st.warning || '')}
-    ${st.pdpConfigured
+  if (state === 'failed') {
+    /* Най-опасният случай: библиотекарят е направил всичко както трябва, а
+       копието въпреки това е в чист текст. Затова се казва изрично КАКВО се е
+       провалило и се дава пряк изход — ръчно криптирано копие сега. */
+    el.innerHTML = `<div class="note d" style="margin-top:0">
+      <b>⚠ Днешното копие НЕ е криптирано, въпреки че защитата е включена.</b>
+      ${esc(st.warning || '')}${plainNote}
+      <div class="toolbar" style="margin:8px 0 0">
+        <button type="button" class="btn pri" onclick="backupNowForm()">Направи копие с парола сега…</button>
+        <button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button>
+      </div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = `<div class="note ${state === 'locked' ? 'w' : 'd'}" style="margin-top:0">
+    <b>${state === 'locked' ? '⚠ Копията не се криптират в момента.' : '⚠ Копията НЕ са криптирани.'}</b>
+    ${esc(st.warning || '')}${plainNote}
+    ${state === 'locked'
       ? '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button></div>'
       : '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn pri" onclick="pdpSetupForm()">Включи защита на личните данни…</button></div>'}
   </div>`;
 }
 window.loadAutoBackupBox = loadAutoBackupBox;
+/* Известия от main процеса: дневното копие беше прекриптирано (напр. след смяна
+   на паролата) или опитът се провали. Дотук провалът не стигаше до библиотекаря
+   по никакъв път освен конзолата. Абонаментът е еднократен за целия живот на
+   прозореца — картата се прерисува само ако е на екрана. */
+let autoBkSubscribed = false;
+function subscribeAutoBackupEvents() {
+  if (autoBkSubscribed) return;
+  const api = window.api && window.api.backup;
+  if (!api || typeof api.onAutoStatus !== 'function') return; // по-стар preload — картата пак се чете при отваряне
+  autoBkSubscribed = true;
+  api.onAutoStatus((info) => {
+    if (info && info.message) toast(info.message, info.level === 'err' ? 'err' : 'ok');
+    loadAutoBackupBox();
+  });
+}
 // Само превърта до картата за защитата — тя е по-нагоре в същия екран.
 function pdpFocus() {
   const box = $('#pdpBox');
@@ -507,7 +552,7 @@ const CIRC_RULE_FIELDS = [
   ['extensions_count', 'Продължения', 'празно = общото · 0 = без ограничение'],
   ['extension_days', 'Дни на продължение', 'празно = общото'],
   ['suspend_per_day', 'Наказание (дни/ден забава)', 'празно = общото · 0 = изключено'],
-  ['suspend_max', 'Таван на наказанието', 'празно = общото · 0 = без таван']
+  ['suspend_max', 'Таван на наказанието', 'празно = общото · 0 = 90 дни']
 ];
 async function loadCircRulesBox() {
   const box = $('#circRulesBox'); if (!box) return;

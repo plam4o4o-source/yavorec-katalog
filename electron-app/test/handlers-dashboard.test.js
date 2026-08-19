@@ -9,13 +9,29 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerDashboardHandlers = require('../handlers/dashboard');
 const registerPeriodicalsHandlers = require('../handlers/periodicals');
+/* LOAN_SELECT и pctRequired се ВЗИМАТ от продукцията (handlers/loans.js и
+   main.js), а не се преписват тук — преписаните копия мълчаливо се разминават
+   с оригинала и таблото започва да се тества срещу собствената си измислица.
+   Вж. test/helpers/prod-values.js. */
+const { LOAN_SELECT, pctRequired } = require('./helpers/prod-values.js');
 
-const LOAN_SELECT = `
-  SELECT l.*, b.title, b.author, b.inv_number, r.name AS reader_name, r.card_no
-  FROM loans l
-  JOIN books b ON b.id = l.book_id
-  JOIN readers r ON r.id = l.reader_id
-`;
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -27,7 +43,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dashboard-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-dashboard-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -42,7 +58,7 @@ function setup() {
     },
     today: () => '2026-08-02',
     yearOf: () => '2026',
-    pctRequired: (n) => (n <= 50000 ? 10 : n <= 200000 ? 5 : 2),
+    pctRequired,
     isWorkDay: () => true,
     LOAN_SELECT
   };
@@ -56,7 +72,7 @@ function setup() {
    Регистрираме и двата модула върху една и съща db, за да проверим реалната
    връзка между тях, не заглушка. */
 function setupWithPeriodicals() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-dashboard-per-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-dashboard-per-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -70,7 +86,7 @@ function setupWithPeriodicals() {
   });
   registerDashboardHandlers(ipcMain, {
     getDb: () => db, run, today, yearOf: () => '2026',
-    pctRequired: (n) => (n <= 50000 ? 10 : n <= 200000 ? 5 : 2),
+    pctRequired,
     isWorkDay: () => true, LOAN_SELECT, countOverduePeriodicals
   });
   return { db, ipcMain };

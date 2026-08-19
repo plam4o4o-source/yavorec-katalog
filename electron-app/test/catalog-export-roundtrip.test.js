@@ -18,6 +18,24 @@ const registerBooksHandlers = require('../handlers/books');
 const registerCatalogHandlers = require('../handlers/catalog');
 const { csvCell } = require('../security-utils');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 const CTRL = String.fromCharCode(1); // \x01 — недопустим в XML 1.0
 
 function fakeIpcMain() {
@@ -29,7 +47,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-roundtrip-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-roundtrip-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
   db.prepare('UPDATE settings SET lib_name = ? WHERE id = 1').run('НЧ „Тест — 1900“');

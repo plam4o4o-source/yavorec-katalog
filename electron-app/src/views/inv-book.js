@@ -17,7 +17,7 @@
    библиотекарят пише. Печатът (printInvBookDoc) продължава да ползва целия
    списък от window._INVBOOK_ROWS — разпечатката е меродавният документ по
    чл. 26 и не бива да зависи от това какво се вижда на екрана. */
-const INVBOOK_PAGE_SIZE = 300;
+const INVBOOK_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE;
 async function renderInvBook() {
   const rows = await call(window.api.invBook.list());
@@ -117,24 +117,27 @@ function invBookMatches() {
     (r.call_number || '').toLowerCase().includes(t));
 }
 /* Изчертава само таблицата и лентата под нея — полето за търсене не се пипа. */
-function paintInvBookRows() {
+/* v2.3.0: append=true (само от бутона „Покажи още“) добавя САМО новата порция
+   през paintRowWindow() в core.js. Дотогава всяко натискане презаписваше целия
+   <tbody> с rows.slice(0, LIMIT) — и вече показаните редове се изчертаваха
+   наново, тоест работата растеше квадратично: измерено при 15 000 записа,
+   49 натискания от 300 до 15 000 реда = 127 861 ms. Търсенето и програмното
+   филтриране остават пълен рендер — там наборът от редове е друг. */
+let INVBOOK_PAINTED = 0;
+function paintInvBookRows(append) {
   const rows = invBookMatches();
-  const shown = rows.slice(0, INVBOOK_RENDER_LIMIT);
-  const more = rows.length - shown.length;
-  const body = $('#ibBody');
-  if (body) {
-    body.innerHTML = rows.length ? invBookRowsHtml(shown)
-      : (INVBOOK_QUERY.trim()
-        ? `<tr><td colspan="11" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
-        : `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`);
-  }
-  const bar = $('#ibMore');
-  if (bar) {
-    bar.innerHTML = more > 0
-      ? `<button class="btn" onclick="INVBOOK_RENDER_LIMIT+=${INVBOOK_PAGE_SIZE};paintInvBookRows()">Покажи още (${more} от общо ${rows.length})</button>`
-      : (rows.length > INVBOOK_PAGE_SIZE
-        ? `<span class="hint">Показани са всички ${rows.length} реда. Печатът винаги съдържа цялата книга.</span>` : '');
-  }
+  INVBOOK_PAINTED = paintRowWindow({
+    body: '#ibBody', bar: '#ibMore', rows, limit: INVBOOK_RENDER_LIMIT,
+    painted: append ? INVBOOK_PAINTED : 0,
+    rowsHtml: invBookRowsHtml,
+    emptyHtml: INVBOOK_QUERY.trim()
+      ? `<tr><td colspan="11" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
+      : `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`,
+    moreHtml: (more, total) => more > 0
+      ? `<button class="btn" onclick="INVBOOK_RENDER_LIMIT+=${INVBOOK_PAGE_SIZE};paintInvBookRows(true)">Покажи още (${more} от общо ${total})</button>`
+      : (total > INVBOOK_PAGE_SIZE
+        ? `<span class="hint">Показани са всички ${total} реда. Печатът винаги съдържа цялата книга.</span>` : '')
+  });
 }
 window.paintInvBookRows = paintInvBookRows;
 /* Оставено достъпно и програмно (търсене от друго място): задава търсенето,

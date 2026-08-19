@@ -9,7 +9,29 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerReadersHandlers = require('../handlers/readers');
 const { ftsQuery, READERS_FTS_SETUP_SQL } = require('../search-fts');
-const { normalizeScanCode } = require('../security-utils');
+/* diffFields (main.js) и csvCell (security-utils.js) се ВЗИМАТ от продукцията.
+   Копието на diffFields връщаше обект вместо масив, а копието на csvCell не
+   неутрализираше водещите =/+/-/@ — двете заедно правеха теста сляп и за ЕГН
+   в одита, и за CSV injection. Вж. test/helpers/prod-values.js. */
+const { diffFields, csvCell, normalizeScanCode } = require('./helpers/prod-values.js');
+
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -21,7 +43,7 @@ function fakeIpcMain() {
 }
 
 function setup(overrides = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-readers-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-readers-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -44,16 +66,12 @@ function setup(overrides = {}) {
     maskReaderRow: (r) => r,
     maskReaderRows: (rows) => rows,
     preparePiiForWrite: (out, prev) => { piiCalls.prepareWrite.push({ out: Object.assign({}, out), prev }); },
-    diffFields: (oldObj, newObj, fields) => {
-      const d = {};
-      fields.forEach(f => { if (!oldObj || oldObj[f] !== newObj[f]) d[f] = [oldObj ? oldObj[f] : undefined, newObj[f]]; });
-      return d;
-    },
+    diffFields,
     checkRecordLimit: () => {},
     dialog: { showSaveDialog: async () => savedDialogs.saveDialog },
     getMainWindow: () => ({}),
     fs,
-    csvCell: (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"',
+    csvCell,
     normalizeScanCode
   }, overrides);
   registerReadersHandlers(ipcMain, deps);
@@ -91,14 +109,30 @@ test('readers:create calls checkRecordLimit before inserting (throws stop the in
   assert.equal(list.data.length, 0);
 });
 
-test('readers:update computes a diff via diffFields excluding egn/id_card_no, and logs it', async () => {
+/* Одитната следа НЕ бива да съдържа ЕГН/№ на лична карта: тя се чете от всеки
+   с достъп до програмата и се изнася заедно с резервните копия, докато самите
+   полета са под отделна защита (handlers/pdp.js). Дотук тази гаранция се
+   „проверяваше" срещу измислен diffFields, който връщаше ОБЕКТ {поле:[преди,
+   след]} — затова `diff.egn === undefined` беше вярно и когато ЕГН-то е вътре,
+   защото истинската продукция връща МАСИВ [{field,before,after}] и обектното
+   свойство .egn върху масив така или иначе е undefined. Сега се ползва
+   истинският diffFields, а твърдението гледа полето field. */
+test('readers:update изчислява diff през истинския diffFields и НИКОГА не вкарва ЕГН в одитната следа', async () => {
   const { ipcMain, auditLog } = setup();
   const id = (await ipcMain.invoke('readers:create', { name: 'Мария', phone: '111', egn: '1234567890' })).data;
   auditLog.length = 0;
   await ipcMain.invoke('readers:update', { id, name: 'Мария', phone: '222', egn: '0000000000' });
   assert.equal(auditLog.length, 1);
-  assert.ok(auditLog[0].diff.phone, 'phone change should appear in the diff');
-  assert.equal(auditLog[0].diff.egn, undefined, 'egn should never appear in the audit diff');
+  const diff = auditLog[0].diff;
+  assert.ok(Array.isArray(diff), 'diffFields в продукцията връща масив — ако тук дойде обект, тестът пази фалшификат');
+  const changed = diff.map(d => d.field);
+  assert.ok(changed.includes('phone'), 'смяната на телефон трябва да е в diff-а');
+  assert.equal(diff.find(d => d.field === 'phone').before, '111');
+  assert.equal(diff.find(d => d.field === 'phone').after, '222');
+  assert.ok(!changed.includes('egn'), 'ЕГН никога не влиза в одитната следа');
+  assert.ok(!changed.includes('id_card_no'), '№ на лична карта също не влиза');
+  // И най-грубата проверка: самата стойност не бива да се среща никъде в diff-а.
+  assert.ok(!JSON.stringify(diff).includes('0000000000'), 'ЕГН не бива да се появява дори като стойност');
 });
 
 test('readers:update calls preparePiiForWrite with the previous row for PII handling', async () => {
@@ -199,6 +233,29 @@ test('readers:exportCsv omits egn/id_card_no columns entirely (справоче�
   assert.doesNotMatch(raw, /1234567890/);
   assert.doesNotMatch(raw, /999888777/);
   assert.doesNotMatch(raw, /ЕГН/i);
+});
+
+/* CSV injection: Excel/LibreOffice изпълняват клетка, започваща с =, +, - или @,
+   като ФОРМУЛА. Име на читател „=SUM(1+1)" или бележка „=HYPERLINK(...)" е
+   достатъчно, за да се получи изпълним документ от обикновена справка на
+   библиотеката. Затова csvCell слага водещ апостроф. Дотук тестовете подаваха
+   СОБСТВЕН csvCell, който само вадеше кавичките — заради което мутацията
+   „readers:exportCsv спира да вика csvCell" оцеляваше незабелязано. */
+test('readers:exportCsv неутрализира формули в CSV (водещи =, +, -, @) и правилно вади кавичките', async () => {
+  const { ipcMain } = setup();
+  await ipcMain.invoke('readers:create', { name: '=SUM(1+1)', note: '+79', phone: '-1', address: '@cmd' });
+  await ipcMain.invoke('readers:create', { name: 'Кавички "вътре"', note: 'ред;с;точка и запетая' });
+  const result = await ipcMain.invoke('readers:exportCsv');
+  assert.equal(result.ok, true, result.error);
+  const raw = fs.readFileSync(result.data, 'utf8');
+
+  assert.ok(raw.includes('"\'=SUM(1+1)"'), 'формулата трябва да е обезвредена с водещ апостроф');
+  assert.ok(raw.includes('"\'+79"'), 'водещият + също е формула за Excel');
+  assert.ok(raw.includes('"\'-1"'), 'водещият - също');
+  assert.ok(raw.includes('"\'@cmd"'), 'водещият @ също');
+  assert.ok(!/(^|;)"[=+@]/m.test(raw), 'нито една клетка не бива да започва направо с =, + или @');
+  assert.ok(raw.includes('"Кавички ""вътре"""'), 'кавичките се удвояват по RFC 4180');
+  assert.ok(raw.includes('"ред;с;точка и запетая"'), 'разделителят вътре в клетка остава в кавички');
 });
 
 test('readers:exportCsv respects a cancelled save dialog', async () => {

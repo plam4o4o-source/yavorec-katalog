@@ -11,8 +11,26 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('../search-fts');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function freshDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-fts-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fts-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
@@ -94,7 +112,7 @@ test('readers_fts folds Cyrillic case on reader names the same way books_fts doe
 });
 
 test('a fresh DB (schema.sql alone, before the migration) has no FTS tables', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-fts-nomigration-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fts-nomigration-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
   const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name));

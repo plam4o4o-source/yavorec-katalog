@@ -9,7 +9,8 @@
 // не се чупят по-стари/директни извиквания на регистратора без тази зависимост
 // (напр. по-стари тестове, извикващи регистратора без нея).
 module.exports = function registerDashboardHandlers(ipcMain, deps) {
-  const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals } = deps;
+  const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
+    effectiveDaysLate } = deps;
 
   ipcMain.handle('dashboard:stats', () =>
     run(() => {
@@ -33,6 +34,13 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const activeReaders = db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n;
       const loansOpen = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n;
       const overdueRows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due LIMIT 7`).all();
+      /* Дните забава се смятат тук, със същата функция както в „Просрочени" и на
+         гишето (v2.3.0). Дотогава таблото ги смяташе в изгледа по сурови календарни
+         дни — и след като „Просрочени" мина на ефективните дни, едно и също заемане
+         показваше различен брой дни на двата екрана (проверено: 30 срещу 22). */
+      overdueRows.forEach(r => {
+        r.daysLate = effectiveDaysLate ? effectiveDaysLate(r.date_due, today()) : null;
+      });
       const overdueCount = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n;
       const acquiredYear = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE substr(register_date,1,4) = ?`).get(y).n;
       const deaccessionedYear = db.prepare(`

@@ -320,7 +320,11 @@ CREATE TABLE IF NOT EXISTS inventory_sessions (
   committee2      TEXT,
   committee3      TEXT,
   pool_size       INTEGER DEFAULT 0,
-  closed          INTEGER DEFAULT 0
+  closed          INTEGER DEFAULT 0,
+  -- Вид на проверката, записан при приключване: 'full' (пълна — несканираното се
+  -- смята за липсващо) или 'representative' (по чл. 40, т. 2 — протоколът важи само
+  -- за сканираното). NULL = сесия отпреди v2.3.0, за която видът не е записван.
+  mode            TEXT
 );
 CREATE TABLE IF NOT EXISTS inventory_session_scans (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -556,6 +560,9 @@ CREATE INDEX IF NOT EXISTS idx_books_title    ON books(title);
 CREATE INDEX IF NOT EXISTS idx_books_author   ON books(author);
 CREATE INDEX IF NOT EXISTS idx_books_category ON books(category_id);
 CREATE INDEX IF NOT EXISTS idx_books_status   ON books(status);
+-- „Постъпления" прави по две корелирани подзаявки на партида точно по това поле;
+-- без индекса измерено 1317 ms за 400 партиди при 15 000 книги, с него — 9 ms.
+CREATE INDEX IF NOT EXISTS idx_books_acquisition ON books(acquisition_id);
 CREATE INDEX IF NOT EXISTS idx_readers_name   ON readers(name);
 CREATE INDEX IF NOT EXISTS idx_loans_reader   ON loans(reader_id);
 CREATE INDEX IF NOT EXISTS idx_loans_book     ON loans(book_id);

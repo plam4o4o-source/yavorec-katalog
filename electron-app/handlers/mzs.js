@@ -40,13 +40,51 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       return tx.immediate();
     })
   );
+  /* № и датата се обновяват наистина. Формата ги показва като редактируеми (№ е
+     дори задължително поле), но дотук просто липсваха в SET: mzs:update връщаше
+     {ok:true}, а редът оставаше със стария номер — сгрешен номер в регистъра на
+     МЗС не можеше да се поправи по никакъв начин. Проверката за дубликат е
+     същата като в mzs:create (схемата няма UNIQUE(year, no)) и по същата причина
+     е в транзакция с .immediate(); тук самият ред се изключва от проверката.
+     Непратено/празно поле не изтрива стойността, за да продължат да работят и
+     частичните извиквания (само статус, само партньор). */
   ipcMain.handle('mzs:update', (e, m) =>
     run(() => {
-      getDb().prepare(`
-        UPDATE mzs_requests SET direction=@direction, partner=@partner, author=@author, title=@title, isbn=@isbn,
-          requester=@requester, status=@status, due_date=@due_date, note=@note WHERE id=@id
-      `).run(m);
-      logAudit('Редакция на МЗС заявка', '№ ' + m.no + ' — ' + m.title);
+      const db = getDb();
+      const cur = db.prepare('SELECT * FROM mzs_requests WHERE id = ?').get(m.id);
+      if (!cur) throw new Error('Заявката не е намерена.');
+      const given = (v) => v !== undefined && v !== null && v !== '';
+      const no = given(m.no) ? parseInt(m.no, 10) : cur.no;
+      if (!Number.isFinite(no) || no <= 0) throw new Error('Номерът на заявката трябва да е цяло положително число.');
+      const date = given(m.date) ? m.date : cur.date;
+      const year = yearOf(date);
+      const tx = db.transaction(() => {
+        if (db.prepare('SELECT 1 FROM mzs_requests WHERE year = ? AND no = ? AND id <> ?').get(year, no, m.id)) {
+          throw new Error('Заявка № ' + no + '/' + year + ' вече съществува — изберете друг номер.');
+        }
+        db.prepare(`
+          UPDATE mzs_requests SET no=@no, year=@year, date=@date, direction=@direction, partner=@partner,
+            author=@author, title=@title, isbn=@isbn, requester=@requester, status=@status,
+            due_date=@due_date, note=@note WHERE id=@id
+        `).run({
+          id: m.id, no, year, date,
+          direction: m.direction || cur.direction, partner: given(m.partner) ? m.partner : cur.partner,
+          /* Непратено (undefined) поле пази старата стойност; ИЗРИЧНО празно го
+             изчиства. Дотогава `m.author ?? null` триеше автора, ISBN, заявителя,
+             срока и бележката при всяко частично извикване — обратното на обещаното
+             два реда по-горе. Днес единственият извикващ праща цялата форма, тоест
+             не гърми, но това е капан за следващия бърз бутон „смени статуса". */
+          author: m.author !== undefined ? (m.author || null) : cur.author,
+          title: given(m.title) ? m.title : cur.title,
+          isbn: m.isbn !== undefined ? (m.isbn || null) : cur.isbn,
+          requester: m.requester !== undefined ? (m.requester || null) : cur.requester,
+          status: m.status || cur.status,
+          due_date: m.due_date !== undefined ? (m.due_date || null) : cur.due_date,
+          note: m.note !== undefined ? (m.note || null) : cur.note
+        });
+      });
+      tx.immediate();
+      logAudit('Редакция на МЗС заявка', '№ ' + no + ' — ' + (given(m.title) ? m.title : cur.title));
     })
   );
   ipcMain.handle('mzs:delete', (e, id) => run(() => getDb().prepare('DELETE FROM mzs_requests WHERE id = ?').run(id)));

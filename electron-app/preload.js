@@ -58,7 +58,12 @@ contextBridge.exposeInMainWorld('api', {
     // Криптирано ли е днешното автоматично копие и ако не — защо. Показва се в
     // „Настройки“ → „Резервно копие“ (v2.2.1); дотогава предупреждението стигаше
     // до библиотекаря само през одитната следа.
-    autoStatus: invoke('backup:autoStatus')
+    autoStatus: invoke('backup:autoStatus'),
+    /* Дневното копие се прекриптира в main процеса — при отключване и при СМЯНА
+       на паролата — и това може да се провали. Дотук резултатът стигаше само до
+       console.error. Сега main изпраща известие, а „Настройки“ показва тост и
+       опреснява картата (същият модел като app.onUpdateStatus). */
+    onAutoStatus: (cb) => ipcRenderer.on('backup:autoStatusChanged', (e, data) => cb(data))
   },
   limits: {
     usage: invoke('limits:usage'),

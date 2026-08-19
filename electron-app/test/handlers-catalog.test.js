@@ -9,6 +9,31 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const registerCatalogHandlers = require('../handlers/catalog');
+/* BOOK_SELECT и csvCell се ВЗИМАТ от продукцията, не се преписват. Тук копията
+   бяха разминати по двата начина, които мутационният одит наказа:
+   `1 AS available` беше закована константа (тоест всеки документ излизаше
+   наличен, независимо от бройките и статуса), а копието на csvCell не
+   неутрализираше водещите =/+/-/@, заради което мутацията „exportCsv спира да
+   вика csvCell" оцеляваше. Вж. test/helpers/prod-values.js. */
+const { BOOK_SELECT, csvCell } = require('./helpers/prod-values.js');
+
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
 
 function fakeIpcMain() {
   const handlers = new Map();
@@ -40,7 +65,7 @@ function makeExecFile(overrides = {}) {
 }
 
 function setup({ execFileOverrides } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-catalog-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-catalog-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -65,10 +90,8 @@ function setup({ execFileOverrides } = {}) {
     getMainWindow: () => ({}),
     fs, path,
     execFile: makeExecFile(execFileOverrides),
-    BOOK_SELECT: `
-      SELECT b.*, 1 AS available FROM books b
-    `,
-    csvCell: (x) => '"' + String(x ?? '').replace(/"/g, '""') + '"',
+    BOOK_SELECT,
+    csvCell,
     flushCatalogWrite: () => { flushCalls.push(1); return flushResult; },
     buildCatalogPayload: () => ({
       library: 'Читалище X', place: 'Село Y', generated: '2026-08-02',

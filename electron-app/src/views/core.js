@@ -124,6 +124,54 @@ function flashRow(sel) {
 }
 window.flashRow = flashRow;
 
+/* ---------------- Прозоречен рендер на таблици (обща помощна функция, v2.3.0) ----------------
+   ЗАЩО обща: ограничение на изчертаваните редове имаха само три екрана —
+   „Книги“, „Читатели“ и „Инвентарна книга“ — всеки със собствено копие на един
+   и същ код, а останалите 33 екрана чертаят целия резултат наведнъж. Тук е
+   общият вариант, за да може всеки следващ екран да го ползва наготово, вместо
+   да преоткрива модела (и неговите капани) за четвърти път.
+
+   ЗАЩО insertAdjacentHTML вместо innerHTML: и трите екрана правеха
+   rows.slice(0, LIMIT) и презаписваха ЦЕЛИЯ <tbody> при всяко „Покажи още“ —
+   тоест изчертаваха наново и вече показаните редове. Работата расте
+   квадратично: измерено в „Книги“ при 15 000 записа, 49 натискания от 300 до
+   15 000 реда отнеха 112 462 ms, като първите натискания бяха ~250 ms, а
+   последните — 5 691 ms всяко. Добавянето само на новата порция прави всяко
+   натискане еднакво евтино.
+
+   RENDER_PAGE_SIZE е общият размер на порцията (300 реда — толкова, колкото
+   вече ползват трите екрана).
+
+   o = { body, bar, rows, limit, painted, rowsHtml, emptyHtml, moreHtml }
+     body/bar  — CSS селектор или елемент; bar е лентата с „Покажи още“
+     rows      — ПЪЛНИЯТ (филтриран) списък; limit — колко от него да се видят
+     painted   — колко реда вече стоят в тялото; 0 (по подразбиране) = пълен рендер
+     rowsHtml(part) — HTML за подадените редове; emptyHtml — при нула редове
+     moreHtml(more, total) — HTML на лентата отдолу
+   Връща новия брой изчертани редове — извикващият го пази за следващия път. */
+const RENDER_PAGE_SIZE = 300;
+function paintRowWindow(o) {
+  const body = typeof o.body === 'string' ? $(o.body) : o.body;
+  const bar = typeof o.bar === 'string' ? $(o.bar) : o.bar;
+  const rows = o.rows || [];
+  const limit = o.limit == null ? rows.length : Math.max(0, o.limit);
+  const shown = Math.min(limit, rows.length);
+  const painted = Math.max(0, o.painted || 0);
+  /* Добавя се само когато в тялото наистина стоят точно тези `painted` реда
+     (body.children.length === painted). Всяко друго положение — ново търсене,
+     сменен филтър, друга подредба, прясно пресъздадена таблица — е пълен
+     рендер: иначе към резултата от стария филтър биха се долепили редове от
+     новия и таблицата би показала смес, която не отговаря на нищо. */
+  const append = painted > 0 && shown > painted && body && body.children.length === painted;
+  if (body) {
+    if (append) body.insertAdjacentHTML('beforeend', o.rowsHtml(rows.slice(painted, shown)));
+    else body.innerHTML = shown ? o.rowsHtml(rows.slice(0, shown)) : (o.emptyHtml != null ? o.emptyHtml : o.rowsHtml([]));
+  }
+  if (bar) bar.innerHTML = o.moreHtml ? o.moreHtml(rows.length - shown, rows.length) : '';
+  return shown;
+}
+window.paintRowWindow = paintRowWindow;
+
 /* Звуков сигнал при сканиране (v1.69.0) — кратък висок тон при успех, двоен
    нисък при отказ. При баркод четец очите са върху книгата, не върху екрана —
    звукът е обратната връзка, която реално се забелязва (както в касовите
@@ -225,7 +273,13 @@ document.addEventListener('keydown', e => {
    „Печат“ на съответния раздел. */
 window.addEventListener('beforeprint', () => {
   const pa = $('#printArea');
-  if (pa && !pa.innerHTML.trim()) {
+  if (!pa) return;
+  /* От v2.3.0 doPrint() държи документа като низ и пълни #printArea чак при
+     „Печат…“ (виж PRINT_HTML по-долу). Ctrl+P при ОТВОРЕН преглед заобикаля
+     бутона — затова документът се вкарва тук, иначе тъкмо подготвеният
+     документ би излязъл като празна страница. */
+  if (!pa.innerHTML.trim() && PRINT_HTML) ppFillPrintArea();
+  if (!pa.innerHTML.trim()) {
     toast('Тук няма подготвен документ за печат — ползвайте бутона „Печат“ в съответния раздел.', 'err');
   }
 });
@@ -574,9 +628,32 @@ function ppConfirmed() {
   // Грешка във вписването не бива да спира самия печат — той вече е тръгнал.
   if (cb) { try { cb(); } catch (e) { console.error(e); } }
 }
+/* Печатният документ се ПАЗИ като низ и влиза в #printArea чак когато печатът
+   наистина тръгне (v2.3.0). Дотогава doPrint() слагаше едно и също HTML на ДВЕ
+   места наведнъж: в #printArea (скрит на екрана, виждан само от @media print —
+   виж style.css) и в #ppSheet (листът на прегледа). При „Баркод етикети →
+   Всички“ с 14 750 етикета това са 63,81 МБ HTML, разпарсени ДВА пъти — измерено
+   в Chromium: 2 242 510 DOM възела, 282 МБ JS heap и 37 044 ms замръзнал
+   прозорец. Втората половина от тази работа е чиста загуба: докато прегледът е
+   отворен, никой не печата, а бутонът „Отказ“ е равноправен изход. */
+let PRINT_HTML = '';
+/* Пълни #printArea непосредствено преди window.print()/printToPDF — това е
+   единственото място, което печатният изглед показва. */
+function ppFillPrintArea() {
+  const area = $('#printArea');
+  if (area) area.innerHTML = PRINT_HTML;
+}
+/* Освобождава паметта на двете тежки места. Без това #printArea оставаше пълен
+   до затварянето на програмата: измерено СЛЕД ppClose() и връщане на Табло —
+   69,65 МБ / 2 243 016 възела, които вече никой не гледа и които браузърът няма
+   как да събере, защото са живи DOM възли. */
+function ppFreeDom() {
+  const area = $('#printArea'); if (area) area.innerHTML = '';
+  const sheet = $('#ppSheet'); if (sheet) sheet.innerHTML = '';
+}
 function doPrint(html, docName, onConfirmed) {
   PRINT_DONE_CB = typeof onConfirmed === 'function' ? onConfirmed : null;
-  $('#printArea').innerHTML = html;
+  PRINT_HTML = html;
   PRINT_JOB_NAME = safeFileName(docName || PRINT_DOC_NAME);
   const o = PRINT_PAGE_OPTS || {};
   const sheet = $('#ppSheet');
@@ -599,8 +676,15 @@ function doPrint(html, docName, onConfirmed) {
   // като слоят е видим, защото дотогава clientWidth на .ppScroll е 0.
   requestAnimationFrame(() => ppZoom('fit'));
 }
-/* „Отказ“ (и Esc) отменя отложеното действие — печат не е бил направен. */
-function ppClose() { PRINT_DONE_CB = null; $('#printPreview').classList.remove('on'); }
+/* „Отказ“ (и Esc) отменя отложеното действие — печат не е бил направен — и
+   освобождава паметта на прегледа. Затвореният преглед няма причина да държи
+   десетки мегабайта DOM до края на работния ден. */
+function ppClose() {
+  PRINT_DONE_CB = null;
+  PRINT_HTML = '';
+  $('#printPreview').classList.remove('on');
+  ppFreeDom();
+}
 window.ppClose = ppClose;
 /* Мащаб на прегледа (v1.72.0). Ползва се CSS свойството zoom (Chromium-only,
    но програмата Е Chromium) вместо transform:scale — zoom участва в подредбата,
@@ -632,12 +716,20 @@ function ppZoom(dir) {
 window.ppZoom = ppZoom;
 function ppPrint() {
   ppConfirmed(); // преди ppClose(), който изхвърля отложеното действие
+  const html = PRINT_HTML; // ppClose() изчиства и низа, и двата DOM контейнера
   ppClose();
+  // Едва тук документът влиза в DOM — и то само веднъж, вече без листа на
+  // прегледа, който ppClose() изпразни. Пикът в паметта е ЕДНО копие вместо две.
+  PRINT_HTML = html;
+  ppFillPrintArea();
   if (PRINT_JOB_NAME) document.title = PRINT_JOB_NAME;
   requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
     window.print();
     // Връща се след диалога; в Electron window.print() блокира до затварянето му.
     document.title = APP_TITLE;
+    // Отпечатаното вече не е нужно на никого — освобождава се веднага.
+    PRINT_HTML = '';
+    ppFreeDom();
   }, 150)));
 }
 window.ppPrint = ppPrint;
@@ -645,11 +737,14 @@ window.ppPrint = ppPrint;
    системния диалог (който на Windows не визуализира Electron съдържание).
    printToPDF в главния процес минава през същия печатен рендер (@media
    print + @page от setPrintPage), т.е. PDF-ът е точно каквото би отпечатал
-   window.print(). #printArea вече е попълнен от doPrint(); слоят на
-   прегледа остава отворен, но в печатния изглед е скрит (visibility). */
+   window.print(). Слоят на прегледа остава отворен, но в печатния изглед е
+   скрит (visibility). От v2.3.0 #printArea НЕ се пълни от doPrint(), а тук —
+   непосредствено преди самото записване — и се изпразва веднага след него,
+   независимо от изхода (отказ от диалога, грешка при запис). */
 async function ppSavePdf() {
   const btn = $('#ppPdfBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Запазване…'; }
+  ppFillPrintArea();
   try {
     const res = await window.api.print.savePdf({ fileName: PRINT_JOB_NAME || 'Документ' });
     if (!res.ok) {
@@ -661,6 +756,9 @@ async function ppSavePdf() {
     ppClose();
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Запази PDF…'; }
+    // При успех ppClose() вече е изчистил; при отказ/грешка прегледът остава
+    // отворен, но скритото копие в #printArea няма за какво да стои.
+    const area = $('#printArea'); if (area) area.innerHTML = '';
   }
 }
 window.ppSavePdf = ppSavePdf;
@@ -675,6 +773,60 @@ function labelSize(kind) {
 }
 const LABEL_DOC_NAME = { fund: 'Баркод етикети за фонда', sig: 'Етикети за сигнатура',
   card: 'Читателски карти' };
+/* ---------- Побиране на колоните в A4 листа (v2.3.0) ----------
+   „Колони на листа“ (lbl_cols) е ЕДНА обща настройка за трите вида етикети, а
+   те са с много различна ширина: етикет за фонда 40 мм, за сигнатура 25 мм,
+   читателска карта 90 мм. С фабричните стойности (lbl_cols=3, lbl_gap=3,
+   lbl_margin=8) три читателски карти искат 3×90 + 2×3 = 276 мм при налични
+   210 − 2×8 = 194 мм. Chromium не се оплаква — просто реже всяка трета карта
+   вертикално и библиотекарят го открива чак върху отпечатания лист.
+   Затова колоните се СМАЛЯВАТ до колкото наистина се събират. */
+const A4_W_MM = 210, A4_H_MM = 297;
+function fitLabelCols(want, w, gap, marg) {
+  const avail = A4_W_MM - 2 * marg;
+  // cols×w + (cols−1)×gap ≤ avail  ⇔  cols ≤ (avail + gap) / (w + gap)
+  const fit = Math.floor((avail + gap) / (w + gap));
+  return Math.max(1, Math.min(want, fit));
+}
+/* Броят етикети в подадения HTML. И трите генератора (lblCard, sigLblCard,
+   readerCardHtml) започват всеки етикет с <div class="lbl…>, затова броенето не
+   изисква callers-ите да подават число — така таванът важи за ВСИЧКИ печатни
+   пътища за етикети, включително „Печат на диапазон“ с огромен диапазон. */
+function labelCount(html) {
+  return (String(html || '').match(/<div class="lbl[ "]/g) || []).length;
+}
+/* Праг, над който се иска изрично потвърждение (v2.3.0).
+   Избран е 500, защото: (1) с фабричните настройки на A4 се събират 3×8 = 24
+   етикета за фонда на лист, т.е. 500 етикета са ~21 листа — толкова един
+   библиотекар реално обработва (реже и лепи) в една сесия; (2) измерено, един
+   етикет е ~4,3 КБ HTML, значи 500 етикета са ~2,2 МБ и се изчертават под
+   секунда, докато „Всички“ при 14 750 етикета са 63,81 МБ и 37 044 ms
+   замръзнал прозорец. Прагът не е забрана — цялата библиотека понякога
+   наистина трябва да се преетикетира — а информирано решение с точни числа. */
+const LABEL_CONFIRM_OVER = 500;
+/* Колко етикета се събират на един A4 лист при текущите настройки — за да е
+   съобщението с истински брой листове, а не с кръгло предположение. */
+function labelsPerSheet(w, h, gap, marg, cols) {
+  const rows = Math.max(1, Math.floor((A4_H_MM - 2 * marg + gap) / (h + gap)));
+  return Math.max(1, cols * rows);
+}
+function confirmManyLabels(n, kind, perSheet) {
+  const what = (LABEL_DOC_NAME[kind] || 'Етикети').toLowerCase();
+  // При ролка perSheet е 1 — тогава „листа A4" е безсмислица и числото подвежда.
+  const roll = perSheet <= 1;
+  const sheets = Math.ceil(n / perSheet);
+  return confirm(
+    'ПЕЧАТ НА ' + n + ' ЕТИКЕТА (' + what + ')\n\n'
+    + (roll ? 'Печатът е на ролка — това са ' + n + ' етикета един след друг.\n\n'
+            : 'Това са около ' + sheets + ' листа A4 при сегашния формат.\n\n')
+    + 'Подготовката на толкова етикети наведнъж запълва паметта и прозорецът остава '
+    + 'без отговор, докато свърши — при целия фонд това са десетки секунди.\n\n'
+    + (kind === 'card'
+      ? 'По-добре е картите да се печатат на партиди — напр. само новозаписаните читатели.\n\n'
+      : 'По-добре е етикетите да се печатат на партиди през полетата „От инвентарен №“ и '
+        + '„До инвентарен №“ — по няколкостотин наведнъж.\n\n')
+    + 'Да продължа ли въпреки това?');
+}
 function printLabelSheet(cardsHtml, kind) {
   const s = SETTINGS_CACHE || {};
   const { w, h } = labelSize(kind);
@@ -682,6 +834,13 @@ function printLabelSheet(cardsHtml, kind) {
   const gap = (s.lbl_gap != null ? +s.lbl_gap : 3);
   const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
   const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
+  const n = labelCount(cardsHtml);
+  if (n > LABEL_CONFIRM_OVER) {
+    const perSheet = s.lbl_mode === 'roll'
+      ? 1 // ролка: един етикет на страница
+      : labelsPerSheet(w, h, gap, marg, fitLabelCols(Math.max(1, Math.min(8, +s.lbl_cols || 3)), w, gap, marg));
+    if (!confirmManyLabels(n, kind, perSheet)) return false;
+  }
   if (s.lbl_mode === 'roll') {
     // Един етикет на страница с точния размер на ролката. „Поле на листа“ важи
     // само за A4 (виж else по-долу) — тук НЕ се изважда от размера на етикета:
@@ -700,7 +859,25 @@ function printLabelSheet(cardsHtml, kind) {
   } else {
     // A4 лист: колоните и разстоянията се задават от настройките, а всеки етикет
     // получава точната си височина, за да съвпадне с готовите листове с етикети.
-    const cols = Math.max(1, Math.min(8, +s.lbl_cols || 3));
+    const want = Math.max(1, Math.min(8, +s.lbl_cols || 3));
+    const cols = fitLabelCols(want, w, gap, marg);
+    /* Редът на двете съобщения има значение. Самият етикет, по-широк от
+       печатаемата площ, е ИСТИНСКИЯТ проблем и се проверява ПРЪВ: при него
+       fitLabelCols връща 1, тоест `cols < want` също е вярно, и ако намаляването
+       се обяви първо, библиотекарят получава успокоителното „колоните са намалени,
+       готово", а етикетът пак ще излезе отрязан. */
+    if (w > A4_W_MM - 2 * marg) {
+      toast('Етикетът е широк ' + w + ' мм, а на A4 при поле ' + marg + ' мм остават '
+        + (A4_W_MM - 2 * marg) + ' мм — ще се отреже при печат. Намалете ширината или полето.', 'err');
+    } else if (cols < want) {
+      // Мълчаливото рязане е по-лошо от намаляването на колоните: отпечатаният
+      // лист изглежда наред до момента, в който се види, че всяка N-та карта е
+      // без десен край. Затова библиотекарят научава защо е станало и как да го
+      // промени (по-малко поле, по-тесен етикет или изрично по-малко колони).
+      toast('Колоните са намалени от ' + want + ' на ' + cols + ' — при ширина ' + w
+        + ' мм, разстояние ' + gap + ' мм и поле ' + marg + ' мм на A4 се събират '
+        + cols + '. Иначе последната колона щеше да се отреже при печат.');
+    }
     setPrintPage({
       name: docName, landscape: false, margin: marg + 'mm',
       extraCss: `.lblsheet{display:grid;grid-template-columns:repeat(${cols},${w}mm);gap:${gap}mm;justify-content:start}` +
@@ -709,7 +886,9 @@ function printLabelSheet(cardsHtml, kind) {
     });
   }
   doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
+  return true;
 }
+window.printLabelSheet = printLabelSheet;
 /* Етикет за фонда: наименование на библиотеката, населено място, баркод (Code 39)
    и инвентарният номер под баркода.
    Заглавната част (v1.71.1, по изрична заявка): когато „Организация“ е

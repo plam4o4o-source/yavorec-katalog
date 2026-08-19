@@ -112,7 +112,11 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price);
           if (b.status !== 'отчислен') db.prepare("UPDATE books SET status='липсващ', status_date=date('now') WHERE id=?").run(b.id);
         });
-        db.prepare('UPDATE inventory_sessions SET closed = 1 WHERE id = ?').run(sessionId);
+        /* Видът се ЗАПИСВА в базата (v2.3.0). Дотогава оставаше само в отговора към
+           прозореца, затова в списъка приключена представителна проверка с 0 липсващи
+           изглеждаше точно като пълна с 0 липсващи — а пред проверяващ от регионалната
+           библиотека няма как да се докаже кое от двете е било. */
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ? WHERE id = ?').run(mode, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
           ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();

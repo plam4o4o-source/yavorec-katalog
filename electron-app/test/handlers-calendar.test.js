@@ -12,6 +12,24 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const registerCalendarHandlers = require('../handlers/calendar');
 
+
+/* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
+   фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
+   при пълен диск поредицата започва да пада лавинообразно на съвсем несвързани
+   места (# pass 302 / # fail 345) и прати диагностиката по грешна следа.
+   mkTmpDir() запомня папката, test.after() я трие. */
+const tmpDirs = [];
+function mkTmpDir(prefixPath) {
+  const d = fs.mkdtempSync(prefixPath);
+  tmpDirs.push(d);
+  return d;
+}
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* нищо не зависи от това */ }
+  }
+});
+
 function fakeIpcMain() {
   const handlers = new Map();
   return {
@@ -22,7 +40,7 @@ function fakeIpcMain() {
 }
 
 function setup() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-calendar-test-'));
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-calendar-test-'));
   const db = new Database(path.join(dir, 'library.db'));
   db.pragma('foreign_keys = ON');
   const schemaSql = fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8');
@@ -156,4 +174,105 @@ test('датите не зависят от часовата зона на ко�
   } finally {
     if (original === undefined) delete process.env.TZ; else process.env.TZ = original;
   }
+});
+
+/* ===========================================================================
+   Границите на интервала (a, b] и датите-ръбове.
+   ЗАЩО: closedDaysBetween брои затворените дни в интервала (a, b] — денят на
+   ПАДЕЖА не се брои, денят на ВРЪЩАНЕТО се брои. Това не е стилистичен избор:
+   така резултатът съответства едно към едно на „дни забава" на повикващия код
+   (наказание и обезщетение). Мутационен одит смени интервала на [a, b] и
+   поредицата остана зелена — а последицата е, че обезщетението и наказанието
+   се разминават с цял ден за всеки читател, върнал книга след затворен ден.
+
+   Отделно: досегашните тестове по дати ползваха изключително 01–04.08.2026.
+   Липсваха напълно есенната смяна на часа (25.10.2026 — 25-часов ден),
+   високосният ден (29.02) и годишната граница 31.12 → 01.01. И трите са
+   класически места, където сметки с дати мълчаливо се разминават с ден.
+   =========================================================================== */
+
+function closeDay(db, date, reason) {
+  db.prepare('INSERT OR IGNORE INTO calendar_closed (date, reason) VALUES (?, ?)').run(date, reason || 'тест');
+}
+// Само делнични дни за работни — за да е ясно кой ден защо е затворен.
+function workWeekdays(db) {
+  db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run('1,2,3,4,5');
+}
+
+test('closedDaysBetween: денят на падежа НЕ се брои, денят на връщане СЕ брои — интервалът е (a, b]', async () => {
+  const { db, returned } = setup();
+  db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run('0,1,2,3,4,5,6'); // всички дни работни
+  // Затваряме точно двата края и един ден по средата.
+  closeDay(db, '2026-08-10', 'краят a — НЕ бива да се брои');
+  closeDay(db, '2026-08-11', 'по средата — брои се');
+  closeDay(db, '2026-08-12', 'краят b — брои се');
+
+  assert.equal(returned.closedDaysBetween('2026-08-10', '2026-08-12'), 2,
+    'от трите затворени дни се броят само 11 и 12 — 10-и е денят на падежа');
+  assert.equal(returned.closedDaysBetween('2026-08-09', '2026-08-10'), 1,
+    'самият 10-и се брои, когато е ДЕНЯТ НА ВРЪЩАНЕ, а не денят на падежа');
+  assert.equal(returned.closedDaysBetween('2026-08-11', '2026-08-11'), 0, 'a === b дава 0');
+  assert.equal(returned.closedDaysBetween('2026-08-12', '2026-08-10'), 0, 'обърнат интервал дава 0');
+});
+
+test('есенна смяна на часа: 25.10.2026 е 25-часов ден и не отмества нито един резултат', async () => {
+  /* В България лятното часово време свършва в последната неделя на октомври
+     (25.10.2026) — денят има 25 часа. Сметка с денонощия по 864e5 ms или с
+     МЕСТНА полунощ там се разминава с един ден. Календарът смята изцяло в UTC,
+     затова тук се проверява именно това: резултатът не зависи от смяната. */
+  const { db, returned } = setup();
+  workWeekdays(db);
+  closeDay(db, '2026-10-26', 'понеделник след смяната на часа');
+
+  // 24–25.10.2026 са събота и неделя; 26-и е затворен понеделник.
+  assert.equal(returned.isWorkDay('2026-10-23'), true, 'петък преди смяната е работен');
+  assert.equal(returned.isWorkDay('2026-10-24'), false, 'събота');
+  assert.equal(returned.isWorkDay('2026-10-25'), false, 'неделята на смяната на часа');
+  assert.equal(returned.isWorkDay('2026-10-26'), false, 'затворен понеделник');
+  assert.equal(returned.nextWorkDay('2026-10-24'), '2026-10-27',
+    'първият работен ден след уикенда и затворения понеделник е вторник 27-и');
+  assert.equal(returned.closedDaysBetween('2026-10-23', '2026-10-27'), 3,
+    'събота, неделя (25-часовият ден) и затворения понеделник — точно три');
+});
+
+test('пролетна смяна на часа: 29.03.2026 е 23-часов ден и също не мърда резултата', async () => {
+  const { db, returned } = setup();
+  workWeekdays(db);
+  assert.equal(returned.isWorkDay('2026-03-29'), false, 'неделя, 23-часов ден');
+  assert.equal(returned.nextWorkDay('2026-03-28'), '2026-03-30', 'събота → понеделник, не назад в петък');
+  assert.equal(returned.closedDaysBetween('2026-03-27', '2026-03-30'), 2, 'събота и неделята на смяната');
+});
+
+test('високосен ден: 29.02.2028 се брои като истински ден', async () => {
+  const { db, returned } = setup();
+  db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run('0,1,2,3,4,5,6');
+  closeDay(db, '2028-02-29', 'високосен ден, затворено');
+  assert.equal(returned.isWorkDay('2028-02-29'), false);
+  assert.equal(returned.nextWorkDay('2028-02-29'), '2028-03-01', '29 февруари → 1 март');
+  assert.equal(returned.closedDaysBetween('2028-02-28', '2028-03-01'), 1,
+    'между 28.02 и 01.03 във високосна година има точно един ден — 29-и');
+  // За контраст: 2026 НЕ е високосна и 28.02 се следва направо от 01.03.
+  assert.equal(returned.closedDaysBetween('2026-02-28', '2026-03-01'), 0);
+});
+
+test('годишна граница: 31.12 → 01.01 не губи и не добавя ден', async () => {
+  const { db, returned } = setup();
+  db.prepare('UPDATE settings SET work_days = ? WHERE id = 1').run('0,1,2,3,4,5,6');
+  closeDay(db, '2026-12-31', 'Нова година — затворено');
+  closeDay(db, '2027-01-01', 'Нова година — затворено');
+
+  assert.equal(returned.nextWorkDay('2026-12-31'), '2027-01-02',
+    'прескачането на границата на годината трябва да върне дата от НОВАТА година');
+  assert.equal(returned.closedDaysBetween('2026-12-30', '2027-01-01'), 2,
+    '31 декември и 1 януари — по един ден от всяка година');
+  assert.equal(returned.closedDaysBetween('2026-12-31', '2027-01-01'), 1,
+    'денят на падежа (31-и) не се брои и през границата на годината');
+});
+
+test('дълъг интервал през годишната граница брои всички уикенди правилно', async () => {
+  const { db, returned } = setup();
+  workWeekdays(db);
+  // 2026-12-25 (петък) → 2027-01-08 (петък): уикендите са 26–27.12, 2–3.01 и 9–10.01(извън).
+  assert.equal(returned.closedDaysBetween('2026-12-25', '2027-01-08'), 4,
+    'два уикенда по два дни в интервал, който пресича 31 декември');
 });
