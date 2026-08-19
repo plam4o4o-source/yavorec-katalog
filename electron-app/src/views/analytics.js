@@ -33,9 +33,57 @@ async function renderAnalytics() {
       <button class="btn" onclick="printAnalytics()">Печат / PDF</button>
     </div>
 
-    <div id="anlList">${analyticsListHtml(rows)}</div>`;
+    <div id="anlList"></div>`;
+  // Списъкът се пълни през drawAnalyticsList(), не направо в шаблона — така
+  // пълният рендер и търсенето минават по ЕДИН и същ път и не могат да се
+  // разминат в това колко реда стоят изчертани (ANL_PAINTED).
+  drawAnalyticsList(rows);
 }
-/* Броячите и таблицата — единственото, което зависи от търсенето. */
+/* Прозоречен рендер (v2.3.1) по общия модел от core.js (paintRowWindow/
+   RENDER_PAGE_SIZE). ЗАЩО тук: краеведският масив е ЕДИНСТВЕНАТА част от базата,
+   която само расте — описанията не се отчисляват като книгите и не се връщат
+   като заеманията, а всяка година прибавя нови статии от местния печат. Измерено
+   на реалистичен обем (jsdom върху истинския изглед, 4 000 описания): 4 000
+   изчертани реда и 2 275 КБ разметка в #anlList, при това с ДВА бутона на ред.
+   Разделът вече има търсачка и филтър по година — там пълният набор е нужен на
+   БРОЯЧИТЕ, не на очите, затова kpi() продължава да брои по целия резултат. */
+const ANL_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let ANL_RENDER_LIMIT = ANL_PAGE_SIZE;
+let ANL_PAINTED = 0;
+function analyticsRowsHtml(rows) {
+  return rows.map(a => `<tr>
+        <td><b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}
+          ${a.author ? `<br><span class="hint">${esc(a.author)}</span>` : ''}
+          ${a.is_local ? '<span class="tag tagLocal">краеведски</span>' : ''}</td>
+        <td class="hint">${esc(analyticSource(a))}</td>
+        <td class="num">${esc(a.year || '')}</td>
+        <td class="num">${esc(a.pages || '')}</td>
+        <td><button class="btn sm" onclick="analyticForm(${a.id})">Редакция</button>
+            <button class="btn sm dgr" onclick="analyticDelete(${a.id})">Изтрий</button></td></tr>`).join('');
+}
+/* Броячът се пририсува заедно с редовете (стои в лентата, която paintRowWindow
+   обновява) и казва „показани са N от M“ — иначе скъсеният списък изглежда
+   пълен и краеведът би заключил, че по-старите му описания са изчезнали. */
+function analyticsMoreHtml(more, total) {
+  const shown = total - more;
+  return `<span class="hint">Показани са ${shown} от ${total} описания.</span>`
+    + (more > 0 ? ` <button class="btn" onclick="ANL_RENDER_LIMIT+=${ANL_PAGE_SIZE};paintAnalyticsRows(true)">Покажи още (${more} от общо ${total})</button>` : '');
+}
+/* append=true идва САМО от бутона „Покажи още“ и добавя единствено новата
+   порция. Търсене, смяна на година и отметката „само краеведски“ остават пълен
+   рендер — там резултатът е ДРУГ набор и добавяне би долепило новите редове
+   към старите (виж paintRowWindow в core.js). */
+function paintAnalyticsRows(append) {
+  ANL_PAINTED = paintRowWindow({
+    body: '#anlBody', bar: '#anlMore', rows: window._ANL_LIST || [], limit: ANL_RENDER_LIMIT,
+    painted: append ? ANL_PAINTED : 0,
+    rowsHtml: analyticsRowsHtml, moreHtml: analyticsMoreHtml
+  });
+}
+window.paintAnalyticsRows = paintAnalyticsRows;
+/* Броячите и таблицата — единственото, което зависи от търсенето. Редовете НЕ се
+   вписват тук: тялото се оставя празно и се пълни от paintAnalyticsRows(), за да
+   има едно-единствено място, което знае колко реда стоят вътре. */
 function analyticsListHtml(rows) {
   const total = rows.length, local = rows.filter(r => r.is_local).length;
   return `<div class="kpis">
@@ -45,28 +93,31 @@ function analyticsListHtml(rows) {
 
     ${rows.length ? `<div class="wrap"><table class="ledger"><thead><tr>
       <th>Автор и заглавие</th><th style="width:30%">Източник</th><th style="width:70px">Год.</th>
-      <th style="width:90px">Стр.</th><th style="width:130px"></th></tr></thead><tbody>
-      ${rows.map(a => `<tr>
-        <td><b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}
-          ${a.author ? `<br><span class="hint">${esc(a.author)}</span>` : ''}
-          ${a.is_local ? '<span class="tag tagLocal">краеведски</span>' : ''}</td>
-        <td class="hint">${esc(analyticSource(a))}</td>
-        <td class="num">${esc(a.year || '')}</td>
-        <td class="num">${esc(a.pages || '')}</td>
-        <td><button class="btn sm" onclick="analyticForm(${a.id})">Редакция</button>
-            <button class="btn sm dgr" onclick="analyticDelete(${a.id})">Изтрий</button></td></tr>`).join('')}
-      </tbody></table></div>`
+      <th style="width:90px">Стр.</th><th style="width:130px"></th></tr></thead>
+      <tbody id="anlBody"></tbody></table></div>
+      <div class="toolbar" id="anlMore" style="justify-content:center"></div>`
     : `<div class="empty"><h3>Няма описани статии</h3>
         <p>Започнете от най-близкото: статии за селото в областния вестник, материали в читалищни
         сборници, глави от краеведски книги.</p></div>`}`;
+}
+/* Изчертава шушулката (броячи + празна таблица) и веднага след това първата
+   порция редове. Всяко ново търсене/филтър започва пак от първата порция —
+   резултатът е друг и старият прозорец няма смисъл. */
+function drawAnalyticsList(rows) {
+  window._ANL_LIST = rows;
+  ANL_RENDER_LIMIT = ANL_PAGE_SIZE;
+  const box = $('#anlList');
+  if (!box) return false;
+  box.innerHTML = analyticsListHtml(rows);
+  paintAnalyticsRows(false);
+  return true;
 }
 /* Търсенето пипа само #anlList — полето за търсене НЕ се пресъздава, иначе
    курсорът изчезва при всяка пауза над 300 ms (моделът от inv-book.js). */
 async function refreshAnalytics() {
   const rows = await call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL }));
   if (!rows) return;
-  const box = $('#anlList');
-  if (box) box.innerHTML = analyticsListHtml(rows); else renderAnalytics();
+  if (!drawAnalyticsList(rows)) renderAnalytics();
 }
 window.refreshAnalytics = refreshAnalytics;
 function analyticSource(a) {

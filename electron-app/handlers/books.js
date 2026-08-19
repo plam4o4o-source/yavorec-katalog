@@ -23,6 +23,34 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     LEFT JOIN categories c ON c.id = b.category_id
     LEFT JOIN inventory i ON i.book_id = b.id
   `;
+  /* Лека проекция за СПИСЪЦИТЕ (v2.3.1). `b.*` мъкне и анотацията, ключовите думи,
+     забележката и адреса на корицата — полета, които нито един списък не показва, но
+     които правят по-голямата част от товара: измерено при 15 000 книги товарът на
+     books:list беше 20,29 МБ и 38 колони на ред, докато на екрана се рисуват 300 реда
+     от 14 колони. Целият този JSON се сериализира, минава по IPC и се разпарсва при
+     всяко отваряне на раздела и при всяко търсене.
+
+     Тук са САМО полетата, които реално се ползват от консуматорите на books:list:
+       • src/views/books.js — id, inv_number, title, author, category_id/_name,
+         department, status, quantity, available, series, series_no, year;
+       • src/views/logo-org.js → lblCard (barcode, inv_number) и sigLblCard
+         (call_number, author_mark, udk), плюс status за филтъра „действащ фонд".
+     Формата за редакция НЕ ползва списъка — bookForm(id) дърпа целия запис през
+     books:get, който продължава да връща BOOK_SELECT. Ако нов екран потрябва от
+     друго поле, тестът в test/fixes-ipc-payload.test.js пада и казва точно кое. */
+  const BOOK_LIST_SELECT = `
+    SELECT b.id, b.inv_number, b.barcode, b.title, b.author, b.category_id, b.year,
+           b.udk, b.call_number, b.author_mark, b.department, b.status,
+           b.series, b.series_no,
+           c.name AS category_name,
+           COALESCE(i.quantity, 0) AS quantity,
+           COALESCE(i.quantity, 0) - COALESCE((
+             SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.date_in IS NULL
+           ), 0) AS available
+    FROM books b
+    LEFT JOIN categories c ON c.id = b.category_id
+    LEFT JOIN inventory i ON i.book_id = b.id
+  `;
   const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
     'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
     'city', 'publisher', 'series', 'series_no', // v1.70.0 — поредица
@@ -98,12 +126,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         // и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
         // таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
         // потребителите очакват "съдържа навсякъде", а не само префикс.
-        return db.prepare(`${BOOK_SELECT}
+        return db.prepare(`${BOOK_LIST_SELECT}
           WHERE b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
              OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
           ORDER BY ${order}`).all(ftsQuery(query), q, q, q);
       }
-      return db.prepare(`${BOOK_SELECT} ORDER BY ${order}`).all();
+      return db.prepare(`${BOOK_LIST_SELECT} ORDER BY ${order}`).all();
     })
   );
   ipcMain.handle('books:get', (e, id) => run(() => getDb().prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));

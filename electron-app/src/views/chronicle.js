@@ -24,17 +24,50 @@ async function renderChronicle() {
       <button class="btn" onclick="printChronicle()">Печат / PDF</button>
     </div>
 
-    <div id="chrList">${chronicleListHtml(rows)}</div>`;
+    <div id="chrList"></div>`;
+  drawChronicleList(rows);
 }
-function chronicleListHtml(rows) {
-  // Записите се групират по година, за да се чете като истински летопис.
-  const byYear = {};
-  for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
-  const yearsSorted = Object.keys(byYear).sort((a, b) => b.localeCompare(a));
-  return rows.length ? yearsSorted.map(y => `
-      <div class="chrYear">
-        <div class="chrYearHead">${esc(y)}</div>
-        ${byYear[y].map(c => `<div class="chrItem" tabindex="0" role="button" aria-label="${esc(c.title)}"
+/* Прозоречен рендер (v2.3.1) по общия модел от core.js (paintRowWindow/
+   RENDER_PAGE_SIZE). ЗАЩО тук: летописът по устройство САМО расте — записаното
+   събитие остава завинаги, а всяка година прибавя нови. Измерено (jsdom върху
+   истинския изглед, 3 000 записа): 3 000 изчертани записа и 3 141 КБ разметка в
+   #chrList — най-тежкият от краеведските раздели, защото всеки запис носи и
+   откъс от описанието до 240 знака, и (когато има) снимка.
+
+   ЗАЩО СЕ СМЕНИ ГНЕЗДЕНЕТО. Дотук записите се групираха в <div class="chrYear">
+   на година — тоест преките деца на списъка бяха ГОДИНИ, не записи. При такова
+   гнездене добавянето на порция е невъзможно да се направи вярно: ако порцията
+   свърши по средата на 1985 г., следващата или ще повтори заглавието „1985“,
+   или ще залепи записите в чужда група. Затова сега всеки ЗАПИС е пряко дете, а
+   заглавието на годината се носи от първия запис за нея (и той поема класа
+   .chrYear, чието единствено правило е разстоянието отгоре — външният вид
+   остава същият, без да се пипа style.css). Така „в тялото стоят точно толкова
+   деца, колкото са изчертани“ важи и добавянето е точно.
+
+   Редът НЕ се променя: chronicle:list връща ORDER BY year DESC, date DESC, id DESC,
+   тоест записите за една година вече идват един до друг и в същата подредба, в
+   която старото групиране ги показваше. */
+const CHR_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let CHR_RENDER_LIMIT = CHR_PAGE_SIZE;
+let CHR_PAINTED = 0;
+/* Кои записи откриват своята година. Смята се ВЕДНЪЖ за целия списък, а не при
+   всяка порция: иначе първият запис на всяка порция би изглеждал като начало на
+   година (заглавието „1985“ щеше да се повтаря на всяко „Покажи още“). */
+let CHR_YEAR_HEADS = new WeakSet();
+function markChronicleYearHeads(rows) {
+  CHR_YEAR_HEADS = new WeakSet();
+  let prev = null;
+  for (const c of rows) {
+    if (String(c.year) !== prev) CHR_YEAR_HEADS.add(c);
+    prev = String(c.year);
+  }
+}
+function chronicleRowsHtml(rows) {
+  return rows.map(c => {
+    const head = CHR_YEAR_HEADS.has(c);
+    return `<div${head ? ' class="chrYear"' : ''}>
+        ${head ? `<div class="chrYearHead">${esc(c.year)}</div>` : ''}
+        <div class="chrItem" tabindex="0" role="button" aria-label="${esc(c.title)}"
           onclick="chronicleView(${c.id})" onkeydown="cardActivate(event, () => chronicleView(${c.id}))">
           ${c.photo ? `<img class="chrThumb" src="${esc(c.photo)}" alt="">` : ''}
           <div class="chrBody">
@@ -46,19 +79,52 @@ function chronicleListHtml(rows) {
             ${c.body ? `<div class="chrText">${esc(String(c.body).slice(0, 240))}${String(c.body).length > 240 ? '…' : ''}</div>` : ''}
             ${c.links ? `<div class="hint">${c.links} свързани материала</div>` : ''}
           </div>
-        </div>`).join('')}
-      </div>`).join('')
+        </div>
+      </div>`;
+  }).join('');
+}
+/* Броячът се пририсува заедно със записите и казва „показани са N от M“ — иначе
+   скъсеният летопис изглежда пълен и по-старите години изглеждат незаписани. */
+function chronicleMoreHtml(more, total) {
+  const shown = total - more;
+  return `<span class="hint">Показани са ${shown} от ${total} записа в летописа.</span>`
+    + (more > 0 ? ` <button class="btn" onclick="CHR_RENDER_LIMIT+=${CHR_PAGE_SIZE};paintChronicleRows(true)">Покажи още (${more} от общо ${total})</button>` : '');
+}
+/* append=true идва САМО от „Покажи още“. Търсенето и филтърът по година остават
+   пълен рендер — там резултатът е ДРУГ набор (и други заглавия на години). */
+function paintChronicleRows(append) {
+  CHR_PAINTED = paintRowWindow({
+    body: '#chrItems', bar: '#chrMore', rows: window._CHR_LIST || [], limit: CHR_RENDER_LIMIT,
+    painted: append ? CHR_PAINTED : 0,
+    rowsHtml: chronicleRowsHtml, moreHtml: chronicleMoreHtml
+  });
+}
+window.paintChronicleRows = paintChronicleRows;
+function chronicleListHtml(rows) {
+  return rows.length
+    ? `<div id="chrItems"></div>
+       <div class="toolbar" id="chrMore" style="justify-content:center"></div>`
     : `<div class="empty"><h3>Летописът е празен</h3>
         <p>Впишете първото събитие — основаването на читалището, откриването на библиотеката,
         юбилей, дарение, ремонт.</p></div>`;
+}
+/* Едно място за рисуване на списъка — и от пълния рендер, и от търсенето. */
+function drawChronicleList(rows) {
+  window._CHR_LIST = rows;
+  CHR_RENDER_LIMIT = CHR_PAGE_SIZE; // нов резултат — пак от първата порция
+  markChronicleYearHeads(rows);
+  const box = $('#chrList');
+  if (!box) return false;
+  box.innerHTML = chronicleListHtml(rows);
+  paintChronicleRows(false);
+  return true;
 }
 /* Търсенето пипа само #chrList — полето за търсене НЕ се пресъздава, иначе при
    пауза над 300 ms курсорът изчезва по средата на думата (моделът от inv-book.js). */
 async function refreshChronicle() {
   const rows = await call(window.api.chronicle.list({ q: CHR_Q, year: CHR_YEAR }));
   if (!rows) return;
-  const box = $('#chrList');
-  if (box) box.innerHTML = chronicleListHtml(rows); else renderChronicle();
+  if (!drawChronicleList(rows)) renderChronicle();
 }
 window.refreshChronicle = refreshChronicle;
 function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(refreshChronicle, 300); }

@@ -827,14 +827,34 @@ function confirmManyLabels(n, kind, perSheet) {
         + '„До инвентарен №“ — по няколкостотин наведнъж.\n\n')
     + 'Да продължа ли въпреки това?');
 }
-function printLabelSheet(cardsHtml, kind) {
+/* Първият параметър приема ДВА вида (v2.3.1):
+     • готов HTML низ — както досега (диапазони, единична карта, всички
+       извиквания извън logo-org.js);
+     • { rows, card } — самите редове и функцията за ЕДИН етикет; тогава низът
+       се сглобява ЧАК след като библиотекарят е потвърдил.
+
+   ЗАЩО. Въпросът за много етикети (confirmManyLabels, v2.3.0) стоеше тук, но
+   извикващият вече беше построил целия низ с rows.map(card).join('') — при
+   14 750 етикета това е ~63 МБ низ и 1–2 s работа, извършени ПРЕДИ да е ясно
+   дали изобщо ще се печата. При отказ времето и паметта отиват на вятъра, и то
+   точно в мига, в който библиотекарят е казал „не“ — тоест програмата изглежда
+   заспала като наказание за отказа.
+
+   ЗАЩО ПРОМЯНАТА Е ТУК, а не в logo-org.js. Всичко, от което зависи въпросът —
+   прагът LABEL_CONFIRM_OVER, размерът на етикета, режимът „ролка“, колоните,
+   които реално се събират на A4 — живее в този файл. Ако въпросът се вдигне
+   при извикващия, всеки от петте печатни бутона трябва да преповтори тази
+   сметка и следващият праг ще се промени на пет места вместо на едно. Тук
+   промяната е една: броят идва от rows.length, вместо да се брои в готовия низ. */
+function printLabelSheet(cards, kind) {
   const s = SETTINGS_CACHE || {};
   const { w, h } = labelSize(kind);
   const docName = (LABEL_DOC_NAME[kind] || 'Етикети') + ' — ' + bg(today());
   const gap = (s.lbl_gap != null ? +s.lbl_gap : 3);
   const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
   const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
-  const n = labelCount(cardsHtml);
+  const lazy = !!(cards && typeof cards === 'object' && Array.isArray(cards.rows) && typeof cards.card === 'function');
+  const n = lazy ? cards.rows.length : labelCount(cards);
   if (n > LABEL_CONFIRM_OVER) {
     const perSheet = s.lbl_mode === 'roll'
       ? 1 // ролка: един етикет на страница
@@ -885,6 +905,9 @@ function printLabelSheet(cardsHtml, kind) {
         `display:flex;flex-direction:column;align-items:center;justify-content:center}`
     });
   }
+  // Сглобяването е последното нещо преди печата — след потвърждението и след
+  // всички предупреждения за размера. При отказ дотук изобщо не се стига.
+  const cardsHtml = lazy ? cards.rows.map(r => cards.card(r)).join('') : cards;
   doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
   return true;
 }

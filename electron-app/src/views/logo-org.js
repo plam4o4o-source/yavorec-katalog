@@ -19,18 +19,26 @@ async function activeBooks() {
   const books = await call(window.api.books.list(''));
   return (books || []).filter(b => b.status !== 'отчислен');
 }
+/* Етикетите и картите се подават на printLabelSheet() като ДАННИ ({rows, card}),
+   а не като готов HTML низ (v2.3.1). ЗАЩО: въпросът „наистина ли 14 750 етикета?“
+   (confirmManyLabels, v2.3.0) се задава вътре в printLabelSheet — а дотук всяка
+   от тези функции вече беше построила целия низ с rows.map(...).join(''), тоест
+   при 14 750 етикета ~1–2 s и десетки мегабайта, изхабени ПРЕДИ библиотекарят да
+   е казал „да“, и напълно напразно, ако каже „не“. Сега низът се сглобява чак
+   след потвърждението. „Диапазон“ минава по същия път — таванът важи и там,
+   защото диапазон „от 1 до 99999“ е точно същият печат с друго име. */
 async function printLabelsRange() {
   const from = parseInt($('[name=lblFrom]').value, 10), to = parseInt($('[name=lblTo]').value, 10);
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet(rows.map(lblCard).join(''), 'fund');
+  printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsRange = printLabelsRange;
 async function printLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet(rows.map(lblCard).join(''), 'fund');
+  printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsAll = printLabelsAll;
 async function printSignatureLabelsRange() {
@@ -38,20 +46,20 @@ async function printSignatureLabelsRange() {
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet(rows.map(sigLblCard).join(''), 'sig');
+  printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
 async function printSignatureLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet(rows.map(sigLblCard).join(''), 'sig');
+  printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsAll = printSignatureLabelsAll;
 async function printCardsAll() {
   const readers = await call(window.api.readers.list(''));
   const rows = (readers || []).filter(r => r.status !== 'прекратен');
   if (!rows.length) return toast('Няма активни читатели.', 'err');
-  printLabelSheet(rows.map(readerCardHtml).join(''), 'card');
+  printLabelSheet({ rows, card: readerCardHtml }, 'card');
 }
 window.printCardsAll = printCardsAll;
 /* Карта само за ЕДИН читател (v1.71.0) — бутон „Карта“ на реда в списъка

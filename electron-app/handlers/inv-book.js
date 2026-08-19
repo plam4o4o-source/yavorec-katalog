@@ -8,8 +8,16 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
   ipcMain.handle('invBook:list', () =>
     run(() => {
       const db = getDb();
+      /* Лека проекция (v2.3.1) — както при books:list. Инвентарната книга показва
+         точно колоните от Приложение № 4; `b.*` мъкнеше и анотацията, ключовите
+         думи и адреса на корицата, които тук не се показват никъде. Измерено при
+         15 000 документа: 13,28 МБ товар за 300 изчертани реда.
+         Редакцията НЕ ползва този списък — bookForm(id) дърпа целия запис през
+         books:get. Ползваните полета са заковани с тест. */
       const rows = db.prepare(`
-        SELECT b.*, c.name AS category_name,
+        SELECT b.id, b.inv_number, b.register_date, b.title, b.author, b.volume,
+               b.year, b.price, b.call_number, b.status, b.description,
+               c.name AS category_name,
                a.no AS acq_no, a.date AS acq_date,
                d.no AS act_no, d.date AS act_date
         FROM books b

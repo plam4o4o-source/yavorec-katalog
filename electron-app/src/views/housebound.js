@@ -56,6 +56,6 @@ async function extendLoan(id) {
   const { date_due, renewals, max } = res.data;
   toast('Срокът е продължен до ' + bg(date_due) + ' (продължение ' + renewals + (max ? '/' + max : '') + ').', 'ok');
   markSaved();
-  if (VIEW === 'over') renderOver(); else renderCirc();
+  if (VIEW === 'over') renderOver(true); else renderCirc();
 }
 window.extendLoan = extendLoan;
