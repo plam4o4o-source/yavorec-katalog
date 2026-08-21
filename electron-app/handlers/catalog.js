@@ -290,7 +290,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   }
   function buildMarcXml(books) {
     return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-      `<!-- UNIMARC в MARCXML структура. Изнесено от библиотечна система „Инвентар“. -->\n` +
+      `<!-- UNIMARC в MARCXML структура. Изнесено от библиотечна система „InvLib“. -->\n` +
       `<collection xmlns="http://www.loc.gov/MARC21/slim">\n` +
       books.map(marcRecord).join('\n') + `\n</collection>\n`;
   }

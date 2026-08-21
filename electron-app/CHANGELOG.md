@@ -11,6 +11,29 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.3
+
+**BG:** Видимият текст на програмата вече казва **InvLib** навсякъде, вместо
+предишното „Инвентар“ — заглавието на прозореца, съобщението при повреда на
+базата при стартиране, темата на писмото „Съобщи за грешка…“, документацията
+(README, наръчник за библиотекаря, архитектура) и коментарът, вграждан в
+изнесените UNIMARC/MARCXML файлове. Инсталационният идентификатор (`appId`),
+папката с данните на библиотеката и `productName` в конфигурацията на
+инсталатора умишлено НЕ са пипнати — вижте „Работа в локална мрежа“ в
+`docs/ARCHITECTURE.md` защо смяната им носи риск за вече инсталирани
+библиотеки. Заради това преките пътища, инсталационният файл и записът в
+„Приложения“ на Windows продължават да казват „Инвентар“.
+
+**EN:** The program's visible text now says **InvLib** everywhere instead of
+the previous "Инвентар" — the window title, the startup database-error
+dialog, the bug-report email subject, the documentation (README, librarian's
+manual, architecture doc), and the comment embedded in exported
+UNIMARC/MARCXML files. The install identifier (`appId`), the library's data
+folder, and the installer's `productName` are intentionally untouched — see
+`docs/ARCHITECTURE.md` for why changing them risks orphaning data for
+already-installed libraries. Because of that, shortcuts, the installer file,
+and the Windows "Apps" listing still say "Инвентар".
+
 ## v2.4.2
 
 **BG:** Уебсайтът на програмата (Настройки → „Помощ и обратна връзка“) вече

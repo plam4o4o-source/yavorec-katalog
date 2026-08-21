@@ -439,7 +439,7 @@ function createWindow() {
     minHeight: 640,
     resizable: true,
     icon: path.join(__dirname, 'icon.ico'),
-    title: 'Инвентар · Библиотечна система',
+    title: 'InvLib · Библиотечна система',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -539,7 +539,7 @@ app.whenReady().then(() => {
   const detail = (err && err.message) ? err.message : String(err);
   try { logToFile('error', 'Стартирането пропадна: ' + detail); } catch (e) { /* дневникът е последната ни грижа тук */ }
   try {
-    dialog.showErrorBox('Инвентар не можа да се стартира',
+    dialog.showErrorBox('InvLib не можа да се стартира',
       'Базата данни не можа да бъде отворена.\n\n' + detail + '\n\n' +
       'Най-честата причина е повреден файл или недостъпна папка (изключен мрежов диск).\n' +
       'Какво да направите:\n' +
