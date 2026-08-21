@@ -54,6 +54,13 @@ test('settings singleton row exists after fresh init (id=1)', () => {
   db.close();
 });
 
+test('нова инсталация тръгва с тема InvLib (theme = \'7\') по подразбиране', () => {
+  const db = freshDb();
+  const row = db.prepare('SELECT theme FROM settings WHERE id = 1').get();
+  assert.equal(row.theme, '7', 'schema.sql: settings.theme DEFAULT трябва да е \'7\' (InvLib) за нова база');
+  db.close();
+});
+
 test('runMigrations-equivalent: PRAGMA user_version can be set and read back', () => {
   const db = freshDb();
   assert.equal(db.pragma('user_version', { simple: true }), 0);

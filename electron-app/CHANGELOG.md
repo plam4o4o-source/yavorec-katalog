@@ -11,6 +11,20 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.5
+
+**BG:** Нова инсталация тръгва с цветовата тема **InvLib** (тъмно
+синьо/тюркоаз) вместо предишната „Бронз“. Засяга само наистина нова база
+данни — вече съществуваща инсталация пази досегашния си избор на тема
+непроменен, каквато и да е тя. Смяна на темата по всяко време си остава
+възможна от „Настройки“ → най-долу, между и седемте налични теми.
+
+**EN:** A new installation now starts with the **InvLib** color theme
+(navy/teal) instead of the previous "Bronze". This only affects a genuinely
+fresh database — an already-existing installation keeps whatever theme it
+already has selected, unchanged. The theme can still be switched at any time
+from Settings, among all seven available themes.
+
 ## v2.4.4
 
 **BG:** Описанието на програмата вече назовава изрично и трите вида
