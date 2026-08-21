@@ -228,6 +228,10 @@
 
 .kat-foot{text-align:center;font-size:.82rem;color:#5a4d3d;margin-top:2.8rem;line-height:1.8;
   padding-top:1.6rem;border-top:1px solid rgba(201,168,76,.18);}
+/* Дискретен кредит на софтуера под данните на читалището — умишлено в
+   същия приглушен тон като останалия текст на страницата (не в синьо/тюркоаз
+   на InvLib), за да не влиза в разрез с топлата палитра на сайта. */
+.kat-poweredby{font-size:.72rem;color:#8b7f6a;margin-top:.3rem;letter-spacing:.02em;}
 
 /* Reveal при поява */
 .kat-r{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1);}
@@ -352,7 +356,7 @@
   <div id="katR"></div>
   <button class="kat-more" id="katM" style="display:none">Покажи още</button>
 
-  <div class="kat-foot" id="katFt">Народно читалище „Васил Левски – 1922" · с. Яворец, общ. Габрово</div>
+  <div class="kat-foot" id="katFt">Народно читалище „Васил Левски – 1922" · с. Яворец, общ. Габрово<br><span class="kat-poweredby">Библиотечен софтуер: InvLib</span></div>
 
 </div>
 
@@ -370,6 +374,9 @@ var SOURCES=[
   {url:'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@main/katalog.json',label:'jsDelivr (резервен път)'}
 ];
 var FT_BASE="Народно читалище „Васил Левски – 1922\" · с. Яворец, общ. Габрово";
+/* Дискретен кредит на софтуера — винаги последен ред във футъра, независимо
+   дали finish() е успял да сложи датата на актуалност (виж по-долу). */
+var FT_POWEREDBY='<br><span class="kat-poweredby">Библиотечен софтуер: InvLib</span>';
 var D=[],P=0,R=[],LOG=[];
 /* Търсене по думи + подредба + състояние в адреса (за споделяеми връзки).
    QW — думите от текущото търсене (за открояване); SORT — избраната
@@ -551,7 +558,7 @@ function diagHtml(){
     'onclick="window.katRetry();return false">Опитай отново сега</a></div></div>';
 }
 function finish(gen,note){
-  document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+gen+' · '+D.length+' записа'+note;
+  document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+gen+' · '+D.length+' записа'+note+FT_POWEREDBY;
   run();
 }
 /* „1 намерен запис“, „2 намерени записа“ — броячът в правилното число */
