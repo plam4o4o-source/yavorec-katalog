@@ -152,11 +152,34 @@ body{
 #main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
 /* Лентата остава залепена отгоре при превъртане — дългите регистри иначе
    оставят потребителя без заглавие и без бутоните за действия. */
+/* Три колони, за да стои логото ТОЧНО в центъра на лентата — на едно и също
+   място във всеки раздел. Страничните колони са minmax(0,1fr): равни по
+   определение и свиваеми, така че дълго заглавие се пренася на два реда,
+   вместо да избута логото настрани. Пробвано беше и „auto 1fr auto“ (всяка
+   страна със естествената си ширина): заглавието остава на един ред, но
+   логото се мести с до 230px между разделите и опира в дългите подзаглавия
+   („Готови справки“) — по-лошо от пренасянето на един ред заглавие. */
 #topbar{
   position:sticky; top:0; z-index:10;
-  display:flex; justify-content:space-between; align-items:flex-start;
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:start; column-gap:18px;
   padding:20px 30px 14px; border-bottom:1px solid var(--rule); background:var(--paper2);
   box-shadow:0 6px 16px -14px rgba(27,24,19,.4);
+}
+/* Логото на InvLib в горната лента. Прозрачен фон — ляга върху --paper2 на
+   всяка от 7-те теми (всичките са светли), без светъл правоъгълник около него. */
+.topbarLogo{
+  justify-self:center; align-self:center; height:54px; width:auto; display:block;
+  pointer-events:none;
+}
+/* В тесен прозорец мястото трябва на заглавието и на бутоните — логото
+   отстъпва, вместо да се сблъска с тях. Заедно с него си отива и решетката:
+   връща се точно старото подреждане с flex, при което заглавието стои на
+   един ред, а бутоните се пренасят. Иначе свиваемата колона minmax(0,1fr)
+   пренасяше „Инвентарна книга“ на два реда и лентата пораснеше с 30px. */
+@media (max-width:1280px){
+  .topbarLogo{display:none}
+  #topbar{display:flex; justify-content:space-between}
 }
 #topbar h1{font-family:var(--serif); font-size:26px; margin:0; color:var(--spine2)}
 #topbar h1::after{
