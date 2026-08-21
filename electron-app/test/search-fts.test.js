@@ -111,6 +111,60 @@ test('readers_fts folds Cyrillic case on reader names the same way books_fts doe
   db.close();
 });
 
+/* v2.4.0 — одит v2.3.1 №22: BOOKS_FTS_SETUP_SQL/READERS_FTS_SETUP_SQL се
+   изпълняваха точно веднъж по договорка (пазени от user_version в main.js),
+   но самият SQL разчиташе на НЕДОКУМЕНТИРАНО поведение на FTS5 при повторно
+   изпълнение (виж и поправката в main.js runMigrations() за надпреварата,
+   при която това реално би могло да се случи — две станции, стартиращи
+   едновременно срещу празна обща база за пръв път). ПРОВЕРЕНО директно:
+   повторното изпълнение на старата (непроменена) версия на този SQL върху
+   better-sqlite3/SQLite версията тук НЕ гърми и не дублира резултата — FTS5
+   мълчаливо игнорира втория опит за същия rowid. Точно защото това поведение
+   е недокументирано (не е гарантирано през версии на SQLite/better-sqlite3),
+   SQL-ът вече ползва официално документираната команда 'rebuild' вместо
+   голо INSERT ... SELECT: тя трие и препопулира целия FTS5 индекс наново от
+   съдържанието, безопасна за повторно изпълнение по конструкция, не по
+   late-added условие. (Първи опит с "WHERE id NOT IN (SELECT rowid FROM
+   books_fts)" се оказа ПОГРЕШЕН — за external-content таблица обикновен
+   SELECT без MATCH чете направо през content='books', така че "вече
+   съществува" излизаше вярно за всеки ред от books, дори неиндексиран, и
+   populate-ването тихо пропускаше точно новите редове; хванато от
+   test/db-init.test.js "migration chain v2+v3+v4" теста, не измислено.) */
+test('BOOKS_FTS_SETUP_SQL/READERS_FTS_SETUP_SQL са идемпотентни: повторно изпълнение НЕ гърми и не дублира резултатите', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO books (title, author) VALUES (?, ?)').run('Под игото', 'Вазов, Иван');
+  db.prepare('INSERT INTO readers (name) VALUES (?)').run('Иван Петров');
+  assert.deepEqual(findBooks(db, 'под'), ['Под игото']);
+
+  // Повторно изпълнение на СЪЩИЯ SQL върху ВЕЧЕ населена база — точно
+  // сценарият на надпреварата при първо стартиране от две станции наведнъж.
+  assert.doesNotThrow(() => { db.exec(BOOKS_FTS_SETUP_SQL); db.exec(READERS_FTS_SETUP_SQL); });
+
+  // Резултатите не се дублират — все още по един ред на книга/читател.
+  assert.deepEqual(findBooks(db, 'под'), ['Под игото']);
+  assert.deepEqual(findReaders(db, 'иван'), ['Иван Петров']);
+  const bookFtsCount = db.prepare('SELECT COUNT(*) AS n FROM books_fts').get().n;
+  const readerFtsCount = db.prepare('SELECT COUNT(*) AS n FROM readers_fts').get().n;
+  assert.equal(bookFtsCount, 1);
+  assert.equal(readerFtsCount, 1);
+  db.close();
+});
+
+/* Целенасочен регресионен тест за самата грешка, хваната по пътя (виж
+   бележката по-горе): книга, вкарана В БАЗАТА ПРЕДИ FTS5 да е бил настроен
+   изобщо (fresh install сценарий — миграцията ce изпълнява СЛЕД схемата, но
+   заварва вече наличен фонд при ъпгрейд от стара база), трябва да се намира
+   след настройването, не само книги, добавени СЛЕД него. */
+test('книга, вкарана ПРЕДИ FTS5 да е бил настроен, се намира СЛЕД настройването (не само нови книги)', () => {
+  const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fts-preexisting-'));
+  const db = new Database(path.join(dir, 'library.db'));
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'db', 'schema.sql'), 'utf8'));
+  db.prepare('INSERT INTO books (title) VALUES (?)').run('Стара книга отпреди миграцията');
+  db.exec(BOOKS_FTS_SETUP_SQL);
+  assert.deepEqual(findBooks(db, 'миграцията'), ['Стара книга отпреди миграцията']);
+  db.close();
+});
+
 test('a fresh DB (schema.sql alone, before the migration) has no FTS tables', () => {
   const dir = mkTmpDir(path.join(os.tmpdir(), 'inv-fts-nomigration-'));
   const db = new Database(path.join(dir, 'library.db'));

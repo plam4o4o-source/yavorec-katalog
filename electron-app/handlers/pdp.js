@@ -116,7 +116,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
           .run(salt.toString('base64'), verifier);
         n = reencryptAllReaders(null, key);
-      })();
+      }).immediate();
       setPdpKey(password, key, 'setup');
       logAudit('Защита на лични данни', 'зададена е парола за защита на ЕГН/№ ЛК (' + n + ' читатели засегнати)');
       return true;
@@ -152,7 +152,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
           .run(newSalt.toString('base64'), newVerifier);
         reencryptAllReaders(oldKey, newKey);
-      })();
+      }).immediate();
       setPdpKey(newPassword, newKey, 'change');
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;

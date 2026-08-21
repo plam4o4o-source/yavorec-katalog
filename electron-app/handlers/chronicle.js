@@ -47,7 +47,7 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
       db.transaction(() => {
         db.prepare("DELETE FROM links WHERE (from_kind = 'летопис' AND from_id = ?) OR (to_kind = 'летопис' AND to_id = ?)").run(id, id);
         db.prepare('DELETE FROM chronicle WHERE id = ?').run(id);
-      })();
+      }).immediate();
       logAudit('Летопис', 'изтрит запис: ' + (c ? c.title : id));
     })
   );

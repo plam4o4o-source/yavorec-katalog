@@ -52,7 +52,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
           .run(cutoff, anonId);
         return n;
       });
-      const n = tx();
+      const n = tx.immediate();
       logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани');
       return { anonymized: n, cutoff };
     })

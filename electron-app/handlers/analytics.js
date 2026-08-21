@@ -71,7 +71,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       db.transaction(() => {
         db.prepare("DELETE FROM links WHERE to_kind = 'статия' AND to_id = ?").run(id);
         db.prepare('DELETE FROM analytics WHERE id = ?').run(id);
-      })();
+      }).immediate();
       logAudit('Аналитично описание', 'изтрита статия: ' + (a ? a.title : id));
     })
   );

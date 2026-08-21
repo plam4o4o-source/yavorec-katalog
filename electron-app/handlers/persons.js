@@ -42,7 +42,7 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
       db.transaction(() => {
         db.prepare("DELETE FROM links WHERE (from_kind = 'персона' AND from_id = ?) OR (to_kind = 'персона' AND to_id = ?)").run(id, id);
         db.prepare('DELETE FROM persons WHERE id = ?').run(id);
-      })();
+      }).immediate();
       logAudit('Персоналии', 'изтрита персоналия: ' + (p ? p.name : id));
     })
   );

@@ -12,6 +12,29 @@
 // на споделена стойност напред.
 module.exports = function registerBooksHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode } = deps;
+  /* Одит v2.3.1 №9(a) — позволените стойности се четат от същия списък, който
+     създава enum тригера на books.status (db/enum-triggers.js), по образец на
+     handlers/data-import.js, за да не могат двата да се разминат. */
+  const { ENUM_COLUMNS } = require('../db/enum-triggers');
+  const BOOK_STATUS_VALUES = (ENUM_COLUMNS.find(c => c.table === 'books' && c.col === 'status') || {}).values || [];
+  /* Стар ред, редактиран на ръка в базата преди тригерът да съществува (или внесен
+     от чужда система), може да носи статус извън enum-а (напр. „изгубена“). Самият
+     SQL тригер (BEFORE INSERT/UPDATE) отхвърля записа с general SQLite съобщение
+     ("Непозната стойност за books.status."), без никакво упътване — библиотекарят
+     не разбира защо документът внезапно „не се записва“. Тук проверката се прави
+     ПРЕДИ да се стигне до тригера, за да излезе ясно съобщение на български какво
+     точно да направи. */
+  function assertValidStatus(status) {
+    if (status != null && !BOOK_STATUS_VALUES.includes(status)) {
+      throw new Error(
+        `Документът има непознат за програмата статус „${status}“ (най-вероятно от стара база, ` +
+        'редактирана на ръка, или внесени данни отпреди въвеждането на списъка с позволени статуси). ' +
+        'Записът не може да бъде запазен с тази стойност. Отворете документа за редакция и изберете ' +
+        'валиден статус от падащото меню „Състояние“ (наличен / липсващ / за реставрация / отчислен), ' +
+        'след което запазете отново.'
+      );
+    }
+  }
 
   const BOOK_SELECT = `
     SELECT b.*, c.name AS category_name,
@@ -104,7 +127,16 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     if (out.category_id != null) out.category_id = parseInt(out.category_id, 10);
     if (out.acquisition_id != null) out.acquisition_id = parseInt(out.acquisition_id, 10);
     out.price = b.price ? parseFloat(b.price) : 0;
-    out.status = b.status || 'наличен';
+    /* Одит v2.3.1 №9(b): досега липсваща/празна стойност за status ставаше винаги
+       'наличен' — вярно за НОВ запис (разумна стойност по подразбиране), но при
+       РЕДАКЦИЯ на съществуващ ред мълчаливо превръщаше NULL статус (стари данни,
+       все още непрегледани от библиотекаря) в 'наличен' — включително в публичния
+       онлайн каталог (main.js: publicBookFields), макар NULL да не значи „наличен“
+       никъде в програмата. Редакция без изрична нова стойност вече пази текущия
+       статус на реда какъвто и да е — NULL или непозната стара стойност включително;
+       'наличен' по подразбиране остава само когато записът реално се създава (prev
+       липсва).*/
+    out.status = b.status || (prev ? prev.status : 'наличен');
     out.register_date = b.register_date || today();
     out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
     out.status_date = !prev ? today()
@@ -152,6 +184,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       checkRecordLimit('books');
       const tx = db.transaction((b) => {
         const payload = bookPayload(b);
+        assertValidStatus(payload.status);
         const info = db.prepare(`
           INSERT INTO books (${BOOK_FIELDS.join(',')}, register_date)
           VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')}, @register_date)
@@ -168,7 +201,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
         return id;
       });
-      const id = tx(book);
+      const id = tx.immediate(book);
       scheduleCatalogWrite();
       return id;
     })
@@ -179,6 +212,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const tx = db.transaction((b) => {
         const prev = db.prepare('SELECT * FROM books WHERE id = ?').get(b.id);
         const payload = bookPayload(b, prev);
+        assertValidStatus(payload.status);
         db.prepare(`
           UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
         `).run(Object.assign({ id: b.id }, payload));
@@ -189,7 +223,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         const diff = diffFields(prev, payload, BOOK_FIELDS);
         logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
       });
-      tx(book);
+      tx.immediate(book);
       scheduleCatalogWrite();
     })
   );
@@ -277,10 +311,36 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const tx = db.transaction(() => db.prepare(
         `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND status != 'отчислен'`
       ).run(v, ...ids).changes);
-      const changes = tx();
+      const changes = tx.immediate();
       logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));
       scheduleCatalogWrite();
       return changes;
+    })
+  );
+  /* Одит v2.3.1 №21: миграция v4 (db/schema.sql) нарочно НЕ сложи UNIQUE на
+     books.barcode — рискова промяна върху „мръсна“ стара/внесена база с вече
+     съществуващи дубликати — и коментарът там обещаваше „отделна стъпка за
+     откриване и разрешаване на дубликати“, която така и не се появи никъде.
+     Дотогава сканирането тихо съвпада с ПЪРВИЯ намерен ред (books:byBarcode,
+     deaccessionActs:findBook, inventorySessions:scan — навсякъде `WHERE barcode
+     = ?` без LIMIT 1, но SQLite го връща имплицитно с .get()) — може да завери
+     или отчисли грешен физически екземпляр. Каналът тук е само за ОТКРИВАНЕ/
+     справка: връща групи книги със същия ненулев баркод, библиотекарят решава
+     ръчно какво да поправи (UI за самата справка е отделен слой, не тук). */
+  ipcMain.handle('books:findDuplicateBarcodes', () =>
+    run(() => {
+      const db = getDb();
+      const dupBarcodes = db.prepare(`
+        SELECT barcode FROM books
+        WHERE barcode IS NOT NULL AND TRIM(barcode) != ''
+        GROUP BY barcode HAVING COUNT(*) > 1
+      `).all().map(r => r.barcode);
+      if (!dupBarcodes.length) return [];
+      const stmt = db.prepare(`
+        SELECT id, inv_number, barcode, title, author, status
+        FROM books WHERE barcode = ? ORDER BY inv_number
+      `);
+      return dupBarcodes.map(barcode => ({ barcode, books: stmt.all(barcode) }));
     })
   );
   ipcMain.handle('books:addCheck', (e, { bookId, date }) =>

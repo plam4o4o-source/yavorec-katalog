@@ -148,7 +148,7 @@ function seedAuthorisedValues(category, defaults) {
   const values = [...defaults];
   for (const v of existing) if (!values.includes(v)) values.push(v);
   const ins = db.prepare('INSERT OR IGNORE INTO authorised_values (category, value, sort) VALUES (?, ?, ?)');
-  db.transaction(() => values.forEach((v, i) => ins.run(category, v, i)))();
+  db.transaction(() => values.forEach((v, i) => ins.run(category, v, i))).immediate();
 }
 
 function initDb() {
@@ -263,7 +263,7 @@ function initDb() {
     WHERE cn_sort IS NULL AND call_number IS NOT NULL AND TRIM(call_number) <> ''`).all();
   if (noCn.length) {
     const upd = db.prepare('UPDATE books SET cn_sort = ? WHERE id = ?');
-    db.transaction(() => noCn.forEach(b => upd.run(cnSortKey(b.call_number), b.id)))();
+    db.transaction(() => noCn.forEach(b => upd.run(cnSortKey(b.call_number), b.id))).immediate();
   }
   // Датирани съгласия — при вече отбелязано съгласие без дата се записва датата на
   // регистрация: най-добрата налична долна граница, по-честна от днешната дата.
@@ -372,10 +372,28 @@ function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
   const pending = MIGRATIONS.filter(m => m.version > from).sort((a, b) => a.version - b.version);
   for (const m of pending) {
+    // Одит v2.3.1 №2/№22: `from` е прочетено ЕДНОКРАТНО, извън транзакция —
+    // при две станции, стартиращи едновременно срещу празна обща (мрежова)
+    // база, и двете могат да изчислят еднакво `pending`, преди която и да е
+    // да е приложила и една миграция. .immediate() по-долу вече сериализира
+    // самия запис (виж поправката на конкурентността), но не пречи на ВТОРАТА
+    // станция да опита да приложи миграция, която ПЪРВАТА вече е приложила,
+    // докато ѝ е чакала реда. Проверено директно с два реални процеса
+    // (test/two-process-locking.test.js): при СЕГАШНИТЕ миграции това не
+    // гърми, защото всяка от тях се оказва случайно идемпотентна сама по себе
+    // си (ensureColumns()/CREATE ... IF NOT EXISTS/FTS5 мълчаливо толерира
+    // повторен INSERT — виж search-fts.js). Разчитането на тази случайност
+    // обаче е точно рискът, който одитът посочи — бъдеща миграция може и да
+    // не е идемпотентна (напр. UPDATE, който трупа стойност). Затова
+    // user_version се прочита ОТНОВО тук, ВЪТРЕ в самата транзакция (под
+    // заключването за запис, взето от .immediate()) — станцията, дошла
+    // втора, вижда версията вече вдигната и прескача m.run() съвсем изрично.
     db.transaction(() => {
+      const current = db.pragma('user_version', { simple: true });
+      if (current >= m.version) return;
       m.run();
       db.pragma('user_version = ' + m.version);
-    })();
+    }).immediate();
     console.log(`Схемата на базата данни е обновена до версия ${m.version}.`);
   }
   const finalVersion = pending.length ? pending[pending.length - 1].version : from;
@@ -500,6 +518,10 @@ app.whenReady().then(() => {
   // данни) — всяко работно място пази собствения си избор в локалния config.json.
   CURRENT_USER = readConfig().lastUserName || '';
   autoBackupIfNeeded();
+  // Одит v2.3.1 №25: „заделена" резервация нямаше никакъв механизъм за
+  // изтичане — веднъж на старт е достатъчно (срокът е в цели дни, виж
+  // HOLD_EXPIRE_DAYS в handlers/holds.js), периодичен таймер е излишен.
+  expireStaleHolds();
   startAutoPushTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
@@ -552,6 +574,9 @@ function friendlyDbError(err) {
   }
   if (err.code === 'SQLITE_CONSTRAINT_NOTNULL' || m.includes('NOT NULL constraint failed')) {
     return 'Задължително поле липсва.';
+  }
+  if (err.code === 'SQLITE_BUSY' || err.code === 'SQLITE_BUSY_SNAPSHOT' || m.includes('database is locked')) {
+    return 'Друг компютър записва в базата данни в момента — изчакайте малко и опитайте пак.';
   }
   if (m.includes('no such column') || m.includes('no such table')) {
     return 'Базата данни не е напълно обновена за тази версия на програмата. Затворете и рестартирайте програмата; ако грешката продължи, пишете за поддръжка. (' + m + ')';
@@ -672,7 +697,7 @@ require('./handlers/acquisitions')(ipcMain, { getDb: () => db, run, logAudit, BO
    Извадени в handlers/deaccession-acts.js (Фаза 4, стъпка 15 от разбиването
    на монолита main.js на модули по домейн). */
 require('./handlers/deaccession-acts')(ipcMain, {
-  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, normalizeScanCode
+  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode
 });
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
@@ -762,7 +787,7 @@ function logEvent(kind, opts) {
    монолита main.js на модули по домейн). firstActiveHold/
    consumeHoldOnCheckout/activateHoldOnReturn се връщат обратно тук, защото
    ги ползва домейнът "Заемания" по-долу. */
-const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, freeCopies, activeHolds } =
+const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, freeCopies, activeHolds, expireStaleHolds } =
   require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit, normalizeScanCode });
 
 /* ---------------- Заемания ----------------
@@ -890,7 +915,12 @@ function publicBookFields(b, opacMap) {
     // каталог я обявяваше за налична само защото по нея няма отворено заемане —
     // читателят идва специално за книга, за която библиотеката вече знае, че липсва.
     k: b.keywords || '', n: b.annotation || '', cv: b.cover_url || '',
-    av: (b.available > 0 && (b.status == null || b.status === 'наличен')) ? 1 : 0,
+    // Одит v2.3.1 №9: NULL status (стари/непрегледани данни — обикновено от
+    // внос отпреди enum тригера) МИНАВАШЕ за „наличен" тук, значи и в
+    // публичния онлайн каталог — читател виждаше „налична" книга, чието
+    // реално състояние библиотеката дори не е потвърдила. NULL вече не се
+    // третира като наличност никъде — само изричното 'наличен'.
+    av: (b.available > 0 && b.status === 'наличен') ? 1 : 0,
     // d = дата на постъпване: страницата извежда „Нови постъпления" сама от нея.
     // Старите версии на страницата не познават ключа и просто го подминават.
     d: b.register_date || ''
@@ -961,7 +991,13 @@ function writeCatalogIfConfigured() {
     return { written: true };
   } catch (err) {
     console.error('Автоматичен запис на каталога:', err.message);
-    return { written: false };
+    // Одит v2.3.1 №8: до тук стигаше само конзолата — catalog:writeNow
+    // проверяваше единствено полето `blocked`, така че реален провал на
+    // записа (напр. изключен мрежов диск: ENOENT) минаваше за успех и
+    // библиотекарят виждаше зелено "Каталогът е обновен.", докато
+    // публикуваният katalog.json си оставаше стар/недокоснат. `error` тук
+    // носи причината до самия IPC канал, за да я покаже интерфейсът.
+    return { written: false, error: err.message };
   }
 }
 // generic debounce/coalesce помощник (debounce.js) — schedule() слива много

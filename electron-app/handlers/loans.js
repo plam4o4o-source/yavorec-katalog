@@ -10,6 +10,8 @@
 // вече разчита logEvent да е hoisted в main.js). BOOK_SELECT (по стойност)
 // и scheduleCatalogWrite (по референция, hoisted по-долу в main.js) идват
 // от все още неизвадения домейн "Книги"/"Онлайн каталог".
+const { isValidIsoDate } = require('../security-utils');
+
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
@@ -173,6 +175,10 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   );
   ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due }) =>
     run(() => {
+      if (!isValidIsoDate(date_out)) throw new Error('Датата на заемане липсва или е невалидна.');
+      if (date_due != null && date_due !== '' && !isValidIsoDate(date_due)) {
+        throw new Error('Датата на връщане (' + date_due + ') е невалидна.');
+      }
       const db = getDb();
       const tx = db.transaction(() => {
         const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(book_id);
@@ -189,13 +195,16 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         logEvent('заемане', { bookId: book_id, readerId: reader_id, date: date_out });
         return info.lastInsertRowid;
       });
-      const id = tx();
+      const id = tx.immediate();
       scheduleCatalogWrite();
       return id;
     })
   );
   ipcMain.handle('loans:return', (e, { id, date_in }) =>
     run(() => {
+      if (date_in != null && date_in !== '' && !isValidIsoDate(date_in)) {
+        throw new Error('Датата на връщане (' + date_in + ') е невалидна.');
+      }
       const db = getDb();
       const inDate = date_in || today();
       const before = db.prepare('SELECT date_due, date_in FROM loans WHERE id = ?').get(id);
@@ -243,36 +252,55 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       };
     })
   );
+  /* Повторен одит v2.4.0 (реаудит): тук по-рано НЯМАШЕ db.transaction(...).immediate()
+     изобщо — проверката на лимита от продължения (used >= max) и записа на новия
+     renewals ставаха с две отделни, невзаимно заключени stmt-та. Двама читатели,
+     кликнали "Продължи" на едно и също заемане от две станции в един и същ момент
+     (или един и същ читател, кликнал двойно), четяха ЕДИН И СЪЩ стар renewals,
+     двамата минаваха проверката за лимита, и вторият INSERT/UPDATE тихо
+     ПРЕЗАПИСВАШЕ renewals на стойност, по-малка от реалния брой успешни
+     продължения (lost update) — точно класът проблем, за който checkout/
+     checkoutByCode вече бяха поправени (viz. .immediate() по-долу в двата
+     handler-а). Доказано директно с два реални os процеса
+     (test/reaudit-v24-a.test.js): и двете паралелни продължения се връщаха с
+     ok:true, а renewals в базата оставаше 2 вместо истинските 3. Сега цялата
+     проверка+запис е в ЕДНА db.transaction(...).immediate() транзакция, точно
+     както при заемане — правото на запис се взима ПРЕДИ проверката на лимита,
+     така че втората станция вижда вече обновения renewals и получава ясния
+     отказ „Достигнат е лимитът…“, а не сурова "database is locked". */
   ipcMain.handle('loans:extend', (e, { id }) =>
     run(() => {
       const db = getDb();
-      const l = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
-      if (!l || l.date_in) throw new Error('Заемането не е активно.');
-      const s = circRule(readerCategory(l.reader_id));
-      const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
-      const used = l.renewals || 0;
-      if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
-      /* Резервацията се преценява срещу СВОБОДНИТЕ бройки, точно както при заемане
-         (consumeHoldOnCheckout в handlers/holds.js). Дотогава тук стоеше проверка на
-         ниво заглавие: при 5 екземпляра, 1 зает и 1 резервация трети читател можеше
-         да вземе бройка от рафта, но държащият не можеше да продължи своята — двете
-         места се разминаваха, след като заемането мина на бройки. Продължението
-         отнема една бройка от наличните, затова се отказва само когато свободните не
-         стигат за чакащите пред този читател. */
-      const holds = activeHolds ? activeHolds(l.book_id) : (firstActiveHold(l.book_id) ? [firstActiveHold(l.book_id)] : []);
-      const others = holds.filter(x => x.reader_id !== l.reader_id);
-      const free = freeCopies ? freeCopies(l.book_id) : 0;
-      if (others.length && free < others.length) {
-        const h = others[0];
-        throw new Error('Книгата е резервирана от ' + h.reader_name + ' и няма свободна бройка за нея — ' +
-          'срокът не може да се продължи.');
-      }
-      const base = l.date_due || today();
-      const newDue = nextWorkDay(addDays(base, s.extension_days || 30));
-      db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
-      logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
-      logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
-      return { date_due: newDue, renewals: used + 1, max };
+      const tx = db.transaction(() => {
+        const l = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
+        if (!l || l.date_in) throw new Error('Заемането не е активно.');
+        const s = circRule(readerCategory(l.reader_id));
+        const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
+        const used = l.renewals || 0;
+        if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
+        /* Резервацията се преценява срещу СВОБОДНИТЕ бройки, точно както при заемане
+           (consumeHoldOnCheckout в handlers/holds.js). Дотогава тук стоеше проверка на
+           ниво заглавие: при 5 екземпляра, 1 зает и 1 резервация трети читател можеше
+           да вземе бройка от рафта, но държащият не можеше да продължи своята — двете
+           места се разминаваха, след като заемането мина на бройки. Продължението
+           отнема една бройка от наличните, затова се отказва само когато свободните не
+           стигат за чакащите пред този читател. */
+        const holds = activeHolds ? activeHolds(l.book_id) : (firstActiveHold(l.book_id) ? [firstActiveHold(l.book_id)] : []);
+        const others = holds.filter(x => x.reader_id !== l.reader_id);
+        const free = freeCopies ? freeCopies(l.book_id) : 0;
+        if (others.length && free < others.length) {
+          const h = others[0];
+          throw new Error('Книгата е резервирана от ' + h.reader_name + ' и няма свободна бройка за нея — ' +
+            'срокът не може да се продължи.');
+        }
+        const base = l.date_due || today();
+        const newDue = nextWorkDay(addDays(base, s.extension_days || 30));
+        db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
+        logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
+        logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
+        return { date_due: newDue, renewals: used + 1, max };
+      });
+      return tx.immediate();
     })
   );
 
@@ -282,6 +310,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
     run(() => {
+      if (date_out != null && date_out !== '' && !isValidIsoDate(date_out)) {
+        throw new Error('Датата на заемане (' + date_out + ') е невалидна.');
+      }
       const db = getDb();
       const tx = db.transaction(() => {
         const c = normalizeScanCode(code);
@@ -317,13 +348,16 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
         return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
       });
-      const result = tx();
+      const result = tx.immediate();
       scheduleCatalogWrite();
       return result;
     })
   );
   ipcMain.handle('loans:returnByCode', (e, { code, date_in }) =>
     run(() => {
+      if (date_in != null && date_in !== '' && !isValidIsoDate(date_in)) {
+        throw new Error('Датата на връщане (' + date_in + ') е невалидна.');
+      }
       const db = getDb();
       const c = normalizeScanCode(code);
       const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(c, c);
