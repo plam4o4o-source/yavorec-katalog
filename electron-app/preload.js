@@ -84,7 +84,8 @@ contextBridge.exposeInMainWorld('api', {
     delete: invoke('books:delete'),
     addCheck: invoke('books:addCheck'),
     checks: invoke('books:checks'),
-    bulkUpdate: invoke('books:bulkUpdate')
+    bulkUpdate: invoke('books:bulkUpdate'),
+    findDuplicateBarcodes: invoke('books:findDuplicateBarcodes')
   },
   isbn: {
     lookup: invoke('isbn:lookup')

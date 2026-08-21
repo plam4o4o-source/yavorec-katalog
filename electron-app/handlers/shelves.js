@@ -82,7 +82,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
         SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND COALESCE(department,'') != 'служебен'
       `);
       let added = 0;
-      db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; })();
+      db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; }).immediate();
       const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(shelfId);
       logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“');
       scheduleCatalogWrite();

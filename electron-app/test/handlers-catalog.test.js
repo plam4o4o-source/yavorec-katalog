@@ -242,6 +242,35 @@ test('catalog:writeNow requires a configured folder and surfaces the write-block
   assert.equal(ok.ok, true);
 });
 
+/* Одит v2.3.1 №8: writeCatalogIfConfigured() (main.js) връща {written:false}
+   при реален провал на самия запис (напр. изключен мрежов диск), БЕЗ
+   {blocked:true} — това е различен случай от "фондът излиза празен". Преди
+   поправката catalog:writeNow/gitPublishNow проверяваха само `blocked` и
+   връщаха ok:true въпреки провала: интерфейсът показваше зелено "Каталогът
+   е обновен." (src/views/catalog.js), докато публикуваният файл си остана
+   недокоснат. */
+test('catalog:writeNow surfaces a real write failure (written:false, НЕ blocked) с причината, не тихо ok:true', async () => {
+  const { db, ipcMain, setFlushResult, dir } = setup();
+  db.prepare('UPDATE settings SET catalog_folder=? WHERE id=1').run(dir);
+
+  setFlushResult({ written: false, error: 'ENOENT: no such file or directory' });
+  const failed = await ipcMain.invoke('catalog:writeNow');
+  assert.equal(failed.ok, false, 'реален провал на записа не биваше да минава за успех');
+  assert.match(failed.error, /не успя/);
+  assert.match(failed.error, /ENOENT/, 'причината от writeCatalogIfConfigured трябва да стигне до потребителя');
+});
+
+test('catalog:gitPublishNow surfaces a real write failure (written:false, НЕ blocked) вместо да продължи към git', async () => {
+  const { db, ipcMain, setFlushResult, dir } = setup();
+  db.prepare('UPDATE settings SET catalog_folder=? WHERE id=1').run(dir);
+
+  setFlushResult({ written: false, error: 'EACCES: permission denied' });
+  const failed = await ipcMain.invoke('catalog:gitPublishNow');
+  assert.equal(failed.ok, false, 'реален провал на записа не биваше да минава за успех');
+  assert.match(failed.error, /не успя/);
+  assert.match(failed.error, /EACCES/);
+});
+
 test('catalog:exportMarc writes a MARCXML file with one <record> per book', async () => {
   const { db, ipcMain, savedDialogs, dir, auditLog } = setup();
   db.prepare("INSERT INTO books (title, author, inv_number, language, isbn) VALUES ('Под игото', 'Вазов, Иван', 1, 'български', '123')").run();

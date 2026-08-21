@@ -202,11 +202,24 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   ipcMain.handle('catalog:disconnectFolder', () =>
     run(() => { getDb().prepare('UPDATE settings SET catalog_folder = NULL WHERE id = 1').run(); })
   );
+  // Одит v2.3.1 №8: и двата канала по-долу проверяваха САМО `w.blocked`, а не
+  // `w.written` — реален провал на самия запис (напр. изключен мрежов диск:
+  // ENOENT) минаваше за успех. `writeCatalogIfConfigured()` (main.js) вече
+  // връща `error` с причината в такъв случай — тук се проверява и се показва.
+  function assertCatalogWriteOk(w) {
+    if (w.blocked) {
+      throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.');
+    }
+    if (!w.written) {
+      throw new Error('Записът на каталога не успя' + (w.error ? ': ' + w.error : '.') +
+        ' Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
+    }
+  }
   ipcMain.handle('catalog:gitPublishNow', async () => {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
     const w = flushCatalogWrite();
-    if (w.blocked) return { ok: false, error: 'Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.' };
+    try { assertCatalogWriteOk(w); } catch (err) { return { ok: false, error: err.message }; }
     const r = await gitPublish(s.catalog_folder);
     if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
     return r;
@@ -216,7 +229,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
       if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
       const w = flushCatalogWrite();
-      if (w.blocked) throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.');
+      assertCatalogWriteOk(w);
       return true;
     })
   );

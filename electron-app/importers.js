@@ -61,12 +61,60 @@ function parseDelimited(text, delimiter) {
     }
     if (c === '"') { inQ = true; continue; }
     if (c === delimiter) { row.push(field); field = ''; continue; }
-    if (c === '\r') continue;
+    // BUG FIX (одит #5): по-рано \r само се прескачаше и НИКОГА не прекратяваше
+    // ред сам по себе си — работеше за \r\n (защото следващият \n довършваше
+    // реда), но файл със самотно \r като край на ред (стар Mac износ, някои
+    // конфигурации на LibreOffice) нямаше нито един \n в целия текст, затова
+    // целият файл се срутваше в един объркан "ред". Библиотекарят виждаше
+    // "0 добавени" и предполагаше повреден файл. Сега самотно \r (т.е. не е
+    // последвано веднага от \n) прекратява реда точно както \n би го направил;
+    // \r\n продължава да работи както преди — \r се прескача, а \n довършва.
+    if (c === '\r') {
+      if (text[i + 1] === '\n') continue;
+      row.push(field); rows.push(row); row = []; field = '';
+      continue;
+    }
     if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
     field += c;
   }
   if (field !== '' || row.length) { row.push(field); rows.push(row); }
   return rows.filter(r => r.some(v => String(v).trim() !== ''));
+}
+// Проверка за незатворена кавичка (одит #11): огледва СЪЩАТА логика за inQ като
+// parseDelimited, но интересува я само крайното състояние. Ако текстът свърши,
+// докато inQ е още true, значи има нечетен брой кавички някъде — последното поле
+// е погълнало остатъка от файла в себе си и следващите редове са изчезнали като
+// отделни записи, без каквото и да е съобщение за грешка.
+function hasUnterminatedQuote(text) {
+  let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') i++; else inQ = false; }
+      continue;
+    }
+    if (c === '"') inQ = true;
+  }
+  return inQ;
+}
+// Проверка за подозрителен брой колони (одит #11): автоматичното откриване на
+// разделител гледа само първия ред, затова файл със смесен разделител (заглавен
+// ред с ",", редове с данни с ";") тихо разбива данните в грешни колони, без явна
+// грешка — просто повечето стойности кацат в грешните полета. Ако почти всички
+// редове с данни имат различен брой колони от заглавния ред, това е силен знак,
+// че разпознатият разделител (или самите данни) не съвпада.
+function rowColumnCountWarning(rows) {
+  if (rows.length < 2) return null;
+  const headerCols = rows[0].length;
+  if (headerCols <= 1) return null; // няма с какво да се сравнява
+  let mismatched = 0;
+  for (let i = 1; i < rows.length; i++) if (rows[i].length !== headerCols) mismatched++;
+  if (mismatched / (rows.length - 1) > 0.6) {
+    return `Повечето редове с данни имат различен брой колони от заглавния ред (${headerCols}). `
+      + 'Възможно е разпознатият разделител да е грешен, или файлът да смесва различни разделители — '
+      + 'проверете внимателно съответствието на колоните преди да внесете.';
+  }
+  return null;
 }
 
 /* ---------------- XLSX ----------------
@@ -79,6 +127,13 @@ function parseDelimited(text, delimiter) {
 // парсер; maxOutputLength спира разопаковането веднага, вместо да позволи да
 // изяде цялата налична памет на компютъра на библиотекаря.
 const MAX_XLSX_FILE_SIZE = 60 * 1024 * 1024; // суров .xlsx файл — разумен таван за библиотечен внос
+// BUG FIX (одит #12): само XLSX имаше лимит за размер — CSV/TSV внасяне нямаше
+// никакъв, а parseDelimited обхожда текста знак по знак. Измерено на тази машина:
+// файл от 100 MB с един ред отнема ~29 секунди в parseDelimited() без никаква
+// обратна връзка към библиотекаря (вижда замръзнал прозорец). Границата е същата
+// като при XLSX — прост и достатъчен таван, вместо streaming парсър, който би
+// усложнил кода без реална нужда за библиотечен обем от документи.
+const MAX_DELIMITED_FILE_SIZE = 60 * 1024 * 1024;
 const MAX_XLSX_ENTRIES = 2000; // вътрешни части в архива (истински .xlsx има под 20–30)
 const MAX_XLSX_ENTRY_UNCOMPRESSED = 150 * 1024 * 1024; // разопакован размер на ЕДНА вътрешна част
 function unzipEntries(buf) {
@@ -177,12 +232,29 @@ function parseXlsx(buf) {
 function readTable(filePath) {
   const buf = fs.readFileSync(filePath);
   if (filePath.toLowerCase().endsWith('.xlsx')) {
-    return { rows: parseXlsx(buf), encoding: 'XLSX', delimiter: null };
+    return { rows: parseXlsx(buf), encoding: 'XLSX', delimiter: null, warning: null };
+  }
+  // BUG FIX (одит #12): таван за размер на CSV/TSV, огледан по MAX_XLSX_FILE_SIZE —
+  // виж бележката при константата защо и колко реално отнема без него.
+  if (buf.length > MAX_DELIMITED_FILE_SIZE) {
+    throw new Error('Файлът е твърде голям за внасяне (над '
+      + Math.round(MAX_DELIMITED_FILE_SIZE / 1024 / 1024) + ' MB).');
   }
   const { text, encoding } = decodeBuffer(buf);
   const firstLine = text.split(/\r?\n/)[0] || '';
   const delimiter = detectDelimiter(firstLine);
-  return { rows: parseDelimited(text, delimiter), encoding, delimiter };
+  const rows = parseDelimited(text, delimiter);
+  // BUG FIX (одит #11): двете евристики по-долу не спират внасянето (текстът може
+  // и да е напълно наред) — само подготвят предупреждение, за да не остане
+  // библиотекарят с "0 добавени" без обяснение защо.
+  const warnParts = [];
+  if (hasUnterminatedQuote(text)) {
+    warnParts.push('Файлът съдържа незатворена кавичка (") — възможно е част от данните да са '
+      + 'се слели в едно поле и следващи редове да липсват.');
+  }
+  const colWarning = rowColumnCountWarning(rows);
+  if (colWarning) warnParts.push(colWarning);
+  return { rows, encoding, delimiter, warning: warnParts.length ? warnParts.join(' ') : null };
 }
 
 /* ---------------- Разпознаване на колоните ----------------
@@ -248,4 +320,7 @@ function guessMapping(headers) {
   return map;
 }
 
-module.exports = { readTable, guessMapping, HEADER_MAP, decodeBuffer, parseDelimited, parseXlsx };
+module.exports = {
+  readTable, guessMapping, HEADER_MAP, decodeBuffer, parseDelimited, parseXlsx,
+  hasUnterminatedQuote, rowColumnCountWarning, MAX_DELIMITED_FILE_SIZE
+};

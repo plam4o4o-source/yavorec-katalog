@@ -335,3 +335,66 @@ test('loans:overdueByReader groups overdue loans by reader with a computed fine'
   assert.equal(result.data[0].n, 1);
   assert.equal(result.data[0].loans.length, 1);
 });
+
+/* v2.4.0 — одит v2.3.1 №6: date_out/date_due/date_in вече се проверяват на
+   входа. Преди тези поправки '0000-00-00'/'2026-13-45'/'not-a-date' минаваха
+   тихо, а '2026-02-30' се търкулваше напред до 2 март без грешка — вместо
+   ясно съобщение, по-късно effectiveDaysLate() връщаше NaN. */
+test('loans:checkout отхвърля липсваща или невалидна date_out, не записва ред', async () => {
+  const { db, ipcMain } = setup();
+  const bookId = insertBookWithInventory(db, { inv_number: 20 });
+  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+
+  for (const bad of [undefined, '', '0000-00-00', '2026-13-45', 'not-a-date', '2026-02-30']) {
+    const r = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: bad });
+    assert.equal(r.ok, false, 'date_out=' + JSON.stringify(bad) + ' трябваше да е отхвърлена');
+    assert.match(r.error, /дата.*заемане|невалидна/i);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loans').get().n, 0, 'нито един ред не биваше да се запише');
+});
+
+test('loans:checkout отхвърля невалидна date_due, но приема липсваща (незадължителна)', async () => {
+  const { db, ipcMain } = setup();
+  const bookId = insertBookWithInventory(db, { inv_number: 21 });
+  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+
+  const bad = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02', date_due: '2026-02-30' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /дата.*връщане|невалидна/i);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loans').get().n, 0);
+
+  const ok = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
+  assert.equal(ok.ok, true, 'липсваща date_due е разрешена (без краен срок)');
+});
+
+test('loans:checkoutByCode отхвърля невалидна date_out', async () => {
+  const { db, ipcMain } = setup();
+  const bookId = insertBookWithInventory(db, { inv_number: 22, barcode: 'BC22' });
+  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+
+  const r = await ipcMain.invoke('loans:checkoutByCode', { reader_id: readerId, code: 'BC22', date_out: '2026-13-45' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /дата.*заемане|невалидна/i);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loans').get().n, 0);
+});
+
+test('loans:return и loans:returnByCode отхвърлят невалидна date_in', async () => {
+  const { db, ipcMain } = setup();
+  const bookId = insertBookWithInventory(db, { inv_number: 23, barcode: 'BC23' });
+  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const checkout = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
+  assert.equal(checkout.ok, true);
+  const loanId = checkout.data;
+
+  const r1 = await ipcMain.invoke('loans:return', { id: loanId, date_in: 'not-a-date' });
+  assert.equal(r1.ok, false);
+  assert.match(r1.error, /дата.*връщане|невалидна/i);
+
+  const r2 = await ipcMain.invoke('loans:returnByCode', { code: 'BC23', date_in: '0000-00-00' });
+  assert.equal(r2.ok, false);
+  assert.match(r2.error, /дата.*връщане|невалидна/i);
+
+  // все още незаето — невалидната дата не е записала нищо
+  const still = db.prepare('SELECT date_in FROM loans WHERE id = ?').get(loanId);
+  assert.equal(still.date_in, null);
+});

@@ -64,11 +64,57 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     return tmp;
   }
 
+  /* Одит #19: доскоро тук се четеше директно ЖИВИЯТ файл на базата
+     (fs.copyFileSync за некриптирано копие; encryptBackupFile(resolveDbPath(),
+     ...) четеше същия файл със суров fs.readFileSync за криптирано) — байт по
+     байт, покрай better-sqlite3, без никаква координация с текущо изпълняваща
+     се транзакция. wal_checkpoint(TRUNCATE) по-долу смалява прозореца на
+     практика, но не го затваря теоретично — правилният инструмент е истинско
+     SQLite API за снимка на базата, а не копиране на суровите байтове на
+     диска.
+
+     db.serialize() (better-sqlite3, обвивка около sqlite3_serialize) взема
+     консистентна снимка ПРЕЗ отворената връзка, вместо да чете файла отстрани
+     — точно каквото иска одитът. НЕ е използвано db.backup() (другата
+     „истинска" SQLite backup функция, която одитът предлага изрично): тя на
+     better-sqlite3 връща Promise и пише файла НА ЧАСТИ през setImmediate —
+     проверено директно, веднага след извикването ѝ файлът на диска дори още
+     не съществува. autoBackupIfNeeded() по-долу обаче се вика fire-and-forget
+     при стартиране (main.js, без await) и множество тестове (handlers-
+     backup.test.js, fixes-backup-v23.test.js — извън обхвата на тази
+     поправка) проверяват диска веднага СЛЕД синхронно извикване, без await.
+     db.serialize() дава същата защита (истинско SQLite API вместо суров прочит
+     на живия файл), но остава напълно синхронна операция, затова не се налага
+     целият верижен извикващ код да стане асинхронен. */
   function doBackupTo(destPath, password) {
     const db = getDb();
     if (db) db.pragma('wal_checkpoint(TRUNCATE)');
-    if (password) encryptBackupFile(resolveDbPath(), destPath, password);
-    else fs.copyFileSync(resolveDbPath(), destPath);
+    if (!db) {
+      // Няма отворена връзка към базата (напр. извикано точно около
+      // presetDb(null) при възстановяване) — просто копирай файла, както
+      // досега; db.serialize() няма върху какво да работи.
+      if (password) encryptBackupFile(resolveDbPath(), destPath, password);
+      else fs.copyFileSync(resolveDbPath(), destPath);
+      return;
+    }
+    const snapshot = db.serialize();
+    if (!password) {
+      fs.writeFileSync(destPath, snapshot);
+      return;
+    }
+    /* encryptBackupFile() чете от ПЪТ, не от Buffer — затова снимката първо
+       каца в некриптиран временен файл до крайната цел, а криптирането се
+       прилага върху НЕГО. Редът е същият, какъвто беше и преди тази
+       поправка (резервно копие на некриптирания файл, после криптиране върху
+       копието) — само източникът на некриптираната снимка вече е
+       db.serialize(), не суров прочит на живия .db. */
+    const plainTmp = destPath + '.plain-tmp';
+    try {
+      fs.writeFileSync(plainTmp, snapshot);
+      encryptBackupFile(plainTmp, destPath, password);
+    } finally {
+      try { fs.unlinkSync(plainTmp); } catch (e) { /* временен файл — не е фатално, ако остане */ }
+    }
   }
 
   function pruneOldAutoBackups() {

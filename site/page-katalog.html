@@ -442,13 +442,32 @@ async function loadLive(){
     }
     console.warn('[каталог] неуспешен източник — '+src.label+': '+entry.detail);
   }
-  try{ var c=localStorage.getItem('katalog_cache'); if(c)return JSON.parse(c); }catch(e){}
+  /* И двата живи източника паднаха — резервният вариант е локалния кеш,
+     записан при последния УСПЕШЕН живи fetch (виж setItem по-горе). Той НЕ
+     е равностоен на жив успех: маркираме го изрично с __stale, за да може
+     boot() да покаже видимо предупреждение вместо тихо да го подмине като
+     актуални данни. */
+  try{
+    var c=localStorage.getItem('katalog_cache');
+    if(c){ var cached=JSON.parse(c); if(cached&&cached.items){ cached.__stale=true; return cached; } }
+  }catch(e){}
   return null;
 }
 async function boot(){
   showLoading();
   var j=await loadLive();
-  if(j&&j.items){ D=j.items; SHELVES=(j.shelves||[]); setupDynamic(); finish((j.generated||'').split('-').reverse().join('.'),''); }
+  if(j&&j.items&&j.__stale){
+    /* И двата живи източника паднаха, но има запазен кеш от по-раншен
+       успешен fetch — показваме го, но НЕ като живи данни: ясно
+       предупреждение с датата, на която кешът е бил направен (j.generated,
+       записана при самото кеширане), плюс диагностиката защо живите
+       източници не са отговорили. */
+    D=j.items; SHELVES=(j.shelves||[]); setupDynamic();
+    var genStr=(j.generated||'').split('-').reverse().join('.');
+    var whenTxt=genStr?(' от '+genStr):'';
+    finish(genStr||'—','<br><span style="color:#a0522d">Показват се кеширани данни'+whenTxt+' — свързаност с живите източници не бе възможна.</span>'+diagHtml());
+  }
+  else if(j&&j.items){ D=j.items; SHELVES=(j.shelves||[]); setupDynamic(); finish((j.generated||'').split('-').reverse().join('.'),''); }
   else{ D=STATIC; SHELVES=[]; setupDynamic(); finish(STATIC_GEN,'<br><span style="color:#a0522d">Няма връзка към живите данни в момента — показва се последно запазено копие.</span>'+diagHtml()); }
 }
 /* Строи изгледа от самите данни: филтрите по вид/отдел се пълнят от реално

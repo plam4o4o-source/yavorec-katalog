@@ -15,7 +15,13 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   ipcMain.handle('inventorySessions:requirement', () =>
     run(() => {
       const db = getDb();
-      const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен'").get().n;
+      // Одит v2.3.1 №20: `status != 'отчислен'` в SQL дава NULL (не TRUE) за ред с
+      // NULL status и SQLite мълчаливо го изключва от WHERE — книга с NULL status
+      // (стари/внесени данни, никога прегледани) изчезваше от пула за инвентаризация,
+      // докато ЕДНОВРЕМЕННО публичният каталог я броеше за налична (виж #9,
+      // main.js: publicBookFields) — пропада през двете предпазни мрежи едновременно.
+      // Условието включва изрично и NULL редовете навсякъде тук, където се смята пул.
+      const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
       const s = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
       const pct = pctRequired(active);
       return { active, pct, target: Math.ceil(active * pct / 100), naturalLoss: naturalLoss(active, s.free_access_pct) };
@@ -24,7 +30,8 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   ipcMain.handle('inventorySessions:start', (e, s) =>
     run(() => {
       const db = getDb();
-      const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' ${s.department ? 'AND department = @department' : ''}`)
+      // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
+      const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = @department' : ''}`)
         .get(s.department ? { department: s.department } : {});
       const info = db.prepare(`
         INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3, pool_size, closed)
@@ -56,6 +63,16 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       const c = normalizeScanCode(code);
       const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(c, c);
       if (!b) throw new Error('Непознат баркод/инв. № ' + code);
+      /* Одит v2.3.1 №24: сесия, ограничена до един отдел (s.department), тихо
+         приемаше сканирания на книги от ДРУГИ отдели — броени като „проверени“ в
+         протокола, макар да са извън декларирания обхват/pool_size (последният е
+         преброен САМО за отдела при inventorySessions:start). Отказва се изрично,
+         вместо да се приема мълчаливо — протоколът пред регионалната библиотека
+         трябва да отговаря точно на обявения обхват. */
+      if (s.department && (b.department || '') !== s.department) {
+        throw new Error('Инв. № ' + b.inv_number + ' е от отдел „' + (b.department || '—') +
+          '“, а тази инвентаризация обхваща само отдел „' + s.department + '“. Документът не е записан в протокола.');
+      }
       const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
       if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
       db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(sessionId, b.id);
@@ -96,7 +113,8 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         if (!s) throw new Error('Няма такава сесия.');
         if (s.closed) throw new Error('Тази инвентаризация вече е приключена.');
         const scannedIds = db.prepare('SELECT book_id FROM inventory_session_scans WHERE session_id = ?').all(sessionId).map(r => r.book_id);
-        const pool = db.prepare(`SELECT * FROM books WHERE status != 'отчислен' ${s.department ? 'AND department = ?' : ''}`)
+        // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
+        const pool = db.prepare(`SELECT * FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = ?' : ''}`)
           .all(...(s.department ? [s.department] : []));
         const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
         const scannedSet = new Set(scannedIds);
@@ -126,7 +144,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
         };
       });
-      return tx();
+      return tx.immediate();
     })
   );
 };

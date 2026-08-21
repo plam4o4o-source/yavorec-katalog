@@ -15,6 +15,25 @@ function csvCell(x) {
   return '"' + s.replace(/"/g, '""') + '"';
 }
 
+// Одит v2.3.1 №6: handlers/loans.js приемаше дата на връщане (date_due) без
+// никаква проверка — '0000-00-00', '2026-13-45' и 'not-a-date' минаваха
+// тихо, а '2026-02-30' JS я търкулваше напред до 2 март БЕЗ грешка. По-късно
+// effectiveDaysLate() върху невалидна дата дава NaN, което по IPC пристига
+// като null — екранът "Просрочени" показва празни/безсмислени дни закъснение
+// и глоба, без никаква следа защо. Проверката тук е нарочно СТРОГА (не просто
+// регулярен израз): "2026-02-30" минава regex-а, но е невалидна дата, затова
+// след regex-а датата се пресъздава през Date.UTC и се сравнява обратно —
+// само истинско превъртане (30 февруари -> 2 март) проваля тази проверка.
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+function isValidIsoDate(s) {
+  const m = ISO_DATE_RE.exec(String(s == null ? '' : s));
+  if (!m) return false;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
 // Груба, но достатъчна проверка на формата на имейл — не техническа коректност
 // на самия адрес е целта (mailto: схемата и без това е фиксирана буквално в
 // main.js, не идва от полето), а да не подадем съвсем несвързан низ от
@@ -45,10 +64,26 @@ const CYR_TO_LAT_SCAN = {
 const CYR_TO_LAT_SCAN_LOWER = Object.fromEntries(
   Object.entries(CYR_TO_LAT_SCAN).map(([cy, la]) => [cy.toLowerCase(), la.toLowerCase()])
 );
+// Одит v2.3.1 №23: баркод четецът понякога праща и вътрешни контролни знаци
+// (напр. таб/нов ред от бъгав драйвер, или сканиране, прекъснато по средата) —
+// те не се виждат в интерфейса, но остават в стойността и правят "12\n34" ≠
+// "1234" при сравнение с базата, вместо ясно съобщение "не е намерен".
+// Премахват се ВСИЧКИ контролни знаци (\x00-\x1F, \x7F), не само водещи/
+// опашни whitespace знаци (тях trim() вече маха).
+// Второ: код, съставен САМО от whitespace/контролни знаци, преди се
+// нормализираше до '' — а всеки повикващ пита базата с
+// "... OR inv_number = CAST(? AS INTEGER)", където CAST('' AS INTEGER) = 0 в
+// SQLite. Ако в базата случайно има ред с inv_number = 0 (стар внос/ръчна
+// поправка), празно сканиране мълчаливо намираше ИМЕННО него. Връщането на
+// `null` вместо '' затваря дупката за всички повикващи наведнъж: SQL
+// сравнение с NULL никога не е истина (нито за barcode = NULL, нито за
+// inv_number = CAST(NULL AS INTEGER)), а всеки повикващ вече проверява
+// `if (!b) throw ...` — точно поведението за "не е намерен".
 function normalizeScanCode(code) {
-  let s = String(code == null ? '' : code).trim();
+  let s = String(code == null ? '' : code).replace(/[\x00-\x1F\x7F]/g, '').trim();
+  if (!s) return null;
   s = s.replace(/[А-Яа-я]/g, ch => CYR_TO_LAT_SCAN[ch] || CYR_TO_LAT_SCAN_LOWER[ch] || ch);
   return s;
 }
 
-module.exports = { csvCell, isValidEmail, normalizeScanCode };
+module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate };

@@ -4,8 +4,10 @@
 // референция, функция дефинирана в main.js — отчисляването/анулирането
 // сменят видимостта на документи в онлайн каталога, затова насрочват
 // запис на katalog.json, точно както shelves.js).
+const { isValidIsoDate } = require('../security-utils');
+
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, normalizeScanCode } = deps;
+  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
 
   /* Кои заемания са били ПРИНУДИТЕЛНО закрити от акт за отчисляване. Без този
      белег анулирането на акта връщаше книгата „наличен“, но заемът оставаше
@@ -58,6 +60,14 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
+      /* Реадит след v2.4.0 (доп. находка): act.date влизаше НЕВАЛИДИРАНА право в
+         loans.date_in, books.status_date и books.deaccession_date — точно
+         същата дупка, която isValidIsoDate() (security-utils.js, одит v2.3.1)
+         вече затваря при loans:checkout/return. Доказано изпълнимо на практика:
+         буквален боклук низ ('НЕВАЛИДНА-ДАТА-99-99') се записваше безпроблемно
+         в тези колони. Проверката е тук, ПРЕДИ транзакцията да пипне базата —
+         както при loans.js — за да не се налага частично отменяне. */
+      if (!isValidIsoDate(act.date)) throw new Error('Датата на акта липсва или е невалидна.');
       const no = parseInt(act.no, 10);
       const year = yearOf(act.date);
       const tx = db.transaction(() => {
@@ -91,6 +101,19 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         // Принудително закритите заемания се отбелязват с номера на акта — за да
         // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
         const closeLoans = db.prepare(`UPDATE loans SET date_in = ?, deaccession_act_id = ? WHERE book_id = ? AND date_in IS NULL`);
+        /* Одит v2.3.1 №10: НОВА резервация върху вече отчислена книга правилно се
+           отказва (holds:add проверява b.status != 'отчислен'), но обратният път —
+           книгата Е БИЛА резервирана и СЛЕД това се отчислява — оставаше пробит:
+           редът в holds си стоеше 'чака'/'заделена' завинаги, а чакащият читател
+           никога не биваше уведомен, че резервираната книга вече не съществува във
+           фонда. Активните резервации ('чака','заделена' — виж handlers/holds.js:
+           HOLD_ACTIVE) на всеки отчислен документ се отказват тук изрично, със
+           същия статус 'отказана', който ползва holds:cancel. */
+        const cancelHolds = db.prepare(`
+          UPDATE holds SET status = 'отказана', resolved_at = datetime('now')
+          WHERE book_id = ? AND status IN ('чака','заделена')
+        `);
+        let cancelledHolds = 0;
         bookIds.forEach(bookId => {
           const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
           if (!b) return;
@@ -102,15 +125,34 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
             .run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
+          cancelledHolds += cancelHolds.run(b.id).changes;
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
-        logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text);
+        logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text
+          + (cancelledHolds ? (' (отказани ' + cancelledHolds + ' резервации на отчислените документи)') : ''));
         return actId;
       });
       // .immediate() — виж проверката на номера в транзакцията по-горе.
       const actId = tx.immediate();
-      scheduleCatalogWrite();
+      /* Одит v2.3.1 №26: библиотека с точно 1 (последна) книга — отчисляването ѝ
+         прави фонда празен, а предпазната мярка в main.js (writeCatalogIfConfigured:
+         "не презаписвай непразен публикуван каталог с празен") коректно отказва
+         записа — но само с console.error, невидим за библиотекаря. scheduleCatalogWrite()
+         е debounced (насрочва запис след 4 сек., резултатът се губи мълчаливо); тук
+         записът се извиква СИНХРОННО (flushCatalogWrite, ако е подаден — старите
+         тестове без него продължават с debounced поведение), за да можем да прочетем
+         резултата веднага и да оставим следа в дневника, четим от библиотекаря
+         (Дневник/audit_log), вместо само в конзолата, която той никога не вижда. */
+      const w = flushCatalogWrite ? flushCatalogWrite() : (scheduleCatalogWrite(), null);
+      if (w && w.blocked) {
+        logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
+          + ' е спрян — фондът излиза празен, а публикуваният каталог не е. '
+          + 'Използвайте „Ръчен запис“ в „Онлайн каталог“, ако наистина искате празен каталог.');
+      } else if (w && !w.written) {
+        logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
+          + ' не успя' + (w.error ? ': ' + w.error : '.') + ' Проверете папката за онлайн каталога в „Настройки“.');
+      }
       return actId;
     })
   );
@@ -136,7 +178,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда'
           + (reopened ? ' (' + reopened + ' заемания са отворени обратно)' : ''));
       });
-      tx();
+      tx.immediate();
       scheduleCatalogWrite();
     })
   );

@@ -49,7 +49,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
           if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
           res.added++;
         }
-      })();
+      }).immediate();
       logAudit('Инвентаризация', `внесени ${res.added} сканирания от телефон` +
         (res.unknown.length ? `, ${res.unknown.length} непознати` : ''));
       return res;
