@@ -536,10 +536,27 @@ async function loadSettingsCache() {
 // чете оттам, за да не се налага една и съща промяна да се прави на две места.
 function needsSetup(s) { return !(s && (s.org || s.lib_name)); }
 function updateBrandSub() {
-  const el = $('#brandSub'); if (!el || !SETTINGS_CACHE) return;
-  const txt = [SETTINGS_CACHE.org, SETTINGS_CACHE.place].filter(Boolean).join(' · ');
-  el.textContent = txt || 'Попълнете данните в „Настройки“';
-  el.classList.toggle('brandSubEmpty', !txt);
+  if (!SETTINGS_CACHE) return;
+  // Рамката в лентата (.brandMark/#brandName) вече не показва твърдо вписано
+  // "ИНВЕНТАР" — показва действителното наименование на библиотеката от
+  // Настройки, със същия пад към "Организация", какъвто вече ползват
+  // читателската карта (readerCardHtml) и етикетите (lblCard).
+  const nameEl = $('#brandName');
+  if (nameEl) {
+    const name = SETTINGS_CACHE.lib_name || SETTINGS_CACHE.org || '';
+    nameEl.textContent = name || 'Попълнете названието в „Настройки“';
+    nameEl.classList.toggle('brandNameEmpty', !name);
+    nameEl.title = name; // пълният текст като tooltip, ако е дълъг и обвит на няколко реда
+  }
+  // #brandSub показваше "org · place" — след като организацията/името вече
+  // стоят в рамката отгоре (#brandName), повтарянето им тук дублираше
+  // същото наименование два пъти в лентата. Затова остава само населеното
+  // място; когато то липсва, редът се скрива изцяло — не показва повторно
+  // подкана за Настройки, тя вече е в самата рамка.
+  const el = $('#brandSub'); if (!el) return;
+  const place = SETTINGS_CACHE.place || '';
+  el.textContent = place;
+  el.style.display = place ? '' : 'none';
 }
 function applyTheme() {
   document.documentElement.dataset.theme = (SETTINGS_CACHE && SETTINGS_CACHE.theme) || '1';

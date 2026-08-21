@@ -11,6 +11,25 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.6
+
+**BG:** Логото на InvLib (реалната икона — книга, преминаваща в дигитални
+пиксели) вече стои центрирано най-отгоре в страничната лента. Рамката под
+него, преди с твърдо вписано „ИНВЕНТАР / Библиотечна система“, вече показва
+действителното наименование на библиотеката, въведено в „Настройки“ →
+„Наименование на библиотеката“ (с пад към „Организация“, ако то не е
+попълнено) — така рамката остава вярна за всяка библиотека, а не само за
+тази, за която е поръчано приложението. Само визуалният слой на страничната
+лента е засегнат.
+
+**EN:** The InvLib logo (the real icon — a book dissolving into digital
+pixels) now sits centered at the very top of the sidebar. The frame below it,
+previously showing a hardcoded "ИНВЕНТАР / Библиотечна система", now displays
+the library's actual name, taken from Settings → "Library name" (falling
+back to "Organization" if that field is empty) — so the frame stays accurate
+for any library, not only the one the app was originally built for. Sidebar
+visual layer only.
+
 ## v2.4.5
 
 **BG:** Нова инсталация тръгва с цветовата тема **InvLib** (тъмно

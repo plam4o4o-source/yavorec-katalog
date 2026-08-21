@@ -79,28 +79,36 @@ body{
   display:flex; flex-direction:column; overflow-y:auto;
 }
 .brand{padding:18px 16px 16px; border-bottom:1px solid var(--spine3)}
-/* Рамка около името на програмата, като на логото на "InvLib":
+/* Логото на InvLib (новата визуална идентичност, v2.4.1+), центрирано най-отгоре
+   в лентата — над рамката с наименованието. Реалната икона (не преначертана),
+   бяла версия, за да носи контраст на всеки тъмен --spine фон измежду всичките
+   7 цветови теми. */
+.brandIcon{
+  display:block; width:104px; height:auto; margin:0 auto 12px;
+}
+/* Рамка около наименованието на библиотеката, като на логото на InvLib:
    тънка бронзова рамка с малък вътрешен отстъп (двойна линия), тъмен фон,
-   центриран текст. Отстоянията са пресметнати да съберат "БИБЛИОТЕЧНА СИСТЕМА"
-   на един ред в тясната странична лента (270px). */
+   центриран текст. Съдържанието идва изцяло от Настройки (виж updateBrandSub
+   в core.js) — рамката пази оформлението, текстът в нея е винаги актуалният
+   lib_name (с пад към org), не твърдо вписано име на приложението. */
 .brandMark{
-  border:1px solid var(--brassL); padding:13px 6px 11px; text-align:center;
+  border:1px solid var(--brassL); padding:11px 10px; text-align:center;
   position:relative;
 }
 .brandMark::before{
   content:''; position:absolute; inset:4px; border:1px solid var(--brassD); pointer-events:none;
 }
-.brandTitle{
-  font-family:var(--serif); font-size:23px; font-weight:700; color:var(--brassL);
-  letter-spacing:.03em; line-height:1.1; white-space:nowrap;
+.brandName{
+  font-family:var(--serif); font-size:15px; font-weight:700; color:var(--brassL);
+  letter-spacing:.02em; line-height:1.32;
+  overflow-wrap:break-word; word-break:break-word;
 }
-.brandTagline{
-  font-size:10px; color:#C9BFA0; margin-top:6px; letter-spacing:.14em;
-  text-transform:uppercase; white-space:nowrap;
-}
+/* Докато названието на библиотеката не е въведено — приглушено, за да личи, че е подкана */
+.brandNameEmpty{font-style:italic; font-weight:400; font-size:13px; opacity:.65}
+/* Само населеното място — организацията/името вече стоят в рамката отгоре
+   (#brandName), затова тук не се повтарят. Скрито изцяло, когато мястото
+   липсва (виж updateBrandSub в core.js), вместо да остава празен ред. */
 .brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
-/* Докато данните на библиотеката не са въведени — приглушено, за да личи, че е подкана */
-.brandSubEmpty{font-style:italic; opacity:.65}
 #nav{padding:10px 0 20px}
 /* Тънка линия след заглавието на групата запълва остатъка от реда */
 .nav-grp{
