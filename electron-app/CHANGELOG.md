@@ -11,6 +11,24 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.4
+
+**BG:** Описанието на програмата вече назовава изрично и трите вида
+библиотеки, за които е предвидена — читалищни, общински **и училищни** —
+навсякъде, където досега споменаваше само първите две: заглавната страница на
+README, картата „Помощ и обратна връзка“ в „Настройки“, лицензионния текст и
+документа „InvLib — представяне на функциите“. Без промяна във
+функционалността — програмата е била и продължава да е еднакво универсална
+за всеки от трите вида още от самото начало (виж „Данни на библиотеката
+(универсалност)“ в `electron-app/README.md`).
+
+**EN:** The program's description now explicitly names all three kinds of
+libraries it targets — chitalishte, municipal, **and school** libraries —
+everywhere it previously mentioned only the first two: the README title, the
+"Help and feedback" card in Settings, the license text, and the "InvLib —
+Features" document. No functional change — the program has always been
+equally universal for all three kinds from the start.
+
 ## v2.4.3
 
 **BG:** Видимият текст на програмата вече казва **InvLib** навсякъде, вместо

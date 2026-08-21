@@ -1,4 +1,4 @@
-# InvLib — библиотечна система за читалищни и общински библиотеки
+# InvLib — библиотечна система за читалищни, общински и училищни библиотеки
 
 [![CI](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml/badge.svg)](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/plam4o4o-source/yavorec-katalog)](https://github.com/plam4o4o-source/yavorec-katalog/releases)
@@ -6,8 +6,8 @@
 [![Уебсайт](https://img.shields.io/badge/уебсайт-invlib.com-8b6914)](https://invlib.com/)
 
 > **English summary.** *InvLib* is a free, open-source library management
-> system (ILS) for small public and community libraries in Bulgaria —
-> particularly the *chitalishte* (community culture center) libraries. It is
+> system (ILS) for small public, community, and school libraries in Bulgaria
+> — particularly the *chitalishte* (community culture center) libraries. It is
 > an offline-first Windows desktop application (Electron + SQLite) covering
 > the full workflow required by the Bulgarian library regulation *Наредба № 3
 > от 18.11.2014 г.*: accession/inventory books, cataloging with UDC and
@@ -21,7 +21,7 @@
 > tests), and documented in a bilingual [CHANGELOG](electron-app/CHANGELOG.md).
 
 „InvLib“ е **безплатна програма с отворен код** за управление на фонда на
-малка читалищна или общинска библиотека — инвентарна книга, каталог,
+малка читалищна, общинска или училищна библиотека — инвентарна книга, каталог,
 читатели и заемане, КДБФ, дневник, отчисляване, инвентаризация и още, по
 образеца на **Наредба № 3 от 18.11.2014 г.** Работи **офлайн**, на Windows,
 без месечен абонамент и без изпращане на данни където и да е.
@@ -154,7 +154,7 @@ GitHub Security Advisories (частен доклад), не публичен is
   (повторна кандидатура при натрупана публична видимост), Azure Trusted
   Signing и Certum Open Source ([подробности](electron-app/README-bibliotekar.md#цифров-подпис-и-антивирусни-програми))
 - **Обратна връзка от още библиотеки** — програмата е универсална по
-  замисъл; целта е да бъде изпробвана и от други читалищни/общински
+  замисъл; целта е да бъде изпробвана и от други читалищни/общински/училищни
   библиотеки и развивана по реалните им нужди
 - Подобрения, предлагани от практиката, се вписват и обсъждат в
   [Issues](https://github.com/plam4o4o-source/yavorec-katalog/issues);

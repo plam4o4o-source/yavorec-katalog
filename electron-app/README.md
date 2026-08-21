@@ -21,7 +21,7 @@ Windows инсталаторът засега е **без цифров подп�
 ## Общ преглед / Overview
 
 **Български:** „InvLib“ е Windows десктоп приложение за управление на фонда
-на малка библиотека — читалищна или общинска. Включва пълен инвентар и
+на малка библиотека — читалищна, общинска или училищна. Включва пълен инвентар и
 каталог на книгите, контрол на авторитетните данни (автори/заглавия), УДК
 класификация, читателски карти и заемане, напомняния за просрочени книги,
 износ в библиотечни формати (UNIMARC/MARCXML, Dublin Core), внасяне на данни
@@ -32,7 +32,7 @@ Windows инсталаторът засега е **без цифров подп�
 отворен код — GNU GPL-3.0 или по-нова версия (по избор на получателя).
 
 **English:** „InvLib“ (*Inventory + Library*) is a Windows desktop application for
-managing the collection of a small public or community library
+managing the collection of a small public, community, or school library
 (*chitalishte*) in Bulgaria. It provides full book inventory and cataloging,
 authority control for authors/titles, UDC classification, reader cards and
 lending, overdue-book reminders, export to library formats
