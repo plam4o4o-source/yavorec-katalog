@@ -44,6 +44,16 @@ html[data-theme="6"]{ /* Кафяво-теракота */
   --spine:#22140A; --spine2:#301D0F; --spine3:#4A2E18;
   --brass:#A65A2E; --brassL:#D99461; --brassD:#7A3F1D;
 }
+html[data-theme="7"]{ /* InvLib — новата визуална идентичност (Primary Navy/Teal).
+  --spine/--paper/--brass са точните hex стойности от бранд спецификацията, не
+  подбрани да наподобяват някоя от другите 6 теми. Контраст, проверен програмно:
+  --spine срещу sidebar текста #e9e2cf (виж #rail по-долу) = 8.0:1; --brassL срещу
+  --spine (.rankRow/::selection) = 5.6:1 — и двете над WCAG AA (4.5:1), както при
+  всички останали теми. */
+  --paper:#F8FAFC; --paper2:#FCFEFF; --paper3:#EAF1F7; --rule:#D7E3EF; --rule2:#C2D3E4;
+  --spine:#1E3A8A; --spine2:#254398; --spine3:#3457B0;
+  --brass:#0EA5A8; --brassL:#4DD0D2; --brassD:#086F71;
+}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
 body{

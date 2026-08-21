@@ -478,7 +478,10 @@ const THEMES = [
   { id: '3', name: 'Горско зелено', spine: '#0E1F14', brass: '#2E6B45', paper: '#EFF3EC' },
   { id: '4', name: 'Бордо', spine: '#22090F', brass: '#7A2036', paper: '#F5EDEC' },
   { id: '5', name: 'Графит', spine: '#1C2126', brass: '#536573', paper: '#EEF0F1' },
-  { id: '6', name: 'Кафяво-теракота', spine: '#22140A', brass: '#A65A2E', paper: '#F3ECE3' }
+  { id: '6', name: 'Кафяво-теракота', spine: '#22140A', brass: '#A65A2E', paper: '#F3ECE3' },
+  // Нова визуална идентичност InvLib — точните цветове от бранд спецификацията
+  // (Primary Navy/Teal), не преоцветена версия на съществуваща тема.
+  { id: '7', name: 'InvLib', spine: '#1E3A8A', brass: '#0EA5A8', paper: '#F8FAFC' }
 ];
 async function setTheme(id) {
   await call(window.api.settings.updateTheme(id));
