@@ -11,6 +11,26 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.7
+
+**BG:** Логото на InvLib (пълният хоризонтален вариант — икона, „InvLib“,
+„Library Management System“ и „Инвентар — библиотечна система“) вече стои
+центрирано в горната лента, над съдържанието на всеки раздел. Лентата стана
+решетка от три колони, за да е логото на едно и също място във всеки раздел;
+при трите най-дълги заглавия („Книга за движение на библиотечния фонд“,
+„Готови справки“, „Авторитетни данни“) заглавието се пренася на два реда на
+екрани под Full HD. В прозорец, по-тесен от 1280px, логото се скрива и
+лентата се връща точно на старото си подреждане, за да не се губи място.
+Логото е с прозрачен фон, така че ляга правилно върху всяка от 7-те теми.
+
+**EN:** The InvLib logo (the full horizontal lockup — icon, "InvLib",
+"Library Management System", and the Bulgarian subtitle) now sits centered in
+the top bar. The bar became a three-column grid so the logo stays in exactly
+the same place in every section; on sub-Full-HD screens the three longest
+section titles wrap to two lines. Below 1280px the logo is hidden and the bar
+reverts to its previous layout. The logo has a transparent background so it
+sits correctly on all 7 themes.
+
 ## v2.4.6
 
 **BG:** Логото на InvLib (реалната икона — книга, преминаваща в дигитални
