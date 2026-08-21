@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS settings (
   card_w            INTEGER DEFAULT 90,     -- читателска карта, мм (стандарт 90x60)
   card_h            INTEGER DEFAULT 60,
   logo              TEXT,                   -- лого на организацията, data URI
-  theme             TEXT DEFAULT '1',
+  theme             TEXT DEFAULT '7',      -- '7' = InvLib (нова инсталация); съществуващи бази пазят избора си
   scan_sound        INTEGER DEFAULT 1,      -- звуков сигнал при сканиране (1 = включен)
   catalog_folder    TEXT,
   sru_endpoint      TEXT,     -- SRU каталог за внасяне на записи; празно = LOC по подразбиране
