@@ -1,7 +1,7 @@
 {
   "name": "inventar-desktop",
-  "version": "2.4.2",
-  "description": "Библиотечна система „Инвентар“ — Windows десктоп приложение (Electron + SQLite)",
+  "version": "2.4.3",
+  "description": "Библиотечна система „InvLib“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
     "name": "Пламен Христов - Пачо"

@@ -830,7 +830,7 @@ async function reportBug() {
   const [version, s] = await Promise.all([
     call(window.api.app.getVersion()), call(window.api.settings.get())
   ]);
-  const subject = 'Инвентар' + (version ? ' v' + version : '') + ' — съобщение за грешка';
+  const subject = 'InvLib' + (version ? ' v' + version : '') + ' — съобщение за грешка';
   const body = 'Опишете какво направихте и какво се случи (може и на кратко):\n\n\n\n' +
     '---\n' +
     'Версия на програмата: ' + (version || '?') + '\n' +

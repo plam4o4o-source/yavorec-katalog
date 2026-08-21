@@ -1,11 +1,11 @@
-# Инвентар — библиотечна система за читалищни и общински библиотеки
+# InvLib — библиотечна система за читалищни и общински библиотеки
 
 [![CI](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml/badge.svg)](https://github.com/plam4o4o-source/yavorec-katalog/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/plam4o4o-source/yavorec-katalog)](https://github.com/plam4o4o-source/yavorec-katalog/releases)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Уебсайт](https://img.shields.io/badge/уебсайт-invlib.com-8b6914)](https://invlib.com/)
 
-> **English summary.** *Inventar* is a free, open-source library management
+> **English summary.** *InvLib* is a free, open-source library management
 > system (ILS) for small public and community libraries in Bulgaria —
 > particularly the *chitalishte* (community culture center) libraries. It is
 > an offline-first Windows desktop application (Electron + SQLite) covering
@@ -20,7 +20,7 @@
 > release is built from tagged source by GitHub Actions, tested by CI (530+
 > tests), and documented in a bilingual [CHANGELOG](electron-app/CHANGELOG.md).
 
-„Инвентар“ е **безплатна програма с отворен код** за управление на фонда на
+„InvLib“ е **безплатна програма с отворен код** за управление на фонда на
 малка читалищна или общинска библиотека — инвентарна книга, каталог,
 читатели и заемане, КДБФ, дневник, отчисляване, инвентаризация и още, по
 образеца на **Наредба № 3 от 18.11.2014 г.** Работи **офлайн**, на Windows,

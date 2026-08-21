@@ -601,7 +601,7 @@ test('reportBug() отваря пощенския клиент с имейла �
   await window.reportBug();
   assert.equal(calls.length, 1);
   assert.equal(calls[0].email, 'plam4o.4o@outlook.com');
-  assert.match(calls[0].subject, /Инвентар/);
+  assert.match(calls[0].subject, /InvLib/);
   assert.match(calls[0].subject, /1\.73\.0/, 'темата съдържа версията на програмата');
   assert.match(calls[0].body, /Библиотека при читалището/, 'тялото съдържа името на библиотеката за контекст');
   assert.doesNotMatch(calls[0].body, /BEGIN.*PRIVATE|password|парола/i, 'писмото не трябва да съдържа чувствителни данни по подразбиране');
