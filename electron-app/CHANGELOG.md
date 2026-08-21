@@ -11,6 +11,21 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.1
+
+**BG:** Нова визуална идентичност — InvLib. Иконата на приложението (`icon.ico`)
+е обновена по новия дизайн (отворена книга, преминаваща в дигитални пиксели —
+физическа библиотека → дигитална библиотека). Добавена е и 7-ма цветова тема
+„InvLib“ (тъмно синьо/тюркоаз) в „Настройки“, с точните цветове от бранд
+спецификацията. Име на продукта, идентификатор на инсталацията (`appId`) и
+папката с данните на библиотеката не са пипани — само визуалният слой.
+
+**EN:** New visual identity — InvLib. The application icon is updated to the
+new design (an open book dissolving into digital pixels — physical library →
+digital library), and a 7th color theme "InvLib" (navy/teal) is added under
+Settings, using the exact brand palette. Product name, install identifier
+(`appId`), and the library's data folder are untouched — visual layer only.
+
 ## v2.4.0
 
 **BG:** Трети задълбочен одит — 26 намерени дефекта, всичките отстранени, плюс
