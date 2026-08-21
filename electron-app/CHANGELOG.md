@@ -11,6 +11,17 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.2
+
+**BG:** Уебсайтът на програмата (Настройки → „Помощ и обратна връзка“) вече
+сочи към новия адрес **invlib.com**, вместо предишния `inventar-two.vercel.app`.
+Само линкът е сменен — имейлът за връзка с разработчика е същият.
+
+**EN:** The program's website link (Settings → "Help and feedback") now
+points to the new address **invlib.com** instead of the previous
+`inventar-two.vercel.app`. Only the link changed — the developer contact
+email is unchanged.
+
 ## v2.4.1
 
 **BG:** Нова визуална идентичност — InvLib. Иконата на приложението (`icon.ico`)
