@@ -825,7 +825,7 @@ window.resetNoticeTemplates = resetNoticeTemplates;
    (setWindowOpenHandler) и ги праща към системния браузър вместо в прозореца на
    приложението, затова тук не е нужен отделен IPC канал. */
 const DEV_CONTACT_EMAIL = 'plam4o.4o@outlook.com';
-const DEV_SITE_URL = 'https://inventar-two.vercel.app/';
+const DEV_SITE_URL = 'https://invlib.com/';
 async function reportBug() {
   const [version, s] = await Promise.all([
     call(window.api.app.getVersion()), call(window.api.settings.get())

@@ -578,8 +578,8 @@ test('картата „Помощ и обратна връзка“ показ�
   const dom = await settled(buildDom({}));
   const { window } = dom;
   await window.renderSetup();
-  const link = window.document.querySelector('a[href="https://inventar-two.vercel.app/"]');
-  assert.ok(link, 'трябва да има линк към https://inventar-two.vercel.app/');
+  const link = window.document.querySelector('a[href="https://invlib.com/"]');
+  assert.ok(link, 'трябва да има линк към https://invlib.com/');
   assert.equal(link.getAttribute('target'), '_blank', 'линкът трябва да се отваря извън прозореца на приложението');
 });
 
