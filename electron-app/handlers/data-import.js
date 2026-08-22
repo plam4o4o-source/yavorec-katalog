@@ -245,7 +245,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             const payload = {
               inv_number: inv,
               barcode: cell(row, 'barcode') || String(inv),
-              register_date: parseDate(cell(row, 'register_date')) || new Date().toISOString().slice(0, 10),
+              // today() от deps, а не собствено new Date(): същият часовник, който
+              // ползва status_date по-долу и всеки друг handler. Преди тук стоеше
+              // пряко извикване, което заобикаляше инжектирания часовник — заради
+              // това тестът за тази стойност беше закован за истинската дата на
+              // деня, в който е писан, и целият пакет почервеня на следващия ден.
+              register_date: parseDate(cell(row, 'register_date')) || today(),
               title,
               subtitle: cell(row, 'subtitle') || null,
               author: author || null,
