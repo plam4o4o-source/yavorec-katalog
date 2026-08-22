@@ -94,6 +94,19 @@ async function beginInvent() {
 window.beginInvent = beginInvent;
 async function renderInventRun() {
   const s = await call(window.api.inventorySessions.get(INVENT_SESSION.id));
+  /* `s` може да е null по два отделни пътя: call() връща null при {ok:false} —
+     например базата е заета от другата станция и заявката е надхвърлила
+     busy_timeout — а самият handler връща null, ако редът вече не съществува.
+     Без тази проверка следващият ред хвърляше TypeError вътре в route(): #view
+     оставаше с предишния екран, полето за сканиране изчезваше, а INVENT_SESSION
+     си стоеше — тоест всяко следващо влизане в раздела удряше същия ред и
+     библиотекарят не можеше да се върне в проверката си без рестарт.
+     closeInvent() по-долу пази точно това от самото начало. */
+  if (!s) {
+    INVENT_SESSION = null;
+    toast('Проверката не се зареди — вероятно базата е заета от друг компютър. Опитайте отново.', 'err');
+    return renderInvent();
+  }
   const found = s.scans.length, pool = s.pool_size || 0;
   const left = Math.max(0, pool - found);
   const pct = pool ? Math.min(100, Math.round(found / pool * 100)) : 0;

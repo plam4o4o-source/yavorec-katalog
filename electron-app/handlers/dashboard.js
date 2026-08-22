@@ -12,11 +12,15 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
   const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
     effectiveDaysLate } = deps;
 
+  // Бройки екземпляри, не заглавия — виж дългата бележка при QTY в handlers/kdbf.js.
+  const QTY = "COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1)";
+
   ipcMain.handle('dashboard:stats', () =>
     run(() => {
       const db = getDb();
       return {
-        books: db.prepare("SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен'").get().n,
+        // Бройки, не заглавия — виж бележката при QTY в handlers/kdbf.js.
+        books: db.prepare(`SELECT COALESCE(SUM(${QTY}),0) AS n FROM books b WHERE (b.status != 'отчислен' OR b.status IS NULL)`).get().n,
         readers: db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n,
         loansOpen: db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n,
         overdue: db.prepare(`
@@ -30,7 +34,10 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const y = yearOf();
-      const fund = db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(price),0) AS v FROM books WHERE status != 'отчислен'").get();
+      const fund = db.prepare(
+        `SELECT COALESCE(SUM(${QTY}),0) AS n, COALESCE(SUM(b.price * ${QTY}),0) AS v
+         FROM books b WHERE (b.status != 'отчислен' OR b.status IS NULL)`
+      ).get();
       const activeReaders = db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n;
       const loansOpen = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n;
       const overdueRows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due LIMIT 7`).all();
@@ -42,13 +49,26 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         r.daysLate = effectiveDaysLate ? effectiveDaysLate(r.date_due, today()) : null;
       });
       const overdueCount = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n;
-      const acquiredYear = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE substr(register_date,1,4) = ?`).get(y).n;
+      // Бройки, не заглавия — на едно и също табло „Библиотечен фонд" по-горе вече
+      // брои документи; ако тези два реда останеха на заглавия, Таблото щеше да си
+      // противоречи само със себе си.
+      const acquiredYear = db.prepare(
+        `SELECT COALESCE(SUM(COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1)),0) AS n FROM books b WHERE substr(b.register_date,1,4) = ?`
+      ).get(y).n;
       const deaccessionedYear = db.prepare(`
-        SELECT COUNT(*) AS n FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
+        SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) AS n
+        FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
       `).get(y).n;
       const loansYear = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE substr(date_out,1,4) = ?`).get(y).n;
       const readersYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?`).get(y, y).n;
-      const active = fund.n;
+      /* Целта по чл. 40 се смята от ЗАГЛАВИЯТА (редовете), не от бройките — умишлено
+         различно от `fund.n` точно над него. Инвентаризацията се проверява чрез
+         сканиране, а инвентарният номер в тази схема е един на ред в books; затова
+         пулът, който handlers/inventory-sessions.js съставя, също са редове. Ако тук
+         се ползваше `fund.n` (вече бройки), Таблото щеше да показва една цел, а
+         екранът „Инвентаризация“ — друга. Условието е дословно същото като там,
+         включително NULL-безопасната проверка на статуса. */
+      const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
       const pct = pctRequired(active);
       const target = Math.ceil(active * pct / 100);
       const scannedYear = db.prepare(`

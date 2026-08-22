@@ -18,7 +18,14 @@ const FIELD_LABELS = {
   guarantor_phone: 'Телефон на гаранта', note: 'Бележка'
 };
 function auditDiffHtml(diffJson) {
-  let diff; try { diff = JSON.parse(diffJson); } catch (e) { return ''; }
+  /* Повреден запис не бива да изглежда като „това действие не е променило нищо“.
+     Одитната следа е документът, който проверяващият от регионалната библиотека
+     чете — там разликата между двете има значение. Празен/липсващ diff (обичайното
+     за действия без редакция) си остава без ред, както досега. */
+  if (diffJson == null || diffJson === '') return '';
+  let diff;
+  try { diff = JSON.parse(diffJson); }
+  catch (e) { return '<div class="diffList"><span class="hint">(записът за промените е повреден и не може да бъде прочетен)</span></div>'; }
   if (!Array.isArray(diff) || !diff.length) return '';
   return `<div class="diffList">${diff.map(d =>
     `<div><b>${esc(FIELD_LABELS[d.field] || d.field)}:</b> ${esc(d.before ?? '—')} → ${esc(d.after ?? '—')}</div>`

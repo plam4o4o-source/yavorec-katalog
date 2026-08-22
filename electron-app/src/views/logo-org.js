@@ -106,9 +106,28 @@ async function printOverdueNotices() {
   // doPrint() само отваря преглед с бутон „Отказ“ — дотогава при отказ в
   // регистъра вече стоеше „изпратено напомняне“ на всички просрочили читатели
   // и следващото напомняне тръгваше от грешна степен.
-  const logNotices = () => rows.forEach(r => window.api.notices.log({
-    reader_id: r.reader_id, level: levels[r.reader_id] || 1, channel: 'печат', loans_count: r.n
-  }));
+  /* Всяко вписване се изчаква и проверява. Дотук беше forEach без await и без
+     поглед към резултата: заета от друга станция база или изтрит междувременно
+     читател проваляха записа напълно безмълвно — писмата излизат от принтера и
+     отиват при читателите, а в регистъра няма и следа, тоест следващото напомняне
+     тръгва пак от ниво 1. try/catch в извикващия също не помагаше: forEach връща
+     undefined синхронно и отказаният promise няма как да стигне дотам.
+     Съобщението е едно, обобщено — не по едно на читател. */
+  const logNotices = async () => {
+    let failed = 0;
+    for (const r of rows) {
+      try {
+        const res = await window.api.notices.log({
+          reader_id: r.reader_id, level: levels[r.reader_id] || 1, channel: 'печат', loans_count: r.n
+        });
+        if (!res || !res.ok) failed++;
+      } catch (e) { failed++; }
+    }
+    if (failed) {
+      toast(failed + ' от ' + rows.length + ' напомняния не се вписаха в регистъра — писмата са '
+        + 'отпечатани, но следващият път ще тръгнат от същата степен.', 'err');
+    }
+  };
   setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
   doPrint(rows.map(r => `<div class="pdoc">${shead()}
     <h2>НАПОМНИТЕЛНО ПИСМО</h2>

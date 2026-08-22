@@ -232,19 +232,33 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const daysLate = effectiveDaysLate(before.date_due, inDate);
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
       const fine = daysLate * ((s && s.fine_per_day) || 0);
-      // `AND date_in IS NULL` е втората (атомарна) половина на защитата по-горе:
-      // ако два прозореца натиснат „Приеми" едновременно, само първият ще запише.
-      const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
-        .run(inDate, fine, id);
-      if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
-      const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
-      if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
-      const hold = l ? activateHoldOnReturn(l.book_id) : null;
-      let suspendedUntil = null;
-      if (l) {
-        logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: inDate });
-        suspendedUntil = applySuspension(l.reader_id, l.date_due, inDate);
-      }
+      /* Едно връщане пипа ЧЕТИРИ таблици: loans (затваря заемането), holds
+         (активира следващата резервация), events (захранва дневника и годишния
+         отчет) и readers (наказанието). Дотук те се записваха едно по едно, без
+         транзакция: прекъсване по средата — спиране на тока, прекъсната мрежа към
+         споделената база — оставяше заемането затворено, но без събитие, и
+         годишният отчет тихо оставаше с едно заемане по-малко от инвентарната
+         книга. Сега или минават всичките, или нито едно, точно както при
+         loans:extend по-горе. `.immediate()` взима правото на запис още в началото,
+         за да не се стигне до „database is locked“ насред поредицата. */
+      const tx = db.transaction(() => {
+        // `AND date_in IS NULL` е втората (атомарна) половина на защитата по-горе:
+        // ако два прозореца натиснат „Приеми" едновременно, само първият ще запише.
+        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
+          .run(inDate, fine, id);
+        if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
+        const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
+        if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+        const hold = l ? activateHoldOnReturn(l.book_id) : null;
+        let suspendedUntil = null;
+        if (l) {
+          logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: inDate });
+          suspendedUntil = applySuspension(l.reader_id, l.date_due, inDate);
+        }
+        return { hold, suspendedUntil };
+      });
+      const { hold, suspendedUntil } = tx.immediate();
+      // Извън транзакцията: пише файл, не база — не бива да я държи отворена.
       scheduleCatalogWrite();
       return {
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
@@ -293,7 +307,15 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           throw new Error('Книгата е резервирана от ' + h.reader_name + ' и няма свободна бройка за нея — ' +
             'срокът не може да се продължи.');
         }
-        const base = l.date_due || today();
+        /* Продължението тръгва от по-късната от двете дати — стария срок и днес.
+           Дотук стоеше само `l.date_due`, а бутонът „Продължи“ стои тъкмо на
+           екрана „Просрочени“, където всяко заемане е с изтекъл срок: заемане със
+           срок 15.01, продължено на 20.02, получаваше нов срок 14.02 — пак в
+           миналото. Програмата казваше, че срокът е продължен, книгата се връщаше
+           в списъка на просрочените още в същия миг, а едно от позволените
+           продължавания беше изхабено. */
+        const t = today();
+        const base = (l.date_due && l.date_due > t) ? l.date_due : t;
         const newDue = nextWorkDay(addDays(base, s.extension_days || 30));
         db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
         logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
@@ -371,12 +393,25 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       // просрочие вече ползваше изчистените от затворени дни.
       const daysLate = effectiveDaysLate(loan.date_due, inDate);
       const fine = daysLate * ((s && s.fine_per_day) || 0);
-      db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ?').run(inDate, fine, loan.id);
-      logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
-      logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
-      const suspendedUntil = applySuspension(loan.reader_id, loan.date_due, inDate);
-      const hold = activateHoldOnReturn(b.id);
-      scheduleCatalogWrite();
+      /* Същата транзакция и същата атомарна защита като при loans:return — това
+         е ДРУГИЯТ път за връщане (сканиране на баркод) и на гишето минава по-често
+         от бутона. Дотук тук нямаше нито транзакция, нито `AND date_in IS NULL`:
+         прекъсване между UPDATE-а и logEvent оставяше заемането затворено без
+         събитие (годишният отчет тихо с едно по-малко), а двойно сканиране на
+         един и същ баркод удвояваше наказанието. */
+      const tx = db.transaction(() => {
+        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
+          .run(inDate, fine, loan.id);
+        if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
+        logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+        logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
+        return {
+          suspendedUntil: applySuspension(loan.reader_id, loan.date_due, inDate),
+          hold: activateHoldOnReturn(b.id)
+        };
+      });
+      const { suspendedUntil, hold } = tx.immediate();
+      scheduleCatalogWrite(); // пише файл, не база — извън транзакцията
       return {
         title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine, suspendedUntil,
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null

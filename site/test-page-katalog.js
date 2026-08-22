@@ -61,7 +61,7 @@ function jsonResponse(obj, ok, status) {
  * описан в skill-а (проксирани URL-и, съдържащи оригиналния hostname като substring).
  */
 function makeFetchMock(scenario) {
-  return function fetchMock(url) {
+  return function fetchMock(url, fetchOpts) {
     var opts = {
       ok: true,
       status: 200,
@@ -79,6 +79,21 @@ function makeFetchMock(scenario) {
         e.name = 'AbortError';
         return Promise.reject(e);
       }
+      /* Заглавките идват мигновено (HTTP 200), но ТЯЛОТО никога не тръгва — падаща
+         мрежа, задавен CDN възел. Верен на браузъра: прекъсването отказва и
+         четенето на тялото, затова json() слуша сигнала. Точно този случай беше
+         пропуснат: таймерът се гасеше при заглавките и страницата висеше вечно. */
+      if (scenario.primary === 'body-hangs') {
+        return Promise.resolve({ ok: true, status: 200, json: function () {
+          return new Promise(function (_, rej) {
+            if (fetchOpts && fetchOpts.signal && fetchOpts.signal.addEventListener) {
+              fetchOpts.signal.addEventListener('abort', function () {
+                var er = new Error('The operation was aborted'); er.name = 'AbortError'; rej(er);
+              });
+            }
+          });
+        } });
+      }
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(scenario.primaryBody); } });
     }
     if (url.startsWith(JSDELIVR_URL)) {
@@ -92,6 +107,17 @@ function makeFetchMock(scenario) {
         var e2 = new Error('The operation was aborted');
         e2.name = 'AbortError';
         return Promise.reject(e2);
+      }
+      if (scenario.fallback === 'body-hangs') {
+        return Promise.resolve({ ok: true, status: 200, json: function () {
+          return new Promise(function (_, rej) {
+            if (fetchOpts && fetchOpts.signal && fetchOpts.signal.addEventListener) {
+              fetchOpts.signal.addEventListener('abort', function () {
+                var er = new Error('The operation was aborted'); er.name = 'AbortError'; rej(er);
+              });
+            }
+          });
+        } });
       }
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(scenario.fallbackBody); } });
     }
@@ -155,7 +181,7 @@ async function runScenario(name, opts) {
       if (ft && ft.innerHTML && ft.innerHTML.indexOf('Каталогът е актуален') !== -1) {
         clearInterval(iv);
         resolve();
-      } else if (waited > 8000) {
+      } else if (waited > (opts.waitMs || 8000)) {
         clearInterval(iv);
         reject(new Error('[' + name + '] timeout waiting for boot()/finish() to complete'));
       }
@@ -163,9 +189,13 @@ async function runScenario(name, opts) {
   });
 
   var ftHtml = w.document.getElementById('katFt').innerHTML;
+  // katR е контейнерът, в който showLoading() рисува анимацията „Разгръщаме
+  // каталога…“ — по него се вижда дали страницата е останала забита на нея.
+  var listEl = w.document.getElementById('katR');
+  var listHtml = listEl ? listEl.innerHTML : '';
   var uncaughtErrors = w.__uncaughtErrors.slice();
   dom.window.close();
-  return { ftHtml: ftHtml, uncaughtErrors: uncaughtErrors };
+  return { ftHtml: ftHtml, listHtml: listHtml, uncaughtErrors: uncaughtErrors };
 }
 
 const CACHED_GENERATED = '2026-03-15'; // -> очаквано форматирано като 15.03.2026
@@ -267,12 +297,36 @@ async function main() {
       '(е) очаквах диагностиката да покаже timeout за jsDelivr, различно от HTTP статус — намерено: ' + r.ftHtml);
   }
 
+  /* --- Сценарий (ж) — одит: заглавките пристигат, ТЯЛОТО никога не тръгва. ---
+     Дотук fetchTimeout() гасеше таймера в .finally() на самия fetch, а fetch се
+     решава още при заглавките: сървър, който отговори „200 OK“ и после спре да
+     подава байтове, оставяше страницата ЗАВИНАГИ на анимацията „Разгръщаме
+     каталога…“ — резервният източник не се пробваше, кешът не се пробваше,
+     съобщение нямаше. Сега таймерът тече и през четенето на тялото. */
+  {
+    var r = await runScenario('zh: headers arrive, body never does (both sources)', {
+      primary: 'body-hangs',
+      fallback: 'body-hangs',
+      localStorage: {},
+      // Двата източника се пробват последователно. Заглавките идват веднага, тоест
+      // всеки източник изяжда пълния срок за ТЯЛОТО (25 сек.) — тестът трябва да
+      // чака повече от 50 сек., преди да се откаже.
+      waitMs: 70000
+    });
+    assert(!/Разгръщаме каталога/.test(r.listHtml || ''),
+      '(ж) страницата не бива да остане на анимацията за зареждане — намерено: ' + (r.listHtml || '').slice(0, 200));
+    assert(r.ftHtml.indexOf('Няма връзка към живите данни') !== -1,
+      '(ж) очаквах падане обратно на static-fallback текста — намерено: ' + r.ftHtml);
+    assert(/изтече времето за изчакване/.test(r.ftHtml),
+      '(ж) диагностиката трябва да каже, че е изтекло времето за изчакване — намерено: ' + r.ftHtml);
+  }
+
   if (failures.length) {
     console.error('ПРОВАЛ — ' + failures.length + ' проверка(и) не преминаха:');
     failures.forEach(function (f) { console.error('  - ' + f); });
     process.exit(1);
   } else {
-    console.log('ВСИЧКИ 6 СЦЕНАРИЯ МИНАХА (' + targetPath + ')');
+    console.log('ВСИЧКИ 7 СЦЕНАРИЯ МИНАХА (' + targetPath + ')');
     process.exit(0);
   }
 }

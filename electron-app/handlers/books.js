@@ -309,7 +309,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       // „кога стана липсваща" няма отговор.
       const extra = field === 'status' ? ", status_date = date('now')" : '';
       const tx = db.transaction(() => db.prepare(
-        `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND status != 'отчислен'`
+        `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND (status != 'отчислен' OR status IS NULL)`
       ).run(v, ...ids).changes);
       const changes = tx.immediate();
       logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));

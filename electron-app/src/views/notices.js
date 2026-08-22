@@ -51,30 +51,51 @@ async function openReminders() {
 window.openReminders = openReminders;
 /* Отбелязва в регистъра (notice_log), че напомнянето реално е минало към читателя.
    Така списъкът показва „последно: № 2 · 12.05" и повторните не се пращат на сляпо. */
-function remLog(i, channel) {
+/* Минава през call(), а не „изстрелване и забрава“: това е официалният регистър,
+   по който се вдига нивото на следващото напомняне. Дотук резултатът изобщо не се
+   проверяваше и провалът беше напълно невидим — списъкът после показваше „няма
+   пращано досега“ и ескалацията тръгваше пак от ниво 1. */
+async function remLog(i, channel) {
   const r = (window._REMINDERS || [])[i];
-  if (!r) return;
-  window.api.notices.log({ reader_id: r.reader_id, level: r.level || 1, channel, loans_count: r.n });
+  if (!r) return false;
+  const ok = await call(window.api.notices.log({ reader_id: r.reader_id, level: r.level || 1, channel, loans_count: r.n }));
+  if (ok === null) {
+    toast('Напомнянето е подготвено, но НЕ се вписа в регистъра — следващия път ще тръгне пак от същото ниво.', 'err');
+    return false;
+  }
+  return true;
 }
 async function remMail(i) {
   const r = (window._REMINDERS || [])[i];
   if (!r) return;
   const res = await window.api.loans.mailto({ email: r.email, subject: r.subject, body: $('#remB' + i).value });
   if (!res.ok) return toast(res.error, 'err');
-  remLog(i, 'имейл');
+  await remLog(i, 'имейл');
   toast('Писмото е отворено в пощенския клиент.', 'ok');
 }
 window.remMail = remMail;
 async function remCopy(id, i, channel) {
   const el = $('#' + id);
   if (!el) return;
+  /* Регистърът се пипа САМО ако копирането наистина е станало. Дотук и двата пътя
+     можеха да се провалят (достъпът до системния буфер се отказва при заключена
+     политика или извън потребителски жест), а програмата въпреки това казваше
+     „Копирано.“ и вписваше напомняне № 2 като изпратено — библиотекарят лепваше в
+     съобщението каквото е било в буфера отпреди. */
+  let copied = false;
   try {
     await navigator.clipboard.writeText(el.value);
+    copied = true;
   } catch (e) {
     // Резервен път, ако достъпът до системния буфер е отказан.
-    el.select(); document.execCommand('copy');
+    try { el.select(); copied = document.execCommand('copy') === true; }
+    catch (e2) { copied = false; }
   }
-  if (i != null) remLog(i, channel || 'копиране');
+  if (!copied) {
+    el.select(); // текстът остава маркиран, за да може ръчно с Ctrl+C
+    return toast('Копирането не стана — текстът е маркиран, натиснете Ctrl+C.', 'err');
+  }
+  if (i != null) await remLog(i, channel || 'копиране');
   toast('Копирано.', 'ok');
 }
 window.remCopy = remCopy;

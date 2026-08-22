@@ -17,6 +17,9 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
       const rows = db.prepare(`
         SELECT b.id, b.inv_number, b.register_date, b.title, b.author, b.volume,
                b.year, b.price, b.call_number, b.status, b.description,
+               -- бройки екземпляри: „Налични: N · стойност" под таблицата брои
+               -- документи, както навсякъде другаде (виж handlers/kdbf.js)
+               COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1) AS quantity,
                c.name AS category_name,
                a.no AS acq_no, a.date AS acq_date,
                d.no AS act_no, d.date AS act_date

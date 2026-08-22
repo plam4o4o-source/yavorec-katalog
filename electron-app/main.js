@@ -75,11 +75,61 @@ function configPath() {
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'config.json');
 }
-function readConfig() {
-  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch (e) { return {}; }
+/* Празен обект при ПЪРВО пускане е нормално. Празен обект при неуспешно ЧЕТЕНЕ на
+   съществуващ файл е нещо съвсем друго — и дотук двете бяха неразличими. Всяка
+   грешка се превръщаше в „няма настройки“, а `app:setUser` (който се вика при
+   всяка смяна на служителя от горния десен ъгъл) прави чети-промени-запиши: така
+   един-единствен неуспешен прочит — например докато антивирусна програма държи
+   файла, обичайно под Windows — изтриваше `dbFolder` ЗАВИНАГИ. На следващата
+   сутрин програмата се отваряше на празна локална база, при това мълчаливо:
+   предпазната мрежа за „мрежовата папка е недостъпна“ не се задейства, защото
+   според програмата такава никога не е била задавана.
+
+   Сега провалът се различава от липсата. При повреден или непрочетен файл
+   readConfig хвърля, а извикващият решава какво да прави — а `writeConfig` пази
+   отделно копие `config.bad.json`, преди да презапише, за да може пътят да бъде
+   възстановен ръчно. */
+function readConfigOrThrow() {
+  const p = configPath();
+  if (!fs.existsSync(p)) return {};            // първо пускане — наистина няма настройки
+  const raw = fs.readFileSync(p, 'utf8');      // при заета/недостъпна папка хвърля — и трябва
+  const cfg = JSON.parse(raw);                 // при повреден JSON хвърля — и трябва
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('config.json не е обект');
+  return cfg;
 }
+function readConfig() {
+  try { return readConfigOrThrow(); }
+  catch (e) {
+    console.error('config.json не можа да бъде прочетен:', e.message);
+    return {};
+  }
+}
+/* Пише атомарно (настрани → преименувай), за да не остане пресечен файл при спиране
+   на тока насред записа — точно този файл сочи къде е базата на библиотеката. */
 function writeConfig(cfg) {
-  fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2), 'utf8');
+  const p = configPath();
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.renameSync(tmp, p);
+}
+/* Чети-промени-запиши БЕЗ риск да загуби вече записани стойности: ако четенето се
+   провали, записът се отказва изцяло, вместо да презапише файла с окастрен обект.
+   По-добре смяната на служителя да не се запомни, отколкото пътят до базата да
+   изчезне. */
+function updateConfig(mutate) {
+  let cfg;
+  try { cfg = readConfigOrThrow(); }
+  catch (e) {
+    const p = configPath();
+    try {
+      if (fs.existsSync(p)) fs.copyFileSync(p, p.replace(/\.json$/, '.bad.json'));
+    } catch (e2) { /* копието е удобство, не условие */ }
+    console.error('config.json не се прочете — записът е отказан, за да не се загуби пътят до базата:', e.message);
+    return false;
+  }
+  mutate(cfg);
+  writeConfig(cfg);
+  return true;
 }
 function defaultDbDir() {
   return app.isPackaged ? app.getPath('userData') : path.join(__dirname, 'db');
@@ -214,6 +264,13 @@ function initDb() {
     anonymize_years: 'INTEGER DEFAULT 0'
   });
 
+  /* Снимката на бройките в акта за отчисляване — за вече съществуващи бази.
+     NULL означава „акт отпреди тази версия“ и се чете като 1 екземпляр, точно
+     както се броеше и преди (един ред = един документ). */
+  ensureColumns('deaccession_items', {
+    quantity: 'INTEGER'
+  });
+
   ensureColumns('books', {
     status_date: 'TEXT',
     datelastseen: 'TEXT',
@@ -236,7 +293,17 @@ function initDb() {
   });
 
   ensureColumns('loans', {
-    anon_category: 'TEXT'
+    anon_category: 'TEXT',
+    /* CREATE TABLE IF NOT EXISTS в schema.sql НЕ добавя колона към вече
+       съществуваща таблица — затова присъствието ѝ в описанието на таблицата
+       важи само за нови бази. Дотук колоната се създаваше единствено от лениво
+       извикваната миграция в handlers/deaccession-acts.js, тоест само след като
+       библиотеката състави или анулира акт за отчисляване. Всяка заявка отвън,
+       която я ползва (handlers/stats.js изключва оттук заеманията, закрити от
+       акт), гърмеше с „no such column“ на всяка инсталация, която още не е
+       правила отчисляване — а това е точно екранът „Справки и статистика“,
+       нужен за годишния отчет. */
+    deaccession_act_id: 'INTEGER'
   });
 
   ensureColumns('readers', {
@@ -408,7 +475,7 @@ function runMigrations() {
 require('./handlers/db-location')(ipcMain, {
   app, dialog, fs, path,
   getDb: () => db, setDb: (v) => { db = v; }, getMainWindow: () => mainWindow,
-  run, readConfig, writeConfig, resolveDbDir, resolveDbPath
+  run, readConfig, writeConfig, updateConfig, resolveDbDir, resolveDbPath
 });
 
 /* ---------------- Резервни копия ----------------
@@ -507,6 +574,31 @@ if (!app.requestSingleInstanceLock()) {
 
 app.whenReady().then(() => {
   pruneOldLogs();
+  /* Повреден или непрочетим config.json е тихата версия на „базата изчезна“:
+     програмата пада на локалната папка и отваря ПРАЗНА база, а библиотекарят
+     вижда библиотека без нито една книга, без нищо да обяснява защо. Затова
+     провалът се показва изрично, преди базата да бъде докосната. */
+  try {
+    readConfigOrThrow();
+  } catch (err) {
+    logToFile('error', 'config.json не се прочете: ' + err.message);
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      noLink: true,
+      buttons: ['Изход', 'Продължи с локална база'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Настройките на програмата не могат да бъдат прочетени',
+      message: 'Файлът с настройките (config.json) не можа да бъде прочетен.',
+      detail: 'В него се пази пътят до базата данни на библиотеката. Докато не бъде прочетен, '
+        + 'програмата не знае къде е базата и би отворила ПРАЗНА локална база.\n\n'
+        + 'Причина: ' + err.message + '\n\n'
+        + '• „Изход“ — безопасният избор. Затворете програмата на другите компютри, проверете дали '
+        + 'антивирусната програма не държи файла, и опитайте пак.\n'
+        + '• „Продължи с локална база“ — данните, въведени оттук нататък, НЯМА да попаднат в общата база.'
+    });
+    if (choice === 0) { app.exit(0); return; }
+  }
   // Преди каквото и да е докосване на базата — виж askAboutMissingDbFolder по-горе.
   if (!ensureDbFolderAvailable({ readConfig, existsSync: fs.existsSync, ask: askAboutMissingDbFolder })) {
     logToFile('warn', 'Стартирането е прекратено — настроената папка с базата данни не е достъпна.');
@@ -539,13 +631,32 @@ app.whenReady().then(() => {
   const detail = (err && err.message) ? err.message : String(err);
   try { logToFile('error', 'Стартирането пропадна: ' + detail); } catch (e) { /* дневникът е последната ни грижа тук */ }
   try {
+    /* Съветът дотук беше „копирайте последното копие върху library.db“ и той е
+       ОПАСЕН по два начина. Първо, при включена защита на личните данни най-новото
+       копие е .invbak — криптирано; копирано върху library.db то дава файл, който
+       програмата не може да отвори, а оригиналът вече е презаписан. Второ, „базата
+       е заключена от друга станция“ стига до същия този диалог и не е повреда
+       изобщо — възстановяване там означава да се загуби работата на другия компютър.
+       Затова: първо се пази копие на текущия файл, възстановяването минава през
+       самата програма, а заключването се назовава отделно. */
+    const locked = /locked|busy/i.test(detail);
     dialog.showErrorBox('InvLib не можа да се стартира',
       'Базата данни не можа да бъде отворена.\n\n' + detail + '\n\n' +
-      'Най-честата причина е повреден файл или недостъпна папка (изключен мрежов диск).\n' +
-      'Какво да направите:\n' +
-      '• Проверете дали мрежовият диск с базата е включен и достъпен.\n' +
-      '• Ако е повреден файлът — възстановете последното резервно копие от подпапка „backups" ' +
-      'до базата данни (копирайте го върху library.db).\n' +
+      (locked
+        ? 'Този текст обикновено НЕ означава повреда, а че базата се ползва от друг компютър '
+          + 'или от втори отворен прозорец на програмата.\nКакво да направите:\n'
+          + '• Затворете програмата на другите работни места и опитайте пак.\n'
+          + '• Проверете дали програмата не е останала отворена два пъти на този компютър.\n'
+          + '• НЕ възстановявайте резервно копие — това би изтрило работата на другия компютър.\n'
+        : 'Най-честата причина е повреден файл или недостъпна папка (изключен мрежов диск).\n'
+          + 'Какво да направите:\n'
+          + '• Проверете дали мрежовият диск с базата е включен и достъпен.\n'
+          + '• НЕ копирайте резервно копие върху library.db. Ако защитата на личните данни е '
+          + 'включена, копията са криптирани (.invbak) и така базата става неотваряема, а '
+          + 'оригиналът се губи безвъзвратно.\n'
+          + '• Вместо това: преименувайте library.db на library-повреден.db (не я триете — може '
+          + 'да се спаси), пуснете програмата отново и възстановете копието от „Настройки“ → '
+          + '„Резервни копия“, откъдето разкриптирането става само.\n') +
       '• Ако проблемът остава, изпратете дневника от папката „logs" на разработчика.');
   } catch (e) { /* ако и диалогът не тръгне, поне не увисваме */ }
   app.exit(1);
@@ -618,7 +729,9 @@ function naturalLoss(n, freeAccessPct) { return (freeAccessPct > 50 ? n * 10 : n
 ipcMain.handle('app:setUser', (e, name) =>
   run(() => {
     CURRENT_USER = (name || '').trim();
-    const cfg = readConfig(); cfg.lastUserName = CURRENT_USER; writeConfig(cfg);
+    // Не readConfig()+writeConfig(): при неуспешен прочит това презаписваше
+    // файла с празен обект и трие `dbFolder`. Виж updateConfig по-горе.
+    updateConfig((cfg) => { cfg.lastUserName = CURRENT_USER; });
     return CURRENT_USER;
   })
 );
@@ -779,7 +892,18 @@ function logEvent(kind, opts) {
       .run(o.date || today(), kind, o.bookId || null, o.readerId || null,
         rd ? rd.category : null, bk ? bk.language : null, bk ? bk.udk : null,
         bk ? bk.category_name : null, o.note || null);
-  } catch (err) { console.error('Регистър на събитията:', err.message); }
+  } catch (err) {
+    /* Дотук грешката се преглъщаше тук — и това обезсмисляше транзакциите около
+       заемане/връщане: уловено изключение НЕ отменя транзакция в SQLite, тоест
+       UPDATE-ът на заемането се записваше, а събитието — не, и годишният отчет
+       оставаше с едно заемане по-малко от инвентарната книга. Точно провалът,
+       който транзакцията трябва да изключи.
+       Затова изключението се препредава: извикващият е в транзакция и тя ще бъде
+       отменена изцяло. Записът в дневника остава — той носи техническата причина. */
+    console.error('Регистър на събитията:', err.message);
+    throw new Error('Действието не беше вписано в регистъра на събитията (' + err.message
+      + ') — операцията е отменена, за да не се разминат отчетите. Опитайте отново.');
+  }
 }
 
 /* ---------------- Резервации ----------------
@@ -927,6 +1051,8 @@ function publicBookFields(b, opacMap) {
   };
 }
 function buildCatalogPayload() {
+  /* НЕ NULL-безопасно, и това е нарочно — виж бележката при catalog:status в
+     handlers/catalog.js: документ с непознат статус не се публикува навън. */
   const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен' ORDER BY b.title`).all();
   const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
   const opacMap = {};

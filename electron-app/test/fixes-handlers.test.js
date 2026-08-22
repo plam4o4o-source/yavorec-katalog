@@ -205,6 +205,9 @@ function setupDbLocation(fsPatch) {
     getDb: () => db, setDb: (v) => { db = v; }, getMainWindow: () => ({}),
     run: RUN,
     readConfig: () => config, writeConfig: (cfg) => { config = cfg; },
+    // updateConfig е задължителна зависимост от одита нататък: чети-промени-запиши
+    // без риск да загуби вече записани стойности (виж main.js).
+    updateConfig: (mutate) => { mutate(config); return true; },
     resolveDbDir: () => dbFolder,
     resolveDbPath: () => path.join(dbFolder, 'library.db')
   });

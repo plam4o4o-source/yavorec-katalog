@@ -70,6 +70,9 @@ function setup(opts = {}) {
     },
     readConfig: () => config,
     writeConfig: (cfg) => { config = cfg; },
+    // updateConfig е задължителна зависимост от одита нататък: чети-промени-запиши
+    // без риск да загуби вече записани стойности (виж main.js).
+    updateConfig: (mutate) => { mutate(config); return true; },
     resolveDbDir: () => (config.dbFolder && fs.existsSync(config.dbFolder)) ? config.dbFolder : dbFolder,
     resolveDbPath: () => path.join((config.dbFolder && fs.existsSync(config.dbFolder)) ? config.dbFolder : dbFolder, 'library.db')
   };

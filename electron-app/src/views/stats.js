@@ -41,7 +41,9 @@ async function renderStats() {
         <div class="kpi-lbl">Заемания</div><div class="kpi-extra">през ${y} г.</div></div></div>
       <div class="kpi"><div class="kpi-ico">🚪</div><div class="kpi-body">
         <div class="kpi-num">${r.visits.toLocaleString('bg-BG')}</div>
-        <div class="kpi-lbl">Посещения</div><div class="kpi-extra">БДС ISO 2789</div></div></div>
+        <div class="kpi-lbl">Посещения</div><div class="kpi-extra">${r.visitsRecorded
+          ? 'БДС ISO 2789'
+          : '<b>не са вписвани</b> — вижте „Впиши посещения“ по-долу'}</div></div></div>
     </div>
 
     <div class="grid g3">

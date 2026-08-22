@@ -843,9 +843,14 @@ async function reportBug() {
 }
 window.reportBug = reportBug;
 async function copyDevEmail() {
-  try { await navigator.clipboard.writeText(DEV_CONTACT_EMAIL); }
-  catch (e) { /* най-честата причина е липса на разрешение за системния буфер;
-                 имейлът и без това се вижда в картата, затова само съобщението по-долу отпада мълчаливо */ }
-  toast('Имейлът е копиран: ' + DEV_CONTACT_EMAIL, 'ok');
+  /* Съобщението „копиран“ трябва да е вярно. Дотук стоеше ИЗВЪН try и се
+     показваше и когато копирането се е провалило — коментарът твърдеше, че
+     отпада мълчаливо, но кодът не правеше това. */
+  try {
+    await navigator.clipboard.writeText(DEV_CONTACT_EMAIL);
+    toast('Имейлът е копиран: ' + DEV_CONTACT_EMAIL, 'ok');
+  } catch (e) {
+    toast('Копирането не стана — имейлът е ' + DEV_CONTACT_EMAIL, 'err');
+  }
 }
 window.copyDevEmail = copyDevEmail;

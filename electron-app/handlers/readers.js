@@ -32,9 +32,16 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     return out;
   }
 
-  ipcMain.handle('readers:list', (e, query) =>
+  /* `limit` е незадължителен и се подава САМО от подсказващите полета (заемане,
+     предложения за покупка, резервации), които така или иначе показват първите
+     шест реда. Дотук те получаваха ЦЕЛИЯ резултат — при 4000 читатели това е
+     стотици килобайта, пренесени през IPC и изхвърлени веднага, при всеки
+     натиснат клавиш. Екранът „Читатели“ нарочно не подава limit: там търсенето
+     трябва да върне всички съвпадения, защото списъкът се странира отсам. */
+  ipcMain.handle('readers:list', (e, query, limit) =>
     run(() => {
       const db = getDb();
+      const cap = Number.isFinite(limit) && limit > 0 ? ' LIMIT ' + Math.min(Math.floor(limit), 500) : '';
       if (query && query.trim()) {
         const q = `%${query.trim()}%`;
         // Името минава през FTS5 (виж books:list за обяснението); телефон и
@@ -44,10 +51,10 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           SELECT * FROM readers
           WHERE id IN (SELECT rowid FROM readers_fts WHERE readers_fts MATCH ?)
              OR phone LIKE ? OR card_no LIKE ?
-          ORDER BY name
+          ORDER BY name${cap}
         `).all(ftsQuery(query), q, q));
       }
-      return maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY name').all());
+      return maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY name' + cap).all());
     })
   );
   ipcMain.handle('readers:get', (e, id) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id))));

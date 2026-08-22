@@ -334,9 +334,81 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       ? 'Днешното резервно копие беше прекриптирано с новата парола.'
       : 'Днешното резервно копие вече е криптирано с паролата за защита на личните данни.');
   }
+  /* СМЯНА НА ПАРОЛАТА важи и за ВЕЧЕ НАПРАВЕНИТЕ копия, не само за днешното.
+     Дотук се прекриптираше само файлът за текущия ден; останалите (до 30 назад,
+     виж AUTO_BACKUP_KEEP_DAYS) оставаха заключени с изоставената парола, а
+     списъкът в „Настройки“ ги показваше като изправни. Две последици: копие
+     отпреди седмица не се отваря с паролата, която библиотекарят знае — тоест на
+     практика е загубено; а ако паролата е сменена ЗАЩОТО е компрометирана, то
+     продължава да се отваря с компрометираната.
+
+     Всеки файл се проверява поотделно и се прекриптира само ако наистина не се
+     отваря с текущата парола. Един провал не спира останалите — по-добре 29
+     прекриптирани и един докладван, отколкото нито един. */
+  function reencryptOldBackups(password, prevPassword) {
+    const dir = backupsDir();
+    const { date: today } = todayPaths();
+    let files = [];
+    try {
+      files = fs.readdirSync(dir).filter(f => /^auto-\d{4}-\d{2}-\d{2}\.invbak$/.test(f));
+    } catch (e) { return { done: 0, failed: [] }; }
+    let done = 0;
+    const failed = [];
+    for (const f of files) {
+      if (f === `auto-${today}.invbak`) continue; // за днешния се грижи upgradeTodayAutoBackup
+      const full = path.join(dir, f);
+      if (opensWith(full, password)) continue;   // вече е с текущата парола
+      /* НЕ през writeEncryptedDaily: то снима ЖИВАТА база (doBackupTo) и изобщо
+         не чете подадения му plainDest — писано е за днешното копие, където
+         живата база наистина е поне толкова нова. За исторически файл това би
+         означавало всичките 29 стари копия да бъдат презаписани със снимка на
+         ДНЕШНАТА база: тридесетдневният прозорец за връщане назад изчезва
+         безшумно, а одитът отгоре на всичкото рапортува успех.
+         Затова тук: разкриптирай със старата парола в паметта → запиши
+         криптирано настрани с новата → провери, че се отваря → чак тогава
+         преименувай върху оригинала. Съдържанието на файла остава своето. */
+      const staged = full + '.tmp';
+      const plainTmp = full + '.plain.tmp';
+      try {
+        const buf = prevPassword ? decryptBackupBuffer(full, prevPassword) : null;
+        if (!buf || buf.subarray(0, 15).toString('utf8') !== 'SQLite format 3') { failed.push(f); continue; }
+        fs.writeFileSync(plainTmp, buf);
+        encryptBackupFile(plainTmp, staged, password);
+        if (!opensWith(staged, password)) throw new Error('новото копие не се отваря с новата парола');
+        fs.renameSync(staged, full);
+        done++;
+      } catch (err) {
+        failed.push(f);
+      } finally {
+        /* Разшифрованият близнак съдържа личните данни на всички читатели, а
+           папката с копията обикновено е споделена в мрежата — не бива да остава
+           на диска по НИКОЙ път, включително при провал. */
+        try { if (fs.existsSync(plainTmp)) fs.unlinkSync(plainTmp); } catch (e2) { /* нищо не зависи от това */ }
+        try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e2) { /* нищо не зависи от това */ }
+      }
+    }
+    return { done, failed };
+  }
+
   pii.onSession((meta) => {
     try { upgradeTodayAutoBackup(meta); }
     catch (err) { console.error('Криптиране на дневното копие след отключване — грешка:', err.message); }
+    if (meta && meta.reason === 'change') {
+      try {
+        const password = autoBackupPassword();
+        if (!password) return;
+        const { done, failed } = reencryptOldBackups(password, meta.prevPassword);
+        if (done) logAudit('Резервно копие', done + ' по-стари автоматични копия бяха прекриптирани с новата парола');
+        if (failed.length) {
+          logAudit('Резервно копие', 'ВНИМАНИЕ: ' + failed.length + ' по-стари копия НЕ можаха да бъдат '
+            + 'прекриптирани и остават със старата парола: ' + failed.join(', '));
+          notifyAutoBackup('err', failed.length + ' по-стари резервни копия останаха със старата парола — '
+            + 'вижте одитната следа. Пазете старата парола, докато не бъдат прекриптирани.');
+        }
+      } catch (err) {
+        console.error('Прекриптиране на по-старите копия — грешка:', err.message);
+      }
+    }
   });
 
   /* Състояние на автоматичното копие, готово за показване в интерфейса: дали

@@ -4,12 +4,23 @@
 
 /* ---------------- Онлайн каталог ---------------- */
 async function renderCatalog() {
-  const [status, s, rc] = await Promise.all([
-    call(window.api.catalog.status()), call(window.api.settings.get()), call(window.api.catalog.remoteCheck())
+  const [status, s, rc, ap] = await Promise.all([
+    call(window.api.catalog.status()), call(window.api.settings.get()), call(window.api.catalog.remoteCheck()),
+    call(window.api.catalog.autoPushStatus())
   ]);
   if (!status) return;
   const notSetUp = !status.ghUser || !status.ghRepo;
+  /* Автоматичното публикуване се проваля тихо (изтекъл токен, разместено
+     хранилище, липсваща мрежа) — дотук грешката отиваше само в конзолата, която
+     никой не отваря, а екранът продължаваше да обещава обновяване на всеки
+     5 минути. Ако последният опит е бил неуспешен, това се казва тук. */
+  const autoPushWarn = ap && ap.error ? `<div class="note" style="border-left-color:var(--red)">
+      <b>Автоматичното публикуване не е успяло.</b> Последен опит:
+      ${esc(String(ap.at || '').slice(0, 16).replace('T', ' '))} ч. — ${esc(ap.error)}<br>
+      Каталогът на сайта <b>остава със старото съдържание</b>, докато това не се оправи.
+      Натиснете „Публикувай сега“ по-долу, за да видите пълното съобщение.</div>` : '';
   $('#view').innerHTML = `
+    ${autoPushWarn}
     <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
     Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл. Каталогът се
     публикува през <b>GitHub</b> — ${s && s.cat_url ? `сайтът <b>${esc(s.cat_url)}</b> чете` : 'сайтът на библиотеката чете'}
