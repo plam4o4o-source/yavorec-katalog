@@ -34,7 +34,14 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
      днешното криптирано копие е останало със старата парола и трябва да се
      прекриптира — иначе копието от деня на смяната се отваря само с паролата,
      която библиотекарят е изоставил (или с компрометираната). */
-  function setPdpKey(password, key, reason) { PDP_KEY = key; pii.setSession(password, key, { reason }); }
+  /* prevPassword се подава САМО при смяна и служи на едно-единствено място:
+     handlers/backup.js прекриптира с него вече направените дневни копия, които
+     иначе остават заключени с изоставената парола. Не се запазва никъде — стига
+     до абонатите на pii.onSession и толкова. */
+  function setPdpKey(password, key, reason, prevPassword) {
+    PDP_KEY = key;
+    pii.setSession(password, key, { reason, prevPassword });
+  }
   function pdpSettingsRow() {
     return getDb().prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id = 1').get() || {};
   }
@@ -153,7 +160,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(newSalt.toString('base64'), newVerifier);
         reencryptAllReaders(oldKey, newKey);
       }).immediate();
-      setPdpKey(newPassword, newKey, 'change');
+      setPdpKey(newPassword, newKey, 'change', oldPassword);
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;
     })

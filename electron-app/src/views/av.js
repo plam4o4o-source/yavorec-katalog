@@ -33,10 +33,16 @@ async function avCopyDirs() {
   const info = await call(window.api.security.exclusionInfo());
   if (!info) return;
   const text = info.dirs.join('\n');
-  try { await navigator.clipboard.writeText(text); }
-  catch (e) { /* резервен път по-долу, през прозореца */ }
+  // Текстът на прозореца казва истината за това дали копирането е станало — дотук
+  // пишеше „копиран“ в удебелено и когато не е. Прозорецът с текста си остава
+  // резервният път и в двата случая.
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; }
+  catch (e) { /* резервният път е самият прозорец по-долу */ }
   modal('Папки за изключения — AVG и други антивирусни', `
-    <div class="note" style="margin-top:0">Списъкът е <b>копиран</b> — поставете всяка папка като
+    <div class="note" style="margin-top:0">${copied
+      ? 'Списъкът е <b>копиран</b> — поставете'
+      : 'Копирането не стана — <b>щракнете в текста по-долу и натиснете Ctrl+C</b>, после поставете'} всяка папка като
     изключение в антивирусната. Пътищата, ред по ред:</div>
     <textarea class="remText" rows="${info.dirs.length + 1}" readonly
       onclick="this.select()">${esc(text)}</textarea>

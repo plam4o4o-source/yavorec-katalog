@@ -24,7 +24,13 @@ async function renderInvBook() {
   if (!rows) return;
   const active = rows.filter(r => r.status !== 'отчислен');
   const deacc = rows.length - active.length;
-  const value = active.reduce((s, r) => s + (r.price || 0), 0);
+  /* Броят и стойността са по ЕКЗЕМПЛЯРИ, както в КДБФ и в Таблото — иначе
+     „Налични: N · стойност" под инвентарната книга противоречи на същите две
+     числа на другите два екрана. Самата таблица си остава по редове: един ред =
+     един инвентарен номер, точно както е в Приложение № 4. */
+  const qtyOf = (r) => (r.quantity == null ? 1 : Number(r.quantity) || 0);
+  const activeCopies = active.reduce((s, r) => s + qtyOf(r), 0);
+  const value = active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0);
   const checked = rows.filter(r => (r.checks || []).length).length;
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
@@ -36,8 +42,10 @@ async function renderInvBook() {
         <div class="kpi-lbl">Вписани общо</div>
         <div class="kpi-extra">от началото на книгата</div></div></div>
       <div class="kpi ok"><div class="kpi-ico">✅</div><div class="kpi-body">
-        <div class="kpi-num">${active.length.toLocaleString('bg-BG')}</div>
-        <div class="kpi-lbl">Налични</div><div class="kpi-extra">${mny(value)}</div></div></div>
+        <div class="kpi-num">${activeCopies.toLocaleString('bg-BG')}</div>
+        <div class="kpi-lbl">Налични</div><div class="kpi-extra">${mny(value)}${
+          activeCopies !== active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' заглавия' : ''
+        }</div></div></div>
       <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">📕</div><div class="kpi-body">
         <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Отчислени</div>

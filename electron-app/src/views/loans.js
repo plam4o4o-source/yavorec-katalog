@@ -129,7 +129,8 @@ async function renderCirc() {
     ps.addEventListener('input', debounce(async () => {
       const q = ps.value.trim();
       if (!q) { $('#pSug').innerHTML = ''; return; }
-      const rows = await call(window.api.readers.list(q)) || [];
+      // limit: полето показва само първите шест — няма смисъл да пренасяме останалите
+      const rows = await call(window.api.readers.list(q, 20)) || [];
       $('#pSug').innerHTML = rows.length
         ? rows.slice(0, 6).map(r => `<button class="btn" style="display:block;width:100%;text-align:left;margin-bottom:4px"
             onclick="selectCircReader(${r.id})"><b>${esc(r.name)}</b> · ${esc(r.card_no || '')} · ${esc(r.category || '')}</button>`).join('')

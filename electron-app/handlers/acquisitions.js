@@ -9,8 +9,11 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
 
   ipcMain.handle('acquisitions:list', () =>
     run(() => getDb().prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM books b WHERE b.acquisition_id = a.id) AS registered_count,
-             (SELECT COALESCE(SUM(price),0) FROM books b WHERE b.acquisition_id = a.id) AS registered_value
+      -- Бройки екземпляри, не заглавия: същото броене като в КДБФ Част № 1
+      -- (handlers/kdbf.js) — иначе екранът „Постъпления" и отпечатаният КДБФ
+      -- показват различни числа за една и съща партида.
+      SELECT a.*, (SELECT COALESCE(SUM(COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1)),0) FROM books b WHERE b.acquisition_id = a.id) AS registered_count,
+             (SELECT COALESCE(SUM(b.price * COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1)),0) FROM books b WHERE b.acquisition_id = a.id) AS registered_value
       FROM acquisitions a ORDER BY a.date DESC, a.no DESC
     `).all())
   );
@@ -19,7 +22,26 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
       const db = getDb();
       const acq = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(id);
       if (!acq) return null;
+      /* `fund_qty` е ОТЧЕТНАТА бройка и нарочно е отделна от `quantity` на
+         BOOK_SELECT. Двете правила са различни по същество и това е умишлено:
+           quantity = COALESCE(i.quantity, 0) — НАЛИЧНОСТ за заемане; липсващ ред
+             в inventory значи, че документът не може да бъде зает (виж тригера
+             trg_loans_capacity), затова там нулата е вярна;
+           fund_qty = COALESCE(i.quantity, 1) — БРОЙ ДОКУМЕНТИ във фонда; вписаният
+             в инвентарната книга документ е поне един физически екземпляр дори
+             при стара база без ред в inventory.
+         Колоната „По вид" в КДБФ (Приложение № 1) брои документи, затова чете
+         fund_qty — иначе би дала 0 за всяка книга от внесена база. */
       acq.items = db.prepare(`${BOOK_SELECT} WHERE b.acquisition_id = ? ORDER BY b.inv_number`).all(id);
+      /* Отчетната бройка се долепя с ОТДЕЛНА заявка, а не чрез кърпене на низа
+         BOOK_SELECT: той е споделена константа и всяка промяна в подредбата му
+         би счупила такава замяна мълчаливо. */
+      const fq = new Map(db.prepare(`
+        SELECT b.id, COALESCE(i.quantity, 1) AS fund_qty
+        FROM books b LEFT JOIN inventory i ON i.book_id = b.id
+        WHERE b.acquisition_id = ?
+      `).all(id).map(r => [r.id, r.fund_qty]));
+      acq.items.forEach(it => { it.fund_qty = fq.has(it.id) ? fq.get(it.id) : 1; });
       return acq;
     })
   );

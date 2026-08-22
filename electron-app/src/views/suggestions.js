@@ -59,7 +59,7 @@ async function saveSuggestion() {
     const byCard = await window.api.readers.byCard(q);
     if (byCard.ok && byCard.data) { reader_id = byCard.data.id; reader_name = byCard.data.name; }
     else {
-      const list = await window.api.readers.list(q);
+      const list = await window.api.readers.list(q, 20);
       if (list.ok && list.data && list.data[0]) { reader_id = list.data[0].id; reader_name = list.data[0].name; }
       else reader_name = q;
     }

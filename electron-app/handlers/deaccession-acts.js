@@ -29,8 +29,8 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
 
   ipcMain.handle('deaccessionActs:list', () =>
     run(() => getDb().prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
-             (SELECT COALESCE(SUM(price),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_value
+      SELECT a.*, (SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
+             (SELECT COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_value
       FROM deaccession_acts a ORDER BY a.date DESC, a.no DESC
     `).all())
   );
@@ -54,7 +54,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   // обяснението на кирилско/латинско разминаване при баркод четец.
   ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
     const c = normalizeScanCode(code);
-    return getDb().prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND b.status != 'отчислен'`).get(c, c);
+    return getDb().prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND (b.status != 'отчислен' OR b.status IS NULL)`).get(c, c);
   }));
   ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
     run(() => {
@@ -95,14 +95,14 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         });
         const actId = info.lastInsertRowid;
         const insItem = db.prepare(`
-          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language)
-          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language)
+          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language, quantity)
+          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language, @quantity)
         `);
         // Принудително закритите заемания се отбелязват с номера на акта — за да
         // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
         const closeLoans = db.prepare(`UPDATE loans SET date_in = ?, deaccession_act_id = ? WHERE book_id = ? AND date_in IS NULL`);
         /* Одит v2.3.1 №10: НОВА резервация върху вече отчислена книга правилно се
-           отказва (holds:add проверява b.status != 'отчислен'), но обратният път —
+           отказва (holds:add проверява статуса в JS, виж handlers/holds.js), но обратният път —
            книгата Е БИЛА резервирана и СЛЕД това се отчислява — оставаше пробит:
            редът в holds си стоеше 'чака'/'заделена' завинаги, а чакащият читател
            никога не биваше уведомен, че резервираната книга вече не съществува във
@@ -120,7 +120,15 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           insItem.run({
             act_id: actId, book_id: b.id, inv_number: b.inv_number, author: b.author, title: b.title,
             volume: b.volume, year: b.year, price: b.price, udk: b.udk,
-            category: b.category_name, language: b.language
+            category: b.category_name, language: b.language,
+            /* Бройките се СНИМАТ тук, а не се четат живо от inventory при всяко
+               отваряне на КДБФ: редът в deaccession_items е документ по чл. 35,
+               ал. 2 и не бива да се променя със задна дата, ако някой редактира
+               „Налични бройки" или изтрие документа години по-късно.
+               BOOK_SELECT дава COALESCE(i.quantity, 0); отчислява се цялото
+               заглавие с всичките му екземпляри, а 0 (липсващ ред в inventory,
+               стара база) означава поне един физически документ. */
+            quantity: (b.quantity && b.quantity > 0) ? b.quantity : 1
           });
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
             .run('отчислен', act.date, actId, act.date, b.id);

@@ -112,11 +112,21 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
     'немски': 'b_lang_de', 'френски': 'b_lang_fr'
   };
   // Проверява се от най-дългия префикс към най-късия — иначе „793" би хванало „7".
+  /* Таблицата ТРЯБВА да покрива всяка цифра 0-9 на последно място, иначе заемането
+     не попада в никоя колона и трите реда „Всичко“ на Раздел Б (по вид, по език, по
+     съдържание) не се събират: по вид и по език се брои винаги (има резервна
+     стойност), по съдържание — само при съвпадение. Липсваха точно „8“ и „6“:
+     езикознание 81 и приложните науки 65-68 не влизаха никъде. */
   const DNEVNIK_UDK_PREFIXES = [
     ['793', 'b_cat_793'], ['799', 'b_cat_793'], ['91', 'b_cat_91'], ['80', 'b_cat_80'],
+    ['81', 'b_cat_80'], // езикознание — заедно с 80, както е в самия формуляр
     ['82', 'b_cat_82'], ['61', 'b_cat_61'], ['62', 'b_cat_62'], ['63', 'b_cat_63'],
     ['64', 'b_cat_62'], ['69', 'b_cat_62'], ['0', 'b_cat_0'], ['1', 'b_cat_1'], ['2', 'b_cat_2'],
-    ['3', 'b_cat_3'], ['5', 'b_cat_5'], ['7', 'b_cat_7'], ['9', 'b_cat_9']
+    ['3', 'b_cat_3'], ['5', 'b_cat_5'],
+    ['6', 'b_cat_62'], // 65-68 — управление, химични и други производства: приложни науки
+    ['7', 'b_cat_7'],
+    ['8', 'b_cat_82'], // остатъкът от клас 8 е художествена литература
+    ['9', 'b_cat_9']
   ];
   const DNEVNIK_AGE_MAP = {
     'дете до 14 г.': 'a_age_u14', 'ученик': 'a_age_15_18', 'студент': 'a_age_19_28'
@@ -128,6 +138,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const out = {};
       const add = (k, n) => { if (k) out[k] = (out[k] || 0) + (n == null ? 1 : n); };
       const seenReaders = new Set();
+      let unclassified = 0; // заемания на книги без разпознат УДК — виж по-долу
       for (const ev of events) {
         if (ev.kind === 'читалня') { add('a_visit_reading'); continue; }
         if (ev.kind === 'дома') { add('a_visit_home'); continue; }
@@ -135,11 +146,14 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         // Раздел Б — по вид, език и съдържание, само за реално заетите този ден.
         add(DNEVNIK_TYPE_MAP[ev.book_category] || 'b_type_books');
         add(DNEVNIK_LANG_MAP[ev.book_language] || 'b_lang_other');
+        /* Книга без попълнен УДК не може да бъде подредена по съдържание. Да бъде
+           набутана в „Общ отдел“ би било по-лошо от това да не бъде броена — числото
+           щеше да изглежда вярно и никой не би проверил. Затова тук се брои отделно
+           и се връща на изгледа, за да каже на библиотекаря колко реда трябва да
+           допълни ръчно, вместо трите „Всичко“ да се разминават необяснимо. */
         const udk = String(ev.book_udk || '').trim();
-        if (udk) {
-          const hit = DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p));
-          if (hit) add(hit[1]);
-        }
+        const hit = udk ? DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p)) : null;
+        if (hit) add(hit[1]); else unclassified++;
         // Раздел А — всеки читател се брои веднъж на ден, по категорията му към момента.
         const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
         if (!seenReaders.has(rk)) {
@@ -148,7 +162,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
           if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
         }
       }
-      return { date, suggestions: out, eventsCount: events.length };
+      return { date, suggestions: out, eventsCount: events.length, unclassified };
     })
   );
   ipcMain.handle('dnevnik:exportCsv', async (e, { year, month }) => {

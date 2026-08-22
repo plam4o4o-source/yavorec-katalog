@@ -422,20 +422,45 @@ function showLoading(){
     '</div>'+
     skelRow+skelRow+skelRow;
 }
-/* fetch с таймаут — при мълчаливо увиснала връзка (вместо изрична грешка) не се чака безкрайно */
-function fetchTimeout(url,ms){
+/* fetch с таймаут — при мълчаливо увиснала връзка (вместо изрична грешка) не се чака безкрайно.
+
+   ВАЖНО за реда на изчистване: fetch() се решава още при ПРИСТИГАНЕТО НА
+   ЗАГЛАВКИТЕ, докато тялото се чете чак след това с .json(). Дотук таймерът се
+   гасеше в .finally() на самия fetch — тоест точно преди дългата част. Сървър,
+   който отговори веднага с „200 OK“ и след това спре да подава байтове (падаща
+   мрежа, прекъснат мобилен интернет, задавен CDN възел), оставяше страницата да
+   виси на анимацията „Разгръщаме каталога…“ БЕЗКРАЙНО: резервният източник не се
+   пробваше, кешът не се пробваше, съобщение нямаше.
+
+   Затова таймерът се гаси чак когато ЦЯЛОТО тяло е прочетено — четенето вече е
+   тук, вътре във функцията, а не при извикващия. Връща се готовият JSON.
+
+   ДВА РАЗЛИЧНИ СРОКА, а не един: katalog.json е над 1 MB, а страницата се отваря
+   и от селски мобилен интернет. Ако единственият срок покриваше и тялото, всяко
+   бавно, но напълно РАБОТЕЩО изтегляне щеше да бъде прекъснато и читателят щеше
+   да получи трите вградени демо записа вместо каталога — тоест щяхме да сменим
+   рядко увисване с чест грешен резултат. Затова:
+     headMs — колко чакаме СЪРВЪРЪТ да се обади (мъртъв източник се хваща бързо);
+     bodyMs — колко му даваме да достави файла, след като вече се е обадил. */
+function fetchJsonTimeout(url,headMs,bodyMs){
   var ctl=('AbortController' in window)?new AbortController():null;
-  var t=ctl?setTimeout(function(){ctl.abort();},ms):null;
-  return fetch(url,{cache:'no-store',signal:ctl?ctl.signal:undefined}).finally(function(){ if(t)clearTimeout(t); });
+  var t=ctl?setTimeout(function(){ctl.abort();},headMs):null;
+  return fetch(url,{cache:'no-store',signal:ctl?ctl.signal:undefined}).then(function(r){
+    /* Заглавките дойдоха — сървърът е жив. Срокът се пренавива за тялото, но НЕ
+       се маха: точно това беше бъгът. */
+    if(t)clearTimeout(t);
+    if(ctl)t=setTimeout(function(){ctl.abort();},bodyMs);
+    if(!r.ok){ var e=new Error('HTTP '+r.status); e.httpStatus=r.status; throw e; }
+    return r.json();
+  }).finally(function(){ if(t)clearTimeout(t); });
 }
 async function loadLive(){
   LOG=[];
   for(var i=0;i<SOURCES.length;i++){
     var src=SOURCES[i], entry={label:src.label,ok:false,detail:''};
     try{
-      var r=await fetchTimeout(src.url,6000);
-      if(!r.ok){ entry.detail='HTTP '+r.status; LOG.push(entry); console.warn('[каталог] неуспешен източник — '+src.label+': '+entry.detail); continue; }
-      var j=await r.json();
+      /* 6 сек. да се обади сървърът, после 25 сек. за самия файл (>1 MB). */
+      var j=await fetchJsonTimeout(src.url,6000,25000);
       if(j&&j.items){ entry.ok=true; entry.detail=j.items.length+' записа'; LOG.push(entry);
         try{ localStorage.setItem('katalog_cache',JSON.stringify(j)); }catch(e2){}
         return j;
@@ -443,7 +468,8 @@ async function loadLive(){
       entry.detail='отговорът не съдържа "items" (вероятно вход в OneDrive вместо самия файл)';
       LOG.push(entry);
     }catch(e){
-      entry.detail=(e&&e.name==='AbortError')?'изтече времето за изчакване (6 сек.)':
+      entry.detail=(e&&e.name==='AbortError')?'изтече времето за изчакване':
+        (e&&e.httpStatus)?('HTTP '+e.httpStatus):
         'мрежова/CORS грешка'+(e&&e.message?': '+e.message:'');
       LOG.push(entry);
     }
@@ -462,6 +488,27 @@ async function loadLive(){
 }
 async function boot(){
   showLoading();
+  /* Цялото стартиране е обвито: един-единствен неочакван запис (празен елемент в
+     items, разместено поле, стар кеш от предишна версия на файла) хвърляше
+     необработена грешка и страницата оставаше завинаги на анимацията
+     „Разгръщаме каталога…“ — без съобщение и без резервен вариант. По-добре
+     статичното копие с обяснение, отколкото въртящи се точки. */
+  try{ await bootInner(); }
+  catch(e){
+    console.error('[каталог] стартирането пропадна:',e);
+    try{
+      D=STATIC; SHELVES=[]; setupDynamic();
+      finish(STATIC_GEN,'<br><span style="color:#a0522d">Каталогът не можа да се зареди '+
+        '('+esc(e&&e.message?e.message:'неизвестна грешка')+') — показва се последно запазено копие.</span>'+diagHtml());
+    }catch(e2){
+      /* И резервният път се счупи — поне не оставяме въртящи се точки. */
+      var host=document.getElementById('katR')||document.body; /* katR е контейнерът, в който showLoading() рисува */
+      host.innerHTML='<div style="padding:1rem;color:#a0522d">Каталогът не можа да се зареди. '+
+        'Моля, презаредете страницата или опитайте по-късно.</div>';
+    }
+  }
+}
+async function bootInner(){
   var j=await loadLive();
   if(j&&j.items&&j.__stale){
     /* И двата живи източника паднаха, но има запазен кеш от по-раншен
@@ -558,7 +605,11 @@ function diagHtml(){
     'onclick="window.katRetry();return false">Опитай отново сега</a></div></div>';
 }
 function finish(gen,note){
-  document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+gen+' · '+D.length+' записа'+note+FT_POWEREDBY;
+  /* esc(gen): това беше единственото място на страницата, където стойност от
+     katalog.json влиза в innerHTML без екраниране. Файлът идва от хранилището
+     или от кеша в браузъра — и в двата случая не е нещо, на което страницата
+     бива да се доверява сляпо. */
+  document.getElementById('katFt').innerHTML=FT_BASE+'<br>Каталогът е актуален към '+esc(gen)+' · '+D.length+' записа'+note+FT_POWEREDBY;
   run();
 }
 /* „1 намерен запис“, „2 намерени записа“ — броячът в правилното число */

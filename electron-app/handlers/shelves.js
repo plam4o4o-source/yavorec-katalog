@@ -79,6 +79,9 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       const db = getDb();
       const ins = db.prepare(`
         INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id)
+        -- Същата консервативна проверка като в износа на каталога (виж бележката в
+        -- handlers/catalog.js): документ, който няма да бъде публикуван, не бива да
+        -- влиза и във витрина — иначе страницата показва празна карта.
         SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND COALESCE(department,'') != 'служебен'
       `);
       let added = 0;

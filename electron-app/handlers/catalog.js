@@ -100,6 +100,18 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     if (!push.ok) return { ok: false, error: 'git push: ' + (push.stderr || 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
     return { ok: true, committed: commit.ok };
   }
+  /* Последният провал на автоматичното публикуване, за да може интерфейсът да го
+     покаже. Дотук грешката отиваше САМО в конзолата — а в готово приложение никой
+     не отваря конзоли: изтекъл токен или разместено хранилище спираха публикуването
+     завинаги, докато екранът продължаваше да обещава обновяване на всеки 5 минути.
+     Онлайн каталогът можеше да остане замръзнал с месеци, без никой да разбере. */
+  let LAST_AUTO_PUSH = { at: null, error: null, okAt: null };
+  function noteAutoPush(error) {
+    const now = new Date().toISOString();
+    LAST_AUTO_PUSH.at = now;
+    LAST_AUTO_PUSH.error = error || null;
+    if (!error) LAST_AUTO_PUSH.okAt = now;
+  }
   let AUTO_PUSH_TIMER = null;
   function startAutoPushTimer() {
     if (AUTO_PUSH_TIMER) return;
@@ -108,13 +120,25 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
         if (!s || !s.catalog_folder || !isGitRepo(s.catalog_folder)) return;
         const r = await gitPublish(s.catalog_folder);
-        if (r.ok && r.committed) console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
-        else if (!r.ok) console.error('Автоматично публикуване в GitHub — грешка:', r.error);
+        if (r.ok && r.committed) {
+          console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
+          noteAutoPush(null);
+        } else if (r.ok) {
+          noteAutoPush(null); // нямало е промяна за публикуване — това е успех
+        } else {
+          console.error('Автоматично публикуване в GitHub — грешка:', r.error);
+          noteAutoPush(r.error);
+          logAudit('Онлайн каталог', 'автоматичното публикуване се провали: ' + r.error);
+        }
       } catch (err) {
         console.error('Автоматично публикуване в GitHub — грешка:', err.message);
+        noteAutoPush(err.message);
       }
     }, 5 * 60 * 1000);
   }
+  // Изгледът „Онлайн каталог“ пита оттук и показва предупреждение, ако последният
+  // опит е бил неуспешен.
+  ipcMain.handle('catalog:autoPushStatus', () => run(() => LAST_AUTO_PUSH));
   function stopAutoPushTimer() {
     if (AUTO_PUSH_TIMER) { clearInterval(AUTO_PUSH_TIMER); AUTO_PUSH_TIMER = null; }
   }
@@ -139,6 +163,14 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch, lib_name, org FROM settings WHERE id = 1').get();
+      /* Каталожният домейн НАРОЧНО е консервативен и НЕ ползва NULL-безопасната
+         форма, за разлика от Таблото и справките: документ с непознат статус
+         (внос отпреди enum тригера) НЕ се публикува навън — по-добре да липсва
+         от публичния каталог, отколкото сайтът да го обяви за наличен и читател
+         да дойде за книга, чието състояние никой не знае. Тази проверка стои и в
+         самия износ (buildCatalogPayload в main.js) и в двете броячки тук —
+         трите ТРЯБВА да са еднакви, иначе екранът обещава повече записи,
+         отколкото файлът съдържа. Виж test/main-catalog-norms.test.js. */
       const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND COALESCE(department,'') != 'служебен'`).get().n;
       const avail = db.prepare(`
         SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен'
@@ -222,6 +254,11 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     try { assertCatalogWriteOk(w); } catch (err) { return { ok: false, error: err.message }; }
     const r = await gitPublish(s.catalog_folder);
     if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
+    /* И ръчното публикуване обновява състоянието — иначе предупреждението за
+       провалено автоматично публикуване продължава да твърди, че каталогът на
+       сайта е стар, точно след като библиотекарят го е публикувал по бутона,
+       който самото предупреждение му препоръчва. */
+    noteAutoPush(r.ok ? null : r.error);
     return r;
   });
   ipcMain.handle('catalog:writeNow', () =>

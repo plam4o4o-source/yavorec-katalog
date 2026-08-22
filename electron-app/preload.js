@@ -321,6 +321,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   catalog: {
     status: invoke('catalog:status'),
+    autoPushStatus: invoke('catalog:autoPushStatus'),
     chooseFolder: invoke('catalog:chooseFolder'),
     disconnectFolder: invoke('catalog:disconnectFolder'),
     writeNow: invoke('catalog:writeNow'),

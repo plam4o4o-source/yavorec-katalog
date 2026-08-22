@@ -14,7 +14,7 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
   const {
     app, dialog, fs, path,
     getDb, setDb, getMainWindow,
-    run, readConfig, writeConfig, resolveDbDir, resolveDbPath
+    run, readConfig, writeConfig, updateConfig, resolveDbDir, resolveDbPath
   } = deps;
 
   ipcMain.handle('dbLocation:get', () =>
@@ -74,9 +74,15 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
         }
       }
       if (db) db.close();
-      const cfg = readConfig();
-      cfg.dbFolder = newDir;
-      writeConfig(cfg);
+      /* updateConfig, не readConfig+writeConfig: при неуспешен прочит второто
+         записва обект само с dbFolder и мълчаливо изтрива всичко останало
+         (напр. lastUserName). Отказаният запис се съобщава — иначе програмата
+         щеше да се рестартира и да отвори СТАРАТА папка, твърдейки, че е сменена. */
+      if (!updateConfig((cfg) => { cfg.dbFolder = newDir; })) {
+        return { ok: false, error: 'Настройките (config.json) не можаха да бъдат прочетени, затова новата '
+          + 'папка НЕ беше записана. Копието на повредения файл е до него (config.bad.json). '
+          + 'Базата остава на старото място.' };
+      }
       app.relaunch();
       app.exit(0);
       return { ok: true, data: newDir };
@@ -86,9 +92,11 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
   });
   ipcMain.handle('dbLocation:resetDefault', () =>
     run(() => {
-      const cfg = readConfig();
-      delete cfg.dbFolder;
-      writeConfig(cfg);
+      // Виж бележката при dbLocation:setFolder по-горе.
+      if (!updateConfig((cfg) => { delete cfg.dbFolder; })) {
+        throw new Error('Настройките (config.json) не можаха да бъдат прочетени — папката НЕ беше върната '
+          + 'към стандартната. Копието на повредения файл е до него (config.bad.json).');
+      }
       app.relaunch();
       app.exit(0);
     })
