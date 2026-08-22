@@ -65,12 +65,40 @@ test('style.css: в тесен прозорец логото се скрива �
   // прозорци щяха да платят цената, без да получат логото.
   // едно ниво вложени блокове вътре в media query-то
   const all = [...STYLE_CSS.matchAll(/@media \(max-width:\s*(\d+)px\)\{((?:[^{}]|\{[^{}]*\})*)\}/g)];
-  const m = all.find(x => x[2].includes('.topbarLogo'));
+  const m = all.find(x => x[2].includes('display:none'));
   assert.ok(m, 'очаква се media query, който скрива .topbarLogo');
   const block = m[2];
   assert.match(block, /\.topbarLogo\{display:none\}/);
   assert.match(block, /#topbar\{display:flex;\s*justify-content:space-between\}/,
     'старото подреждане трябва да се възстанови изцяло, за да няма разлика спрямо преди промяната');
-  assert.ok(Number(m[1]) >= 1200,
-    'прагът трябва да пази тесните прозорци — логото заема ~290px в средата на лентата');
+});
+
+test('прагът, под който логото се скрива, е ПОД ширината, с която прозорецът се отваря', () => {
+  /* Одит: прагът беше 1280px, а createWindow отваря прозореца на width:1280 —
+     и това е ВЪНШНАТА ширина на прозореца (няма useContentSize:true), тоест CSS
+     ширината е с рамката по-малко и media query-ят max-width:1280px хваща.
+     Резултат: логото — цялата причина за версия 2.4.7 — не се виждаше никога
+     при размера, с който програмата се отваря. Виждаше се едва след ръчно
+     максимизиране на монитор над 1280 CSS px.
+     Тестът чете реалната стойност от main.js, за да не може двете да се
+     разминат отново. */
+  const MAIN_JS = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const wm = MAIN_JS.match(/new BrowserWindow\(\{[\s\S]*?width:\s*(\d+)/);
+  assert.ok(wm, 'ширината по подразбиране трябва да се намери в createWindow');
+  const defaultWidth = Number(wm[1]);
+
+  const minM = MAIN_JS.match(/minWidth:\s*(\d+)/);
+  const minWidth = minM ? Number(minM[1]) : defaultWidth;
+
+  const all = [...STYLE_CSS.matchAll(/@media \(max-width:\s*(\d+)px\)\{((?:[^{}]|\{[^{}]*\})*)\}/g)];
+  const hide = all.find(x => x[2].includes('.topbarLogo{display:none}'));
+  assert.ok(hide, 'очаква се media query, който скрива логото');
+  const threshold = Number(hide[1]);
+
+  assert.ok(threshold < defaultWidth,
+    `прагът (${threshold}px) трябва да е под ширината по подразбиране на прозореца ` +
+    `(${defaultWidth}px), иначе логото не се вижда при размера, с който програмата се отваря`);
+  assert.ok(threshold <= minWidth,
+    `прагът (${threshold}px) трябва да е до минималната ширина на прозореца (${minWidth}px), ` +
+    'за да не изчезва логото при нормално преоразмеряване');
 });

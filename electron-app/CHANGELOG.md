@@ -11,6 +11,36 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.8
+
+**BG:** Поправки след задълбочен одит, всичките в слоя, добавен от v2.4.1 нататък.
+(1) **Контраст на бутоните.** `--brass` се ползва като фон под бял текст (главния
+бутон „Запиши“, класирането в Таблото, днешния ден в Дневника, етикета
+„краезнание“). В тема **InvLib** това даваше 3.01:1 — под изискването на WCAG AA
+от 4.5:1 — а от v2.4.5 тъкмо тя е темата по подразбиране за всяка нова
+инсталация. Тонът е затъмнен до 4.62:1. Същата проверка откри и два по-стари
+пропуска: **Бронз** (4.40:1) и избраният текст в **Бордо** (4.13:1) — и двата
+коригирани с по един тон. Точният брандов Teal остава в логото и в страничната
+лента. (2) **Логото в горната лента се вижда.** Прагът, под който то се скрива,
+беше 1280px, а прозорецът се отваря на 1280px външна ширина — тоест логото не се
+показваше никога при размера, с който програмата тръгва. Сега се смалява, вместо
+да изчезва, и отстъпва едва под 1000px. (3) **Тестовият пакет е зелен.** Един
+тест сверяваше срещу закована дата, защото вносът на данни ползваше собствен
+часовник вместо инжектирания — пакетът щеше да е червен всеки ден след
+21.08.2026. (4) Дребният текст в „Авторитетни данни“ мина на `--brassD`.
+
+**EN:** Fixes from a deep audit, all in the layer added from v2.4.1 onward.
+(1) **Button contrast.** `--brass` is used as a background under white text; in
+the **InvLib** theme that was 3.01:1, below the WCAG AA threshold of 4.5:1 — and
+since v2.4.5 that is the default theme for every new install. Darkened to
+4.62:1. The same check caught two older misses: **Бронз** (4.40:1) and selected
+text in **Бордо** (4.13:1), both corrected. (2) **The top-bar logo is actually
+visible.** Its hide threshold was 1280px while the window opens at 1280px outer
+width, so it never showed at the size the program starts at; it now scales down
+instead of disappearing. (3) **The test suite is green again** — one test
+compared against a hardcoded date because the data import used its own clock
+instead of the injected one. (4) Small text in Authority data moved to `--brassD`.
+
 ## v2.4.7
 
 **BG:** Логото на InvLib (пълният хоризонтален вариант — икона, „InvLib“,

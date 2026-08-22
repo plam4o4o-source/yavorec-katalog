@@ -13,6 +13,15 @@ const {
 } = require('../importers');
 const registerDataImportHandlers = require('../handlers/data-import');
 
+/* Датата, с която е спрян часовникът във всички setup() по-долу. Тестовете за
+   „пада на днешна дата“ трябва да сверяват СПРЯМО НЕЯ, а не спрямо литерал.
+   Преди тук стоеше закован '2026-08-21' и в теста, и в очакването, но самият
+   handler ползваше собствено new Date() вместо инжектирания today() — затова
+   очакването сочеше истинската дата на деня, в който тестът е писан, и целият
+   пакет почервеня на следващия ден. Handler-ът вече ползва today(); константата
+   тук пази двете страни да не се разминат отново. */
+const STUB_TODAY = '2026-08-21';
+
 /* Хигиена на временните папки — виж test/importers.test.js/handlers-data-import.test.js
    защо: node --test не чисти нищо след себе си. */
 const tmpDirs = [];
@@ -60,7 +69,7 @@ function setup() {
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
     getMainWindow: () => ({}),
     fs, path, BOOK_FIELDS,
-    today: () => '2026-08-21',
+    today: () => STUB_TODAY,
     cnSortKey: (s) => String(s || '').toUpperCase().trim().replace(/\d+/g, m => m.padStart(6, '0'))
   };
   registerDataImportHandlers(ipcMain, deps);
@@ -151,7 +160,7 @@ test('import:run с huge inv не увисва процеса дори изпъ�
     registerDataImportHandlers({ handle: (c, fn) => handlers.set(c, fn) }, {
       getDb: () => db, run: (fn) => fn, logAudit: () => {},
       dialog: {}, getMainWindow: () => ({}), fs, path, BOOK_FIELDS,
-      today: () => '2026-08-21', cnSortKey: (s) => String(s || '')
+      today: () => ${JSON.stringify(STUB_TODAY)}, cnSortKey: (s) => String(s || '')
     });
     const csvPath = ${JSON.stringify(path.join(dir, 'huge.csv'))};
     const huge = '9007199254740992';
@@ -227,7 +236,7 @@ test('import:run разпознава Excel сериен номер на дат�
   assert.equal(result.ok, true);
   const row = db.prepare("SELECT register_date FROM books WHERE title='Книга'").get();
   assert.equal(row.register_date, '2021-01-01', 'суров Excel сериен номер трябва да се разчете като истинска дата');
-  assert.notEqual(row.register_date, '2026-08-21', 'не биваше тихо да падне на днешна дата');
+  assert.notEqual(row.register_date, STUB_TODAY, 'не биваше тихо да падне на днешна дата');
 });
 
 test('import:run продължава да разпознава обичайните текстови формати за дата', async () => {
@@ -249,7 +258,7 @@ test('import:run не гадае дата от нереалистично гол
   const result = await ipcMain.invoke('import:run', { mapping: { 0: 'title', 1: 'register_date' }, options: {} });
   assert.equal(result.ok, true);
   const row = db.prepare("SELECT register_date FROM books WHERE title='Книга'").get();
-  assert.equal(row.register_date, '2026-08-21', 'извън разумния диапазон → пада на днешна дата, както преди');
+  assert.equal(row.register_date, STUB_TODAY, 'извън разумния диапазон → пада на днешна дата, както преди');
 });
 
 /* -------------------------------------------------------------------------

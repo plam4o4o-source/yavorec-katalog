@@ -12,13 +12,23 @@ const path = require('path');
 const CORE_JS = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'core.js'), 'utf8');
 const STYLE_CSS = fs.readFileSync(path.join(__dirname, '..', 'src', 'style.css'), 'utf8');
 
-test('THEMES съдържа тема "7" InvLib с точните цветове от бранд спецификацията', () => {
+/* Бележка към --brass на тема 7: до одита тук се изискваше точният брандов
+   Teal #0EA5A8. Той обаче се ползва като ФОН под бял текст (.btn.pri и още
+   три места) и там даваше 3.01:1 — под WCAG AA. От v2.4.5 тема 7 е темата по
+   подразбиране за всяка нова инсталация, тоест това беше стойността, с която
+   тръгва всяка библиотека. Затова --brass е по-тъмен тон от същото семейство
+   (#0A8285 = 4.62:1), а точният брандов Teal остава в логото и в --brassL
+   върху тъмния --spine. Праговете се пазят от fixes-theme-contrast.test.js. */
+const T7_BRASS = '#0A8285';
+
+test('THEMES съдържа тема "7" InvLib с цветовете от бранд спецификацията', () => {
   const m = CORE_JS.match(/const THEMES = \[([\s\S]*?)\];/);
   assert.ok(m, 'THEMES масивът трябва да е намерен в core.js');
   const themeLine = m[1].split('\n').find(l => /id:\s*'7'/.test(l));
   assert.ok(themeLine, 'трябва да има ред с id: \'7\' в THEMES');
   assert.match(themeLine, /spine:\s*'#1E3A8A'/i, 'spine на тема 7 трябва да е точното Primary Navy #1E3A8A');
-  assert.match(themeLine, /brass:\s*'#0EA5A8'/i, 'brass на тема 7 трябва да е точното Teal #0EA5A8');
+  assert.match(themeLine, new RegExp("brass:\\s*'" + T7_BRASS + "'", 'i'),
+    'brass на тема 7 трябва да е достъпният тон ' + T7_BRASS + ' (виж бележката по-горе)');
   assert.match(themeLine, /paper:\s*'#F8FAFC'/i, 'paper на тема 7 трябва да е точното Light Background #F8FAFC');
 });
 
@@ -27,7 +37,7 @@ test('html[data-theme="7"] в style.css съществува и пази същ�
   assert.ok(m, 'CSS блокът за data-theme="7" трябва да съществува');
   const block = m[1];
   assert.match(block, /--spine:\s*#1E3A8A/i);
-  assert.match(block, /--brass:\s*#0EA5A8/i);
+  assert.match(block, new RegExp('--brass:\\s*' + T7_BRASS, 'i'));
   assert.match(block, /--paper:\s*#F8FAFC/i);
 });
 

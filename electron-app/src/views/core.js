@@ -473,15 +473,18 @@ const PRICHINI = [
 const PER_FREQ = ['седмично', 'двуседмично', 'месечно', 'тримесечно', 'полугодишно', 'годишно', 'нередовно'];
 const MZS_STATUS = ['заявено', 'изпратено', 'получено', 'върнато', 'отказано'];
 const THEMES = [
-  { id: '1', name: 'Бронз', spine: '#1A1208', brass: '#96731F', paper: '#F4F0E4' },
+  { id: '1', name: 'Бронз', spine: '#1A1208', brass: '#8F6D1D', paper: '#F4F0E4' },
   { id: '2', name: 'Наситено синьо', spine: '#0F1B2E', brass: '#2C5C8F', paper: '#EEF2F6' },
   { id: '3', name: 'Горско зелено', spine: '#0E1F14', brass: '#2E6B45', paper: '#EFF3EC' },
   { id: '4', name: 'Бордо', spine: '#22090F', brass: '#7A2036', paper: '#F5EDEC' },
   { id: '5', name: 'Графит', spine: '#1C2126', brass: '#536573', paper: '#EEF0F1' },
   { id: '6', name: 'Кафяво-теракота', spine: '#22140A', brass: '#A65A2E', paper: '#F3ECE3' },
-  // Нова визуална идентичност InvLib — точните цветове от бранд спецификацията
-  // (Primary Navy/Teal), не преоцветена версия на съществуваща тема.
-  { id: '7', name: 'InvLib', spine: '#1E3A8A', brass: '#0EA5A8', paper: '#F8FAFC' }
+  // Нова визуална идентичност InvLib — цветовете от бранд спецификацията
+  // (Primary Navy/Teal), не преоцветена версия на съществуваща тема. brass е
+  // по-тъмен тон от брандовия Teal #0EA5A8 нарочно: под бял текст точният Teal
+  // дава 3.01:1, под прага на WCAG AA. Виж бележката при html[data-theme="7"]
+  // в style.css — стойността тук трябва да съвпада с тази там.
+  { id: '7', name: 'InvLib', spine: '#1E3A8A', brass: '#0A8285', paper: '#F8FAFC' }
 ];
 async function setTheme(id) {
   await call(window.api.settings.updateTheme(id));

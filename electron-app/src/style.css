@@ -9,7 +9,11 @@
      paper/paper3 комбинации. */
   --ink:#1B1813; --ink2:#5C5344; --ink3:#676054;
   --spine:#1A1208; --spine2:#241809; --spine3:#3A2A12;
-  --brass:#96731F; --brassL:#C9A84C; --brassD:#6E5314;
+  /* --brass беше #96731F: бял текст върху него (.btn.pri, .rankNo, .dnvToday,
+     .tagLocal) даваше 4.40:1 — под прага на WCAG AA от 4.5:1. Затъмнен е с
+     един тон до 4.80:1; разликата е практически невидима, но бутоните вече
+     покриват прага. Проверява се в test/fixes-theme-contrast.test.js. */
+  --brass:#8F6D1D; --brassL:#C9A84C; --brassD:#6E5314;
   --red:#A32B22; --redL:#F0DEDA;
   --green:#3E6B4A; --greenL:#DFE9E0;
   --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
@@ -32,7 +36,9 @@ html[data-theme="3"]{ /* Горско зелено */
 html[data-theme="4"]{ /* Бордо */
   --paper:#F5EDEC; --paper2:#FCF7F6; --paper3:#EBDEDC; --rule:#DCC2BE; --rule2:#C9A29C;
   --spine:#22090F; --spine2:#331019; --spine3:#4A1B26;
-  --brass:#7A2036; --brassL:#B85670; --brassD:#4E1322;
+  /* --brassL беше #B85670: ::selection рисува --spine текст върху --brassL, а
+     това даваше 4.13:1 — под WCAG AA. Изсветлен до 4.79:1. */
+  --brass:#7A2036; --brassL:#C2627C; --brassD:#4E1322;
 }
 html[data-theme="5"]{ /* Графит */
   --paper:#EEF0F1; --paper2:#F9FAFA; --paper3:#E2E5E7; --rule:#C9CFD3; --rule2:#AFB8BD;
@@ -45,14 +51,25 @@ html[data-theme="6"]{ /* Кафяво-теракота */
   --brass:#A65A2E; --brassL:#D99461; --brassD:#7A3F1D;
 }
 html[data-theme="7"]{ /* InvLib — новата визуална идентичност (Primary Navy/Teal).
-  --spine/--paper/--brass са точните hex стойности от бранд спецификацията, не
-  подбрани да наподобяват някоя от другите 6 теми. Контраст, проверен програмно:
-  --spine срещу sidebar текста #e9e2cf (виж #rail по-долу) = 8.0:1; --brassL срещу
-  --spine (.rankRow/::selection) = 5.6:1 — и двете над WCAG AA (4.5:1), както при
-  всички останали теми. */
+  --spine и --paper са точните hex стойности от бранд спецификацията.
+
+  --brass НЕ е точният Teal #0EA5A8 от спецификацията, и това е нарочно.
+  --brass се ползва като ФОН под бял текст на четири места (.btn.pri, .rankRow
+  .rankNo, .dnvToday .dnvDay, .tagLocal) и като цвят на текст на още няколко.
+  Бял текст върху #0EA5A8 дава 3.01:1 — под изискването на WCAG AA от 4.5:1 за
+  обикновен текст. Тъй като от v2.4.5 тема 7 е темата по подразбиране за всяка
+  нова инсталация, това щеше да е стойността, с която тръгва всяка библиотека.
+  Затова тук стои по-тъмен тон от същото семейство: бял текст върху #0A8285 =
+  4.62:1, а самият той върху --paper2 = 4.57:1 — и двете над прага. Точният
+  брандов Teal остава в логото и в --brassL върху тъмния --spine.
+
+  Контраст, проверен програмно (виж test/fixes-invlib-theme.test.js):
+  --spine срещу sidebar текста #e9e2cf (виж #rail по-долу) = 8.0:1;
+  --brassL срещу --spine (.rankRow/::selection) = 5.6:1;
+  #fff срещу --brass = 4.62:1; --brass срещу --paper2 = 4.57:1. */
   --paper:#F8FAFC; --paper2:#FCFEFF; --paper3:#EAF1F7; --rule:#D7E3EF; --rule2:#C2D3E4;
   --spine:#1E3A8A; --spine2:#254398; --spine3:#3457B0;
-  --brass:#0EA5A8; --brassL:#4DD0D2; --brassD:#086F71;
+  --brass:#0A8285; --brassL:#4DD0D2; --brassD:#065456;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
@@ -172,12 +189,19 @@ body{
   justify-self:center; align-self:center; height:54px; width:auto; display:block;
   pointer-events:none;
 }
-/* В тесен прозорец мястото трябва на заглавието и на бутоните — логото
-   отстъпва, вместо да се сблъска с тях. Заедно с него си отива и решетката:
-   връща се точно старото подреждане с flex, при което заглавието стои на
-   един ред, а бутоните се пренасят. Иначе свиваемата колона minmax(0,1fr)
-   пренасяше „Инвентарна книга“ на два реда и лентата пораснеше с 30px. */
-@media (max-width:1280px){
+/* Прозорецът се отваря на 1280 DIP ВЪНШНА ширина (main.js createWindow), тоест
+   CSS ширината е под 1280 заради рамката — а при мащабиране на дисплея на 125%
+   (обичайното на 1366x768 лаптоп) максимизиран прозорец дава едва ~1093 CSS px.
+   Затова логото не бива да изчезва на 1280: при по-малко място то се смалява.
+   Застъпване няма при никоя ширина — решетката свива заглавието, вместо да го
+   бутне под логото (проверено емпирично от 1008 до 1920 px). */
+@media (max-width:1400px){ .topbarLogo{height:44px} }
+/* Чак под 1000px логото отстъпва напълно и се връща точно старото подреждане с
+   flex, при което заглавието стои на един ред, а бутоните се пренасят. Прагът
+   беше 1280px и това беше грешка: минималната ширина на прозореца е 1024 DIP, а
+   ширината по подразбиране 1280 DIP външно — тоест логото не се виждаше НИКОГА
+   при размера, с който програмата се отваря. Виж бележката при .topbarLogo. */
+@media (max-width:1000px){
   .topbarLogo{display:none}
   #topbar{display:flex; justify-content:space-between}
 }
@@ -499,7 +523,10 @@ table.ledger .num{font-family:var(--mono)}
 .authRow input[type=radio]{width:auto; margin:0; flex:0 0 auto}
 .authVal{flex:1; font-size:13px}
 .authN{font-family:var(--mono); font-size:12px; color:var(--ink2); flex:0 0 auto}
-.authTarget{font-size:11px; color:var(--brass); flex:0 0 auto; min-width:74px; text-align:right}
+/* --brassD, не --brass: 11px текст върху --paper2. Пропуснато при v1.70.0, когато
+   останалите текстови ползвания на --brass бяха преместени на --brassD заради
+   контраста — тук стоеше единственият останал. */
+.authTarget{font-size:11px; color:var(--brassD); flex:0 0 auto; min-width:74px; text-align:right}
 
 /* ---------- Напомняния за просрочени ---------- */
 .remCard{border:1px solid var(--rule2); border-radius:4px; margin-bottom:12px; background:var(--paper); overflow:hidden}
