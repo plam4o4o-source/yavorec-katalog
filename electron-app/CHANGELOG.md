@@ -11,6 +11,43 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.11
+
+**BG:** Инсталаторът и десктоп името вече също казват „InvLib“ — изпълнимият
+файл (`InvLib.exe`), инсталационният файл (`InvLib-Setup-X.Y.Z.exe`), записът
+в „Приложения“ на Windows и преките пътища в Старт менюто/Работния плот.
+Видимият текст в самото приложение е бил преименуван още в v2.4.3; сега се
+довършва и последната част, оставена нарочно предпазливо непроменена тогава.
+
+Проверено внимателно преди пускането: вътрешният идентификатор на програмата
+пред Windows (`appId`) не се пипа, затова обновяването на вече монтирани
+библиотеки **преименува** съществуващите преки пътища на място, вместо да
+създава нова, дублирана икона — прегледана е директно логиката на
+electron-builder/NSIS (не само документацията ѝ), а нов тест
+(`fixes-productname-invlib.test.js`) пази точно това условие за напред.
+Папката с данните на библиотеката не се пипа и не се мести — тя винаги е
+зависела от отделно, невидимо техническо име, а не от името на екрана.
+
+Отделно, при прегледа на документацията за тази промяна бяха поправени и
+няколко отдавна неточни места в `README-bibliotekar.md`/`README.md`/
+`docs/ARCHITECTURE.md`, които твърдяха, че папката с данни и програмната
+папка се казват „Инвентар“ — на практика те винаги са били `inventar-desktop`
+(вътрешното техническо име), не видимото име на програмата.
+
+**EN:** The installer and desktop name now also say „InvLib“ — the
+executable (`InvLib.exe`), the installer file (`InvLib-Setup-X.Y.Z.exe`), the
+Windows „Apps“ entry, and the Start Menu/Desktop shortcuts. The app's own
+on-screen text was renamed back in v2.4.3; this finishes the one piece left
+deliberately untouched at the time out of caution.
+
+Verified carefully before shipping: the app's internal Windows identifier
+(`appId`) is untouched, so updating an already-installed library **renames**
+the existing shortcuts in place instead of creating a duplicate icon — the
+actual electron-builder/NSIS logic was traced directly (not just its docs), and
+a new test locks this guarantee in going forward. The data folder is
+unaffected — it has always depended on a separate, invisible technical name,
+not the on-screen product name.
+
 ## v2.4.10
 
 **BG:** Бутон „Запиши настройките“ вече стои и в самата карта „Библиотека“ в

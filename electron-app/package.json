@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "2.4.10",
+  "version": "2.4.11",
   "description": "Библиотечна система „InvLib“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -27,7 +27,7 @@
   },
   "build": {
     "appId": "bg.inventar.app",
-    "productName": "Инвентар",
+    "productName": "InvLib",
     "copyright": "Copyright © 2026 Пламен Христов - Пачо. Свободен софтуер под GNU GPL-3.0-or-later.",
     "publish": [
       {
@@ -61,7 +61,7 @@
     "win": {
       "target": "nsis",
       "icon": "icon.ico",
-      "legalTrademarks": "Инвентар © Пламен Христов - Пачо",
+      "legalTrademarks": "InvLib © Пламен Христов - Пачо",
       "verifyUpdateCodeSignature": false,
       "signtoolOptions": {
         "publisherName": "Plamen Boyanov Hristov",
@@ -78,7 +78,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "Inventar-Setup-${version}.${ext}",
+      "artifactName": "InvLib-Setup-${version}.${ext}",
       "multiLanguageInstaller": true,
       "displayLanguageSelector": true,
       "installerLanguages": [
