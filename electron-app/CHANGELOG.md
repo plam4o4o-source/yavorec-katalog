@@ -11,6 +11,20 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.10
+
+**BG:** Бутон „Запиши настройките“ вече стои и в самата карта „Библиотека“ в
+„Настройки“, не само на дъното на дългата страница (Библиотека / Обслужване /
+Постоянна комисия / Правила по категория читатели / Календар...). Библиотекар,
+който промени само наименованието или адреса на библиотеката най-отгоре, вече
+не се налага да скролва до края, за да разбере, че въобще има бутон за запис.
+И двата бутона записват едно и също — цялата форма, не само картата
+„Библиотека“.
+
+**EN:** A „Save settings“ button now also sits right inside the „Library“
+card in Settings, not only at the bottom of the long page. Both buttons save
+the same thing — the whole form, not just that one card.
+
 ## v2.4.9
 
 **BG:** Поправки по всички останали находки от одита, плюс дефектите, които
