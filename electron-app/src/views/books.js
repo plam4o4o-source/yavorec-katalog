@@ -324,7 +324,7 @@ async function bookForm(id, presetAcqId) {
             <button type="button" class="btn" id="isbnBtn" onclick="isbnLookup()"
               title="Изтегля данните за книгата от Google Books и Open Library">Търси</button>
             <button type="button" class="btn" id="sruBtn" onclick="sruLookup()"
-              title="Внася истински библиотечен MARC запис през SRU (по подразбиране — каталогът на Library of Congress)">SRU…</button>
+              title="Въвежда истински библиотечен MARC запис през SRU (по подразбиране — каталогът на Library of Congress)">SRU…</button>
           </div>
           <div class="hint" id="isbnHint">Въведете ISBN и натиснете „Търси“ (търговски данни) или „SRU…“ (библиотечен MARC запис) — полетата се попълват сами.</div>
         </div>

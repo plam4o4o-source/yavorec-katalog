@@ -599,7 +599,7 @@ test('влачене на файл без File.path не остава без н�
     + window.document.getElementById('toastsTop').textContent;
   assert.equal(loaded.length, 0);
   assert.notEqual(toasts.trim(), '', 'мълчаливото нищо е най-лошият изход — трябва да има съобщение');
-  assert.match(toasts, /Избери файл за внасяне/,
+  assert.match(toasts, /Избери файл за въвеждане/,
     'съобщението трябва да насочва към бутона, който върши работа');
 });
 

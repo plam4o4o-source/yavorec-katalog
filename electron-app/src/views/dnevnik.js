@@ -86,7 +86,7 @@ async function renderDnevnik() {
       </div>
       <button class="btn" onclick="dnevnikDayForm('${todayStr}')">Подробно за днес…</button>
       <button class="btn" onclick="printDnevnikDoc()">Печат / PDF</button>
-      <button class="btn" onclick="exportDnevnikCsv()">Експорт CSV</button>
+      <button class="btn" onclick="exportDnevnikCsv()">Извеждане в CSV</button>
     </div>
     <div class="wrap"><table class="ledger dnvTable"><thead><tr>
       <th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}
@@ -276,6 +276,6 @@ window.printDnevnikDoc = printDnevnikDoc;
 async function exportDnevnikCsv() {
   const res = await window.api.dnevnik.exportCsv({ year: DNEVNIK_YEAR, month: DNEVNIK_MONTH });
   if (!res.ok) return toast(res.error, 'err');
-  toast('Експортирано в ' + res.data, 'ok');
+  toast('Изведено в ' + res.data, 'ok');
 }
 window.exportDnevnikCsv = exportDnevnikCsv;

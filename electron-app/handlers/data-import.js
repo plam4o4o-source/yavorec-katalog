@@ -50,7 +50,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
   ipcMain.handle('import:choose', async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
-        title: 'Изберете файл за внасяне (износ от друга библиотечна система)',
+        title: 'Изберете файл за въвеждане (извеждане от друга библиотечна система)',
         properties: ['openFile'],
         filters: [
           { name: 'Таблици', extensions: ['csv', 'txt', 'tsv', 'xlsx'] },
@@ -307,7 +307,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(nextInv);
       });
       tx.immediate();
-      logAudit('Внасяне на данни', `${report.added} документа от ${path.basename(IMPORT_CACHE.path)}` +
+      logAudit('Въвеждане на данни', `${report.added} документа от ${path.basename(IMPORT_CACHE.path)}` +
         (report.skipped ? `, пропуснати ${report.skipped}` : ''));
       return { ok: true, data: report };
     } catch (err) { return { ok: false, error: err.message }; }

@@ -24,7 +24,7 @@ function mobileHelp() {
       <li>Накрая натиснете <b>„Копирай списъка“</b> и си го изпратете (Вайбър, имейл), или
           „Запиши файл“ и го прехвърлете.</li>
       <li>Тук отворете сесията за инвентаризация и натиснете
-          <b>„Внеси сканирания от телефон“</b> — поставяте списъка и готово.</li>
+          <b>„Въведи сканирания от телефон“</b> — поставяте списъка и готово.</li>
     </ol>
 
     <div class="hint"><b>Работи офлайн.</b> Страницата не изисква интернет и не изпраща никъде
@@ -39,14 +39,14 @@ function mobileHelp() {
 window.mobileHelp = mobileHelp;
 
 function importScansModal(sessionId) {
-  modal('Внасяне на сканирания от телефон', `
+  modal('Въвеждане на сканирания от телефон', `
     <div class="note" style="margin-top:0">Поставете списъка, копиран от телефона — по един номер
     на ред. Приемат се и номера, разделени със запетая или интервал.</div>
     <textarea id="scanPaste" class="remText" rows="12" placeholder="1024&#10;1025&#10;1026&#10;…"></textarea>
     <div class="hint" style="margin-top:6px">Вече сканираните в тази сесия се пропускат, а
     непознатите номера се изброяват отделно, за да се проверят.</div>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn pri" onclick="importScansRun(${sessionId})">Внеси</button>`);
+     <button class="btn pri" onclick="importScansRun(${sessionId})">Въведи</button>`);
   setTimeout(() => { const t = $('#scanPaste'); if (t) t.focus(); }, 60);
 }
 window.importScansModal = importScansModal;
@@ -59,7 +59,7 @@ async function importScansRun(sessionId) {
   if (!r) return;
   markSaved();
   closeModal();
-  toast(`Внесени ${r.added} · повторни ${r.duplicates} · непознати ${r.unknown.length}`, r.unknown.length ? 'err' : 'ok');
+  toast(`Въведени ${r.added} · повторни ${r.duplicates} · непознати ${r.unknown.length}`, r.unknown.length ? 'err' : 'ok');
   if (r.unknown.length) {
     modal('Непознати номера', `
       <div class="note" style="border-left-color:var(--red);margin-top:0">

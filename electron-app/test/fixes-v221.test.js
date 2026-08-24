@@ -273,7 +273,7 @@ test('когато и мостът не върне път, излиза ясно
   assert.equal(loaded.length, 0);
   assert.equal(toasts.length, 1, 'мълчаливият return беше самият дефект');
   assert.equal(toasts[0][0], 'err');
-  assert.match(toasts[0][1], /Избери файл за внасяне/);
+  assert.match(toasts[0][1], /Избери файл за въвеждане/);
 });
 
 test('влаченият файл с неподдържано разширение се отказва по РАЗЧЕТЕНИЯ път', async () => {

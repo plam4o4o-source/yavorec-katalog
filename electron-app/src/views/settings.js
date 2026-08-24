@@ -39,7 +39,7 @@ async function renderSetup() {
         <div class="grid g2">${fld('Ръководител', 'director', { val: s.director || '' })}${fld('Длъжност', 'director_role', { val: s.director_role || '' })}</div>
         ${fld('Библиотекар', 'librarian', { val: s.librarian || '' })}
         ${fld('Адрес на сайта', 'cat_url', { val: s.cat_url || '' })}
-        ${fld('SRU сървър за внасяне на записи', 'sru_endpoint', { val: s.sru_endpoint || '',
+        ${fld('SRU сървър за въвеждане на записи', 'sru_endpoint', { val: s.sru_endpoint || '',
           hint: 'по подразбиране: каталогът на Library of Congress (безплатен, без договор). ' +
                 'Ако библиотеката получи достъп до SRU на НБКМ/COBISS, адресът се сменя тук.' })}
         <div class="field"><label>Лого на организацията</label>
@@ -200,15 +200,15 @@ async function renderSetup() {
       изпълнява <b>веднъж, като администратор</b> (десен бутон → „Изпълни като администратор“).</div>
     </div>
 
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Внасяне на данни от друга система</h3>
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Въвеждане на данни от друга система</h3>
       <div class="note" style="margin-top:0">Ако библиотеката е водила фонда в друга програма
-      (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се внасят оттам, вместо да се
+      (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се въвеждат оттам, вместо да се
       преписват на ръка. Четат се <b>CSV</b>, <b>TXT</b>, <b>TSV</b> и <b>XLSX</b>; кирилицата в
       стари файлове (Windows-1251) се разпознава сама.</div>
-      <div class="toolbar"><button class="btn pri" onclick="importChoose()">Избери файл за внасяне…</button></div>
+      <div class="toolbar"><button class="btn pri" onclick="importChoose()">Избери файл за въвеждане…</button></div>
       <div class="hint" style="margin-top:8px">След избора се показва как са разпознати колоните и
       първите редове от файла — съответствието се проверява и поправя, преди нещо да се запише.
-      <b>Направете резервно копие преди голямо внасяне.</b></div>
+      <b>Направете резервно копие преди голямо въвеждане.</b></div>
     </div>
 
     ${categoriesCardHtml(cats)}

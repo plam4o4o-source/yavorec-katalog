@@ -21,8 +21,8 @@ async function renderCatalog() {
       Натиснете „Публикувай сега“ по-долу, за да видите пълното съобщение.</div>` : '';
   $('#view').innerHTML = `
     ${autoPushWarn}
-    <div class="note"><b>Публичен каталог.</b> Изнасят се само библиографски данни и наличност.
-    Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изнесения файл. Каталогът се
+    <div class="note"><b>Публичен каталог.</b> Извеждат се само библиографски данни и наличност.
+    Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изведения файл. Каталогът се
     публикува през <b>GitHub</b> — ${s && s.cat_url ? `сайтът <b>${esc(s.cat_url)}</b> чете` : 'сайтът на библиотеката чете'}
     файла на живо от там, без нужда от друг сървър.</div>
 
@@ -105,7 +105,7 @@ async function renderCatalog() {
       <div class="hint">Текущ адрес: <b>${esc(s ? s.cat_url || '—' : '—')}</b></div>
     </div>
 
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ръчен експорт</h3>
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ръчно извеждане</h3>
       <p style="font-size:13.5px;margin-top:0">Извежда снимка на данните във файл по избор, независимо от папката за
       автоматично публикуване по-горе.</p>
       <div class="toolbar">
@@ -115,7 +115,7 @@ async function renderCatalog() {
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Библиотечни формати за обмен</h3>
-      <p style="font-size:13.5px;margin-top:0">Изнася целия фонд в стандартните формати, които други
+      <p style="font-size:13.5px;margin-top:0">Извежда целия фонд в стандартните формати, които други
       библиотечни системи разпознават. Смисълът е данните да не са заключени в тази програма: при
       преминаване към <b>COBISS</b> или включване в сводния каталог се подава един файл, вместо да
       се преписват записите на ръка.</p>
@@ -244,13 +244,13 @@ window.applyBulkShelf = applyBulkShelf;
 async function exportMarc() {
   const res = await window.api.catalog.exportMarc();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
-  toast(`Изнесени ${res.data.count} записа в UNIMARC: ${res.data.path}`, 'ok');
+  toast(`Изведени ${res.data.count} записа в UNIMARC: ${res.data.path}`, 'ok');
 }
 window.exportMarc = exportMarc;
 async function exportDc() {
   const res = await window.api.catalog.exportDc();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
-  toast(`Изнесени ${res.data.count} записа в Dublin Core: ${res.data.path}`, 'ok');
+  toast(`Изведени ${res.data.count} записа в Dublin Core: ${res.data.path}`, 'ok');
 }
 window.exportDc = exportDc;
 async function catalogChooseFolder() {
