@@ -133,7 +133,7 @@ async function renderInventRun() {
       <div id="ivLog" style="margin-top:10px;max-height:230px;overflow:auto"></div>
     </div>
     <div class="toolbar">
-      <button class="btn" onclick="importScansModal(${s.id})">📱 Внеси сканирания от телефон</button>
+      <button class="btn" onclick="importScansModal(${s.id})">📱 Въведи сканирания от телефон</button>
       <button class="btn pri" onclick="closeInvent()">Приключи и състави протокол</button>
       <button class="btn" onclick="if(confirm('Прекратяване без запис?')){INVENT_SESSION=null;renderInvent()}">Прекрати</button>
     </div>`;

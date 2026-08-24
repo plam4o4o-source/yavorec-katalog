@@ -11,6 +11,26 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.12
+
+**BG:** По изрична молба на потребителя: терминологията за пренасяне на данни
+навсякъде в програмата вече е „извеждане“/„въвеждане“, вместо предишната смес
+от „износ“/„внос“ и заемки като „експорт“/„импорт“ — един последователен чифт
+термини за едно и също нещо, а не три различни думи на различни екрани.
+Засегнати са бутони, заглавия на прозорци за избор на файл, съобщения и
+записите в одитната следа за: извеждане на читателите/дневника/фонда в CSV,
+извеждане в UNIMARC/MARCXML и Dublin Core, извеждане/публикуване на онлайн
+каталога, въвеждане на данни от друга библиотечна система (АБ/iLib/Excel),
+въвеждане на сканирания от телефон при инвентаризация и SRU въвеждане на MARC
+запис. Само видим текст — самите функции работят по същия начин.
+
+**EN:** At the user's explicit request: the app's terminology for moving data
+in and out is now a single consistent pair — „извеждане“ (output/extract) and
+„въвеждане“ (input/enter) — everywhere, instead of a mix of native and
+borrowed words used inconsistently across screens. Buttons, file-dialog
+titles, messages and audit-log entries are affected; the underlying features
+are unchanged.
+
 ## v2.4.11
 
 **BG:** Инсталаторът и десктоп името вече също казват „InvLib“ — изпълнимият

@@ -50,7 +50,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
           res.added++;
         }
       }).immediate();
-      logAudit('Инвентаризация', `внесени ${res.added} сканирания от телефон` +
+      logAudit('Инвентаризация', `въведени ${res.added} сканирания от телефон` +
         (res.unknown.length ? `, ${res.unknown.length} непознати` : ''));
       return res;
     })

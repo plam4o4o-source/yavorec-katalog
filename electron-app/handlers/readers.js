@@ -156,13 +156,13 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     })
   );
 
-  // Износ на списъка читатели в CSV (v1.70.0). Нарочно БЕЗ ЕГН/№ на лична карта —
+  // Извеждане на списъка читатели в CSV (v1.70.0). Нарочно БЕЗ ЕГН/№ на лична карта —
   // това е справочен документ, не заместител на защитата на личните данни; ЕГН/№ ЛК
   // и без друго излизат маскирани от readers:list, ако защитата е заключена.
   ipcMain.handle('readers:exportCsv', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Износ на читателите (CSV)',
+        title: 'Извеждане на читателите (CSV)',
         defaultPath: 'chitateli.csv',
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       });
@@ -175,7 +175,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         r.category, r.status, r.registered_at, r.re_registered_at, r.note
       ].map(csvCell).join(';'))).join('\r\n');
       fs.writeFileSync(filePath, '﻿' + csv, 'utf8');
-      logAudit('Износ на читатели (CSV)', filePath + ' — ' + rows.length + ' записа');
+      logAudit('Извеждане на читатели (CSV)', filePath + ' — ' + rows.length + ' записа');
       return { ok: true, data: filePath };
     } catch (err) {
       return { ok: false, error: err.message };

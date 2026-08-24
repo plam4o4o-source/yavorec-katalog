@@ -26,7 +26,7 @@ document.addEventListener('drop', async e => {
   const p = (window.api.importData.pathOf && window.api.importData.pathOf(f)) || f.path || '';
   if (!p) {
     return toast('Пътят до провлачения файл не можа да бъде разчетен. '
-      + 'Ползвайте бутона „Избери файл за внасяне…“.', 'err');
+      + 'Ползвайте бутона „Избери файл за въвеждане…“.', 'err');
   }
   if (!/\.(csv|txt|tsv|xlsx)$/i.test(p)) {
     return toast('Приемат се файлове CSV, TXT, TSV и XLSX.', 'err');
@@ -40,13 +40,13 @@ document.addEventListener('drop', async e => {
 function importMapModal() {
   const d = IMPORT_INFO;
   const fieldOpts = Object.entries(d.fields).map(([v, t]) => ({ v, t }));
-  modal('Внасяне на данни — съответствие на колоните', `
+  modal('Въвеждане на данни — съответствие на колоните', `
     <div class="note" style="margin-top:0">
       Файл: <b style="font-family:var(--mono)">${esc(d.path.split(/[\\/]/).pop())}</b> ·
       кодиране <b>${esc(d.encoding)}</b>${d.delimiter ? ` · разделител <b>${esc(d.delimiter === '\t' ? 'табулация' : d.delimiter)}</b>` : ''} ·
       редове с данни: <b>${d.total}</b><br>
       Съответствието е разпознато по заглавията на колоните. <b>Проверете го</b> и поправете
-      каквото е нужно — колоните, оставени на „— не се внася —“, се пренебрегват.
+      каквото е нужно — колоните, оставени на „— не се въвежда —“, се пренебрегват.
     </div>
 
     <div class="wrap" style="max-height:230px">
@@ -62,12 +62,12 @@ function importMapModal() {
     <form id="mapF" onsubmit="return false">
       <div class="grid g3">
         ${d.headers.map((h, i) => fld(h || 'колона ' + (i + 1), 'col' + i, {
-          type: 'select', val: d.mapping[i] || '', opts: fieldOpts, emptyLabel: '— не се внася —'
+          type: 'select', val: d.mapping[i] || '', opts: fieldOpts, emptyLabel: '— не се въвежда —'
         })).join('')}
       </div>
     </form>
 
-    <fieldset><legend>Настройки на внасянето</legend>
+    <fieldset><legend>Настройки на въвеждането</legend>
       <form id="impOptF" onsubmit="return false">
         <label class="chk"><input type="checkbox" name="skipDuplicates" checked>
           <span>Пропускай вече съществуващите (по инвентарен номер, а при липса — по ISBN)</span></label>
@@ -81,7 +81,7 @@ function importMapModal() {
       </form>
     </fieldset>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn pri" onclick="importRun()">Внеси ${d.total} реда</button>`);
+     <button class="btn pri" onclick="importRun()">Въведи ${d.total} реда</button>`);
 }
 
 async function importRun() {
@@ -99,15 +99,15 @@ async function importRun() {
   if (!seen.title) return toast('Посочете коя колона съдържа заглавието — без него записът е безсмислен.', 'err');
   const options = formData('#impOptF');
   const btn = event && event.target;
-  if (btn) { btn.disabled = true; btn.textContent = 'Внасяне…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Въвеждане…'; }
   const res = await window.api.importData.run({ mapping, options });
-  if (btn) { btn.disabled = false; btn.textContent = 'Внеси'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Въведи'; }
   if (!res.ok) return toast(res.error, 'err');
   const r = res.data;
   markSaved();
-  modal('Внасянето приключи', `
+  modal('Въвеждането приключи', `
     <div class="kpis">
-      ${kpi('✅', r.added, 'Внесени документа', 'добавени във фонда', 'ok')}
+      ${kpi('✅', r.added, 'Въведени документа', 'добавени във фонда', 'ok')}
       ${kpi('⏭️', r.skipped, 'Пропуснати', 'дубликати или редове с грешка')}
     </div>
     ${r.usedInv.length ? `<div class="note" style="margin-top:14px">
@@ -122,8 +122,8 @@ async function importRun() {
       <div class="hint" style="margin-top:6px">${r.errors.slice(0, 15).map(x =>
         `ред ${x.line}: ${esc(x.error)}`).join('<br>')}${r.errors.length > 15 ? '<br>…' : ''}</div>
     </div>` : ''}
-    <div class="hint" style="margin-top:12px">Прегледайте внесеното в „Книги“. Ако нещо не е наред,
-    възстановете резервното копие отпреди внасянето — то се прави автоматично при първото
+    <div class="hint" style="margin-top:12px">Прегледайте въведеното в „Книги“. Ако нещо не е наред,
+    възстановете резервното копие отпреди въвеждането — то се прави автоматично при първото
     стартиране за деня.</div>`,
     `<button class="btn pri" onclick="closeModal();go('books')">Към книгите</button>`);
 }

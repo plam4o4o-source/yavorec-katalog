@@ -240,7 +240,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   // връща `error` с причината в такъв случай — тук се проверява и се показва.
   function assertCatalogWriteOk(w) {
     if (w.blocked) {
-      throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчен експорт“.');
+      throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчно извеждане“.');
     }
     if (!w.written) {
       throw new Error('Записът на каталога не успя' + (w.error ? ': ' + w.error : '.') +
@@ -327,7 +327,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   }
   function buildMarcXml(books) {
     return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-      `<!-- UNIMARC в MARCXML структура. Изнесено от библиотечна система „InvLib“. -->\n` +
+      `<!-- UNIMARC в MARCXML структура. Изведено от библиотечна система „InvLib“. -->\n` +
       `<collection xmlns="http://www.loc.gov/MARC21/slim">\n` +
       books.map(marcRecord).join('\n') + `\n</collection>\n`;
   }
@@ -361,21 +361,21 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   ipcMain.handle('catalog:exportMarc', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Експорт в UNIMARC / MARCXML',
+        title: 'Извеждане в UNIMARC / MARCXML',
         defaultPath: 'fond-unimarc.xml',
         filters: [{ name: 'MARCXML', extensions: ['xml'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
       const books = exportBooksFor();
       fs.writeFileSync(filePath, buildMarcXml(books), 'utf8');
-      logAudit('Експорт UNIMARC', filePath + ' — ' + books.length + ' записа');
+      logAudit('Извеждане UNIMARC', filePath + ' — ' + books.length + ' записа');
       return { ok: true, data: { path: filePath, count: books.length } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('catalog:exportDc', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Експорт в Dublin Core',
+        title: 'Извеждане в Dublin Core',
         defaultPath: 'fond-dublincore.xml',
         filters: [{ name: 'XML', extensions: ['xml'] }]
       });
@@ -383,7 +383,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       const books = exportBooksFor();
       const s = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
       fs.writeFileSync(filePath, buildDublinCore(books, s), 'utf8');
-      logAudit('Експорт Dublin Core', filePath + ' — ' + books.length + ' записа');
+      logAudit('Извеждане Dublin Core', filePath + ' — ' + books.length + ' записа');
       return { ok: true, data: { path: filePath, count: books.length } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
@@ -391,14 +391,14 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   ipcMain.handle('catalog:export', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Експорт на онлайн каталог',
+        title: 'Извеждане на онлайн каталог',
         defaultPath: 'katalog.json',
         filters: [{ name: 'JSON', extensions: ['json'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
       const payload = buildCatalogPayload();
       fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
-      logAudit('Експорт на каталог', filePath + ' — ' + payload.items.length + ' записа');
+      logAudit('Извеждане на каталог', filePath + ' — ' + payload.items.length + ' записа');
       return { ok: true, data: filePath };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -407,7 +407,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   ipcMain.handle('catalog:exportCsv', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Експорт на фонда (CSV)',
+        title: 'Извеждане на фонда (CSV)',
         defaultPath: 'fond.csv',
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       });

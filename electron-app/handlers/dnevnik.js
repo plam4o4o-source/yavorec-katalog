@@ -169,7 +169,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
     try {
       const db = getDb();
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
-        title: 'Експорт на дневника (CSV)',
+        title: 'Извеждане на дневника (CSV)',
         defaultPath: `dnevnik-${year}-${String(month).padStart(2, '0')}.csv`,
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       });

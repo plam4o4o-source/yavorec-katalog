@@ -78,7 +78,7 @@ async function renderReaders() {
         <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
       </select>
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
-      <button class="btn" onclick="exportReadersCsv()">Износ CSV</button>
+      <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:345px"></th></tr></thead>

@@ -189,7 +189,7 @@ test('catalog:gitPublishNow requires a configured folder and reports the write-b
   setFlushResult({ written: false, blocked: true });
   const blocked = await ipcMain.invoke('catalog:gitPublishNow');
   assert.equal(blocked.ok, false);
-  assert.match(blocked.error, /Ръчен експорт/);
+  assert.match(blocked.error, /Ръчно извеждане/);
 });
 
 test('catalog:gitPublishNow publishes successfully (commit + push) and logs the audit entry', async () => {
@@ -235,7 +235,7 @@ test('catalog:writeNow requires a configured folder and surfaces the write-block
   setFlushResult({ written: false, blocked: true });
   const blocked = await ipcMain.invoke('catalog:writeNow');
   assert.equal(blocked.ok, false);
-  assert.match(blocked.error, /Ръчен експорт/);
+  assert.match(blocked.error, /Ръчно извеждане/);
 
   setFlushResult({ written: true });
   const ok = await ipcMain.invoke('catalog:writeNow');
@@ -282,7 +282,7 @@ test('catalog:exportMarc writes a MARCXML file with one <record> per book', asyn
   const xml = fs.readFileSync(outPath, 'utf8');
   assert.match(xml, /<record>/);
   assert.match(xml, /Под игото/);
-  assert.ok(auditLog.some(a => a.action === 'Експорт UNIMARC'));
+  assert.ok(auditLog.some(a => a.action === 'Извеждане UNIMARC'));
 });
 
 test('catalog:exportDc writes a Dublin Core XML file', async () => {
