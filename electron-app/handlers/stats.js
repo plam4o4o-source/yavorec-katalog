@@ -216,9 +216,12 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           LEFT JOIN inventory i ON i.book_id = b.id
           WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
         `).all(end, end);
+        // Същото правило като в stats:report по-горе — иначе двете справки за
+        // един и същи фонд дават различни числа при изрично нулеви бройки.
+        const qtyOf = (r) => (r.qty == null ? 1 : Number(r.qty) || 0);
         const byGroup = (rows, field) => {
           const m = {};
-          rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + (Number(r.qty) || 1); });
+          rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + qtyOf(r); });
           return Object.entries(m).sort((a, b) => b[1] - a[1]);
         };
         const byCategory = db.prepare(`
@@ -231,8 +234,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         `).all(end, end).map(r => [r.k, r.n]);
         return {
           id, year: y,
-          fundCount: fund.reduce((s, r) => s + (Number(r.qty) || 1), 0),
-          fundValue: fund.reduce((s, r) => s + (Number(r.price) || 0) * (Number(r.qty) || 1), 0),
+          fundCount: fund.reduce((s, r) => s + qtyOf(r), 0),
+          fundValue: fund.reduce((s, r) => s + (Number(r.price) || 0) * qtyOf(r), 0),
           byDepartment: byGroup(fund, 'department'), byLanguage: byGroup(fund, 'language'), byCategory
         };
       }

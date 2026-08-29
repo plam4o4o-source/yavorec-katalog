@@ -66,6 +66,16 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
         .get(c, c);
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
+      /* Същото условие като в износа на каталога (buildCatalogPayload в main.js) и
+         в груповото добавяне по-долу: там е SQL `status != 'отчислен'`, което за
+         ред с НЕПОЗНАТ статус (внос отпреди enum тригера) не е вярно — тоест
+         такъв документ не се публикува. Проверката в JS тук обаче пропускаше
+         NULL и редът влизаше във витрината: програмата казваше „добавена“, а
+         витрината на сайта излизаше празна, без никъде да пише защо. */
+      if (b.status == null) {
+        throw new Error('Инв. № ' + b.inv_number + ' е без попълнен статус (обикновено запис от по-стар внос) и '
+          + 'затова не се публикува в онлайн каталога. Отворете документа, задайте статус „наличен“ и опитайте пак.');
+      }
       if (b.department === 'служебен') throw new Error('Служебните документи не се публикуват в каталога.');
       getDb().prepare('INSERT OR IGNORE INTO catalog_shelf_items (shelf_id, book_id) VALUES (?, ?)').run(shelfId, b.id);
       scheduleCatalogWrite();

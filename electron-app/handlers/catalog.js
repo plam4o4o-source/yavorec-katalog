@@ -118,7 +118,13 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     AUTO_PUSH_TIMER = setInterval(async () => {
       try {
         const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-        if (!s || !s.catalog_folder || !isGitRepo(s.catalog_folder)) return;
+        if (!s || !s.catalog_folder || !isGitRepo(s.catalog_folder)) {
+          // Папката вече не е свързана — няма какво да се публикува, значи няма и
+          // за какво да предупреждаваме. Иначе червената лента оставаше завинаги
+          // за каталог, който вече не се публикува изобщо.
+          noteAutoPush(null);
+          return;
+        }
         const r = await gitPublish(s.catalog_folder);
         if (r.ok && r.committed) {
           console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
@@ -172,8 +178,14 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
          трите ТРЯБВА да са еднакви, иначе екранът обещава повече записи,
          отколкото файлът съдържа. Виж test/main-catalog-norms.test.js. */
       const pub = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' AND COALESCE(department,'') != 'служебен'`).get().n;
+      /* `b.status = 'наличен'` — дословно същото условие, което слага флага „налична"
+         в изнесения файл (publicBookFields в main.js: `b.available > 0 &&
+         b.status === 'наличен'`). Дотук тук се броеше само по свободни бройки:
+         документ със статус „липсващ“ или „за реставрация“ няма отворено заемане,
+         тоест излизаше „наличен“ на екрана, а в каталога — не. Екранът обещаваше
+         повече зелени етикети, отколкото сайтът показва. */
       const avail = db.prepare(`
-        SELECT COUNT(*) AS n FROM books b WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен'
+        SELECT COUNT(*) AS n FROM books b WHERE b.status = 'наличен' AND COALESCE(b.department,'') != 'служебен'
         AND COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id=b.id),0) >
             (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.date_in IS NULL)
       `).get().n;
@@ -251,7 +263,8 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
     const w = flushCatalogWrite();
-    try { assertCatalogWriteOk(w); } catch (err) { return { ok: false, error: err.message }; }
+    try { assertCatalogWriteOk(w); }
+    catch (err) { noteAutoPush(err.message); return { ok: false, error: err.message }; }
     const r = await gitPublish(s.catalog_folder);
     if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
     /* И ръчното публикуване обновява състоянието — иначе предупреждението за

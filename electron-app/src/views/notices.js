@@ -58,9 +58,15 @@ window.openReminders = openReminders;
 async function remLog(i, channel) {
   const r = (window._REMINDERS || [])[i];
   if (!r) return false;
-  const ok = await call(window.api.notices.log({ reader_id: r.reader_id, level: r.level || 1, channel, loans_count: r.n }));
-  if (ok === null) {
-    toast('Напомнянето е подготвено, но НЕ се вписа в регистъра — следващия път ще тръгне пак от същото ниво.', 'err');
+  /* Директно, без call(): call() вече показва СВОЯ toast с техническата грешка,
+     а тук трябва да се каже какво означава тя за библиотекаря. Две червени
+     съобщения за един провал са шум. */
+  let res;
+  try { res = await window.api.notices.log({ reader_id: r.reader_id, level: r.level || 1, channel, loans_count: r.n }); }
+  catch (e) { res = { ok: false, error: e && e.message }; }
+  if (!res || !res.ok) {
+    toast('Напомнянето е подготвено, но НЕ се вписа в регистъра — следващия път ще тръгне пак от същото ниво.'
+      + (res && res.error ? ' (' + res.error + ')' : ''), 'err');
     return false;
   }
   return true;

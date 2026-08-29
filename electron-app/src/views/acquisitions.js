@@ -89,14 +89,26 @@ async function saveAcq() {
   if (id) { closeModal(); renderAcq(); }
 }
 window.saveAcq = saveAcq;
+/* Отчетната бройка на един инвентиран ред от партидата. `fund_qty` идва от
+   acquisitions:get и е COALESCE(inventory.quantity, 1) — броят ДОКУМЕНТИ, за
+   разлика от `quantity`, което е наличността за заемане и е 0 при липсващ ред.
+   Едно и също правило за картата, за списъка и за разпечатките: „Инвентирани"
+   в списъка вече брои документи (handlers/acquisitions.js), а картата на същата
+   партида показваше заглавия — и „Остават" тласкаше библиотекаря да въведе
+   записи, които не съществуват. */
+function acqQty(i) { return (i && i.fund_qty != null) ? (Number(i.fund_qty) || 0) : 1; }
+function acqCount(items) { return (items || []).reduce((s, i) => s + acqQty(i), 0); }
+function acqValue(items) { return (items || []).reduce((s, i) => s + (Number(i.price) || 0) * acqQty(i), 0); }
+
 async function openAcq(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
   modal('Партида № ' + a.no + ' / ' + a.year, `
     <div class="cards">
       <div class="card"><div class="num">${a.total_count}</div><div class="lbl">Общо по документ</div></div>
-      <div class="card"><div class="num">${a.items.length}</div><div class="lbl">Инвентирани</div></div>
-      <div class="card"><div class="num">${Math.max(0, a.total_count - a.items.length)}</div><div class="lbl">Остават</div></div>
+      <div class="card"><div class="num">${acqCount(a.items)}</div><div class="lbl">Инвентирани</div>${
+        acqCount(a.items) !== a.items.length ? `<div class="lbl">${a.items.length} заглавия</div>` : ''}</div>
+      <div class="card"><div class="num">${Math.max(0, a.total_count - acqCount(a.items))}</div><div class="lbl">Остават</div></div>
     </div>
     <div class="hint" style="margin-bottom:10px">${esc(a.how || '')} · ${esc(a.from_source || '')} ·
       ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}</div>
@@ -121,7 +133,7 @@ async function printDonationDoc(id) {
     <div class="pmeta">На основание чл. 6 от Наредба № 3 от 18.11.2014 г. комисия в състав
     ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'} прие дарение от:<br>
     <b>Дарител:</b> ${esc(a.from_source || '')}<br><b>Адрес:</b> ${esc(a.donor_address || '…………………')}<br>
-    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || a.items.reduce((x, i) => x + (Number(i.price) || 0), 0))}<br>
+    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || acqValue(a.items))}<br>
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${mny(i.price)}</td></tr>`).join('')}
@@ -134,7 +146,7 @@ async function printAcqNoDocDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
   const s = SETTINGS_CACHE || {};
-  const total = a.sum || a.items.reduce((x, i) => x + (Number(i.price) || 0), 0);
+  const total = a.sum || acqValue(a.items);
   setPrintPage({ name: `Протокол за придобиване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ПРОТОКОЛ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за придобиване на библиотечни документи без съпроводителен документ</span></h2>

@@ -114,6 +114,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           WHERE book_id = ? AND status IN ('чака','заделена')
         `);
         let cancelledHolds = 0;
+        /* Отчетната бройка на всеки документ, с разграничение между „липсващ ред“
+           и „изрично нула“ — виж бележката при quantity по-долу. */
+        const qStmt = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?');
+        const invQty = { get: (id) => { const r = qStmt.get(id); return r ? r.quantity : 1; } };
         bookIds.forEach(bookId => {
           const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
           if (!b) return;
@@ -125,10 +129,13 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                отваряне на КДБФ: редът в deaccession_items е документ по чл. 35,
                ал. 2 и не бива да се променя със задна дата, ако някой редактира
                „Налични бройки" или изтрие документа години по-късно.
-               BOOK_SELECT дава COALESCE(i.quantity, 0); отчислява се цялото
-               заглавие с всичките му екземпляри, а 0 (липсващ ред в inventory,
-               стара база) означава поне един физически документ. */
-            quantity: (b.quantity && b.quantity > 0) ? b.quantity : 1
+               Стойността се чете ПРЯКО от inventory, а не от b.quantity на
+               BOOK_SELECT: там е COALESCE(i.quantity, 0) и не различава „няма ред
+               в inventory“ (стара база → 1 документ) от „библиотекарят е въвел
+               изрично 0 бройки“ (→ 0). Слети в едно, вторият случай изваждаше от
+               КДБФ документ, който фондът никога не е броял. Същото разграничение
+               като fund_qty в handlers/acquisitions.js. */
+            quantity: invQty.get(b.id)
           });
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
             .run('отчислен', act.date, actId, act.date, b.id);
