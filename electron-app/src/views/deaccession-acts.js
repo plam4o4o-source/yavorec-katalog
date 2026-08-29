@@ -68,6 +68,16 @@ async function actAdd() {
 window.actAdd = actAdd;
 function actDel(n) { ACT_LIST.splice(n, 1); drawActList(); }
 window.actDel = actDel;
+/* Отчетната бройка на един ред от акта. Снимката (deaccession_items.quantity) е
+   меродавна; NULL значи акт отпреди v2.4.9 и се чете като един документ, точно
+   както се е броял тогава. Едно и също правило за екрана, за прозореца и за
+   разпечатката — актът излиза от сградата подписан и отива в счетоводството,
+   затова числото в него ТРЯБВА да е същото като в списъка „Отчисляване" и в
+   реда на КДБФ Приложение № 3. */
+function actQty(l) { return (l && l.quantity != null) ? (Number(l.quantity) || 0) : 1; }
+function actCount(items) { return (items || []).reduce((s, l) => s + actQty(l), 0); }
+function actValue(items) { return (items || []).reduce((s, l) => s + (Number(l.price) || 0) * actQty(l), 0); }
+
 function drawActList() {
   const el = $('#actList'); if (!el) return;
   if (!ACT_LIST.length) { el.innerHTML = '<div class="hint">Списъкът е празен. Въведете инвентарните номера за отчисляване.</div>'; return; }
@@ -100,8 +110,9 @@ async function openAct(id) {
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
     ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
     <td class="num">${esc(l.year || '')}</td><td class="num">${mny(l.price)}</td></tr>`).join('')}
-    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${a.items.length}</td>
-    <td class="num">${mny(a.items.reduce((s, l) => s + (Number(l.price) || 0), 0))}</td></tr>
+    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(a.items)}${
+      actCount(a.items) !== a.items.length ? ` (${a.items.length} заглавия)` : ''}</td>
+    <td class="num">${mny(actValue(a.items))}</td></tr>
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
     `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>
@@ -113,7 +124,8 @@ async function printActDoc(id) {
   const a = await call(window.api.deaccessionActs.get(id));
   if (!a) return;
   const s = SETTINGS_CACHE || {};
-  const total = a.items.reduce((sum, l) => sum + (Number(l.price) || 0), 0);
+  const total = actValue(a.items);
+  const count = actCount(a.items);
   setPrintPage({ name: `Акт за отчисляване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за отчисляване на библиотечни документи</span></h2>
@@ -121,11 +133,11 @@ async function printActDoc(id) {
     ${esc(s.director_role || 'ръководителя')} на ${esc(s.org || '')}, в състав:<br>
     1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
     на основание <b>чл. 30, т. ${a.reason_code}</b> от Наредба № 3 от 18.11.2014 г. — <b>${esc(a.reason_text)}</b> — отчислява от библиотечния фонд
-    <b>${a.items.length}</b> библиотечни документа на обща стойност <b>${mny(total)}</b></div>
+    <b>${count}</b> библиотечни документа${count !== a.items.length ? ` (${a.items.length} заглавия)` : ''} на обща стойност <b>${mny(total)}</b></div>
     <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th><th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
-    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${mny(l.price)}</td></tr>`).join('')}
+    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${actQty(l) > 1 ? actQty(l) + ' × ' : ''}${mny(l.price)}</td></tr>`).join('')}
     <tr><td colspan="5"><b>ОБЩО</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>
     <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
     Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>

@@ -38,11 +38,21 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const d = date || today();
-      const info = db.prepare('INSERT INTO housebound_visits (reader_id, date, note) VALUES (?, ?, ?)').run(reader_id, d, note || null);
-      logEvent('дома', { readerId: reader_id, date: d, note });
-      const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-      logAudit('Посещение по домовете', (r ? r.name : reader_id) + ' — ' + d);
-      return info.lastInsertRowid;
+      /* В транзакция, защото logEvent вече препредава грешката си (виж main.js).
+         Без нея редът в housebound_visits оставаше записан, а съобщението към
+         библиотекаря твърдеше „операцията е отменена… Опитайте отново“ — тоест
+         всеки повторен опит добавяше ново, дублирано посещение. Посещението и
+         събитието, което захранва Дневника, минават заедно или никак — точно
+         както при заемане и връщане. */
+      const tx = db.transaction(() => {
+        const info = db.prepare('INSERT INTO housebound_visits (reader_id, date, note) VALUES (?, ?, ?)')
+          .run(reader_id, d, note || null);
+        logEvent('дома', { readerId: reader_id, date: d, note });
+        const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
+        logAudit('Посещение по домовете', (r ? r.name : reader_id) + ' — ' + d);
+        return info.lastInsertRowid;
+      });
+      return tx.immediate();
     })
   );
   ipcMain.handle('housebound:list', () =>

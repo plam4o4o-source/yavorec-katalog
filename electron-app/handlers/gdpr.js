@@ -68,19 +68,33 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            някога е резервирал книга или е платил такса, оставаха в базата и в
            копията. „Извеждане на читатели (CSV)" пък беше в списъка напразно: там
            има само път до файл и брой записи, без лични данни. */
-        const auditCleared = db.prepare(`
-          UPDATE audit_log SET detail = '[анонимизирано по GDPR]', diff = NULL
-          WHERE substr(ts, 1, 10) < ?
-            AND action IN ('Нов читател', 'Редакция на читател', 'Изтрит читател с история',
+        /* Касовите записи пазят СУМАТА след тирето („Иван Петров — годишна такса
+           12.00 лв."). Сумата не е личен данни и е част от отчетността — затова
+           тук се маха само името, а остатъкът се запазва. При останалите действия
+           целият текст е самоличност и отпада изцяло. */
+        const MONEY_ACTIONS = "('Начисление', 'Плащане')";
+        const NAME_ACTIONS = `('Нов читател', 'Редакция на читател', 'Изтрит читател с история',
                            'Снето наказание',
                            -- резервации: handlers/holds.js вписва името на читателя
                            'Заделена книга', 'Резервация', 'Отказана резервация', 'Изтекла резервация',
-                           -- каса: handlers/account.js вписва името при начисление и плащане
-                           'Начисление', 'Плащане',
                            -- надомно обслужване: handlers/housebound.js
-                           'Обслужване по домовете', 'Посещение по домовете')
+                           'Обслужване по домовете', 'Посещение по домовете')`;
+        const anonMoney = db.prepare(`
+          UPDATE audit_log
+             SET detail = '[анонимизиран читател]' || substr(detail, instr(detail, ' — ')),
+                 diff = NULL
+           WHERE substr(ts, 1, 10) < ?
+             AND action IN ${MONEY_ACTIONS}
+             AND detail IS NOT NULL AND instr(detail, ' — ') > 0
+             AND detail NOT LIKE '[анонимизиран читател]%'
+        `).run(cutoff).changes;
+        const anonNames = db.prepare(`
+          UPDATE audit_log SET detail = '[анонимизирано по GDPR]', diff = NULL
+          WHERE substr(ts, 1, 10) < ?
+            AND action IN ${NAME_ACTIONS}
             AND COALESCE(detail, '') != '[анонимизирано по GDPR]'
         `).run(cutoff).changes;
+        const auditCleared = anonMoney + anonNames;
 
         /* Историята на търсенията пази свободния текст, който библиотекарят е
            набрал — а той често е точно име на читател. Тя не е документ и няма

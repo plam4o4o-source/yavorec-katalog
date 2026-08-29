@@ -368,7 +368,12 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          криптирано настрани с новата → провери, че се отваря → чак тогава
          преименувай върху оригинала. Съдържанието на файла остава своето. */
       const staged = full + '.tmp';
-      const plainTmp = full + '.plain.tmp';
+      /* Разшифрованото копие отива в ЛОКАЛНАТА временна папка, не до самото копие:
+         папката с резервните копия обикновено е споделена в мрежата, а този файл
+         съдържа ЕГН и № на лична карта на всички читатели. Същият избор като при
+         decryptBackupToTemp по-горе. Криптираният междинен файл (staged) може да
+         остане до целта — той не е четим без паролата. */
+      const plainTmp = path.join(app.getPath('temp'), 'inventar-reenc-' + Date.now() + '-' + f + '.db');
       try {
         const buf = prevPassword ? decryptBackupBuffer(full, prevPassword) : null;
         if (!buf || buf.subarray(0, 15).toString('utf8') !== 'SQLite format 3') { failed.push(f); continue; }
