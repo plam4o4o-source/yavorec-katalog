@@ -138,7 +138,13 @@ test('shelves:addBooks bulk-adds, silently skipping deaccessioned/staff-only ids
 
   const result = await ipcMain.invoke('shelves:addBooks', { shelfId, ids: [okId1, okId2, badId] });
   assert.equal(result.ok, true);
-  assert.equal(result.data, 2, 'only the two eligible books should be counted as added');
+  assert.equal(result.data.added, 2, 'only the two eligible books should be counted as added');
+  /* v2.4.14: пропуснатите вече се връщат ПОИМЕННО и с причина — дотук екранът
+     получаваше само число и отметнат документ изчезваше от витрината, без нито
+     дума защо. */
+  assert.equal(result.data.skipped.length, 1);
+  assert.equal(result.data.skipped[0].inv_number, 12);
+  assert.match(result.data.skipped[0].reason, /отчислен/);
 
   const items = await ipcMain.invoke('shelves:items', shelfId);
   assert.equal(items.data.length, 2);

@@ -125,13 +125,13 @@ test('backup:now writes an unencrypted copy of the live db and logs an audit ent
   assert.match(auditLog[0].detail, /ръчно копие/);
 });
 
-test('backup:now with a password produces an encrypted (INVBAK01) backup', async () => {
+test('backup:now with a password produces an encrypted (INVBAK02) backup', async () => {
   const { ipcMain, dir } = setup();
   const result = await ipcMain.invoke('backup:now', { password: 'таен-парол-123' });
   assert.equal(result.ok, true);
   assert.equal(result.encrypted, true);
   const head = fs.readFileSync(result.data).subarray(0, 8).toString('utf8');
-  assert.equal(head, 'INVBAK01');
+  assert.equal(head, 'INVBAK02'); // v2.4.14: новите копия носят версия на параметрите на ключа
 });
 
 test('backup:restoreFromList replaces the active db file and relaunches the app', async () => {

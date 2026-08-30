@@ -37,6 +37,7 @@ let bootDir = null;
 
 function boot(dbFolder) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-2proc-'));
+  armCleanup();
   const userData = path.join(dir, 'userData');
   fs.mkdirSync(userData, { recursive: true });
   // config.json сочи към СПОДЕЛЕНАТА папка — точно както при мрежов диск.
@@ -104,6 +105,21 @@ function invokeHandler(channel, args) {
   const fn = handlers.get(channel);
   if (!fn) throw new Error('няма регистриран IPC канал ' + channel);
   return fn({}, args);
+}
+
+/* Одит v2.4.14: папката от mkdtemp се триеше САМО в closeApp(), който се
+   изпълнява само при изрично подаден {cmd:'exit'}. Всяко пускане на
+   two-process-locking.test.js оставяше по 9 папки inv-2proc-*, всяка с цяло
+   userData дърво; при няколко десетки пускания в /tmp се насъбират хиляди.
+   Закачката за 'exit' на процеса ги прибира и когато работникът приключва по
+   друг път (убит от теста, необработена грешка, край на файла). */
+let cleanupArmed = false;
+function armCleanup() {
+  if (cleanupArmed) return;
+  cleanupArmed = true;
+  process.on('exit', () => {
+    try { if (bootDir) fs.rmSync(bootDir, { recursive: true, force: true }); } catch (e) { /* при изход — без значение */ }
+  });
 }
 
 function closeApp() {

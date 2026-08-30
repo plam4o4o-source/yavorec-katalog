@@ -80,8 +80,16 @@ async function exportAuditCSV() {
   const rows = await call(window.api.audit.list(ODIT_Q));
   if (!rows) return;
   const h = ['Дата/час', 'Служител', 'Действие', 'Подробност'];
+  /* Одит v2.4.14: това беше ЕДИНСТВЕНОТО изнасяне в CSV, което преизмисляше
+     цитирането на място и не прилагаше неутрализацията на водещите = + - @
+     (security-utils.js: csvCell). Другите три — каталогът, читателите и
+     дневникът — минават през нея. А точно този файл инспекторът от регионалната
+     библиотека най-вероятно ще отвори в Excel, и точно тук има клетки, които
+     започват направо с данни: името на служителя, заглавие на предложение за
+     покупка, име на нов служител. csvSafe е същите три реда, изнесени в
+     src/views/core.js, защото екранният слой няма достъп до модула. */
   const csv = [h.join(';')].concat(rows.map(a => [new Date(a.ts).toLocaleString('bg-BG'), a.user, a.action, a.detail]
-    .map(x => '"' + String(x ?? '').replace(/"/g, '""') + '"').join(';'))).join('\r\n');
+    .map(csvSafe).join(';'))).join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'odit.csv'; a.click();

@@ -86,4 +86,12 @@ function normalizeScanCode(code) {
   return s;
 }
 
-module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate };
+/* Служебният запис, под който handlers/gdpr.js прибира анонимизираните заемания.
+   Живее тук, защото го ползват четири модула (gdpr, stats, dashboard и тестовете)
+   и защото разминаване между тях е точно дефектът, който одит v2.4.14 намери:
+   dashboard.js вече го изключваше поименно при пререгистрациите, а годишните
+   броячи на читатели — не, и двете числа за читатели в един и същи годишен отчет
+   се разминаваха с единица. */
+const ANON_READER_NAME = '— анонимизирани заемания —';
+
+module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, ANON_READER_NAME };

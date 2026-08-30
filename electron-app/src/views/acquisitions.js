@@ -99,6 +99,18 @@ window.saveAcq = saveAcq;
 function acqQty(i) { return (i && i.fund_qty != null) ? (Number(i.fund_qty) || 0) : 1; }
 function acqCount(items) { return (items || []).reduce((s, i) => s + acqQty(i), 0); }
 function acqValue(items) { return (items || []).reduce((s, i) => s + (Number(i.price) || 0) * acqQty(i), 0); }
+/* Има ли ред, чиято бройка не е един документ — виж същата бележка в
+   src/views/deaccession-acts.js. Дотук пояснението „N заглавия“ се показваше
+   при `acqCount !== items.length`, което съвпада случайно и изчезва точно при
+   смесени бройки. */
+function acqMark(i) { return acqQty(i) !== 1 ? acqQty(i) + ' × ' : ''; }
+function acqHasMultiples(items) { return (items || []).some(i => acqQty(i) !== 1); }
+// Означението пред цената на един ред в разпечатките. Одит v2.4.14: редът ОБЩО
+// вече беше Σ(цена × бройка), но всеки ред печаташе гола единична цена и в
+// таблицата нямаше нито колона за бройка, нито означение — счетоводителят вижда
+// колона, която се сумира на едно, и ред ОБЩО, който казва друго. Протоколът по
+// чл. 3, ал. 2 е ЗАМЕСТВАЩ първичен счетоводен документ; вътрешното му
+// противоречие е по-скъпо от неудобството на още една колона.
 
 async function openAcq(id) {
   const a = await call(window.api.acquisitions.get(id));
@@ -107,14 +119,14 @@ async function openAcq(id) {
     <div class="cards">
       <div class="card"><div class="num">${a.total_count}</div><div class="lbl">Общо по документ</div></div>
       <div class="card"><div class="num">${acqCount(a.items)}</div><div class="lbl">Инвентирани</div>${
-        acqCount(a.items) !== a.items.length ? `<div class="lbl">${a.items.length} заглавия</div>` : ''}</div>
+        acqHasMultiples(a.items) ? `<div class="lbl">${a.items.length} заглавия</div>` : ''}</div>
       <div class="card"><div class="num">${Math.max(0, a.total_count - acqCount(a.items))}</div><div class="lbl">Остават</div></div>
     </div>
     <div class="hint" style="margin-bottom:10px">${esc(a.how || '')} · ${esc(a.from_source || '')} ·
       ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}</div>
     ${a.items.length ? `<div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
       ${a.items.map(i => `<tr><td class="num">${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td>
-      <td class="num">${esc(i.year || '')}</td><td class="num">${mny(i.price)}</td></tr>`).join('')}
+      <td class="num">${esc(i.year || '')}</td><td class="num">${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="hint">Все още няма инвентирани документи по тази партида.</div>'}`,
     `<button class="btn l dgr" onclick="delAcq(${id})">Изтрий</button>
      ${a.how === 'дарение' ? `<button class="btn l" onclick="printDonationDoc(${id})">Акт за дарение / PDF</button>` : ''}
@@ -134,10 +146,12 @@ async function printDonationDoc(id) {
     ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'} прие дарение от:<br>
     <b>Дарител:</b> ${esc(a.from_source || '')}<br><b>Адрес:</b> ${esc(a.donor_address || '…………………')}<br>
     <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || acqValue(a.items))}<br>
+    ${(a.sum && a.sum !== acqValue(a.items)) ? `<b>Забележка:</b> обявената стойност (${mny(a.sum)}) се различава от сбора
+    на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
     <b>Основание за придобиване:</b> дарение</div>
-    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Стойност, лв.</th></tr></thead><tbody>
-    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${mny(i.price)}</td></tr>`).join('')}
-    </tbody></table>` : ''}
+    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Стойност, лв.</th></tr></thead><tbody>
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${acqQty(i)}</td><td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
+    <tr><td colspan="5"><b>ОБЩО ${acqCount(a.items)} документа</b></td><td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>` : ''}
     <div class="pmeta">Актът е съставен в три екземпляра — за счетоводството, за библиотеката и за дарителя.</div>
     ${ssig(['Дарител: …………………', 'Комисия: …………………', 'УТВЪРДИЛ: …………………'])}</div>`);
 }
@@ -156,10 +170,12 @@ async function printAcqNoDocDoc(id) {
     за редовно вписване в Книгата за движение на библиотечния фонд и в инвентарната книга.<br>
     <b>Начин на постъпване:</b> ${esc(a.how || '')} &nbsp; <b>Откъде/от кого:</b> ${esc(a.from_source || '')}<br>
     <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща оценена стойност:</b> ${mny(total)}
+    ${total !== acqValue(a.items) ? `<br><b>Забележка:</b> обявената стойност по документа (${mny(total)}) се различава от
+    сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).` : ''}
     ${a.note ? '<br><b>Забележка:</b> ' + esc(a.note) : ''}</div>
-    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Оценена стойност</th></tr></thead><tbody>
-    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${mny(i.price)}</td></tr>`).join('')}
-    <tr><td colspan="4"><b>ОБЩО</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>`
+    ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Оценена стойност</th></tr></thead><tbody>
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${acqQty(i)}</td><td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
+    <tr><td colspan="5"><b>ОБЩО ${acqCount(a.items)} документа</b></td><td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>`
     : '<div class="pmeta">Все още няма инвентирани документи по тази партида.</div>'}
     <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,
     част № 1, като заместващ първичен документ.</div>

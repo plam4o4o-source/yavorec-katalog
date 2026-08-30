@@ -82,17 +82,37 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       return { year: y, month: m, daysInMonth: dim, days, monthTotal, ytdTotal };
     })
   );
+  /* Записват се САМО колоните, които наистина са дошли в заявката — не всичките
+     66 наведнъж.
+
+     Одит v2.4.14: дотук всяко записване пишеше целия ред, изчислен от снимката,
+     която браузърът е заредил при отваряне на екрана. При двама души в един и
+     същи ден — читалня и заемна например — вторият връщаше на нула колоните на
+     първия, защото неговата снимка ги е заредила празни. Без конфликт, без
+     предупреждение: официалният месечен формуляр просто губеше половината ден.
+     Най-честият път (редакция на една клетка в таблицата) сега изпраща точно
+     една колона, а прозорецът „Подробно за деня“ изпраща целия формуляр — там
+     човекът е видял и потвърдил всички числа, и затова е меродавен. За да е
+     видяното наистина текущо, прозорецът се отваря върху презаредени данни (виж
+     dnevnikDayForm в src/views/dnevnik.js).
+
+     Празен ред при първо докосване на деня: колоните, които не са изпратени,
+     остават NULL и се четат като 0 навсякъде, където се сумират — същото
+     поведение като досега. */
   ipcMain.handle('dnevnik:saveDay', (e, d) =>
     run(() => {
       const db = getDb();
+      const cols = DNEVNIK_FIELDS.filter(f => d[f] !== undefined);
+      const hasNote = d.note !== undefined;
+      if (!cols.length && !hasNote) throw new Error('Няма какво да се запише за този ден.');
       const payload = { date: d.date };
-      DNEVNIK_FIELDS.forEach(f => { payload[f] = parseInt(d[f], 10) || 0; });
-      payload.note = d.note || null;
+      cols.forEach(f => { payload[f] = parseInt(d[f], 10) || 0; });
+      if (hasNote) payload.note = d.note || null;
+      const names = cols.concat(hasNote ? ['note'] : []);
       db.prepare(`
-        INSERT INTO dnevnik_days (date, ${DNEVNIK_FIELDS.join(',')}, note)
-        VALUES (@date, ${DNEVNIK_FIELDS.map(f => '@' + f).join(',')}, @note)
-        ON CONFLICT(date) DO UPDATE SET
-          ${DNEVNIK_FIELDS.map(f => f + '=excluded.' + f).join(',')}, note=excluded.note
+        INSERT INTO dnevnik_days (date, ${names.join(',')})
+        VALUES (@date, ${names.map(f => '@' + f).join(',')})
+        ON CONFLICT(date) DO UPDATE SET ${names.map(f => f + '=excluded.' + f).join(',')}
       `).run(payload);
       logAudit('Дневник', 'вписан ден ' + d.date);
     })

@@ -69,6 +69,17 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const branchRes = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const branch = branchRes.ok && branchRes.stdout ? branchRes.stdout : 'main';
 
+    /* Локална самоличност ПРЕДИ първия commit. Одит v2.4.14: на свеж компютър
+       без глобална git конфигурация `git commit` отказва и връща собствения си
+       текст за user.email — съобщение, което стига до библиотекаря дословно,
+       звучи като счупена програма и не се оправя от само себе си при следващите
+       опити. Стойностите са локални за работното копие (--local), не пипат нищо
+       друго на компютъра, и се задават само ако липсват. */
+    const who = await gitRun(folder, ['config', '--local', '--get', 'user.email']);
+    if (!who.ok || !who.stdout) {
+      await gitRun(folder, ['config', '--local', 'user.email', 'invlib@localhost']);
+      await gitRun(folder, ['config', '--local', 'user.name', 'InvLib']);
+    }
     const add = await gitRun(folder, ['add', 'katalog.json']);
     if (!add.ok) return { ok: false, error: 'git add: ' + (add.stderr || 'грешка') };
     const commit = await gitRun(folder, ['commit', '-m', 'Автоматично обновяване на каталога — ' + new Date().toISOString()]);

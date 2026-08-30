@@ -59,13 +59,25 @@ async function importScansRun(sessionId) {
   if (!r) return;
   markSaved();
   closeModal();
-  toast(`Въведени ${r.added} · повторни ${r.duplicates} · непознати ${r.unknown.length}`, r.unknown.length ? 'err' : 'ok');
-  if (r.unknown.length) {
-    modal('Непознати номера', `
-      <div class="note" style="border-left-color:var(--red);margin-top:0">
+  /* `skipped` са документи, НАМЕРЕНИ във фонда, но извън обхвата на тази
+     проверка (чужд отдел или отчислени). Показват се поименно, заедно с
+     причината: дотук телефонният път ги приемаше мълчаливо, а настолният ги
+     отказва с обяснение — протоколът пред регионалната библиотека трябва да
+     отговаря точно на обявения обхват. */
+  const skipped = r.skipped || [];
+  toast(`Въведени ${r.added} · повторни ${r.duplicates} · непознати ${r.unknown.length}`
+    + (skipped.length ? ` · извън обхвата ${skipped.length}` : ''),
+    (r.unknown.length || skipped.length) ? 'err' : 'ok');
+  if (r.unknown.length || skipped.length) {
+    modal('Номера, които не влязоха в протокола', `
+      ${r.unknown.length ? `<div class="note" style="border-left-color:var(--red);margin-top:0">
         <b>${r.unknown.length} номера не са намерени във фонда.</b> Обикновено това са документи,
         описани в друга библиотека, сгрешено сканиране или книги, които още не са заведени.</div>
-      <div class="hint" style="font-family:var(--mono);line-height:1.8">${r.unknown.map(esc).join(' · ')}</div>`,
+      <div class="hint" style="font-family:var(--mono);line-height:1.8">${r.unknown.map(esc).join(' · ')}</div>` : ''}
+      ${skipped.length ? `<div class="note" style="border-left-color:var(--red)">
+        <b>${skipped.length} документа са извън обхвата на тази проверка</b> и затова не са записани в протокола.</div>
+      <div class="hint" style="font-family:var(--mono);line-height:1.8">${
+        skipped.map(x => esc('инв. № ' + x.inv_number + ' — ' + x.reason)).join('<br>')}</div>` : ''}`,
       `<button class="btn pri" onclick="closeModal();renderInventRun(${sessionId})">Разбрах</button>`);
   } else {
     renderInventRun(sessionId);

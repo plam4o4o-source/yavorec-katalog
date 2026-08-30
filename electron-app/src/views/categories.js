@@ -31,7 +31,17 @@ async function saveCategory(id) {
 }
 window.saveCategory = saveCategory;
 async function deleteCategory(id) {
-  if (!confirm('Да изтрия ли тази категория?')) return;
+  /* Питането казва и какво ще се случи с книгите. Изтриването на категория
+     изчиства вида на документа на всяка книга от нея (ON DELETE SET NULL) —
+     необратимо действие, за което дотук пишеше само „Да изтрия ли тази
+     категория?“. */
+  const n = await call(window.api.categories.usage(id));
+  if (n === null) return;
+  const warn = n
+    ? '\n\nВНИМАНИЕ: ' + n + (n === 1 ? ' документ ще остане' : ' документа ще останат')
+      + ' без попълнен вид. Това не може да бъде върнато автоматично — видът трябва да се въведе наново.'
+    : '';
+  if (!confirm('Да изтрия ли тази категория?' + warn)) return;
   await call(window.api.categories.delete(id), 'Категорията е изтрита.');
   renderSetup();
 }

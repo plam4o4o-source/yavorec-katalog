@@ -63,6 +63,14 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       const c = normalizeScanCode(code);
       const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(c, c);
       if (!b) throw new Error('Непознат баркод/инв. № ' + code);
+      /* Одит v2.4.14: тук се приемаше и ОТЧИСЛЕН документ, за разлика от
+         deaccessionActs:findBook, който изрично го изключва. Пулът, спрямо който
+         се смята нормата (inventorySessions:start), брои само неотчислените —
+         тоест отчислен документ вдигаше числителя, без да е в знаменателя. */
+      if (b.status === 'отчислен') {
+        throw new Error('Инв. № ' + b.inv_number + ' е отчислен и не е част от фонда, който тази проверка обхваща. '
+          + 'Документът не е записан в протокола.');
+      }
       /* Одит v2.3.1 №24: сесия, ограничена до един отдел (s.department), тихо
          приемаше сканирания на книги от ДРУГИ отдели — броени като „проверени“ в
          протокола, макар да са извън декларирания обхват/pool_size (последният е
@@ -73,12 +81,28 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         throw new Error('Инв. № ' + b.inv_number + ' е от отдел „' + (b.department || '—') +
           '“, а тази инвентаризация обхваща само отдел „' + s.department + '“. Документът не е записан в протокола.');
       }
-      const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
-      if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
-      db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(sessionId, b.id);
-      db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(b.id, s.date);
-      db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
-      if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
+      /* Четирите записа минават ЗАЕДНО или никак. Одит v2.4.14: дотук бяха
+         четири отделни изявления извън транзакция, докато всички съседни
+         handler-и ползват .immediate() — при SQLITE_BUSY по средата (обичайно на
+         мрежова база) протоколът и картонът на книгата се разминаваха.
+         Уникалният индекс от миграция v8 пази същото и на ниво база: проверката
+         „вече е сканиран“ в JavaScript не е достатъчна, когато две станции
+         сканират едновременно. */
+      const tx = db.transaction(() => {
+        const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?').get(sessionId, b.id);
+        if (already) throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран.');
+        db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(sessionId, b.id);
+        db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(b.id, s.date);
+        db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
+        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
+      });
+      try { tx.immediate(); } catch (err) {
+        // Дубликат, спрян от уникалния индекс (другата станция ни е изпреварила).
+        if (/UNIQUE constraint failed: inventory_session_scans/.test(err.message)) {
+          throw new Error('Инв. № ' + b.inv_number + ' вече е сканиран (записан е от другото работно място).');
+        }
+        throw err;
+      }
       return { inv_number: b.inv_number, title: b.title };
     })
   );

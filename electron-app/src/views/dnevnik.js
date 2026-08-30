@@ -107,10 +107,12 @@ async function dnevnikSaveCell(el) {
   const val = (field === 'a_hours' || field === 'b_hours') ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
   if ((row[field] || 0) === val) return; // без промяна — не пипай базата
   row[field] = val;
-  const payload = { date };
-  DNEVNIK_ALL_FIELDS.forEach(f => { payload[f] = row[f] || 0; });
-  payload.note = row.note || '';
-  const res = await window.api.dnevnik.saveDay(payload);
+  /* Изпраща се САМО променената колона. Дотук тук се пращаше целият ред, сглобен
+     от снимката в паметта на този компютър — тоест редакцията на една клетка
+     презаписваше и всичките останали 65 колони със стойностите, каквито са били
+     при зареждането на екрана, и триеше вписаното междувременно от другото
+     работно място. */
+  const res = await window.api.dnevnik.saveDay({ date, [field]: val });
   if (!res.ok) return toast(res.error, 'err');
   markSaved();
   el.classList.add('saved');
@@ -151,6 +153,12 @@ function dnevnikGroup(title, fields, row) {
     </div></fieldset>`;
 }
 async function dnevnikDayForm(date) {
+  /* Данните се презареждат от базата, преди прозорецът да се отвори. Снимката в
+     window._DNEVNIK може да е отпреди часове, а този прозорец записва целия ден
+     наведнъж — човекът трябва да види текущото състояние, включително вписаното
+     от другото работно място, преди да го потвърди. */
+  const fresh = await call(window.api.dnevnik.getMonth({ year: Number(date.slice(0, 4)), month: Number(date.slice(5, 7)) }));
+  if (fresh && fresh.days) window._DNEVNIK = fresh;
   const days = (window._DNEVNIK && window._DNEVNIK.days) || [];
   const row = days.find(d => d.date === date) || { date };
   modal('Дневник — ' + bg(date), `

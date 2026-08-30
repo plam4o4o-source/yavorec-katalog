@@ -30,7 +30,16 @@ function logsDir() {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
-function logToFile(level, args) {
+/* Приема и масив (от обвивките на console.*), и обикновени аргументи. Одит
+   v2.4.14: пет от седемте места подаваха НИЗ, `args.map` хвърляше TypeError,
+   собственият catch на функцията го поглъщаше и в дневника не влизаше нищо —
+   включително при „Стартирането пропадна“, тоест точно когато библиотекарят е
+   помолен да изпрати дневника. */
+function logToFile(level, args, ...rest) {
+  if (!Array.isArray(args)) args = [args, ...rest];
+  return logToFileArr(level, args);
+}
+function logToFileArr(level, args) {
   try {
     if (!app.isReady()) return; // да не пипаме fs пътища, зависещи от userData, преди 'ready'
     const dir = logsDir();
@@ -134,6 +143,44 @@ function updateConfig(mutate) {
 function defaultDbDir() {
   return app.isPackaged ? app.getPath('userData') : path.join(__dirname, 'db');
 }
+/* Разделя SQL текст на отделни изявления. Пропуска низовете в кавички и
+   коментарите, за да не реже вътре в тях, и — съществено — разпознава тялото
+   BEGIN … END на тригер: db/schema.sql съдържа точно един такъв
+   (trg_loans_capacity), чието тяло има собствена точка и запетая. Първата версия
+   го режеше на две негодни половини и при резервната пътека тригерът, който пази
+   срещу двойно заемане на един екземпляр, изчезваше безшумно. */
+function splitSqlStatements(sql) {
+  const out = [];
+  let cur = '', q = null, depth = 0;
+  const wordAt = (i) => {
+    const m = /^[A-Za-z]+/.exec(sql.slice(i, i + 10));
+    return m ? m[0].toUpperCase() : '';
+  };
+  const isWordBoundary = (i) => i === 0 || !/[A-Za-z0-9_]/.test(sql[i - 1]);
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (q) { cur += ch; if (ch === q) q = null; continue; }
+    if (ch === "'" || ch === '"') { q = ch; cur += ch; continue; }
+    if (ch === '-' && sql[i + 1] === '-') { while (i < sql.length && sql[i] !== '\n') i++; cur += '\n'; continue; }
+    if (isWordBoundary(i)) {
+      const w = wordAt(i);
+      // BEGIN брои само вътре в CREATE TRIGGER — иначе би хванало и BEGIN TRANSACTION,
+      // каквото schema.sql не съдържа, но по-добре да не разчитаме на това.
+      if (w === 'BEGIN' && /CREATE\s+TRIGGER/i.test(cur)) depth++;
+      else if (w === 'END' && depth > 0) {
+        depth--;
+        cur += sql.slice(i, i + 3); i += 2;
+        // Точката и запетаята след END затваря целия CREATE TRIGGER.
+        continue;
+      }
+    }
+    if (ch === ';' && depth === 0) { if (cur.trim()) out.push(cur.trim() + ';'); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 function resolveDbDir() {
   const cfg = readConfig();
   if (cfg.dbFolder && fs.existsSync(cfg.dbFolder)) return cfg.dbFolder;
@@ -217,7 +264,31 @@ function initDb() {
   // fs.readFileSync reads transparently through app.asar for plain text files,
   // so the same path works both in dev and in a packaged build.
   const schemaSql = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
-  db.exec(schemaSql);
+  /* Изпълнява се като едно цяло, но с изрична резервна пътека. Одит v2.4.14:
+     db.exec() спира на ПЪРВАТА грешка и всичко след нея във файла остава
+     неизпълнено — а целият schema.sql минава ПРЕДИ който и да е ensureColumns().
+     Днес това е латентно, защото всяка издадена схема има колоните, върху които
+     стъпват индексите; активира се в мига, в който някой добави в schema.sql
+     индекс върху колона, която ensureColumns() създава — напълно естествена
+     бъдеща стъпка (точно такъв беше idx_books_acquisition във версия 7). Тогава
+     един ред отнасяше целия краеведски модул, който стои по-надолу във файла, а
+     програмата казваше на библиотекаря „повреден файл, възстановете копие“ при
+     напълно здрава база.
+
+     Затова при провал файлът се изпълнява изявление по изявление: успелите си
+     остават, неуспелите се запомнят и се ОПИТВАТ ОТНОВО след блоковете
+     ensureColumns() (виж retryPendingSchema по-долу), когато липсващите колони
+     вече съществуват. Остатъкът се вписва в дневника, вместо да спира
+     стартирането. */
+  let pendingSchema = [];
+  try {
+    db.exec(schemaSql);
+  } catch (e) {
+    console.error('Схемата не се изпълни наведнъж (' + e.message + ') — минава се изявление по изявление.');
+    pendingSchema = splitSqlStatements(schemaSql).filter(stmt => {
+      try { db.exec(stmt); return false; } catch (e2) { return true; }
+    });
+  }
 
   ensureColumns('settings', {
     lbl_mode: "TEXT DEFAULT 'sheet'",
@@ -335,6 +406,20 @@ function initDb() {
     diff: 'TEXT'
   });
 
+  /* Изявленията от schema.sql, които не минаха при първия опит, се опитват пак —
+     сега липсващите колони вече са добавени от блоковете ensureColumns() по-горе.
+     Виж дългата бележка при db.exec(schemaSql). */
+  if (pendingSchema.length) {
+    const still = pendingSchema.filter(stmt => {
+      try { db.exec(stmt); return false; } catch (e) { return true; }
+    });
+    logToFile(still.length ? 'error' : 'info',
+      'Схемата: ' + (pendingSchema.length - still.length) + ' от ' + pendingSchema.length
+      + ' отложени изявления минаха след допълването на колоните.'
+      + (still.length ? ' Останали неизпълнени: ' + still.length + '.' : ''));
+    pendingSchema = still;
+  }
+
   // Еднократни попълвания на новите колони от вече наличните данни. Условието
   // "IS NULL" ги прави безвредни при всяко следващо стартиране.
   // datelastseen — от сканиранията на минали инвентаризации (сурови данни има отдавна).
@@ -398,7 +483,11 @@ function initDb() {
    само като мост за тях (безвредни са, защото са идемпотентни). CURRENT_SCHEMA_VERSION
    просто маркира "всичко познато досега е приложено" за база данни, която стига дотук
    без нито една регистрирана миграция по-долу (напр. чисто нова инсталация). */
-const CURRENT_SCHEMA_VERSION = 6;
+/* Одит v2.4.14: константата беше останала на 6, докато най-високата миграция вече
+   е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
+   дотук без нито една регистрирана миграция) беше недостижим, а коментарът
+   по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
+const CURRENT_SCHEMA_VERSION = 9;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -450,7 +539,55 @@ const MIGRATIONS = [
   { version: 7, run: () => {
     db.exec('CREATE INDEX IF NOT EXISTS idx_books_acquisition ON books(acquisition_id)');
     ensureColumns('inventory_sessions', { mode: 'TEXT' });
-  } }
+  } },
+  /* v8 (v2.4.14) — три находки от одита на схемата, всичките измерени:
+
+     1) inventory_session_scans нямаше НИКАКЪВ индекс освен първичния ключ.
+        Допълването на datelastseen по-долу в initDb() прави корелирана подзаявка
+        по book_id за ВСЯКА книга: измерено при 15 000 книги и 12 000 сканирания —
+        6607 ms при първото стартиране след обновяване и 912 ms при ВСЯКО
+        следващо (книгите, които никога не са били сканирани, остават с
+        datelastseen IS NULL завинаги и плащат пълното сканиране пак и пак).
+        Със същия индекс: 31 ms и ~0 ms. Същият прецедент като idx_books_acquisition
+        във версия 7.
+
+     2) Нямаше UNIQUE(session_id, book_id): дедупликацията беше само проверка в
+        JavaScript, при това извън транзакция, докато по документиран сценарий две
+        работни места работят срещу обща мрежова база — двете минават проверката
+        едновременно и базата приема дубликата. Един и същ физически документ се
+        брои два пъти в протокола пред регионалната библиотека и в изпълнението на
+        нормата по чл. 40. Съществуващите дубликати се изчистват ПРЕДИ индекса
+        (иначе създаването му гърми и спира стартирането): пази се най-ранното
+        сканиране — то е това, което протоколът реално документира.
+
+     3) Индексите по чужди ключове, които се четат често: deaccession_items(act_id)
+        (по две корелирани подзаявки на акт в КДБФ и в списъка с актове),
+        inventory_checks(book_id) и periodical_issues(periodical_id). */
+  { version: 8, run: () => {
+    const dup = db.prepare(`
+      DELETE FROM inventory_session_scans WHERE id NOT IN (
+        SELECT MIN(id) FROM inventory_session_scans GROUP BY session_id, book_id
+      )`).run().changes;
+    if (dup) console.log(`Премахнати ${dup} дублирани сканирания при инвентаризация.`);
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_iss_session_book ON inventory_session_scans(session_id, book_id);
+      CREATE INDEX IF NOT EXISTS idx_iss_book ON inventory_session_scans(book_id);
+      CREATE INDEX IF NOT EXISTS idx_deacc_items_act ON deaccession_items(act_id);
+      CREATE INDEX IF NOT EXISTS idx_inv_checks_book ON inventory_checks(book_id);
+      CREATE INDEX IF NOT EXISTS idx_periodical_issues_pid ON periodical_issues(periodical_id);
+    `);
+  } },
+  /* v9 (v2.4.14) — тригерите за enum колоните се прилагат ОТНОВО.
+
+     applyEnumTriggers() се извикваше само от миграция 5, а всяка вече издадена
+     инсталация е на user_version >= 7 — тоест трите нови пазача от v2.4.14
+     (account_lines.type, inventory_sessions.mode, authorised_values.category)
+     стигаха САМО до чисто нови инсталации. Точно за account_lines.type
+     съществува поправката: handlers/stats.js сравнява буквално с 'обезщетение',
+     и начисление с друг етикет се показва под чуждо име в едната справка и
+     изчезва от другата. Функцията ползва CREATE TRIGGER IF NOT EXISTS, тоест
+     повторното прилагане е безвредно и за вече покритите колони. */
+  { version: 9, run: () => { applyEnumTriggers(db); } }
 ];
 function runMigrations() {
   const from = db.pragma('user_version', { simple: true });
@@ -539,7 +676,16 @@ function createWindow() {
   // легитимен адрес за отваряне (напр. бъдещ линк с target="_blank"), той се
   // праща към системния браузър вместо в самия прозорец на приложението.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    /* Отварянето в нов прозорец се отказва винаги. Пропускането към браузъра е
+       СПРЯНО (одит v2.4.14): в програмата няма нито една връзка с target="_blank"
+       — проверено с търсене — тоест този клон не обслужваше нищо, а оставяше
+       изходен канал: всяка бъдеща дупка в екранния слой можеше да извика
+       window.open('https://…?d=' + данни) и главният процес щеше послушно да го
+       отвори в браузъра. Единственото външно отваряне, което програмата прави, е
+       mailto: в handlers/notices.js, където адресът минава през проверка.
+       Ако някога потрябва истинска външна връзка, тя се добавя тук с изричен
+       списък на разрешените адреси, а не с общо правило за http(s). */
+    if (url) console.warn('Отказано отваряне на външен адрес от екранния слой:', url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -791,7 +937,7 @@ ipcMain.handle('settings:noticeDefaults', () =>
 /* ---------------- Категории ----------------
    Извадени в handlers/categories.js (Фаза 4, стъпка 7 от разбиването на
    монолита main.js на модули по домейн). */
-require('./handlers/categories')(ipcMain, { getDb: () => db, run });
+require('./handlers/categories')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Книги (фонд) + Лимит на броя записи ----------------
    Извадени в handlers/books.js (Фаза 4, стъпка 34, последният от "големите

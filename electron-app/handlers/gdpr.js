@@ -5,12 +5,14 @@
 // anon_category — статистиката остава вярна („дете, 2024 г."), името
 // изчезва. Настройка anonymize_years = 0 изключва всичко. Необратимо е —
 // затова е ръчен бутон.
+const { ANON_READER_NAME } = require('../security-utils');
+
 module.exports = function registerGdprHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
   function anonReaderId() {
     const db = getDb();
-    const NAME = '— анонимизирани заемания —';
+    const NAME = ANON_READER_NAME;
     const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
     if (r) return r.id;
     return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
@@ -24,7 +26,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
       const years = parseInt(s.anonymize_years, 10) || 0;
       if (!years) return { years: 0, count: 0 };
-      const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get('— анонимизирани заемания —');
+      const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get(ANON_READER_NAME);
       const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
         WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
         .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;

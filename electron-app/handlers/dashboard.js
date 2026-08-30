@@ -8,6 +8,8 @@
 // countOverduePeriodicals е undefined-safe (== null проверка по-долу), за да
 // не се чупят по-стари/директни извиквания на регистратора без тази зависимост
 // (напр. по-стари тестове, извикващи регистратора без нея).
+const { ANON_READER_NAME } = require('../security-utils');
+
 module.exports = function registerDashboardHandlers(ipcMain, deps) {
   const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
     effectiveDaysLate } = deps;
@@ -60,7 +62,8 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
       `).get(y).n;
       const loansYear = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE substr(date_out,1,4) = ?`).get(y).n;
-      const readersYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?`).get(y, y).n;
+      const readersYear = db.prepare(`SELECT COUNT(*) AS n FROM readers
+        WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?) AND name != ?`).get(y, y, ANON_READER_NAME).n;
       /* Целта по чл. 40 се смята от ЗАГЛАВИЯТА (редовете), не от бройките — умишлено
          различно от `fund.n` точно над него. Инвентаризацията се проверява чрез
          сканиране, а инвентарният номер в тази схема е един на ред в books; затова
@@ -71,8 +74,15 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
       const pct = pctRequired(active);
       const target = Math.ceil(active * pct / 100);
+      /* COUNT(DISTINCT sc.book_id), не COUNT(*). Одит v2.4.14: нормата по
+         чл. 40, т. 2 е дял от ФОНДА, тоест брои различни документи. Един и същ
+         документ, сканиран в пролетна и в есенна проверка през една календарна
+         година, се броеше два пъти — таблото рапортуваше 200% изпълнение при
+         100% неизпълнение. `target` по-горе се смята от броя активни книги,
+         тоест другата страна на дробта винаги е броила различни документи. */
       const scannedYear = db.prepare(`
-        SELECT COUNT(*) AS n FROM inventory_session_scans sc JOIN inventory_sessions s ON s.id = sc.session_id
+        SELECT COUNT(DISTINCT sc.book_id) AS n FROM inventory_session_scans sc
+        JOIN inventory_sessions s ON s.id = sc.session_id
         WHERE substr(s.date,1,4) = ?
       `).get(y).n;
       const upcoming = db.prepare(`
@@ -87,9 +97,9 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          (кандидати за „липсваща"), записи за анонимизиране. */
       const reregDue = db.prepare(`
         SELECT COUNT(*) AS n FROM readers
-        WHERE status = 'активен' AND name != '— анонимизирани заемания —'
+        WHERE status = 'активен' AND name != ?
           AND date(COALESCE(re_registered_at, registered_at), '+1 year') <= date('now', '+14 days')
-      `).get().n;
+      `).get(ANON_READER_NAME).n;
       const longOverdue = db.prepare(`
         SELECT COUNT(*) AS n FROM loans
         WHERE date_in IS NULL AND date_due IS NOT NULL AND julianday('now') - julianday(date_due) > 60

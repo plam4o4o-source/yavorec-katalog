@@ -49,7 +49,7 @@
     Натиснете <b>„Пусни камерата“</b> и насочете телефона към баркода на документа.
     Всеки разчетен номер се добавя в списъка. Когато свършите, натиснете
     <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, имейл или както Ви е удобно) —
-    там се внася в „Инвентаризация“.
+    там се въвежда в „Инвентаризация“.
   </div>
   <div class="note err" id="nocam" style="display:none">
     Този браузър не може да чете баркодове с камерата. Ползвайте <b>Chrome на Android</b>,
@@ -86,13 +86,22 @@ var dups = 0;
 try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); codes = saved.codes || []; dups = saved.dups || 0; } catch (e) {}
 
 function persist() { try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups })); } catch (e) {} }
+function escHtml(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function (ch) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+  });
+}
 function render() {
   document.getElementById('cnt').textContent = codes.length;
   document.getElementById('dupCnt').textContent = dups;
   var ul = document.getElementById('list');
+  /* Сканираният низ идва от четеца на баркодове (BarcodeDetector rawValue) или
+     от ръчното поле и се вкарваше в innerHTML както е — единственото такова
+     място в целия проект. QR код, съдържащ <img src=x onerror=...>, се
+     изпълняваше в страницата. */
   ul.innerHTML = codes.slice().reverse().map(function (c, i) {
     var idx = codes.length - 1 - i;
-    return '<li><span>' + c + '</span><span class="x" data-i="' + idx + '">&times;</span></li>';
+    return '<li><span>' + escHtml(c) + '</span><span class="x" data-i="' + idx + '">&times;</span></li>';
   }).join('');
   document.getElementById('out').value = codes.join('\n');
   persist();
@@ -181,7 +190,7 @@ document.getElementById('startBtn').addEventListener('click', async function () 
   } catch (e) {
     document.getElementById('nocam').style.display = 'block';
     document.getElementById('nocam').innerHTML =
-      'Камерата не се стартира: ' + (e && e.message ? e.message : e) +
+      'Камерата не се стартира: ' + escHtml(e && e.message ? e.message : e) +
       '<br>Проверете дали сте разрешили достъп до камерата, или въвеждайте номерата на ръка.';
   }
 });

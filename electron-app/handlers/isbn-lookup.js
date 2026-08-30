@@ -83,7 +83,18 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
       city: pub ? pub.name : ''
     };
   }
-  const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
+  /* Одит v2.4.14: полето в настройките е свободен текст и се долепя до заявка,
+   която програмата изпълнява сама — адрес от вида http://192.168.1.1/ превръщаше
+   търсенето в опипване на локалната мрежа. Затова адресът вече се проверява
+   (виж sru:lookup по-долу).
+
+   Стойността по подразбиране НЕ се сменя на https: порт 210 е регистрираният
+   порт за Z39.50 и шлюзът на Библиотеката на Конгреса там говори обикновен HTTP;
+   мълчаливата смяна щеше да счупи търсенето по ISBN на всяка инсталация, а
+   съобщението за грешка щеше да казва само „няма връзка със сървъра“. Рискът тук
+   е чужд библиографски запис да влезе в каталога — неприятно, но поправимо от
+   библиотекаря, за разлика от изгубена функция, която той не може да диагностицира. */
+const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
   const MARC_LANG = {
     bul: 'български', eng: 'английски', rus: 'руски', ger: 'немски', deu: 'немски',
     gre: 'гръцки', ell: 'гръцки', fre: 'френски', fra: 'френски', spa: 'испански',
@@ -170,6 +181,14 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     const s = getDb().prepare('SELECT sru_endpoint FROM settings WHERE id = 1').get() || {};
     const endpoint = (s.sru_endpoint || '').trim() || SRU_ENDPOINT_DEFAULT;
+    /* Адресът идва от свободно поле в настройките и се долепя до заявка, която
+       програмата изпълнява сама. Приемат се само http/https и само истински
+       адрес — иначе file:, а на Windows и други схеми, стават достъпни оттук. */
+    let parsed;
+    try { parsed = new URL(endpoint); } catch (e) { parsed = null; }
+    if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
+      throw new Error('Адресът на библиографския сървър (SRU) в „Настройки“ не е валиден http(s) адрес: ' + endpoint);
+    }
     try {
       const data = await sruLookupIsbn(isbn, endpoint);
       if (!data) return { ok: false, error: 'Няма намерен MARC запис с този ISBN в „' + endpoint + '“.' };

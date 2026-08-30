@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('api', {
     list: invoke('categories:list'),
     create: invoke('categories:create'),
     update: invoke('categories:update'),
+    usage: invoke('categories:usage'),
     delete: invoke('categories:delete')
   },
   books: {

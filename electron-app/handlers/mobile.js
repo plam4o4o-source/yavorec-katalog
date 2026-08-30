@@ -37,11 +37,27 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');
       const addScan = db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)');
       const addCheck = db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)');
-      const res = { added: 0, duplicates: 0, unknown: [] };
+      /* Одит v2.4.14: този път приемаше В СЪЩАТА сесия документи, които
+         inventorySessions:scan отказва изрично — от чужд отдел и отчислени.
+         Един и същ протокол, две различни правила: каквото настолната програма
+         спира на място, телефонът внасяше наум, а числото „проверени“ надхвърляше
+         обявения обхват (pool_size се брои САМО за отдела при
+         inventorySessions:start) без следа откъде. Пропуснатите се връщат
+         поименно, а не се подминават тихо — библиотекарят трябва да види кои
+         номера не са влезли в протокола и защо. */
+      const res = { added: 0, duplicates: 0, unknown: [], skipped: [] };
       db.transaction(() => {
         for (const code of list) {
           const b = find.get(code, code);
           if (!b) { res.unknown.push(code); continue; }
+          if (b.status === 'отчислен') {
+            res.skipped.push({ inv_number: b.inv_number, reason: 'отчислен' });
+            continue;
+          }
+          if (s.department && (b.department || '') !== s.department) {
+            res.skipped.push({ inv_number: b.inv_number, reason: 'отдел „' + (b.department || '—') + '“' });
+            continue;
+          }
           if (already.get(sessionId, b.id)) { res.duplicates++; continue; }
           addScan.run(sessionId, b.id);
           addCheck.run(b.id, s.date);
@@ -51,7 +67,8 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
         }
       }).immediate();
       logAudit('Инвентаризация', `въведени ${res.added} сканирания от телефон` +
-        (res.unknown.length ? `, ${res.unknown.length} непознати` : ''));
+        (res.unknown.length ? `, ${res.unknown.length} непознати` : '') +
+        (res.skipped.length ? `, ${res.skipped.length} извън обхвата на проверката` : ''));
       return res;
     })
   );
