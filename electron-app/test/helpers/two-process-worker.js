@@ -47,6 +47,11 @@ function boot(dbFolder) {
   handlers = new Map();
   appEvents = new Map();
   const fakeWebContents = { setWindowOpenHandler: () => {}, on: () => {}, send: () => {} };
+  /* maximize/show/once съществуват, защото от v2.4.15 createWindow() отваря
+     прозореца скрит и го максимизира/показва на 'ready-to-show'. Липсваха ли
+     тук, createWindow() хвърля, глобалният обработчик в main.js вика app.exit(1),
+     а той в този двойник хвърля — поредицата увисва в цикъл от unhandledRejection
+     вместо да падне с ясна грешка. */
   class FakeBrowserWindow {
     constructor(opts) { this.opts = opts; this.webContents = fakeWebContents; }
     setMenuBarVisibility() {}
@@ -55,6 +60,9 @@ function boot(dbFolder) {
     isMinimized() { return false; }
     restore() {}
     focus() {}
+    maximize() {}
+    show() {}
+    once() {}
     static getAllWindows() { return []; }
   }
   const app = {

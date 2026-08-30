@@ -11,6 +11,25 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.15
+
+**BG:** По желание на потребителя програмата вече се **отваря на цял екран**.
+Прозорецът е максимизиран, а не „kiosk“ — заглавната лента и лентата на
+задачите остават достъпни, прозорецът може да се възстанови, премести и
+преоразмери както преди. „Възстанови надолу“ дава 1280×800, както досега.
+
+Прозорецът се показва чак когато съдържанието е готово за рисуване, за да не
+се вижда за миг по-малък прозорец, който след това подскача до цял екран. Ако
+съдържанието по някаква причина не се зареди, предпазен таймер показва
+прозореца въпреки това — програмата не може да остане невидима.
+
+**EN:** At the user's request the program now opens **full screen** — a
+maximized window, not kiosk mode: the title bar and taskbar stay available and
+the window can still be restored, moved and resized. „Restore Down“ gives
+1280×800 as before. The window is shown only once its content is ready to
+paint, so there is no visible jump from a smaller window to full screen; a
+safety timer shows it anyway if the content never becomes ready.
+
 ## v2.4.14
 
 **BG:** Четвърти и пети кръг на одита — този път бяха отворени три области,

@@ -61,6 +61,7 @@ function startMainApp() {
   const handlers = new Map();          // канал → обработчик (ipcMain.handle)
   const sent = [];                     // webContents.send(channel, data)
   const appEvents = new Map();         // app.on(...)
+  const windows = [];                  // всеки създаден FakeBrowserWindow
   const dialogCalls = [];
   const shellCalls = [];
   let readyResolve;
@@ -72,14 +73,31 @@ function startMainApp() {
     on: () => {},
     send: (channel, data) => sent.push({ channel, data })
   };
+  /* maximize/show/once съществуват, защото createWindow() отваря прозореца
+     максимизиран и скрит, а го показва на 'ready-to-show' (v2.4.15).
+     Двойникът записва дали са извикани, за да може тест да провери реда:
+     максимизиране ПРЕДИ показване. */
   class FakeBrowserWindow {
-    constructor(opts) { this.opts = opts; this.webContents = fakeWebContents; }
+    constructor(opts) {
+      this.opts = opts;
+      this.webContents = fakeWebContents;
+      this.calls = [];
+      this.listeners = new Map();
+      windows.push(this);
+    }
     setMenuBarVisibility() {}
     loadFile() {}
     isDestroyed() { return false; }
     isMinimized() { return false; }
     restore() {}
     focus() {}
+    maximize() { this.calls.push('maximize'); }
+    show() { this.calls.push('show'); }
+    once(ev, fn) {
+      if (!this.listeners.has(ev)) this.listeners.set(ev, []);
+      this.listeners.get(ev).push(fn);
+    }
+    emit(ev) { (this.listeners.get(ev) || []).forEach(fn => fn()); }
     static getAllWindows() { return []; }
   }
 
@@ -132,7 +150,7 @@ function startMainApp() {
   require(MAIN_ID);
 
   started = {
-    dir, userData, handlers, sent, dialogCalls, shellCalls,
+    dir, userData, handlers, sent, dialogCalls, shellCalls, windows,
     /* Изпълнява канала точно както го вика renderer-ът през preload.js. */
     invoke: (channel, ...args) => {
       const fn = handlers.get(channel);
