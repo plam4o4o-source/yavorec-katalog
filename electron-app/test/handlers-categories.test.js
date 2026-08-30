@@ -44,20 +44,25 @@ function setup() {
   db.exec(schemaSql);
 
   const ipcMain = fakeIpcMain();
+  // v2.4.14: модулът вече вписва изтриването в одитната следа — изтриването на
+  // категория обезличава всяка книга от нея (ON DELETE SET NULL) и дотук не
+  // оставяше никаква следа.
+  const auditLog = [];
   const deps = {
     getDb: () => db,
+    logAudit: (action, detail) => auditLog.push({ action, detail }),
     run: (fn) => {
       try { return { ok: true, data: fn() }; }
       catch (err) { return { ok: false, error: err.message }; }
     }
   };
   registerCategoriesHandlers(ipcMain, deps);
-  return { db, ipcMain };
+  return { db, ipcMain, auditLog };
 }
 
-test('registerCategoriesHandlers registers all four categories: IPC channels', () => {
+test('registerCategoriesHandlers registers all categories: IPC channels', () => {
   const { ipcMain } = setup();
-  for (const ch of ['categories:list', 'categories:create', 'categories:update', 'categories:delete']) {
+  for (const ch of ['categories:list', 'categories:create', 'categories:update', 'categories:usage', 'categories:delete']) {
     assert.ok(ipcMain.has(ch), `expected ${ch} to be registered`);
   }
 });
@@ -106,6 +111,8 @@ test('categories:delete removes just the one row, leaving the 10 seeded defaults
   const id = created.data.lastInsertRowid;
   const del = await ipcMain.invoke('categories:delete', id);
   assert.equal(del.ok, true);
+  // v2.4.14: връща се броят книги, останали без вид (тук 0), за да го покаже екранът.
+  assert.equal(del.data, 0);
   const list = await ipcMain.invoke('categories:list');
   assert.equal(list.data.length, 10);
   assert.ok(!list.data.map(c => c.name).includes('За изтриване'));

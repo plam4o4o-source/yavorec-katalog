@@ -62,6 +62,11 @@ async function actAdd() {
   if (!b) return toast('Няма документ с баркод/инв. № ' + code, 'err');
   if (ACT_LIST.some(x => x.id === b.id)) return toast('Инв. № ' + b.inv_number + ' вече е в списъка.', 'err');
   if (b.available < b.quantity) toast('Внимание: инв. № ' + b.inv_number + ' в момента е зает от читател.', 'err');
+  /* Проверката за заетост по-горе ползва b.quantity (наличност). СЛЕД нея полето
+     се заменя с ОТЧЕТНАТА бройка, защото от този момент нататък редът живее в
+     ACT_LIST и се брои от actQty() по същото правило, по което ще бъде снимано в
+     акта: NULL → 1 документ, изрична 0 → 0. Виж бележката при findBook. */
+  b.quantity = b.fund_qty;
   ACT_LIST.push(b);
   drawActList();
 }
@@ -77,6 +82,16 @@ window.actDel = actDel;
 function actQty(l) { return (l && l.quantity != null) ? (Number(l.quantity) || 0) : 1; }
 function actCount(items) { return (items || []).reduce((s, l) => s + actQty(l), 0); }
 function actValue(items) { return (items || []).reduce((s, l) => s + (Number(l.price) || 0) * actQty(l), 0); }
+/* Има ли изобщо ред, чиято бройка не е един документ. Дотук пояснението
+   „(N заглавия)“ се появяваше при `actCount !== items.length` — условие, което
+   се изпълнява СЛУЧАЙНО и в случаи, когато не бива: акт с един ред от 0
+   екземпляра и един от 2 дава 2 документа при 2 заглавия, тоест пояснението
+   изчезва точно когато е най-нужно, а в таблицата стои ред с цена, който не
+   участва нито в бройката, нито в сбора. */
+function actHasMultiples(items) { return (items || []).some(l => actQty(l) !== 1); }
+// Означението пред цената на един ред. Показва се при ВСЯКА бройка, различна от
+// един документ — включително изричната нула, иначе редът изглежда като пропуск.
+function actQtyMark(l) { return actQty(l) !== 1 ? actQty(l) + ' × ' : ''; }
 
 function drawActList() {
   const el = $('#actList'); if (!el) return;
@@ -85,9 +100,10 @@ function drawActList() {
     <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th></th></tr></thead><tbody>
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td><td class="num">${esc(l.year || '')}</td>
-    <td class="num">${mny(l.price)}</td><td><button type="button" class="btn sm dgr" onclick="actDel(${n})">×</button></td></tr>`).join('')}
-    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${ACT_LIST.length} документа</td>
-    <td class="num">${mny(ACT_LIST.reduce((s, l) => s + (Number(l.price) || 0), 0))}</td><td></td></tr>
+    <td class="num">${actQtyMark(l)}${mny(l.price)}</td><td><button type="button" class="btn sm dgr" onclick="actDel(${n})">×</button></td></tr>`).join('')}
+    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(ACT_LIST)} документа${
+      actHasMultiples(ACT_LIST) ? ` (${ACT_LIST.length} заглавия)` : ''}</td>
+    <td class="num">${mny(actValue(ACT_LIST))}</td><td></td></tr>
     </tbody></table></div>`;
 }
 async function saveAct() {
@@ -98,7 +114,8 @@ async function saveAct() {
   const p = PRICHINI.find(x => x.k == d.reason_code);
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
-  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': отчислени са ' + ACT_LIST.length + ' документа.', 'ok'); markSaved(); }
+  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': отчислени са ' + actCount(ACT_LIST) + ' документа'
+    + (actHasMultiples(ACT_LIST) ? ' (' + ACT_LIST.length + ' заглавия)' : '') + '.', 'ok'); markSaved(); }
 }
 window.saveAct = saveAct;
 async function openAct(id) {
@@ -109,9 +126,9 @@ async function openAct(id) {
     <b>Разпореждане (чл. 36):</b> ${esc(a.disposal || '—')}${a.attach ? ' · ' + esc(a.attach) : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
     ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
-    <td class="num">${esc(l.year || '')}</td><td class="num">${mny(l.price)}</td></tr>`).join('')}
+    <td class="num">${esc(l.year || '')}</td><td class="num">${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
     <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(a.items)}${
-      actCount(a.items) !== a.items.length ? ` (${a.items.length} заглавия)` : ''}</td>
+      actHasMultiples(a.items) ? ` (${a.items.length} заглавия)` : ''}</td>
     <td class="num">${mny(actValue(a.items))}</td></tr>
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
@@ -133,11 +150,11 @@ async function printActDoc(id) {
     ${esc(s.director_role || 'ръководителя')} на ${esc(s.org || '')}, в състав:<br>
     1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
     на основание <b>чл. 30, т. ${a.reason_code}</b> от Наредба № 3 от 18.11.2014 г. — <b>${esc(a.reason_text)}</b> — отчислява от библиотечния фонд
-    <b>${count}</b> библиотечни документа${count !== a.items.length ? ` (${a.items.length} заглавия)` : ''} на обща стойност <b>${mny(total)}</b></div>
+    <b>${count}</b> библиотечни документа${actHasMultiples(a.items) ? ` (${a.items.length} заглавия)` : ''} на обща стойност <b>${mny(total)}</b></div>
     <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th><th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
-    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${actQty(l) > 1 ? actQty(l) + ' × ' : ''}${mny(l.price)}</td></tr>`).join('')}
+    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
     <tr><td colspan="5"><b>ОБЩО</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>
     <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
     Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>

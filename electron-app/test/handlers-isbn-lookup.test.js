@@ -96,7 +96,13 @@ test('sru:lookup uses the configured endpoint and falls back to the LOC default 
   let requestedUrl = '';
   const { ipcMain } = setup(async (url) => { requestedUrl = url; return textResponse('<numberOfRecords>0</numberOfRecords>'); }, '');
   await ipcMain.invoke('sru:lookup', '9780000000002');
-  assert.ok(requestedUrl.startsWith('http://lx2.loc.gov:210/lcdb'));
+  /* v2.4.14, след повторния одит: стойността по подразбиране ОСТАВА http.
+     Порт 210 е регистрираният порт за Z39.50 и шлюзът на Библиотеката на
+     Конгреса там говори обикновен HTTP — мълчаливата смяна на https щеше да
+     счупи търсенето по ISBN на всяка инсталация, а съобщението за грешка казва
+     само „няма връзка със сървъра“. Защитата е в ПРОВЕРКАТА на адреса
+     (виж теста по-долу), не в схемата по подразбиране. */
+  assert.ok(requestedUrl.startsWith('http://lx2.loc.gov:210/lcdb'), requestedUrl);
 });
 
 test('sru:lookup uses a custom configured endpoint when set', async () => {

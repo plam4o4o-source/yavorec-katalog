@@ -73,7 +73,7 @@ test('registerPdpHandlers registers all 5 pdp: channels, and returns mask/prepar
 test('pdp:status reports not configured/not unlocked before any setup', async () => {
   const { ipcMain } = setup();
   const result = await ipcMain.invoke('pdp:status');
-  assert.deepEqual(result.data, { configured: false, unlocked: false });
+  assert.deepEqual(result.data, { configured: false, unlocked: false, stale: false });
 });
 
 // v2.2.0: минималната дължина на НОВА парола е 10 знака (солта и проверителят
@@ -94,7 +94,7 @@ test('pdp:setup configures protection, encrypts existing plaintext egn/id_card_n
   const result = await ipcMain.invoke('pdp:setup', 'parola1-dylga');
   assert.equal(result.ok, true);
   const status = await ipcMain.invoke('pdp:status');
-  assert.deepEqual(status.data, { configured: true, unlocked: true });
+  assert.deepEqual(status.data, { configured: true, unlocked: true, stale: false });
 
   const row = db.prepare('SELECT egn, id_card_no FROM readers WHERE id=?').get(readerId);
   assert.match(row.egn, /^PDPv1:/); // now encrypted, not plaintext

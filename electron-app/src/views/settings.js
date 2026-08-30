@@ -499,7 +499,7 @@ function pdpSetupForm() {
 window.pdpSetupForm = pdpSetupForm;
 async function pdpDoSetup() {
   const d = formData('#pdpSetupF');
-  if (!d.password || d.password.length < 4) return toast('Паролата трябва да е поне 4 знака.', 'err');
+  if (!d.password || d.password.length < 10) return toast('Паролата трябва да е поне 10 знака.', 'err');
   if (d.password !== d.password2) return toast('Двете пароли не съвпадат.', 'err');
   const res = await window.api.pdp.setup(d.password);
   if (!res.ok) return toast(res.error, 'err');
@@ -515,6 +515,10 @@ async function pdpDoUnlock() {
   const res = await window.api.pdp.unlock(d.password);
   if (!res.ok) return toast(res.error, 'err');
   toast('Отключено.', 'ok');
+  /* Стара парола (кратка или изведена с предишните, по-евтини параметри) —
+     подсказка да бъде сменена. Показва се СЛЕД „Отключено“ и с отделен toast,
+     за да не изглежда като грешка: самото отключване е успешно. */
+  if (res.data && res.data.advise) setTimeout(() => toast(res.data.advise), 1200);
   loadPdpBox();
   loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
@@ -539,7 +543,7 @@ window.pdpChangePasswordForm = pdpChangePasswordForm;
 async function pdpDoChangePassword() {
   const d = formData('#pdpChangeF');
   if (!d.oldPassword) return toast('Въведете текущата парола.', 'err');
-  if (!d.newPassword || d.newPassword.length < 4) return toast('Новата парола трябва да е поне 4 знака.', 'err');
+  if (!d.newPassword || d.newPassword.length < 10) return toast('Новата парола трябва да е поне 10 знака.', 'err');
   if (d.newPassword !== d.newPassword2) return toast('Двете нови пароли не съвпадат.', 'err');
   const res = await window.api.pdp.changePassword({ oldPassword: d.oldPassword, newPassword: d.newPassword });
   if (!res.ok) return toast(res.error, 'err');

@@ -6,6 +6,8 @@
 // Зависи от value/dnevnikSumRow (стабилни function declarations в main.js,
 // hoisted — dnevnikSumRow е от все още неизвадения домейн "Дневник на
 // библиотеката") и getDb/run/yearOf.
+const { ANON_READER_NAME } = require('../security-utils');
+
 module.exports = function registerStatsHandlers(ipcMain, deps) {
   const { getDb, run, yearOf, value, dnevnikSumRow } = deps;
 
@@ -56,9 +58,13 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         SELECT * FROM loans
         WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ? AND deaccession_act_id IS NULL
       `).all(y);
+      /* Служебният запис на GDPR се вписва с ДНЕШНА дата на регистрация и без
+         него годишните броячи го включват в „нови читатели“ — виж бележката при
+         ANON_READER_NAME в security-utils.js. */
       const readersYear = db.prepare(`
-        SELECT * FROM readers WHERE substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?
-      `).all(y, y);
+        SELECT * FROM readers WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?)
+          AND name != ?
+      `).all(y, y, ANON_READER_NAME);
       const visitsYear = db.prepare(`SELECT COALESCE(SUM(count),0) AS n FROM visits WHERE substr(date,1,4) = ?`).get(y).n;
       /* Разбивките („Фонд по езици“, „по отдели“) също броят екземпляри, за да
          се събират до fundCount — иначе лентите щяха да сочат едно, а показателят
@@ -244,7 +250,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           SELECT COALESCE(category,'—') AS k, COUNT(*) AS n FROM readers WHERE status != 'прекратен' GROUP BY k ORDER BY n DESC
         `).all().map(r => [r.k, r.n]);
         const total = byCategory.reduce((s, [, n]) => s + n, 0);
-        const newThisYear = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE substr(registered_at,1,4) = ?`).get(y).n;
+        const newThisYear = db.prepare(`SELECT COUNT(*) AS n FROM readers
+          WHERE substr(registered_at,1,4) = ? AND name != ?`).get(y, ANON_READER_NAME).n;
         return { id, year: y, total, byCategory, newThisYear };
       }
       if (id === 'fund_movement') {

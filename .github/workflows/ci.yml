@@ -60,3 +60,16 @@ jobs:
         env:
           TZ: Europe/Sofia
         run: npm test
+
+      # Одит v2.4.14: `npm test` е `node --test` и се пуска с working-directory:
+      # electron-app, тоест откриването на тестове никога не излиза от
+      # electron-app/test/. Отделната поредица за ПУБЛИЧНАТА каталожна страница
+      # (site/test-page-katalog.js — и двата източника паднали + кеш → видимо
+      # предупреждение за остарели данни; повреден кеш → връщане към статичния
+      # списък; висящо тяло на отговора → прекъсване по време) минаваше днес, ако
+      # човек я пусне на ръка, но нищо нямаше да съобщи, когато спре да минава.
+      - name: Тестове на публичната каталожна страница (site/)
+        working-directory: site
+        env:
+          NODE_PATH: ../electron-app/node_modules
+        run: node test-page-katalog.js page-katalog.html

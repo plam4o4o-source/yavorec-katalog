@@ -38,6 +38,16 @@ const EUR_RATE = 1.95583;
 const bgn = (n) => (Number(n) || 0).toFixed(2);
 const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
+/* Огледало на csvCell() от security-utils.js за изнасянията, които се сглобяват
+   в екранния слой. Excel и LibreOffice изпълняват като ФОРМУЛА всяка клетка,
+   започваща с =, +, - или @; водещият апостроф ги неутрализира. Двете
+   реализации трябва да останат еднакви — тестът fixes-audit-v2414 ги сравнява
+   знак по знак. */
+function csvSafe(x) {
+  let s = String(x ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 /* Клавиатурна активация на кликаеми <div> карти (v1.70.0) — .prsCard/.chrItem
    (Персоналии/Летопис) бяха обикновени <div onclick>, без tabindex и без
@@ -507,8 +517,25 @@ const C39 = {'0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4'
 'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn','P':'nnwnwnnwn','Q':'nnnnnnwww',
 'R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn','U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw',
 'Y':'wwnnwnnnn','Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','*':'nwnnwnwnn'};
+/* Може ли този низ да бъде отпечатан като Code 39 без да се промени. Одит
+   v2.4.14: code39svg() мълчаливо изхвърляше всичко извън азбуката на Code 39 —
+   тоест кирилицата — и вдигаше регистъра. Читателска карта с номер „Ч-1042“ се
+   отпечатваше като баркод, кодиращ „-1042“, докато под него човешки се четеше
+   „Ч-1042“; четецът връщаше низ, който readers:byCard не намира. Сега
+   несъвместимият номер се показва като изрично предупреждение вместо като
+   баркод, който изглежда редовен. */
+function code39Fits(text) {
+  const s = String(text == null ? '' : text);
+  return s === s.toUpperCase() && !/[^0-9A-Z\-. ]/.test(s);
+}
 function code39svg(text, w, h) {
-  const s = '*' + String(text || '').toUpperCase().replace(/[^0-9A-Z\-. ]/g, '') + '*';
+  const raw = String(text == null ? '' : text);
+  if (raw && !code39Fits(raw)) {
+    return `<div style="font-size:9px;line-height:1.25;color:#b00;border:1px dashed #b00;padding:3px 4px;max-width:${(w || 160)}px">`
+      + `Номерът „${esc(raw)}“ не може да се отпечата като баркод (позволени са само главни латински букви, `
+      + `цифри и знаците - . интервал). Четецът би върнал друга стойност.</div>`;
+  }
+  const s = '*' + raw.toUpperCase().replace(/[^0-9A-Z\-. ]/g, '') + '*';
   const nw = 1, ww = 2.6, gap = 1;
   let units = 0;
   for (const ch of s) { const p = C39[ch]; if (!p) continue; for (const c of p) units += c === 'w' ? ww : nw; units += gap; }

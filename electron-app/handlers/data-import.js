@@ -41,9 +41,29 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       preview: body.slice(0, 8), total: body.length, fields: IMPORT_FIELDS
     };
   }
+  /* Пътят идва от екранния слой (влачене и пускане на файл върху прозореца, виж
+     importData.pathOf в preload.js). Одит v2.4.14: приемаше се КОЙТО И ДА Е
+     абсолютен път и се връщаха заглавният ред и първите 8 реда — тоест канал, по
+     който съдържанието на произволен файл от компютъра излиза в екранния слой.
+     handlers/backup.js вече беше разпознал същия проблем и го затвори със списък
+     от пътища, раздадени от самия диалог; тук диалогът е само единият източник,
+     затова се допълва с проверка на разширението: файловете за внасяне са
+     таблици, а библиотечната база и config.json не са.
+     Днес това не е достижимо отвън (екранният слой е самата програма) — има
+     значение като стъпка за ескалация, ако някога бъде намерена дупка в него. */
+  const dialogApprovedImports = new Set();
+  const IMPORT_EXTENSIONS = ['.csv', '.txt', '.tsv', '.xlsx'];
+  function importSourceAllowed(filePath) {
+    if (dialogApprovedImports.has(path.resolve(filePath))) return true;
+    return IMPORT_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
+  }
   ipcMain.handle('import:load', (e, filePath) => {
     try {
       if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Файлът не е намерен.' };
+      if (!importSourceAllowed(filePath)) {
+        return { ok: false, error: 'За внасяне се приемат само таблици: ' + IMPORT_EXTENSIONS.join(', ')
+          + '. Изберете файла през бутона „Избери файл“, ако е с друго разширение.' };
+      }
       return { ok: true, data: loadImportFile(filePath) };
     } catch (err) { return { ok: false, error: err.message }; }
   });
@@ -58,6 +78,9 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         ]
       });
       if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
+      // Изрично избран от човека през диалога — минава независимо от разширението
+      // (филтърът „Всички файлове“ по-горе е нарочен: стари износи идват и с .dat).
+      dialogApprovedImports.add(path.resolve(filePaths[0]));
       return { ok: true, data: loadImportFile(filePaths[0]) };
     } catch (err) { return { ok: false, error: err.message }; }
   });
@@ -124,6 +147,15 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     // — макар датата на постъпване да е задължително поле по Приложение № 4.
     if (/^\d+(\.\d+)?$/.test(s)) {
       const serial = Math.trunc(Number(s));
+      /* Одит v2.4.14: прозорецът [367, 73050] съдържа и всяка четирицифрена
+         ГОДИНА. Клетка, в която библиотекарят е написал само „1998“ — най-
+         обичайното нещо в стар опис — се тълкуваше като сериен номер на Excel и
+         влизаше в инвентарната книга като 1905-06-21. Годината се разпознава
+         ПЪРВА и се чете като 1 януари: по-полезно е приблизително вярната
+         година, отколкото точно грешен ден през 1905 г. Горната граница е
+         текущата година + 1 (издания „с година напред“ съществуват). */
+      const nowY = new Date().getFullYear();
+      if (serial >= 1900 && serial <= nowY + 1) return `${serial}-01-01`;
       if (serial >= 367 && serial <= 73050) {
         const ds = excelSerialToDateStr(serial);
         if (ds) return ds;

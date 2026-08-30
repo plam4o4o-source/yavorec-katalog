@@ -79,13 +79,22 @@ function gdprApi(db) {
   return { invoke: (c, ...a) => handlers.get(c)({}, ...a) };
 }
 
+/* Одит v2.4.14: датите тук бяха зашити ('2026-05-05', '2026-01-01') при
+   anonymize_years = 3, докато прагът се извежда от истинския часовник
+   (handlers/gdpr.js: anonCutoff). На 1 януари 2030 г. тези два теста щяха да
+   почервенеят сами, без нищо в програмата да се е счупило. Изчисляват се от
+   текущата година, както вече прави test/handlers-gdpr.test.js. */
+const Y = new Date().getFullYear();
+const OLD_TS = (Y - 7) + '-05-05 10:00:00';   // далеч преди прага при 3 години
+const NEW_TS = Y + '-05-05 10:00:00';         // тази година — не се пипа
+
 test('анонимизирането обезличава старите записи в одитната следа, но не ги трие', () => {
   const { db, dir } = gdprDb();
   try {
     db.prepare('UPDATE settings SET anonymize_years = 3 WHERE id = 1').run();
-    db.prepare("INSERT INTO audit_log (ts, user, action, detail, diff) VALUES ('2019-05-05 10:00:00','Мария','Редакция на читател','карта 123 — Иван Петров Иванов','[{\"field\":\"phone\",\"before\":\"0888111222\",\"after\":\"0888333444\"}]')").run();
-    db.prepare("INSERT INTO audit_log (ts, user, action, detail) VALUES ('2026-05-05 10:00:00','Мария','Редакция на читател','карта 999 — Скорошен Читател')").run();
-    db.prepare("INSERT INTO audit_log (ts, user, action, detail) VALUES ('2019-05-05 10:00:00','Мария','Ново заемане','инв. № 5 — Тютюн')").run();
+    db.prepare("INSERT INTO audit_log (ts, user, action, detail, diff) VALUES (@old,'Мария','Редакция на читател','карта 123 — Иван Петров Иванов','[{\"field\":\"phone\",\"before\":\"0888111222\",\"after\":\"0888333444\"}]')").run({ old: OLD_TS });
+    db.prepare("INSERT INTO audit_log (ts, user, action, detail) VALUES (@new,'Мария','Редакция на читател','карта 999 — Скорошен Читател')").run({ new: NEW_TS });
+    db.prepare("INSERT INTO audit_log (ts, user, action, detail) VALUES (@old,'Мария','Ново заемане','инв. № 5 — Тютюн')").run({ old: OLD_TS });
 
     const res = gdprApi(db).invoke('gdpr:anonymize');
     assert.equal(res.ok, true, res.error);
@@ -104,8 +113,8 @@ test('анонимизирането изтрива старата истори�
   const { db, dir } = gdprDb();
   try {
     db.prepare('UPDATE settings SET anonymize_years = 3 WHERE id = 1').run();
-    db.prepare("INSERT INTO search_history (ts, user, kind, query) VALUES ('2019-01-01 09:00:00','Мария','readers','Иван Петров')").run();
-    db.prepare("INSERT INTO search_history (ts, user, kind, query) VALUES ('2026-01-01 09:00:00','Мария','readers','Скорошно търсене')").run();
+    db.prepare("INSERT INTO search_history (ts, user, kind, query) VALUES (@old,'Мария','readers','Иван Петров')").run({ old: OLD_TS });
+    db.prepare("INSERT INTO search_history (ts, user, kind, query) VALUES (@new,'Мария','readers','Скорошно търсене')").run({ new: NEW_TS });
     const res = gdprApi(db).invoke('gdpr:anonymize');
     assert.equal(res.ok, true, res.error);
     const left = db.prepare('SELECT query FROM search_history').all().map(r => r.query);

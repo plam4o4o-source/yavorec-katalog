@@ -53,10 +53,18 @@ const MIN_INSERT = {
     return `INSERT INTO holds (book_id, reader_id, status) VALUES (${bookId}, ${readerId}, @v)`;
   },
   suggestions: () => `INSERT INTO suggestions (date, title, status) VALUES ('2026-08-03', 'З', @v)`,
-  account_lines: (db) => {
+  account_lines_kind: (db) => {
     const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Ч')").run().lastInsertRowid;
     return `INSERT INTO account_lines (reader_id, date, kind, amount) VALUES (${readerId}, '2026-08-03', @v, 1)`;
   },
+  // v2.4.14: account_lines.type получи тригер — беше документиран набор без пазач,
+  // а handlers/stats.js сравнява буквално с 'обезщетение'.
+  account_lines_type: (db) => {
+    const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Ч')").run().lastInsertRowid;
+    return `INSERT INTO account_lines (reader_id, date, kind, type, amount) VALUES (${readerId}, '2026-08-03', 'начисление', @v, 1)`;
+  },
+  inventory_sessions: () => `INSERT INTO inventory_sessions (date, mode) VALUES ('2026-08-03', @v)`,
+  authorised_values: () => `INSERT INTO authorised_values (category, value) VALUES (@v, 'x')`,
   mzs_requests_direction: () => `INSERT INTO mzs_requests (no, year, date, direction, partner, title) VALUES (1, '2026', '2026-08-03', @v, 'П', 'З')`,
   mzs_requests_status: () => `INSERT INTO mzs_requests (no, year, date, partner, title, status) VALUES (1, '2026', '2026-08-03', 'П', 'З', @v)`,
   links_from: (db) => {
@@ -82,6 +90,7 @@ const MIN_INSERT = {
 function keyFor(table, col) {
   if (table === 'mzs_requests') return col === 'direction' ? 'mzs_requests_direction' : 'mzs_requests_status';
   if (table === 'links') return col === 'from_kind' ? 'links_from' : 'links_to';
+  if (table === 'account_lines') return 'account_lines_' + col;
   return table;
 }
 

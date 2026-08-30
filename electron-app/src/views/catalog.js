@@ -234,10 +234,28 @@ async function bulkAddToShelf() {
 window.bulkAddToShelf = bulkAddToShelf;
 async function applyBulkShelf() {
   const d = formData('#shelfPickF');
-  const added = await call(window.api.shelves.addBooks({ shelfId: parseInt(d.shelfId, 10), ids: [...BOOKS_SELECTED] }));
-  if (added == null) return;
+  const r = await call(window.api.shelves.addBooks({ shelfId: parseInt(d.shelfId, 10), ids: [...BOOKS_SELECTED] }));
+  if (r == null) return;
   closeModal();
-  toast(added + ' документа добавени във витрината.', 'ok');
+  /* Пропуснатите се показват поименно. Дотук тук идваше само число и отметнат
+     документ без статус (обичайно при записи от по-стар внос) изчезваше от
+     витрината без нито дума защо — точно тихият отказ, срещу който единичното
+     добавяне вече дава подробно обяснение. */
+  const skipped = (r && r.skipped) || [];
+  toast(r.added + ' документа добавени във витрината'
+    + (skipped.length ? ', ' + skipped.length + ' пропуснати' : '') + '.', skipped.length ? 'err' : 'ok');
+  if (skipped.length) {
+    modal('Документи, които не влязоха във витрината', `
+      <div class="note" style="border-left-color:var(--red);margin-top:0">
+        Тези документи не се публикуват в онлайн каталога и затова не бяха добавени.
+        Документ „без попълнен статус“ обикновено идва от по-стар внос — отворете го,
+        задайте статус „наличен“ и го добавете отново.</div>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Заглавие</th><th>Причина</th></tr></thead><tbody>
+      ${skipped.map(x => `<tr><td class="num">${esc(String(x.inv_number ?? '—'))}</td>
+        <td>${esc(x.title || '')}</td><td>${esc(x.reason)}</td></tr>`).join('')}
+      </tbody></table></div>`,
+      `<button class="btn pri" onclick="closeModal()">Разбрах</button>`);
+  }
   markSaved();
 }
 window.applyBulkShelf = applyBulkShelf;

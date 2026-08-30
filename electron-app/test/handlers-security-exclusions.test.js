@@ -105,13 +105,31 @@ test('security:writeExclusionScript writes a pure-ASCII .bat with an admin check
   const content = fs.readFileSync(result.data, 'utf8');
   assert.match(content, /^@echo off/);
   assert.match(content, /net session/);
-  assert.match(content, /Add-MpPreference -ExclusionPath/);
-  assert.match(content, /Add-MpPreference -ExclusionProcess/);
-  assert.match(content, /Add-MpPreference -ControlledFolderAccessAllowedApplications/);
-  // Unlike the pure-ASCII batch scripts from the separate inventar-biblioteka
-  // browser-app pipeline, this .bat intentionally carries Cyrillic echo text and
-  // relies on its own `chcp 65001` line for correct console output.
-  assert.match(content, /chcp 65001/);
+  /* v2.4.14, след повторния одит: командите вече НЕ се вграждат в cmd. Целият
+     полезен товар е PowerShell скрипт в base64 (-EncodedCommand), защото при
+     вграждане стойност от базата (catalog_folder) можеше да смени смисъла на
+     команда, а опитът да се затвори това с кодировка 'ascii' беше по-лош от
+     проблема: маскирането до 7 бита превръща „К“ в байт 0x1A (край на batch
+     файл) и „Ц“ в `&`. Съдържанието се проверява в декодирания вид. */
+  const m = content.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/);
+  assert.ok(m, 'полезният товар трябва да е кодиран');
+  const ps = Buffer.from(m[1], 'base64').toString('utf16le');
+  assert.match(ps, /Add-MpPreference -ExclusionPath/);
+  assert.match(ps, /Add-MpPreference -ExclusionProcess/);
+  assert.match(ps, /Add-MpPreference -ControlledFolderAccessAllowedApplications/);
+  /* Одит v2.4.14: тестът се казваше „pure-ASCII“, а проверяваше единствено
+     наличието на реда `chcp 65001` — тоест минаваше при файл, пълен с кирилица.
+     Скилът за този проект documentira, че точно тази комбинация вече веднъж е
+     дала нацепен изход на този компютър, а веднъж и парчета от коментар,
+     изпълнени като команди; работещото решение беше целият файл да мине на чист
+     ASCII. Сега проверката е байтова. */
+  const bytes = fs.readFileSync(result.data);
+  const nonAscii = [...bytes].filter(b => b > 127);
+  assert.equal(nonAscii.length, 0, 'скриптът трябва да е чист ASCII, а има ' + nonAscii.length + ' байта над 127');
+  assert.ok(!/chcp/.test(content), 'при чист ASCII смяната на кодовата страница е излишна');
+  // Резултатът се обобщава честно — „Готово“ вече не се печата безусловно.
+  assert.match(ps, /ВНИМАНИЕ: добавени/);
+  assert.match(ps, /if \(\$fail -eq 0\)/);
   assert.ok(auditLog.some(a => a.action === 'Антивирусна защита'));
 });
 
@@ -121,6 +139,9 @@ test('psQuote escaping: a catalog folder path containing a single quote does not
   db.prepare('UPDATE settings SET catalog_folder = ? WHERE id=1').run(weirdDir);
   const result = await ipcMain.invoke('security:writeExclusionScript');
   assert.equal(result.ok, true);
-  const content = fs.readFileSync(result.data, 'utf8');
-  assert.ok(content.includes("o''brien-repo")); // doubled single-quote, valid PowerShell escaping
+  // Единичната кавичка се удвоява — единственото екраниране, което остава
+  // след като пътищата спряха да минават през cmd (виж бележката по-горе).
+  const content = fs.readFileSync(result.data, 'latin1');
+  const ps = Buffer.from(content.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/)[1], 'base64').toString('utf16le');
+  assert.ok(ps.includes("o''brien-repo"), 'валидно PowerShell екраниране на апострофа');
 });

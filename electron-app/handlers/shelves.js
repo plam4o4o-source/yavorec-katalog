@@ -94,12 +94,33 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
         -- влиза и във витрина — иначе страницата показва празна карта.
         SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND COALESCE(department,'') != 'служебен'
       `);
+      /* Одит v2.4.14: пропуснатите се връщат ПОИМЕННО, а не се подминават тихо.
+         shelves:addBook (единичното сканиране) обяснява подробно защо документ без
+         статус не се публикува; тук — пътят, по който витрината реално се пълни
+         (отметки в „Книги“) — SQL филтърът просто ги изпускаше и на екрана
+         оставаше само число: „17 документа добавени“ за 20 отметнати, без нито
+         дума кои три липсват и защо. Причината се изчислява по СЪЩИТЕ условия
+         като филтъра по-горе. */
+      const look = db.prepare('SELECT id, inv_number, title, status, department FROM books WHERE id = ?');
       let added = 0;
-      db.transaction(() => { for (const id of ids) added += ins.run(shelfId, id).changes; }).immediate();
+      const skipped = [];
+      db.transaction(() => {
+        for (const id of ids) {
+          const n = ins.run(shelfId, id).changes;
+          if (n) { added += n; continue; }
+          const b = look.get(id);
+          if (!b) { skipped.push({ id, reason: 'документът вече не съществува' }); continue; }
+          if (b.status === 'отчислен') skipped.push({ inv_number: b.inv_number, title: b.title, reason: 'отчислен' });
+          else if (b.status == null) skipped.push({ inv_number: b.inv_number, title: b.title, reason: 'без попълнен статус (запис от по-стар внос)' });
+          else if (b.department === 'служебен') skipped.push({ inv_number: b.inv_number, title: b.title, reason: 'служебен документ' });
+          // Останалото е INSERT OR IGNORE заради вече съществуващ ред — не е пропуск.
+        }
+      }).immediate();
       const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(shelfId);
-      logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“');
+      logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“'
+        + (skipped.length ? ', ' + skipped.length + ' пропуснати' : ''));
       scheduleCatalogWrite();
-      return added;
+      return { added, skipped };
     })
   );
   ipcMain.handle('shelves:removeBook', (e, { shelfId, bookId }) =>

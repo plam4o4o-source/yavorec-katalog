@@ -52,9 +52,27 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   );
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
   // обяснението на кирилско/латинско разминаване при баркод четец.
+  /* fund_qty се връща ДОПЪЛНИТЕЛНО към b.quantity и е СУРОВАТА стойност от
+     inventory (може да е NULL). Двете броят различни неща и не бива да се
+     смесват: b.quantity е COALESCE(i.quantity, 0) и служи за наличността
+     („заета ли е в момента“), докато ОТЧЕТНАТА бройка чете NULL като 1 документ
+     (стара база без ред в inventory) и изричната 0 като 0 — точно както прави
+     снимката в deaccessionActs:create по-долу (invQty.get). Затова се чете със
+     същата заявка, а не през BOOK_SELECT.
+
+     Одит v2.4.14: екранът, на който актът се СЪСТАВЯ, броеше заглавия и събираше
+     единични цени, докато самият акт, разпечатката и КДБФ броят документи — три
+     заглавия по три екземпляра се виждаха като „3 документа, 30 лв.“ и се
+     утвърждаваха като 9 документа за 90 лв. Оттук нататък екранът разполага със
+     същото число, което ще влезе в акта. */
   ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
     const c = normalizeScanCode(code);
-    return getDb().prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND (b.status != 'отчислен' OR b.status IS NULL)`).get(c, c);
+    const db = getDb();
+    const b = db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND (b.status != 'отчислен' OR b.status IS NULL)`).get(c, c);
+    if (!b) return b;
+    const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
+    b.fund_qty = q ? q.quantity : null;
+    return b;
   }));
   ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
     run(() => {
@@ -118,6 +136,11 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            и „изрично нула“ — виж бележката при quantity по-долу. */
         const qStmt = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?');
         const invQty = { get: (id) => { const r = qStmt.get(id); return r ? r.quantity : 1; } };
+        /* Одитната следа брои СЪЩОТО, което брои актът. Дотук тук отиваше
+           bookIds.length, тоест заглавия: списъкът „Отчисляване“, прегледът,
+           разпечатката и КДБФ казваха 9, а следата, която инспекторът чете, за да
+           възстанови какво се е случило — 3. */
+        let docCount = 0;
         bookIds.forEach(bookId => {
           const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
           if (!b) return;
@@ -137,6 +160,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                като fund_qty в handlers/acquisitions.js. */
             quantity: invQty.get(b.id)
           });
+          docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
             .run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
@@ -144,7 +168,9 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
-        logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + bookIds.length + ' документа, причина: ' + act.reason_text
+        logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + docCount + ' документа'
+          + (docCount !== bookIds.length ? ' (' + bookIds.length + ' заглавия)' : '')
+          + ', причина: ' + act.reason_text
           + (cancelledHolds ? (' (отказани ' + cancelledHolds + ' резервации на отчислените документи)') : ''));
         return actId;
       });

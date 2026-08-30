@@ -283,7 +283,9 @@ CREATE TABLE IF NOT EXISTS account_lines (
   reader_id   INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
   date        TEXT NOT NULL,
   kind        TEXT NOT NULL,   -- начисление | плащане
-  type        TEXT,            -- годишна такса | обезщетение | друго
+  type        TEXT,            -- годишна такса | обезщетение | друго | плащане
+                               -- ('плащане' се записва от account:pay в същата колона;
+                               --  наборът се пази от тригер, виж db/enum-triggers.js)
   amount      REAL NOT NULL,
   note        TEXT,
   created_at  TEXT DEFAULT (datetime('now'))
@@ -346,6 +348,16 @@ CREATE TABLE IF NOT EXISTS inventory_session_scans (
   book_id     INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
   scanned_at  TEXT DEFAULT (datetime('now'))
 );
+-- Един документ се брои ВЕДНЪЖ в една проверка: уникалният индекс се създава от
+-- МИГРАЦИЯ 8 в main.js, не тук. Причината е ред на изпълнение — schema.sql минава
+-- в началото на initDb(), ПРЕДИ миграциите, тоест на всяка съществуваща база с
+-- дубликати (единствената, заради която миграцията изобщо съществува) създаването
+-- му тук се проваля и поваля целия schema.sql. Миграцията първо изчиства
+-- дубликатите и чак тогава слага индекса. Нови бази минават през същата миграция.
+-- idx_iss_book обслужва допълването на datelastseen при стартиране
+-- (измерено: 6607 ms → 31 ms при 15 000 книги) и е безопасен тук.
+CREATE INDEX IF NOT EXISTS idx_iss_book ON inventory_session_scans(book_id);
+CREATE INDEX IF NOT EXISTS idx_inv_checks_book ON inventory_checks(book_id);
 CREATE TABLE IF NOT EXISTS inventory_session_missing (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id  INTEGER NOT NULL REFERENCES inventory_sessions(id) ON DELETE CASCADE,

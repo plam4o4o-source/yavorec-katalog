@@ -20,6 +20,28 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
 
   let PDP_KEY = null;
   const PDP_PLACEHOLDER = 'Защитени данни';
+  /* ОТДЕЛЕН плейсхолдър за „ключът е налице, но НЕ разчита стойността“.
+     Одит v2.4.14, критична находка: при две работни места върху обща мрежова
+     база станция Б отключва сутринта, станция А сменя паролата (базата се
+     прекриптира с новия ключ), а ключът на Б остава в паметта ѝ и вече е
+     ГРЕШЕН. decryptField() хвърля, старият код слагаше същия низ „Защитени
+     данни“ — низ БЕЗ префикса PDPv1:, тоест за preparePiiForWrite чист текст.
+     pdp:status междувременно продължаваше да казва unlocked:true, затова
+     полетата ЕГН/№ ЛК стояха ОТКЛЮЧЕНИ за редакция; първият запис на този
+     читател криптираше думите „Защитени данни“ със стария ключ ВЪРХУ
+     истинското ЕГН. Нито една от двете пароли не го връща обратно.
+
+     Три ключалки срещу това, всяка достатъчна сама по себе си:
+       1. PDP_STALE — щом едно разкриптиране се провали, сесията се смята за
+          негодна и pdp:status връща unlocked:false, тоест интерфейсът заключва
+          полетата (виж pdpLocked в src/views/readers.js);
+       2. preparePiiForWrite отказва да запише КОЙТО И ДА Е от двата
+          плейсхолдъра, каквото и да е състоянието — пази предишната стойност;
+       3. pdp:unlock проверява не само проверителя, но и че с този ключ наистина
+          се разчита реален ред от базата (виж pdpDataReadable). */
+  const PDP_UNREADABLE = 'Защитени данни (ключът не съвпада)';
+  const PDP_PLACEHOLDERS = [PDP_PLACEHOLDER, PDP_UNREADABLE];
+  let PDP_STALE = false;
   /* Минимална дължина на НОВА парола. Беше 4 знака — при сол и проверител, които
      стоят в самата база, а базата по документиран сценарий е на споделен мрежов
      дял, четиризначна парола се намира офлайн за секунди дори с по-скъпото
@@ -57,9 +79,17 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     if (!r) return r;
     for (const f of ['egn', 'id_card_no']) {
       if (!pii.isEncryptedField(r[f])) continue;
-      if (!PDP_KEY) { r[f] = PDP_PLACEHOLDER; continue; }
+      if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; continue; }
       try { r[f] = pii.decryptField(r[f], PDP_KEY); }
-      catch (e) { r[f] = PDP_PLACEHOLDER; console.error('Разкриптиране на лични данни:', e.message); }
+      catch (e) {
+        /* Провалено разкриптиране при НАЛИЧЕН ключ значи, че ключът вече не
+           отговаря на данните — паролата е сменена от друго работно място или
+           базата е пипана отвън. Сесията се обявява за негодна веднага, за да
+           не остане нито едно поле отключено за редакция. */
+        PDP_STALE = true;
+        r[f] = PDP_UNREADABLE;
+        console.error('Разкриптиране на лични данни:', e.message);
+      }
     }
     return r;
   }
@@ -75,12 +105,22 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   function preparePiiForWrite(out, prev) {
     if (!pdpConfigured()) return;
     for (const f of ['egn', 'id_card_no']) {
-      if (PDP_KEY) {
+      /* Ключалка №2 срещу критичната находка от одита: плейсхолдърът НЕ Е
+         стойност и никога не се записва — нито в чист текст, нито криптиран.
+         Каквото и да е дошло от интерфейса, ако е един от двата плейсхолдъра,
+         остава предишната (криптирана) стойност. Проверката е ПРЕДИ всичко
+         останало, за да важи и в трите състояния (отключено, заключено,
+         негодна сесия). */
+      if (PDP_PLACEHOLDERS.includes(out[f])) out[f] = prev ? prev[f] : null;
+      if (PDP_KEY && !PDP_STALE) {
         if (out[f] && !pii.isEncryptedField(out[f])) out[f] = pii.encryptField(out[f], PDP_KEY);
       } else if (prev) {
         out[f] = prev[f];
       } else if (out[f]) {
-        throw new Error('Отключете защитата на лични данни от „Настройки“, за да запишете ЕГН/№ ЛК на нов читател.');
+        throw new Error(PDP_STALE
+          ? 'Защитата на лични данни е отключена с ключ, който вече не отговаря на базата (паролата е сменена '
+            + 'от друго работно място). Заключете и отключете отново с новата парола, за да запишете ЕГН/№ ЛК.'
+          : 'Отключете защитата на лични данни от „Настройки“, за да запишете ЕГН/№ ЛК на нов читател.');
       }
     }
   }
@@ -104,8 +144,56 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     }
     return rows.length;
   }
+  /* Ключалка №3: проверителят доказва само че паролата ражда ключа, с който е
+     направен САМИЯТ проверител — не че този ключ разчита данните. Двете се
+     разминават в два реални случая: (а) някой с достъп до споделената папка е
+     подменил pdp_salt/pdp_verifier с двойка от своя парола (записите тогава
+     остават криптирани със стария ключ и програмата „отключва“, без да чете
+     нищо); (б) прекриптирането е прекъснато по средата. Затова при отключване
+     се проверява и един истински ред. Липсата на криптирани редове (нова база,
+     нищо още не е въведено) е нормална и минава. */
+  function pdpDataReadable(key) {
+    /* Проверяват се НЯКОЛКО реда и отказът е само когато НИТО ЕДИН не се чете.
+       Първата версия гледаше един ред (LIMIT 1 без подредба, тоест най-малкия
+       rowid) и това я правеше грешна и в двете посоки:
+         • лъжлив отказ → библиотекарят се заключва завинаги извън собствените си
+           данни, ако точно този ред е повреден (напр. презаписан от станция с
+           остарял ключ, преди тази версия), докато останалите 499 са наред. А
+           изход няма: старата парола вече не минава през проверителя;
+         • лъжливо разрешение → прекъснато по средата прекриптиране оставя
+           наред точно НАЧАЛНИТЕ редове (reencryptAllReaders върви по id), тоест
+           единствената проверена стойност е от „добрата“ половина.
+       Редовете се вземат от двата края на подредбата, за да покрият и двата
+       случая. */
+    const rows = getDb().prepare(`SELECT egn, id_card_no FROM readers
+      WHERE egn LIKE 'PDPv1:%' OR id_card_no LIKE 'PDPv1:%'
+      ORDER BY id LIMIT 25`).all().concat(
+      getDb().prepare(`SELECT egn, id_card_no FROM readers
+        WHERE egn LIKE 'PDPv1:%' OR id_card_no LIKE 'PDPv1:%'
+        ORDER BY id DESC LIMIT 25`).all());
+    if (!rows.length) return true;
+    let readable = 0, unreadable = 0;
+    for (const r of rows) {
+      const v = pii.isEncryptedField(r.egn) ? r.egn : r.id_card_no;
+      if (!pii.isEncryptedField(v)) continue;
+      try { pii.decryptField(v, key); readable++; } catch (e) { unreadable++; }
+    }
+    if (readable) {
+      // Част от редовете не се четат — това е повреда в ДАННИТЕ, не грешна парола.
+      // Отключва се (иначе няма достъп до останалите), но се вписва в дневника.
+      if (unreadable) {
+        console.error('Защита на лични данни: ' + unreadable + ' от проверените ' + (readable + unreadable)
+          + ' записа не се разчитат с тази парола. Записите с надпис „ключът не съвпада“ трябва да се въведат наново.');
+      }
+      return true;
+    }
+    return unreadable === 0;
+  }
   ipcMain.handle('pdp:status', () =>
-    run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY }))
+    // unlocked:false при негодна сесия — интерфейсът заключва полетата ЕГН/№ ЛК
+    // (виж pdpLocked в src/views/readers.js) вместо да ги остави за редакция с
+    // плейсхолдър вътре. `stale` е отделно, за да може екранът да обясни защо.
+    run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY && !PDP_STALE, stale: PDP_STALE }))
   );
   ipcMain.handle('pdp:setup', (e, password) =>
     run(() => {
@@ -133,13 +221,31 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     run(() => {
       const s = pdpSettingsRow();
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
-      const key = pii.deriveKey(password, Buffer.from(s.pdp_salt, 'base64'));
+      const salt = Buffer.from(s.pdp_salt, 'base64');
+      const key = pii.deriveKey(password, salt);
       if (!pii.checkVerifier(s.pdp_verifier, key)) throw new Error('Грешна парола.');
+      if (!pdpDataReadable(key)) {
+        throw new Error('Паролата отваря защитата, но записаните ЕГН/№ ЛК са криптирани с ДРУГ ключ и не могат да '
+          + 'бъдат разчетени с нея. Това означава, че настройките на защитата в базата са променени отделно от самите '
+          + 'данни — например от друго работно място или чрез редакция на файла. Защитата остава заключена, за да не '
+          + 'бъдат презаписани данните. Опитайте с предишната парола; ако и тя не помогне, възстановете резервно копие.');
+      }
+      PDP_STALE = false;
       setPdpKey(password, key, 'unlock');
-      return true;
+      /* Старите инсталации не се прекриптират сами: база отпреди v2 си остава на
+         по-евтините параметри, а изискването за 10 знака важи само при ЗАДАВАНЕ
+         на нова парола — предишният минимум беше 4. Комбинацията „кратка парола
+         + евтин ключ“ на споделен дял се търси офлайн за минути, затова тук се
+         връща подсказка, а екранът я показва веднъж. Само подсказка: насилствена
+         смяна би заключила библиотекаря извън собствените му данни. */
+      const weak = pii.saltVersion(salt) < pii.CURRENT_KDF_VERSION || String(password).length < PDP_MIN_PASSWORD;
+      return weak
+        ? { ok: true, advise: 'Тази парола е зададена по стария, по-слаб ред. Сменете я от „Настройки“ → „Лични данни“ '
+            + '— новата ще бъде с по-силна защита (поне ' + PDP_MIN_PASSWORD + ' знака).' }
+        : true;
     })
   );
-  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; pii.clearSession(); }));
+  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; pii.clearSession(); }));
   ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
@@ -160,6 +266,10 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           .run(newSalt.toString('base64'), newVerifier);
         reencryptAllReaders(oldKey, newKey);
       }).immediate();
+      // Новият ключ е току-що изведен и е верен по построение — сесията вече не е
+      // негодна. Без този ред успешната смяна оставяше всяко ЕГН с надпис
+      // „ключът не съвпада“ и мълчаливо отхвърляше всяка редакция.
+      PDP_STALE = false;
       setPdpKey(newPassword, newKey, 'change', oldPassword);
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;

@@ -34,6 +34,18 @@ const ENUM_COLUMNS = [
   { table: 'holds', col: 'status', values: ['чака', 'заделена', 'изпълнена', 'отказана'] },
   { table: 'suggestions', col: 'status', values: ['заявено', 'одобрено', 'поръчано', 'получено', 'отказано'] },
   { table: 'account_lines', col: 'kind', values: ['начисление', 'плащане'], notNull: true },
+  /* Одит v2.4.14: account_lines.type имаше документиран набор в schema.sql, но
+     нямаше тригер и базата приемаше произволен текст. Най-скъпото последствие:
+     handlers/stats.js сравнява буквално с 'обезщетение', за да събере „Събрани
+     обезщетения“ — начисление с друг етикет се показваше под чуждо име в едната
+     справка и изчезваше напълно от другата. Списъкът е този от падащото меню в
+     src/views/account.js плюс 'плащане', което account:pay записва в същата
+     колона (schema.sql беше остаряла спрямо кода и вече е поправена). */
+  { table: 'account_lines', col: 'type', values: ['годишна такса', 'обезщетение', 'друго', 'плащане'] },
+  // Видът на проверката се решава при приключване (handlers/inventory-sessions.js).
+  { table: 'inventory_sessions', col: 'mode', values: ['full', 'representative'] },
+  // Номенклатурите, които програмата разпознава (handlers/authorities.js).
+  { table: 'authorised_values', col: 'category', values: ['department', 'language', 'location'], notNull: true },
   { table: 'mzs_requests', col: 'direction', values: ['изходящо', 'входящо'], notNull: true },
   { table: 'mzs_requests', col: 'status', values: ['заявено', 'изпратено', 'получено', 'върнато', 'отказано'] },
   { table: 'links', col: 'from_kind', values: ['персона', 'летопис'], notNull: true },

@@ -262,7 +262,7 @@ test('backup:now (с парола) — реален кръгов тест: backu
   assert.equal(result.encrypted, true);
 
   const head = fs.readFileSync(result.data).subarray(0, 8).toString('utf8');
-  assert.equal(head, 'INVBAK01');
+  assert.equal(head, 'INVBAK02'); // v2.4.14: новите копия носят версия на параметрите на ключа
 
   // #19: encryptBackupFile вече чете от НЕКРИПТИРАН ВРЕМЕНЕН файл (снимка от
   // db.serialize()), не от живия .db — временният файл се вижда в readFileSync
