@@ -76,13 +76,17 @@ test('остарял ключ: плейсхолдърът НИКОГА не се
   const foreign = pii.encryptField('7001011234', otherKey);
   st2.db.prepare('UPDATE readers SET egn = ? WHERE name = ?').run(foreign, 'Иван');
 
-  const row = st2.returned.maskReaderRow(st2.db.prepare("SELECT * FROM readers WHERE name='Иван'").get());
-  assert.match(row.egn, /ключът не съвпада/, 'неразчетената стойност трябва да е РАЗЛИЧНА от „заключено“');
+  /* Изчертава се ПАРТИДА (както прави readers:list). Одит v2.4.16: ключалка №1 се
+     задейства при партида, в която НИТО ЕДИН криптиран ред не се разчита — това е
+     подписът на „ключът не отговаря на базата“. Единичен провален ред НЕ убива
+     сесията; виж отделния тест по-долу. */
+  const rows = st2.returned.maskReaderRows(st2.db.prepare("SELECT * FROM readers").all());
+  assert.match(rows[0].egn, /ключът не съвпада/, 'неразчетената стойност трябва да е РАЗЛИЧНА от „заключено“');
 
-  // Ключалка №1: сесията вече се обявява за негодна и интерфейсът заключва полетата.
   const st = st2.ipcMain.invoke('pdp:status');
   assert.equal(st.data.unlocked, false, 'при негодна сесия pdp:status трябва да казва „заключено“');
   assert.equal(st.data.stale, true);
+  const row = rows[0];
 
   // Ключалка №2: дори полето да стигне дотук, плейсхолдърът не се записва.
   const out = { egn: row.egn, id_card_no: null };
@@ -126,10 +130,11 @@ test('успешната смяна на паролата връща сесия�
   db.prepare("INSERT INTO readers (name, egn) VALUES ('Иван', ?)")
     .run(pii.encryptField('7001011234', pii.deriveKey('първа-парола-11', salt)));
 
-  // Изкуствено разваляме сесията, както би станало при смяна от друга станция.
+  // Изкуствено разваляме сесията, както би станало при смяна от друга станция:
+  // ЦЯЛАТА партида става нечетима, а това е признакът за негоден ключ.
   const foreign = pii.encryptField('7001011234', pii.deriveKey('чужда-9999', pii.generateSalt(2)));
   db.prepare("UPDATE readers SET egn = ? WHERE name='Иван'").run(foreign);
-  returned.maskReaderRow(db.prepare("SELECT * FROM readers WHERE name='Иван'").get());
+  returned.maskReaderRows(db.prepare("SELECT * FROM readers").all());
   assert.equal(ipcMain.invoke('pdp:status').data.stale, true, 'сесията трябва да е негодна преди смяната');
 
   // Връщаме читателя в изправно състояние и сменяме паролата.
@@ -770,4 +775,33 @@ test('одитната следа за отчисляване брои доку�
   assert.match(line.d, /\(3 заглавия\)/);
   const listed = ipcMain.invoke('deaccessionActs:list').data[0];
   assert.equal(listed.item_count, 9, 'и списъкът брои същото');
+});
+
+test('един повреден ред НЕ убива сесията — останалите читатели остават четими', () => {
+  /* Одит v2.4.16, дефект във ВЛАСТНАТА ми поправка от v2.4.14. Проверката при
+     отключване беше направена да толерира частична повреда (за да не заключи
+     библиотекаря извън останалите записи), но maskReaderRow слагаше PDP_STALE при
+     ПЪРВИЯ неуспех. Двете се оказаха в противоречие и резултатът беше по-лош от
+     изходния дефект: отключването успяваше, първото изчертаване на списъка
+     срещаше единствения повреден ред, сесията умираше — и при следващото
+     изчертаване ВСИЧКИ останали, напълно четими записи също излизаха с надпис
+     „ключът не съвпада“. Заключване и отключване наново повтаряше цикъла. */
+  const { db, ipcMain, returned } = pdpSetup();
+  assert.equal(ipcMain.invoke('pdp:setup', 'редовна-парола-11').ok, true);
+  const key = pii.deriveKey('редовна-парола-11',
+    Buffer.from(db.prepare('SELECT pdp_salt FROM settings WHERE id=1').get().pdp_salt, 'base64'));
+  const ins = db.prepare("INSERT INTO readers (name, egn) VALUES (?, ?)");
+  ins.run('Повреден', pii.encryptField('0000000000', pii.deriveKey('чужда-9999', pii.generateSalt(2))));
+  for (let i = 1; i <= 3; i++) ins.run('Читател ' + i, pii.encryptField('750101000' + i, key));
+
+  const first = returned.maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY id').all());
+  assert.match(first[0].egn, /ключът не съвпада/, 'повреденият ред се отбелязва');
+  assert.equal(first[1].egn, '7501010001', 'здравите редове се четат както преди');
+  assert.equal(ipcMain.invoke('pdp:status').data.stale, false, 'един ред не бива да обявява сесията за негодна');
+
+  // И най-важното: второто изчертаване дава същото, а не поголовен плейсхолдър.
+  const second = returned.maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY id').all());
+  assert.equal(second[1].egn, '7501010001', 'сесията остава използваема и при следващото изчертаване');
+  assert.equal(second[3].egn, '7501010003');
+  assert.equal(ipcMain.invoke('pdp:status').data.unreadable, 2, 'броят засегнати полета се съобщава');
 });

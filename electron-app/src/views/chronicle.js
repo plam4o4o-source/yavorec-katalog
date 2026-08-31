@@ -213,7 +213,7 @@ async function chronicleDelete(id) {
 window.chronicleDelete = chronicleDelete;
 
 async function printChronicle() {
-  const rows = await call(window.api.chronicle.list({ year: CHR_YEAR }));
+  const rows = await call(window.api.chronicle.list({ year: CHR_YEAR, q: CHR_Q }));
   if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
   const byYear = {};
   for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }

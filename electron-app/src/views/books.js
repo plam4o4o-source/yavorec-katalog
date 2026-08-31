@@ -76,6 +76,24 @@ function booksMoreHtml(more, total) {
    нови редове към стар резултат. BOOKS_PAINTED пази колко реда стоят в тялото;
    paintRowWindow() допълнително проверява това срещу самия DOM. */
 let BOOKS_PAINTED = 0;
+/* Смяната на филтър изчиства избора — точно както го прави търсенето
+   (виж слушателя на #bSearch по-долу).
+
+   Одит v2.4.16: двата падащи филтъра само пречертаваха тялото на таблицата.
+   BOOKS_SELECTED оставаше пълен с редове, които вече не се виждат никъде, а
+   заглавната отметка се показваше празна и без междинно състояние. Оттам
+   „Групова редакция…“ и „Във витрина…“ пращаха към главния процес идентата на
+   документи, които библиотекарят не вижда — а груповата редакция сама предупреждава,
+   че действието не може да бъде отменено. Единственият знак беше малка подсказка
+   „N избрани“ встрани. */
+function booksFilterChanged() {
+  BOOKS_SELECTED.clear();
+  BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE;
+  renderBooksBody();
+  updateBulkBar();
+  syncChkAll();
+}
+window.booksFilterChanged = booksFilterChanged;
 function renderBooksBody(append) {
   const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
   BOOKS_PAINTED = paintRowWindow({
@@ -144,11 +162,11 @@ async function renderBooks() {
         <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
         <option value="inv" ${BOOKS_SORT === 'inv' ? 'selected' : ''}>По инв. №</option>
       </select>
-      <select id="bDeptFilter" onchange="BOOKS_FILTER_DEPT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooksBody()" title="Филтър по отдел / местонахождение">
+      <select id="bDeptFilter" onchange="BOOKS_FILTER_DEPT=this.value;booksFilterChanged()" title="Филтър по отдел / местонахождение">
         <option value="">— всички отдели —</option>
         ${deptOpts.map(d => `<option value="${esc(d)}" ${BOOKS_FILTER_DEPT === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
       </select>
-      <select id="bCatFilter" onchange="BOOKS_FILTER_CAT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooksBody()" title="Филтър по вид документ (категория)">
+      <select id="bCatFilter" onchange="BOOKS_FILTER_CAT=this.value;booksFilterChanged()" title="Филтър по вид документ (категория)">
         <option value="">— всички категории —</option>
         ${(window._CATS || []).map(c => `<option value="${c.id}" ${String(BOOKS_FILTER_CAT) === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>

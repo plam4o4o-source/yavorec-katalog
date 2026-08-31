@@ -25,9 +25,20 @@ async function renderReports() {
     ${def && def.hint ? `<div class="note" style="margin-top:0">${esc(def.hint)}</div>` : ''}
     <div id="repBody">Зареждане…</div>
   `;
-  if (!id) return;
+  /* Одит v2.4.16: при провал функцията се връщаше преди да пипне каквото и да е.
+     Резултатът беше двоен: #repBody оставаше на „Зареждане…“ завинаги, а
+     window._REPORT продължаваше да сочи ПРЕДИШНАТА справка — тоест „Печат / PDF“
+     отпечатваше старите числа под заглавието на новоизбраната справка. Старата
+     справка се изхвърля СЪЗНАТЕЛНО още преди заявката. */
+  window._REPORT = null;
+  if (!id) { $('#repBody').innerHTML = '<span class="hint">Изберете справка.</span>'; return; }
   const r = await call(window.api.reports.run({ id, year: y }));
-  if (!r) return;
+  if (!r) {
+    $('#repBody').innerHTML = '<div class="note" style="border-left-color:var(--red)">'
+      + 'Справката не можа да бъде изготвена. Опитайте отново, а ако се повтори — проверете дали базата не е '
+      + 'заета от другото работно място.</div>';
+    return;
+  }
   r.title = def ? def.title : '';
   window._REPORT = r;
   $('#repBody').innerHTML = reportBodyHtml(r);
@@ -152,7 +163,8 @@ function reportPrintHtml(r) {
   return '';
 }
 function printReportDoc() {
-  const r = window._REPORT; if (!r) return;
+  const r = window._REPORT;
+  if (!r) return toast('Първо изберете справка и изчакайте да се зареди.', 'err');
   setPrintPage({ name: (r.title || 'Справка') + ' — ' + r.year, landscape: r.id === 'annual_ab', margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">${esc(r.title || 'Справка')}</h2>

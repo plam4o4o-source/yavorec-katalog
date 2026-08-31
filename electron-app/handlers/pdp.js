@@ -42,6 +42,9 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   const PDP_UNREADABLE = 'Защитени данни (ключът не съвпада)';
   const PDP_PLACEHOLDERS = [PDP_PLACEHOLDER, PDP_UNREADABLE];
   let PDP_STALE = false;
+  // Броят неразчетени полета, срещнати в тази сесия — служи само за диагностика
+  // в pdp:status, за да може екранът да каже колко записа са засегнати.
+  let unreadableSeen = 0;
   /* Минимална дължина на НОВА парола. Беше 4 знака — при сол и проверител, които
      стоят в самата база, а базата по документиран сценарий е на споделен мрежов
      дял, четиризначна парола се намира офлайн за секунди дори с по-скъпото
@@ -75,25 +78,59 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   // egn/id_card_no ако защитата е отключена в момента, показва плейсхолдър ако е
   // заключена, и оставя непроменени старите стойности в чист текст (инсталации,
   // които никога не са задавали тази защита — пълна обратна съвместимост).
-  function maskReaderRow(r) {
+  /* ЕДИН провален ред НЕ обявява сесията за негодна.
+
+     Одит v2.4.16: предишната версия слагаше PDP_STALE при първия неуспех, а
+     проверката при отключване (pdpDataReadable) нарочно ТОЛЕРИРА частична
+     повреда, за да не заключи библиотекаря извън останалите записи. Двете се
+     оказаха в противоречие и резултатът беше по-лош от изходния дефект:
+     отключването успяваше, първото изчертаване на списъка срещаше единствения
+     повреден ред, сесията умираше — и при следващото изчертаване ВСИЧКИ
+     останали, напълно четими записи също излизаха с надпис „ключът не съвпада“.
+     Заключването и отключването наново повтаряше цикъла безкрайно.
+
+     Правилното разграничение е между двете различни причини:
+       • ЕДИН ред не се чете → този ред е повреден или е дошъл от друг ключ.
+         Показва се надписът само за него; сесията остава изправна. Полето е
+         редактируемо — точно това е пътят за поправка: библиотекарят въвежда
+         ЕГН-то наново и то се криптира с текущия, верен ключ. Плейсхолдърът не
+         може да бъде записан (виж preparePiiForWrite).
+       • ЦЯЛА партида не се чете и нито един ред не успява → ключът не отговаря
+         на данните изобщо. Това е сценарият със сменена отвън парола и сесията
+         се обявява за негодна. */
+  function maskOne(r, stats) {
     if (!r) return r;
     for (const f of ['egn', 'id_card_no']) {
       if (!pii.isEncryptedField(r[f])) continue;
       if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; continue; }
-      try { r[f] = pii.decryptField(r[f], PDP_KEY); }
+      try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; }
       catch (e) {
-        /* Провалено разкриптиране при НАЛИЧЕН ключ значи, че ключът вече не
-           отговаря на данните — паролата е сменена от друго работно място или
-           базата е пипана отвън. Сесията се обявява за негодна веднага, за да
-           не остане нито едно поле отключено за редакция. */
-        PDP_STALE = true;
+        if (stats) stats.bad++;
         r[f] = PDP_UNREADABLE;
-        console.error('Разкриптиране на лични данни:', e.message);
+        unreadableSeen++;
       }
     }
     return r;
   }
-  function maskReaderRows(rows) { rows.forEach(maskReaderRow); return rows; }
+  function maskReaderRow(r) { return maskOne(r, null); }
+  function maskReaderRows(rows) {
+    const stats = { ok: 0, bad: 0 };
+    rows.forEach(r => maskOne(r, stats));
+    /* Партида, в която НИТО ЕДИН криптиран ред не се разчита, а поне един е бил
+       опитан — това е подписът на „ключът вече не отговаря на базата“. */
+    if (stats.bad && !stats.ok) {
+      PDP_STALE = true;
+      logAudit('Защита на лични данни', 'ключът в тази сесия вече не разчита записаните ЕГН/№ ЛК — '
+        + 'защитата е заключена автоматично; отключете отново с текущата парола');
+    } else if (stats.bad) {
+      /* Смесен резултат: конкретни повредени редове. Вписва се в одитната следа
+         (а не само в дневника за грешки), защото библиотекарят трябва да разбере,
+         че тези ЕГН-та са за въвеждане наново — иначе разбира чак при проверка. */
+      logAudit('Защита на лични данни', stats.bad + ' записа не се разчитат с текущата парола и се показват '
+        + 'като „' + PDP_UNREADABLE + '“ — стойностите им трябва да бъдат въведени наново');
+    }
+    return rows;
+  }
   // Подготвя egn/id_card_no за запис. Ако защитата не е зададена изобщо — без
   // промяна (старо поведение, чист текст). Ако е зададена и отключена — криптира
   // новите стойности. Ако е зададена, но ЗАКЛЮЧЕНА в момента: при редакция се
@@ -173,17 +210,23 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         ORDER BY id DESC LIMIT 25`).all());
     if (!rows.length) return true;
     let readable = 0, unreadable = 0;
+    let skipped = 0;
     for (const r of rows) {
       const v = pii.isEncryptedField(r.egn) ? r.egn : r.id_card_no;
-      if (!pii.isEncryptedField(v)) continue;
+      /* Заявката по-горе ползва LIKE, който в SQLite е нечувствителен към
+         регистъра за ASCII, а isEncryptedField сравнява ТОЧНО с „PDPv1:“.
+         Стойност, записана като „pdpv1:…“, минава филтъра и пропада тук — а
+         старият код връщаше „всичко е наред“ именно когато не е разбрал нищо. */
+      if (!pii.isEncryptedField(v)) { skipped++; continue; }
       try { pii.decryptField(v, key); readable++; } catch (e) { unreadable++; }
     }
+    if (skipped && !readable && !unreadable) return false; // разгледани редове, разбран нито един
     if (readable) {
       // Част от редовете не се четат — това е повреда в ДАННИТЕ, не грешна парола.
       // Отключва се (иначе няма достъп до останалите), но се вписва в дневника.
       if (unreadable) {
-        console.error('Защита на лични данни: ' + unreadable + ' от проверените ' + (readable + unreadable)
-          + ' записа не се разчитат с тази парола. Записите с надпис „ключът не съвпада“ трябва да се въведат наново.');
+        logAudit('Защита на лични данни', unreadable + ' от проверените ' + (readable + unreadable)
+          + ' записа не се разчитат с тази парола — стойностите им трябва да бъдат въведени наново');
       }
       return true;
     }
@@ -193,7 +236,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     // unlocked:false при негодна сесия — интерфейсът заключва полетата ЕГН/№ ЛК
     // (виж pdpLocked в src/views/readers.js) вместо да ги остави за редакция с
     // плейсхолдър вътре. `stale` е отделно, за да може екранът да обясни защо.
-    run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY && !PDP_STALE, stale: PDP_STALE }))
+    run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY && !PDP_STALE, stale: PDP_STALE, unreadable: unreadableSeen }))
   );
   ipcMain.handle('pdp:setup', (e, password) =>
     run(() => {
@@ -231,6 +274,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           + 'бъдат презаписани данните. Опитайте с предишната парола; ако и тя не помогне, възстановете резервно копие.');
       }
       PDP_STALE = false;
+      unreadableSeen = 0;
       setPdpKey(password, key, 'unlock');
       /* Старите инсталации не се прекриптират сами: база отпреди v2 си остава на
          по-евтините параметри, а изискването за 10 знака важи само при ЗАДАВАНЕ
@@ -245,7 +289,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         : true;
     })
   );
-  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; pii.clearSession(); }));
+  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; pii.clearSession(); }));
   ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
@@ -270,6 +314,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       // негодна. Без този ред успешната смяна оставяше всяко ЕГН с надпис
       // „ключът не съвпада“ и мълчаливо отхвърляше всяка редакция.
       PDP_STALE = false;
+      unreadableSeen = 0;
       setPdpKey(newPassword, newKey, 'change', oldPassword);
       logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
       return true;

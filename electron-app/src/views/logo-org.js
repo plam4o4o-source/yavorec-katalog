@@ -71,6 +71,12 @@ async function printCardOne(id) {
   printLabelSheet(readerCardHtml(r), 'card');
 }
 window.printCardOne = printCardOne;
+/* Колко реда се побират на картона. Одит v2.4.16: срязването беше зашитото 14 и
+   НЕ се споменаваше никъде на листа — а loans:byReader връща най-новите първи,
+   тоест по-старата история просто изчезваше без следа. Всяко друго място в
+   програмата, което реже списък, го казва („Показани са N от M“ в Просрочени,
+   броячът в Одитна следа, „Печатът винаги съдържа цялата книга“ в Инвентарна). */
+const CARD_LOAN_ROWS = 14;
 async function printReaderCard(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;
@@ -88,9 +94,11 @@ async function printReaderCard(id) {
     <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
       ${code39svg(r.card_no || String(r.id), 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no || '')}</div></div>
     <table><thead><tr><th>Дата на заемане</th><th>Инв. №</th><th>Заглавие</th><th>Срок</th><th>Върнат на</th></tr></thead><tbody>
-    ${loans.slice(0, 14).map(l => `<tr><td>${bg(l.date_out)}</td><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
+    ${loans.slice(0, CARD_LOAN_ROWS).map(l => `<tr><td>${bg(l.date_out)}</td><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
       <td>${bg(l.date_due) || ''}</td><td>${l.date_in ? bg(l.date_in) : ''}</td></tr>`).join('')}
     </tbody></table>
+    ${loans.length > CARD_LOAN_ROWS ? `<div class="pmeta">Показани са последните ${CARD_LOAN_ROWS} заемания
+      от общо ${loans.length}. Пълната история е в картона на читателя в програмата.</div>` : ''}
     ${ssig(['Подпис на читателя: …………………', 'Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………')])}</div>`);
 }
 window.printReaderCard = printReaderCard;
@@ -98,10 +106,19 @@ async function printOverdueNotices() {
   const rows = await call(window.api.loans.overdueByReader());
   if (!rows || !rows.length) return toast('Няма просрочени заемания.', 'err');
   const s = SETTINGS_CACHE || {};
-  // Отпечатаното писмо е реално напомняне — регистрира се за всеки читател,
-  // със степента от подготвените текстове (ако прозорецът с тях е отворен).
+  /* Отпечатаното писмо е реално напомняне — регистрира се за всеки читател, със
+     степента, която МУ СЕ ПОЛАГА В МОМЕНТА НА ПЕЧАТА.
+
+     Одит v2.4.16: степените се четяха от window._REMINDERS, което се пълни само
+     когато прозорецът „Напомняния“ е бил отварян, и оттам живее до края на
+     сесията. Тоест: отвориш го сутринта, изпратиш няколко по имейл (всяко от тях
+     вдига степента на следващото), после натиснеш „Печат на напомняния“ —
+     вписваше се СУТРЕШНАТА степен и ескалацията спираше на място. А ако
+     прозорецът изобщо не е отварян, всички се вписваха като степен 1. Степените
+     се изтеглят наново тук. */
+  const fresh = await call(window.api.loans.reminders());
   const levels = {};
-  for (const r of (window._REMINDERS || [])) levels[r.reader_id] = r.level || 1;
+  for (const r of (fresh || window._REMINDERS || [])) levels[r.reader_id] = r.level || 1;
   // v2.2.0: вписва се ЧАК след потвърден печат (или запис в PDF). От v1.71.0
   // doPrint() само отваря преглед с бутон „Отказ“ — дотогава при отказ в
   // регистъра вече стоеше „изпратено напомняне“ на всички просрочили читатели
@@ -139,7 +156,8 @@ async function printOverdueNotices() {
     <table><thead><tr><th>Инв. №</th><th>Заглавие</th><th>Зает на</th><th>Срок</th></tr></thead><tbody>
     ${r.loans.map(l => `<tr><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td><td>${bg(l.date_out)}</td><td>${bg(l.date_due)}</td></tr>`).join('')}
     </tbody></table>
-    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b> (${s.fine_per_day} лв./ден забава по чл. 43, ал. 2).</div>
+    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b> (${s.fine_per_day} лв./ден забава съгласно Правилата за обслужване на читателите на библиотеката,
+    приети на основание чл. 43, ал. 2 от Наредба № 3 от 18.11.2014 г.).</div>
     ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''), null, logNotices);
 }
 window.printOverdueNotices = printOverdueNotices;

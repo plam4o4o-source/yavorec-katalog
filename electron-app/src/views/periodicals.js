@@ -93,7 +93,12 @@ async function addIssue(periodicalId) {
 }
 window.addIssue = addIssue;
 async function delIssue(id, periodicalId) {
-  await call(window.api.periodicalIssues.delete(id));
+  /* Одит v2.4.16: изтриваше се без питане и без проверка на резултата. Един
+     неточен натиск в 240-пикселов превъртащ се списък махаше регистриран брой, а
+     път за връщане в интерфейса няма. Съседното delPeriodical пита както трябва. */
+  if (!confirm('Да изтрия ли този брой от кардекса? Действието не може да бъде отменено.')) return;
+  const ok = await call(window.api.periodicalIssues.delete(id), 'Броят е изтрит.');
+  if (ok === null) return;
   markSaved();
   openPeriodical(periodicalId);
 }
