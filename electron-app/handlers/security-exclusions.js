@@ -98,7 +98,15 @@ module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
       ')',
       // Единствената команда: целият полезен товар е вътре в base64, тоест нищо
       // от съдържанието на базата не минава през синтаксиса на cmd.
-      'powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + encoded
+      /* БЕЗ -ExecutionPolicy Bypass. При -EncodedCommand политиката така или
+         иначе не важи (тя се отнася за скриптови ФАЙЛОВЕ), тоест ключът не прави
+         нищо — но заедно с -NoProfile и -EncodedCommand допълва точно подписа,
+         по който Defender („Block execution of potentially obfuscated scripts“),
+         SmartScreen и чужди антивирусни разпознават замаскиран PowerShell. Това е
+         единственият файл в програмата, чиято цел е да ОЦЕЛЕЕ пред недоволна
+         антивирусна. */
+      'echo Adding Windows Defender exclusions. Please wait...',
+      'powershell -NoProfile -EncodedCommand ' + encoded
     ];
     if (rejected.length) {
       lines.push('echo.');

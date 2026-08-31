@@ -152,9 +152,16 @@ function defaultDbDir() {
 function splitSqlStatements(sql) {
   const out = [];
   let cur = '', q = null, depth = 0;
+  /* Думата се приема само ако е ЦЯЛА от двете страни: `end_date` и `ENDING`
+     не са ключовата дума END. Дотук се проверяваше само лявата граница, а
+     [A-Za-z]+ спира на `_` и на цифра — тоест идентификатор в тялото на тригер
+     се четеше като край на блок. */
   const wordAt = (i) => {
-    const m = /^[A-Za-z]+/.exec(sql.slice(i, i + 10));
-    return m ? m[0].toUpperCase() : '';
+    const m = /^[A-Za-z]+/.exec(sql.slice(i, i + 12));
+    if (!m) return '';
+    const after = sql[i + m[0].length];
+    if (after && /[A-Za-z0-9_]/.test(after)) return '';
+    return m[0].toUpperCase();
   };
   const isWordBoundary = (i) => i === 0 || !/[A-Za-z0-9_]/.test(sql[i - 1]);
   for (let i = 0; i < sql.length; i++) {
@@ -162,15 +169,31 @@ function splitSqlStatements(sql) {
     if (q) { cur += ch; if (ch === q) q = null; continue; }
     if (ch === "'" || ch === '"') { q = ch; cur += ch; continue; }
     if (ch === '-' && sql[i + 1] === '-') { while (i < sql.length && sql[i] !== '\n') i++; cur += '\n'; continue; }
+    /* Блоковите коментари се пропускат изцяло. Дотук се разпознаваха само
+       редовите: db/schema.sql вече съдържа блокови, а апостроф вътре в такъв
+       отваряше състояние „низ“, което никога не се затваря — целият остатък от
+       файла се слепваше в едно изявление. */
+    if (ch === '/' && sql[i + 1] === '*') {
+      const close = sql.indexOf('*/', i + 2);
+      i = close === -1 ? sql.length : close + 1;
+      cur += ' ';
+      continue;
+    }
     if (isWordBoundary(i)) {
       const w = wordAt(i);
       // BEGIN брои само вътре в CREATE TRIGGER — иначе би хванало и BEGIN TRANSACTION,
       // каквото schema.sql не съдържа, но по-добре да не разчитаме на това.
       if (w === 'BEGIN' && /CREATE\s+TRIGGER/i.test(cur)) depth++;
+      /* CASE … END вътре в тялото на тригер НЕ затваря блока. SQLite допуска
+         такъв израз и старата версия го приемаше за край: тригерът изчезваше, а
+         остатъкът от тялото му (например DELETE) се изпълняваше като обикновено
+         изявление върху живата база. Затова CASE увеличава дълбочината заедно с
+         BEGIN, а END намалява — така двете се съкращават взаимно. */
+      else if (w === 'CASE' && depth > 0) depth++;
       else if (w === 'END' && depth > 0) {
         depth--;
         cur += sql.slice(i, i + 3); i += 2;
-        // Точката и запетаята след END затваря целия CREATE TRIGGER.
+        // Точката и запетаята след последния END затваря целия CREATE TRIGGER.
         continue;
       }
     }
@@ -762,6 +785,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => {
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
+    /* Между createWindow() и 'ready-to-show' прозорецът е СКРИТ, а не минимизиран
+       (v2.4.15 въведе show:false). focus() не показва скрит прозорец — тоест в
+       този промеждутък второто щракване по иконата не правеше нищо и
+       библиотекарят щракаше пак, защото „нищо не се случва“. */
+    if (!mainWindow.isDestroyed()) mainWindow.show();
     mainWindow.focus();
   });
 }

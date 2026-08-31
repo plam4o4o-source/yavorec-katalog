@@ -21,10 +21,33 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       // докато ЕДНОВРЕМЕННО публичният каталог я броеше за налична (виж #9,
       // main.js: publicBookFields) — пропада през двете предпазни мрежи едновременно.
       // Условието включва изрично и NULL редовете навсякъде тук, където се смята пул.
+      /* Мярката е РЕДОВЕ (инвентарни номера), не екземпляри — съзнателно и
+         документирано решение, виж дългата бележка в handlers/dashboard.js:
+         инвентаризацията се проверява чрез сканиране, а инвентарният номер в тази
+         схема е един на ред в books. Двата екрана ТРЯБВА да ползват една и съща
+         мярка, иначе Таблото и „Инвентаризация“ показват различни цели.
+
+         Одит v2.4.16 отбеляза, че числото се ПОКАЗВАШЕ с етикет „Библиотечен
+         фонд“ — същия, с който Таблото нарича броя екземпляри. Числата са две
+         различни неща и не бива да носят едно име; поправено е в етикета
+         (src/views/inventory-sessions.js), не в мярката. */
       const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
       const s = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
       const pct = pctRequired(active);
-      return { active, pct, target: Math.ceil(active * pct / 100), naturalLoss: naturalLoss(active, s.free_access_pct) };
+      /* Напредъкът за ГОДИНАТА се смята тук, а не чрез сумиране на сесиите в
+         екрана: един и същ документ, проверен в пролетна и в есенна сесия, се
+         броеше два пъти и екранът можеше да обяви нормата за изпълнена при
+         неизпълнена. Същата поправка вече беше направена за Таблото
+         (handlers/dashboard.js), но не и тук — класическото „поправено на едно
+         от две места“. */
+      const y = String(new Date().getFullYear());
+      const scannedYear = db.prepare(`
+        SELECT COUNT(DISTINCT sc.book_id) AS n FROM inventory_session_scans sc
+        JOIN inventory_sessions s ON s.id = sc.session_id
+        WHERE substr(s.date,1,4) = ?
+      `).get(y).n;
+      return { active, pct, target: Math.ceil(active * pct / 100), scannedYear,
+        naturalLoss: naturalLoss(active, s.free_access_pct) };
     })
   );
   ipcMain.handle('inventorySessions:start', (e, s) =>

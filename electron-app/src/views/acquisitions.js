@@ -104,6 +104,15 @@ function acqValue(items) { return (items || []).reduce((s, i) => s + (Number(i.p
    при `acqCount !== items.length`, което съвпада случайно и изчезва точно при
    смесени бройки. */
 function acqMark(i) { return acqQty(i) !== 1 ? acqQty(i) + ' × ' : ''; }
+/* Двете суми се сравняват в СТОТИНКИ, не като числа с плаваща запетая. Одит
+   v2.4.16: `total !== acqValue(a.items)` върху 10.10 + 20.20 дава 30.299999…
+   срещу обявените 30.30 и „Забележката“ излизаше на около една от всеки три
+   партиди — с два ОТПЕЧАТАНИ ЕДНАКВИ израза от двете страни на думата „различава
+   се“. Тоест поправката, която трябваше да махне вътрешното противоречие от
+   заместващ първичен счетоводен документ, го създаваше сама.
+   Закръглянето е същото, което ползва и handlers/account.js (toCents). */
+const cents = (n) => Math.round((Number(n) || 0) * 100);
+function acqDiffers(declared, items) { return cents(declared) !== cents(acqValue(items)); }
 function acqHasMultiples(items) { return (items || []).some(i => acqQty(i) !== 1); }
 // Означението пред цената на един ред в разпечатките. Одит v2.4.14: редът ОБЩО
 // вече беше Σ(цена × бройка), но всеки ред печаташе гола единична цена и в
@@ -146,7 +155,7 @@ async function printDonationDoc(id) {
     ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'} прие дарение от:<br>
     <b>Дарител:</b> ${esc(a.from_source || '')}<br><b>Адрес:</b> ${esc(a.donor_address || '…………………')}<br>
     <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || acqValue(a.items))}<br>
-    ${(a.sum && a.sum !== acqValue(a.items)) ? `<b>Забележка:</b> обявената стойност (${mny(a.sum)}) се различава от сбора
+    ${(a.sum && acqDiffers(a.sum, a.items)) ? `<b>Забележка:</b> обявената стойност (${mny(a.sum)}) се различава от сбора
     на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Стойност, лв.</th></tr></thead><tbody>
@@ -170,7 +179,7 @@ async function printAcqNoDocDoc(id) {
     за редовно вписване в Книгата за движение на библиотечния фонд и в инвентарната книга.<br>
     <b>Начин на постъпване:</b> ${esc(a.how || '')} &nbsp; <b>Откъде/от кого:</b> ${esc(a.from_source || '')}<br>
     <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща оценена стойност:</b> ${mny(total)}
-    ${total !== acqValue(a.items) ? `<br><b>Забележка:</b> обявената стойност по документа (${mny(total)}) се различава от
+    ${acqDiffers(total, a.items) ? `<br><b>Забележка:</b> обявената стойност по документа (${mny(total)}) се различава от
     сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).` : ''}
     ${a.note ? '<br><b>Забележка:</b> ' + esc(a.note) : ''}</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Оценена стойност</th></tr></thead><tbody>
