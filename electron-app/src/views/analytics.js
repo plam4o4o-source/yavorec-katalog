@@ -143,6 +143,16 @@ async function printAnalytics() {
   setPrintPage({ name: (ANL_YEAR ? `Аналитично описание ${ANL_YEAR} г.` : 'Аналитично описание'), landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">АНАЛИТИЧНО ОПИСАНИЕ${ANL_YEAR ? ' — ' + esc(ANL_YEAR) + ' г.' : ''}${ANL_LOCAL ? ' (краеведски)' : ''}</h2>
+    <!-- Разпечатката се прави от филтрирания списък, а излиза на бланка, със
+         заглавие „АНАЛИТИЧНО ОПИСАНИЕ" и два реда за подпис. Обхватът се обявява
+         винаги — включително когато е пълен, за да не се тълкува мълчанието. -->
+    <div class="pmeta">${(ANL_Q || ANL_YEAR || ANL_LOCAL)
+      ? `<b>Обхват:</b> ${[
+          ANL_YEAR ? 'само ' + esc(ANL_YEAR) + ' г.' : 'всички години',
+          ANL_LOCAL ? 'само краеведските описания' : '',
+          ANL_Q ? 'само съдържащите „' + esc(ANL_Q) + '“' : ''
+        ].filter(Boolean).join(', ')} — <b>${rows.length}</b> описания. Това НЕ е пълният списък.`
+      : `Пълен списък — всички <b>${rows.length}</b> аналитични описания към ${bg(today())} г.`}</div>
     ${rows.map(a => `<div style="margin-bottom:8px">
       <b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}${a.year ? ' (' + esc(a.year) + ')' : ''}
       ${a.is_local ? ' <i>— краеведски</i>' : ''}

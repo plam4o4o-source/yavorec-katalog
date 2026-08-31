@@ -70,14 +70,26 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
           throw new Error('Партида № ' + no + '/' + year + ' вече съществува — най-вероятно е създадена от друго работно място '
             + 'към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
         }
+        /* Празно поле → NULL („стойността не е обявена в първичния документ"), а
+           не 0. Дотук и двете влизаха като 0 и разпечатката, която чете
+           `a.sum || acqValue(...)`, печаташе изчисления сбор като обявена
+           стойност — без да казва, че го прави. Изрична нула вече е възможна и
+           се пази като нула. */
+        const declared = (a.sum === '' || a.sum === null || a.sum === undefined) ? null : parseFloat(a.sum);
         const info = db.prepare(`
-          INSERT INTO acquisitions (no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note)
-          VALUES (@no, @year, @date, @how, @from_source, @doc_type, @doc_no, @doc_date, @total_count, @sum, @donor_address, @note)
+          INSERT INTO acquisitions (no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note,
+                                    committee1, committee2, committee3)
+          VALUES (@no, @year, @date, @how, @from_source, @doc_type, @doc_no, @doc_date, @total_count, @sum, @donor_address, @note,
+                  @committee1, @committee2, @committee3)
         `).run({
           no, year, date: a.date, how: a.how || null,
           from_source: a.from_source || null, doc_type: a.doc_type || null, doc_no: a.doc_no || null,
           doc_date: a.doc_date || null, total_count: parseInt(a.total_count, 10) || 0,
-          sum: a.sum ? parseFloat(a.sum) : 0, donor_address: a.donor_address || null, note: a.note || null
+          sum: Number.isFinite(declared) ? declared : null, donor_address: a.donor_address || null, note: a.note || null,
+          /* Снимка на комисията към завеждането — актът за дарение и протоколът по
+             чл. 3, ал. 2 се подписват от НЕЯ. Живите Настройки не стават: при всеки
+             утвърден акт за отчисляване handlers/deaccession-acts.js ги презаписва. */
+          committee1: a.committee1 || null, committee2: a.committee2 || null, committee3: a.committee3 || null
         });
         logAudit('Постъпление', 'партида № ' + a.no + ' — ' + a.total_count + ' бр. от ' + a.from_source);
         return info.lastInsertRowid;

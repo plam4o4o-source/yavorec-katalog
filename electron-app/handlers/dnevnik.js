@@ -38,6 +38,55 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
     'b_cat_fiction', 'b_cat_child_nf', 'b_cat_child_f', 'b_cat_reading_used'
   ];
   const DNEVNIK_FIELDS = [...DNEVNIK_A_FIELDS, ...DNEVNIK_B_FIELDS];
+  /* Човешките имена на колоните за CSV износа. Нарочно са ПЪЛНИ (в таблицата на
+     екрана същите колони са съкратени заради ширината: „Пром./стр.“), защото този
+     файл се отваря в Excel и се подава нагоре, а там няма кой да разчете
+     съкращението. Пълнотата на списъка спрямо DNEVNIK_FIELDS е закована с тест —
+     нов ред в дневника без име тук би върнал имената от базата за него. */
+  const DNEVNIK_LABELS = {
+    a_hours: 'А: Часове на обслужване (мин.)',
+    a_age_u14: 'А: Възраст — до 14 г.', a_age_15_18: 'А: Възраст — 15–18 г.',
+    a_age_19_28: 'А: Възраст — 19–28 г.', a_age_o28: 'А: Възраст — над 28 г.',
+    a_sex_boys: 'А: Пол — момчета', a_sex_men: 'А: Пол — мъже',
+    a_sex_girls: 'А: Пол — момичета', a_sex_women: 'А: Пол — жени',
+    a_edu_basic: 'А: Образование — основно', a_edu_sec: 'А: Образование — средно',
+    a_edu_high: 'А: Образование — висше',
+    a_prof_industry: 'А: Занятие — промишленост и строителство',
+    a_prof_agri: 'А: Занятие — селско стопанство',
+    a_prof_eng: 'А: Занятие — инженерно-технически',
+    a_prof_agrospec: 'А: Занятие — селскостопански специалисти',
+    a_prof_med: 'А: Занятие — медицински',
+    a_prof_sci: 'А: Занятие — математици и физици',
+    a_prof_hum: 'А: Занятие — хуманитарни',
+    a_prof_creative: 'А: Занятие — творчески',
+    a_prof_teach: 'А: Занятие — учители',
+    a_prof_other: 'А: Занятие — други',
+    a_stud_uni: 'А: Учащи — студенти', a_stud_high: 'А: Учащи — горна степен',
+    a_stud_sec: 'А: Учащи — средна степен', a_stud_elem: 'А: Учащи — начална степен',
+    a_visit_home: 'А: Посещения — по домовете', a_visit_child: 'А: Посещения — деца до 14 г.',
+    a_visit_reading: 'А: Посещения — в читалня', a_visit_internet: 'А: Посещения — интернет',
+    b_hours: 'Б: Часове на обслужване (мин.)',
+    b_type_books: 'Б: Вид — книги', b_type_period: 'Б: Вид — периодични издания',
+    b_type_graphic: 'Б: Вид — графични', b_type_carto: 'Б: Вид — картографски',
+    b_type_music: 'Б: Вид — нотни', b_type_audio: 'Б: Вид — аудио',
+    b_type_video: 'Б: Вид — видео', b_type_electronic: 'Б: Вид — електронни',
+    b_type_dvd: 'Б: Вид — DVD', b_type_talking: 'Б: Вид — говорещи книги',
+    b_lang_bg: 'Б: Език — български', b_lang_ru: 'Б: Език — руски',
+    b_lang_slavic: 'Б: Език — славянски', b_lang_en: 'Б: Език — английски',
+    b_lang_de: 'Б: Език — немски', b_lang_fr: 'Б: Език — френски',
+    b_lang_other: 'Б: Език — други',
+    b_cat_0: 'Б: УДК 0 — общ отдел', b_cat_1: 'Б: УДК 1 — философия',
+    b_cat_2: 'Б: УДК 2 — религия', b_cat_3: 'Б: УДК 3 — обществени науки',
+    b_cat_5: 'Б: УДК 5 — математика и естествени науки', b_cat_61: 'Б: УДК 61 — медицина',
+    b_cat_62: 'Б: УДК 62 — техника', b_cat_63: 'Б: УДК 63 — селско стопанство',
+    b_cat_7: 'Б: УДК 7 — изкуство', b_cat_793: 'Б: УДК 793 — спорт',
+    b_cat_80: 'Б: УДК 80 — езикознание', b_cat_82: 'Б: УДК 82 — литературознание',
+    b_cat_9: 'Б: УДК 9 — история', b_cat_91: 'Б: УДК 91 — география',
+    b_cat_fiction: 'Б: Художествена литература',
+    b_cat_child_nf: 'Б: Детска отраслова литература',
+    b_cat_child_f: 'Б: Детска художествена литература',
+    b_cat_reading_used: 'Б: От които ползвани в читалня (не влиза в сборовете)'
+  };
 
   function daysInMonth(year, month) { return new Date(year, month, 0).getDate(); }
   function dnevnikTotals(row) {
@@ -200,20 +249,39 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ? ORDER BY date')
         .all(`${y}-${pad(m)}-01`, `${y}-${pad(m)}-${pad(dim)}`);
       const byDate = {}; rows.forEach(r => { byDate[r.date] = r; });
-      const h = ['Дата', ...DNEVNIK_FIELDS];
-      const csv = [h.join(';')].concat(
-        Array.from({ length: dim }, (_, i) => {
-          const date = `${y}-${pad(m)}-${pad(i + 1)}`;
-          const row = byDate[date] || {};
-          // csvCell вместо собствен esc(): собственият само ограждаше в кавички и
-          // пропускаше защитата срещу formula-injection (клетка, започваща с
-          // '=', '+', '-', '@' — напр. дата, въведена като „-2026…", или бъдещо
-          // текстово поле в дневника — се изпълнява като формула при отваряне в
-          // Excel/LibreOffice).
-          return [date, ...DNEVNIK_FIELDS.map(f => row[f] || 0)].map(csvCell).join(';');
-        })
-      ).join('\r\n');
+      /* Заглавният ред е на ЧОВЕШКИ език, а не имената на колоните в базата.
+         Дотук първият ред на файла беше „a_prof_agrospec;b_cat_793;…“ — таблица,
+         която библиотекарят отваря в Excel и не може да разчете, а всяко подаване
+         нагоре изисква да се преписва на ръка. Имената идват от ЕДНО място
+         (DNEVNIK_LABELS по-горе), за да не се разминат с екрана и разпечатката. */
+      const h = ['Дата', ...DNEVNIK_FIELDS.map(f => DNEVNIK_LABELS[f] || f)];
+      const dayRows = Array.from({ length: dim }, (_, i) => {
+        const date = `${y}-${pad(m)}-${pad(i + 1)}`;
+        return byDate[date] || {};
+      });
+      const line = (first, row) =>
+        // csvCell вместо собствен esc(): собственият само ограждаше в кавички и
+        // пропускаше защитата срещу formula-injection (клетка, започваща с
+        // '=', '+', '-', '@' — напр. дата, въведена като „-2026…", или бъдещо
+        // текстово поле в дневника — се изпълнява като формула при отваряне в
+        // Excel/LibreOffice).
+        [first, ...DNEVNIK_FIELDS.map(f => row[f] || 0)].map(csvCell).join(';');
+      /* Двата обобщителни реда ги има на екрана и в разпечатката, но НЕ ги имаше в
+         CSV — а точно този файл се отваря, за да се вземат сборовете. Всеки, който
+         ги е събирал в Excel сам, е поемал риска от сгрешен диапазон в число,
+         което после се подава нагоре. */
+      const csv = [h.join(';')]
+        .concat(dayRows.map((row, i) => line(`${y}-${pad(m)}-${pad(i + 1)}`, row)))
+        .concat([
+          line('Всичко за месеца', dnevnikSumRow(dayRows)),
+          line('Всичко от началото на годината', dnevnikSumRow(
+            db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ? ORDER BY date')
+              .all(`${y}-01-01`, `${y}-${pad(m)}-${pad(dim)}`)
+          ))
+        ])
+        .join('\r\n');
       fs.writeFileSync(filePath, '﻿' + csv, 'utf8');
+      logAudit('Извеждане на дневника (CSV)', filePath + ' — ' + pad(m) + '.' + y);
       return { ok: true, data: filePath };
     } catch (err) {
       return { ok: false, error: err.message };

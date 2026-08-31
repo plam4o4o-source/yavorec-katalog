@@ -98,15 +98,24 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
        • ЦЯЛА партида не се чете и нито един ред не успява → ключът не отговаря
          на данните изобщо. Това е сценарият със сменена отвън парола и сесията
          се обявява за негодна. */
+  /* Освен стойността, редът носи и `pii_masked: true`, когато поне едно поле е
+     заменено с надпис вместо с истинска стойност. Одит на документите v2.4.17:
+     читателският картон вмъкваше маскираната стойност право в реда „ЕГН:“ и
+     печаташе буквално „Защитени данни“ на подписван документ — а заключеното
+     състояние е НОРМАЛНОТО в началото на всеки работен ден. Флагът позволява на
+     всеки консуматор да реагира, без да сравнява низове с продукционни
+     константи, които живеят в този модул. */
   function maskOne(r, stats) {
     if (!r) return r;
     for (const f of ['egn', 'id_card_no']) {
       if (!pii.isEncryptedField(r[f])) continue;
+      r.pii_masked = true;
       if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; continue; }
-      try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; }
+      try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; delete r.pii_masked; }
       catch (e) {
         if (stats) stats.bad++;
         r[f] = PDP_UNREADABLE;
+        r.pii_masked = true;
         unreadableSeen++;
       }
     }

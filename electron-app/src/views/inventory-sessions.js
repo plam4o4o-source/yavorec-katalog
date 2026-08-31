@@ -58,12 +58,13 @@ async function renderInvent() {
       <button class="btn pri" onclick="startInventForm()">Започни нова проверка</button>
       <button class="btn" onclick="mobileHelp()">📱 Сканиране с телефон</button>
     </div>
-    <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Обхват</th><th>В обхвата</th>
+    <div class="wrap"><table class="ledger"><thead><tr><th>Протокол № / дата</th><th>Обхват</th><th>В обхвата</th>
       <th>Проверени</th><th>Липсващи</th><th>Комисия</th><th>Състояние</th></tr></thead><tbody>
     ${list.length ? list.map(s => {
-      const sp = s.pool_size ? Math.min(100, Math.round((s.scanned || 0) / s.pool_size * 100)) : 0;
-      return `<tr><td class="num">${bg(s.date)}</td><td>${esc(s.scope || '')}</td>
-      <td class="num">${s.pool_size}</td>
+      const poolShown = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
+      const sp = poolShown ? Math.min(100, Math.round((s.scanned || 0) / poolShown * 100)) : 0;
+      return `<tr><td class="num">${s.no ? s.no + ' / ' + esc(s.year || yr(s.date)) : '—'}<br><span class="hint">${bg(s.date)}</span></td><td>${esc(s.scope || '')}</td>
+      <td class="num">${s.pool_final != null ? s.pool_final : s.pool_size}</td>
       <td><div style="display:flex;align-items:center;gap:8px">
         <b class="num">${s.scanned || 0}</b>
         <div class="chartTrack" style="flex:1;min-width:60px;height:7px"><div class="chartFill" style="width:${sp}%"></div></div>
@@ -89,8 +90,19 @@ async function renderInvent() {
 function startInventForm() {
   modal('Нова инвентаризация', `
     <form id="ivF" onsubmit="return false">
-      ${fld('Дата', 'date', { val: today(), type: 'date' })}
-      ${fld('Обхват на проверката', 'scope', { val: 'репрезентативен метод' })}
+      <div class="grid g3">
+        ${fld('Протокол №', 'no', { type: 'number', hint: 'празно = следващият свободен за годината' })}
+        ${fld('Дата', 'date', { val: today(), type: 'date' })}
+        ${fld('Заповед №', 'order_no', { hint: 'с която е назначена комисията' })}
+      </div>
+      <!-- Одит на документите v2.4.17: „Обхват“ беше свободен текст, предварително
+           попълнен „репрезентативен метод“, докато ВИДЪТ на проверката се избира чак
+           при приключване. По подразбиране протоколът гласеше „извърши пълна
+           инвентаризация … Обхват: репрезентативен метод“ — противоречие точно по
+           разграничението, което е нормативно (чл. 40, т. 1 срещу т. 2). Полето вече
+           описва КАКВО се проверява, а не по какъв метод. -->
+      ${fld('Какво се проверява', 'scope', { val: 'целият фонд',
+        hint: 'напр. „целият фонд“, „свободен достъп“, „сектор Краезнание“. Видът на проверката (пълна или представителна) се избира при приключването.' })}
       <div class="grid g3">${fld('Комисия 1', 'committee1', {})}${fld('Комисия 2', 'committee2', {})}${fld('Комисия 3', 'committee3', {})}</div>
       ${fld('Ограничи до отдел', 'department', { type: 'select', opts: OTDELI, emptyLabel: '— целият фонд —' })}
     </form>`,
@@ -287,29 +299,57 @@ async function printInventProtocol(id) {
   const scanned = s.scans.length;
   const missing = s.missing.length;
   const missingValue = s.missing.reduce((n, m) => n + (Number(m.price) || 0), 0);
-  const vid = s.mode === 'full' ? 'пълна инвентаризация'
+  /* ПУЛЪТ КЪМ ПРИКЛЮЧВАНЕТО, не снимката от започването. Одит на документите
+     v2.4.17: печаташе се pool_size — числото, снето при започването — докато
+     липсващите се смятат от пула НАЖИВО при приключване. Книга, вписана докато
+     проверката тече (напълно нормално), влиза в липсващите и не влиза в обхвата,
+     тоест протоколът можеше да гласи „в обхвата 10 · проверени 10 · липсващи 30“.
+     Старите сесии нямат записано pool_final и падат обратно към pool_size. */
+  const pool = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
+  const onLoan = s.on_loan;
+  /* Видът има ТРИ състояния, не две. Сесия отпреди v2.3.0 няма записан вид и
+     старият тернар я пращаше в клона „пълна“ — тоест протоколът удостоверяваше
+     пълна инвентаризация, каквато никой не е обявявал. Списъкът на екрана нарочно
+     отказва да твърди вид за такива сесии („вид: —“); документът трябва да прави
+     същото. */
+  const vid = s.mode === 'full' ? 'пълна инвентаризация (чл. 40, т. 1)'
     : s.mode === 'representative' ? 'инвентаризация по представителния метод (чл. 40, т. 2)'
     : 'инвентаризация';
-  setPrintPage({ name: `Протокол от инвентаризация ${bg(s.date)}`, landscape: false, margin: '14mm 12mm' });
+  const zakl = s.mode === 'representative'
+    ? 'Проверката е представителна по смисъла на чл. 40, т. 2 — протоколът важи за проверените документи; '
+      + 'непроверените остават с непроменен статус и влизат в следваща проверка.'
+    : s.mode === 'full'
+      ? 'Проверката е пълна — непроверените и незаети документи са отбелязани като липсващи.'
+      : 'Видът на проверката не е записан (проверка отпреди версия 2.3.0 на програмата) — '
+        + 'протоколът не удостоверява нито пълна, нито представителна инвентаризация.';
+  const nomer = s.no ? '№ ' + s.no + (s.year ? ' / ' + esc(s.year) : '') : '№ …………';
+  const allowed = Number(s.allowedLoss);
+  const over = Number.isFinite(allowed) ? Math.max(0, missing - allowed) : null;
+  setPrintPage({ name: `Протокол ${s.no || ''}-${s.year || yr(s.date)} от инвентаризация`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2>ПРОТОКОЛ<br><span style="font-size:12pt">от извършена инвентаризация на библиотечния фонд</span></h2>
-    <div class="pmeta">Днес, ${bg(s.date)} г., комисия в състав:<br>
+    <h2>ПРОТОКОЛ ${nomer} / ${bg(s.date)}<br><span style="font-size:12pt">от извършена инвентаризация на библиотечния фонд</span></h2>
+    <div class="pmeta">Днес, ${bg(s.date)} г., комисия, назначена със заповед ${s.order_no ? '№ ' + esc(s.order_no) : '№ …………'} на
+    ${esc(st.director_role || 'ръководителя')} на ${esc(st.org || '')}, в състав:<br>
     1. ${esc(s.committee1 || '…………………')} &nbsp; 2. ${esc(s.committee2 || '…………………')} &nbsp; 3. ${esc(s.committee3 || '…………………')}<br><br>
     извърши <b>${vid}</b> на библиотечния фонд на ${esc(st.org || '')}${st.lib_name ? ', ' + esc(st.lib_name) : ''}
     на основание <b>чл. 40</b> от Наредба № 3 от 18.11.2014 г.<br>
-    <b>Обхват:</b> ${esc(s.scope || 'целият фонд')}${s.department ? ' · отдел „' + esc(s.department) + '“' : ''}<br>
-    <b>Документи в обхвата:</b> ${s.pool_size} &nbsp; <b>Проверени документи:</b> ${scanned}
-    &nbsp; <b>Липсващи:</b> ${missing}</div>
-    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, лв.</th></tr></thead><tbody>
-    ${s.missing.map((m, n) => `<tr><td>${n + 1}</td><td>${m.inv_number}</td>
-      <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td><td>${mny(m.price)}</td></tr>`).join('')}
+    <b>Какво е проверявано:</b> ${esc(s.scope || 'целият фонд')}${s.department ? ' · отдел „' + esc(s.department) + '“' : ''}<br>
+    <b>Документи в обхвата:</b> ${pool} &nbsp; <b>Проверени документи:</b> ${scanned}
+    &nbsp; <b>Липсващи:</b> ${missing}${onLoan != null && onLoan > 0
+      ? `<br><b>Заети от читатели към деня на проверката:</b> ${onLoan} — не се проверяват на място и не се смятат за липсващи.` : ''}</div>
+    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, лв. / €</th></tr></thead><tbody>
+    ${s.missing.map((m, n) => `<tr><td>${n + 1}</td><td>${m.inv_number ?? ''}</td>
+      <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td><td>${m.price == null ? '—' : mny(m.price)}</td></tr>`).join('')}
     <tr><td colspan="3"><b>ОБЩО ${missing} документа</b></td><td><b>${mny(missingValue)}</b></td></tr>
     </tbody></table>`
     : '<div class="pmeta">При проверката не са установени липсващи документи.</div>'}
-    <div class="pmeta">${s.mode === 'representative'
-      ? 'Проверката е представителна по смисъла на чл. 40, т. 2 — протоколът важи за проверените документи; '
-        + 'непроверените остават с непроменен статус и влизат в следваща проверка.'
-      : 'Проверката е пълна — непроверените и незаети документи са отбелязани като липсващи.'}<br>
+    ${Number.isFinite(allowed) ? `<div class="pmeta">
+      <b>Допустими естествени загуби (чл. 41):</b> ${allowed.toFixed(1)} документа за проверен фонд от ${pool}.<br>
+      ${missing === 0 ? 'Липси не са установени.'
+        : over > 0
+          ? `Установените липси надвишават норматива с <b>${over.toFixed(1)}</b> документа — прилага се редът по чл. 51 – 53.`
+          : 'Установените липси са в рамките на допустимите естествени загуби.'}</div>` : ''}
+    <div class="pmeta">${zakl}<br>
     Протоколът се съставя в два екземпляра — по един за счетоводството и за библиотеката.</div>
     ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(st.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }

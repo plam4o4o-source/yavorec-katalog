@@ -115,10 +115,12 @@ async function renderCatalog() {
     </div>
 
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Библиотечни формати за обмен</h3>
-      <p style="font-size:13.5px;margin-top:0">Извежда целия фонд в стандартните формати, които други
+      <p style="font-size:13.5px;margin-top:0">Извежда фонда в стандартните формати, които други
       библиотечни системи разпознават. Смисълът е данните да не са заключени в тази програма: при
       преминаване към <b>COBISS</b> или включване в сводния каталог се подава един файл, вместо да
-      се преписват записите на ръка.</p>
+      се преписват записите на ръка.<br>
+      Изнасят се същите документи, които влизат и в онлайн каталога: <b>без отчислените</b>
+      (библиотеката вече не ги притежава) и <b>без отдел „служебен“</b>.</p>
       <div class="toolbar">
         <button class="btn" onclick="exportMarc()">UNIMARC / MARCXML…</button>
         <button class="btn" onclick="exportDc()">Dublin Core…</button>
@@ -259,16 +261,21 @@ async function applyBulkShelf() {
   markSaved();
 }
 window.applyBulkShelf = applyBulkShelf;
+// Броят на пропуснатите се казва: иначе разликата между „15 000 във фонда“ и
+// „14 620 изведени“ изглежда като загубени записи.
+function exportSkipped(d) {
+  return d && d.excluded ? ` (${d.excluded} отчислени/служебни не се изнасят)` : '';
+}
 async function exportMarc() {
   const res = await window.api.catalog.exportMarc();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
-  toast(`Изведени ${res.data.count} записа в UNIMARC: ${res.data.path}`, 'ok');
+  toast(`Изведени ${res.data.count} записа в UNIMARC${exportSkipped(res.data)}: ${res.data.path}`, 'ok');
 }
 window.exportMarc = exportMarc;
 async function exportDc() {
   const res = await window.api.catalog.exportDc();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
-  toast(`Изведени ${res.data.count} записа в Dublin Core: ${res.data.path}`, 'ok');
+  toast(`Изведени ${res.data.count} записа в Dublin Core${exportSkipped(res.data)}: ${res.data.path}`, 'ok');
 }
 window.exportDc = exportDc;
 async function catalogChooseFolder() {

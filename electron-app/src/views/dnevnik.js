@@ -33,6 +33,40 @@ const DNEVNIK_B_COLS = [
   ['b_cat_82', '82 Лит.'], ['b_cat_9', '9 Ист.'], ['b_cat_91', '91 Геогр.'], ['b_cat_fiction', 'Худ. л-ра'],
   ['b_cat_child_nf', 'Дет.отр.'], ['b_cat_child_f', 'Дет.худ.'], ['b_cat_reading_used', 'В читални']
 ];
+/* ---- Групиращ ред над заглавията на колоните ---------------------------------
+   Раздел А има ЧЕТИРИ колони, озаглавени само „Всичко“ (по възраст, по пол, по
+   образование, по занятие), а Раздел Б — три. На хартия те стоят една до друга
+   без нищо, което да каже кое към коя разбивка се отнася: четири еднакви числа,
+   които понякога съвпадат, а понякога не, и проверяващият няма как да разбере кое
+   какво е. Отделно „В читални“ в Раздел Б стои до категориите по съдържание, но
+   НЕ участва в тяхното „Всичко“ (това е бележка колко от заетите са ползвани в
+   читалня) — дотук нищо не го казваше и числото изглеждаше като пропуснат сбор.
+   Спановете се проверяват срещу дължината на реда с колони при всяко изчертаване:
+   при разминаване групиращият ред просто не се строи, вместо да се разминат
+   заглавията с данните. Заковано е и с тест. */
+/* Етикетите казват и КАКВО влиза в съответното „Всичко“, защото две от четирите
+   суми в Раздел А не са сборът на видимите до тях колони (виж dnevnikTotals в
+   handlers/dnevnik.js): „по образование“ добавя и двете най-млади възрастови
+   групи, а „по занятие“ включва и четирите колони на учащите се. Без това
+   пояснение отпечатаният ред е аритметично необясним за проверяващия. */
+const DNEVNIK_A_GROUPS = [
+  ['Работно време', 1], ['По възраст', 5], ['По пол и възраст', 5],
+  ['По образование (сборът включва и децата до 18 г.)', 4],
+  ['По занятие (сборът включва и учащите се)', 15], ['Посещения', 4]
+];
+const DNEVNIK_B_GROUPS = [
+  ['Работно време', 1], ['По вид документи', 11], ['По език', 8], ['По съдържание (УДК)', 18],
+  ['от които ползвани в читалня (не влиза в горните сборове)', 1]
+];
+function dnevnikGroups(cols) {
+  return cols === DNEVNIK_B_COLS ? DNEVNIK_B_GROUPS : DNEVNIK_A_GROUPS;
+}
+function dnevnikGroupHeadHtml(cols, firstLabel) {
+  const g = dnevnikGroups(cols);
+  if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return '';
+  return `<tr><th>${esc(firstLabel || '')}</th>${
+    g.map(([l, n]) => `<th colspan="${n}" style="text-align:center">${esc(l)}</th>`).join('')}</tr>`;
+}
 /* Всички реални (въвеждани) полета от ДВАТА раздела. Записът в базата презаписва целия ред,
    затова при запис на клетка от Раздел А трябва да се изпратят и стойностите на Раздел Б —
    иначе те биха се нулирали. */
@@ -88,9 +122,10 @@ async function renderDnevnik() {
       <button class="btn" onclick="printDnevnikDoc()">Печат / PDF</button>
       <button class="btn" onclick="exportDnevnikCsv()">Извеждане в CSV</button>
     </div>
-    <div class="wrap"><table class="ledger dnvTable"><thead><tr>
-      <th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}
-    </tr></thead><tbody>
+    <div class="wrap"><table class="ledger dnvTable"><thead>
+      ${dnevnikGroupHeadHtml(cols)}
+      <tr><th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr>
+    </thead><tbody>
       ${r.days.map(dayRowHtml).join('')}
       ${totalRowHtml('Всичко за месеца', r.monthTotal)}
       ${totalRowHtml('Всичко от нач. на годината', r.ytdTotal, 'ytd')}
@@ -273,7 +308,9 @@ function printDnevnikDoc() {
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">ДНЕВНИК НА БИБЛИОТЕКАТА</h2>
     <div class="pmeta"><b>${esc(sectionTitle)}</b><br>${esc(MESETSI[r.month - 1])} ${r.year} г.</div>
-    <table style="font-size:7.5pt"><thead><tr><th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
+    <table style="font-size:7.5pt"><thead>
+    ${dnevnikGroupHeadHtml(cols)}
+    <tr><th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
     ${r.days.map(row => rowHtml(row.day, row)).join('')}
     ${rowHtml('Всичко за месеца', r.monthTotal)}
     ${rowHtml('Всичко от нач. на годината', r.ytdTotal)}
