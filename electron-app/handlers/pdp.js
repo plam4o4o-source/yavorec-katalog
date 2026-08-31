@@ -105,20 +105,34 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
      състояние е НОРМАЛНОТО в началото на всеки работен ден. Флагът позволява на
      всеки консуматор да реагира, без да сравнява низове с продукционни
      константи, които живеят в този модул. */
+  /* Флагът е ПО ПОЛЕ, не по ред. Две отделни неща го налагат — и двете са дефекти
+     в ПЪРВИЯ вариант на самата тази поправка (преглед на собствените поправки от
+     този кръг):
+       1) общият флаг се вдигаше при първото маскирано поле и се ИЗТРИВАШЕ при
+          следващото УСПЕШНО. Ред с нечетим ЕГН и редовен № на лична карта излизаше
+          без флаг — и картонът пак печаташе „Защитени данни (ключът не съвпада)“
+          на мястото на ЕГН, тоест точно каквото поправката трябваше да спре;
+       2) в обратната посока: ред със записан на ОТКРИТ ТЕКСТ ЕГН (отпреди
+          включването на защитата) и криптиран № на лична карта вдигаше флага за
+          целия ред — и картонът скриваше и ЕГН, което е било налично.
+     `pii_masked` остава като „поне едно поле е скрито“ за консуматори, на които
+     това стига; `pii_masked_fields` казва КОИ точно. */
   function maskOne(r, stats) {
     if (!r) return r;
+    const masked = [];
     for (const f of ['egn', 'id_card_no']) {
       if (!pii.isEncryptedField(r[f])) continue;
-      r.pii_masked = true;
-      if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; continue; }
-      try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; delete r.pii_masked; }
+      if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; masked.push(f); continue; }
+      try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; }
       catch (e) {
         if (stats) stats.bad++;
         r[f] = PDP_UNREADABLE;
-        r.pii_masked = true;
+        masked.push(f);
         unreadableSeen++;
       }
     }
+    if (masked.length) { r.pii_masked = true; r.pii_masked_fields = masked; }
+    else { delete r.pii_masked; delete r.pii_masked_fields; }
     return r;
   }
   function maskReaderRow(r) { return maskOne(r, null); }

@@ -89,20 +89,38 @@ async function printReaderCard(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;
   const loans = await call(window.api.loans.byReader(id)) || [];
-  const pii = !!r.pii_masked; // виж бележката по-горе
+  /* ПО ПОЛЕ, не по ред (виж maskOne в handlers/pdp.js). Читател със записан на
+     ОТКРИТ ТЕКСТ ЕГН и криптиран № на лична карта не бива да губи ЕГН-то от
+     картона си, а ред с нечетим ЕГН и редовен № на карта трябва да скрие точно
+     ЕГН-то. Старата форма на флага се приема като „и двете“, за да работи и ако
+     редът дойде от по-стар канал. */
+  const piiMasked = new Set(Array.isArray(r.pii_masked_fields) ? r.pii_masked_fields
+    : (r.pii_masked ? ['egn', 'id_card_no'] : []));
+  const piiEgn = piiMasked.has('egn'), piiCard = piiMasked.has('id_card_no');
+  const piiNames = [piiEgn ? 'ЕГН' : '', piiCard ? '№ на лична карта' : ''].filter(Boolean).join(' и ');
   setPrintPage({ name: `Читателски картон — ${r.name}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ЧИТАТЕЛСКИ КАРТОН № ${esc(r.card_no || '')}</h2>
     <div class="pmeta">
     <b>Име:</b> ${esc(r.name)}<br>
-    <b>ЕГН:</b> ${pii ? '…' : esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${pii ? '…' : esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
+    <b>ЕГН:</b> ${piiEgn ? '…' : esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${piiCard ? '…' : esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
     <b>Постоянен адрес:</b> ${esc(r.address || '…')}<br>
     <b>Телефон:</b> ${esc(r.phone || '…')} &nbsp; <b>Имейл:</b> ${esc(r.email || '…')}<br>
     <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}
-    ${pii ? '<br><span style="font-size:9pt">ЕГН и № на лична карта не са отпечатани: защитата на личните данни е заключена в момента. Отключете я от „Настройки“ и отпечатайте наново, ако картонът трябва да ги съдържа.</span>' : ''}
+    ${piiNames ? `<br><span style="font-size:9pt">${esc(piiNames)} ${piiEgn && piiCard ? 'не са отпечатани' : 'не е отпечатан'}:
+      защитата на личните данни е заключена в момента. Отключете я от „Настройки“ и отпечатайте наново, ако картонът трябва да ${piiEgn && piiCard ? 'ги' : 'го'} съдържа.</span>` : ''}
     ${r.guarantor_name ? `<br><b>Родител/настойник:</b> ${esc(r.guarantor_name)} (${esc(r.guarantor_relation || 'родител')}) — тел. ${esc(r.guarantor_phone || '…')}` : ''}</div>
     <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
-      ${code39svg(r.card_no || String(r.id), 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no || '')}</div></div>
+      ${/* Същият дефект като в readerCardHtml (core.js), пропуснат тук при
+            първата поправка: при липсващ номер на карта баркодът кодираше
+            ВЪТРЕШНИЯ номер на реда, а под него не пишеше нищо. Сканирането
+            търси по номер на карта, тоест лентите сочат към читателя, чиято
+            карта е с този номер — най-често друг гражданин. По-добре без
+            баркод и с указание какво липсва. */
+        r.card_no
+        ? `${code39svg(r.card_no, 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no)}</div>`
+        : `<div style="font-size:9pt;color:#b00">Няма номер на карта — въведете го в картона на читателя,
+            за да се отпечата баркод.</div>`}</div>
     <table><thead><tr><th>Дата на заемане</th><th>Инв. №</th><th>Заглавие</th><th>Срок</th><th>Върнат на</th></tr></thead><tbody>
     ${loans.slice(0, CARD_LOAN_ROWS).map(l => `<tr><td>${bg(l.date_out)}</td><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
       <td>${bg(l.date_due) || ''}</td><td>${l.date_in ? bg(l.date_in) : ''}</td></tr>`).join('')}

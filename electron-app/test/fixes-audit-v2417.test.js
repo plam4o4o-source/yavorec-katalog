@@ -190,7 +190,7 @@ test('непопълнена стойност по документа не се 
   await window.printDonationDoc(7);
   await settle();
   const t = printed(window);
-  assert.match(t, /не е обявена в документа/, 'документът трябва да каже, че числото е изчислено');
+  assert.match(t, /документът не обявява стойност/, 'документът трябва да каже, че числото е изчислено');
   assert.match(t, /15\.00/, 'и да покаже сбора 2 × 7.50');
 });
 
@@ -342,7 +342,8 @@ test('КДБФ обявява на хартия и разминаването, �
   window.printKdbfDoc();
   await settle();
   const t = printed(window);
-  assert.match(t, /3 документа не участват/, 'и разпечатката — тя е документът, който се проверява');
+  assert.match(t, /3 документа не са отчетени като постъпили през нито една година/,
+    'и разпечатката — тя е документът, който се проверява');
   assert.match(t, /Съгласуване на Част № 1 с Част № 2/, 'разминаването се обяснява и на хартия');
 });
 
@@ -637,7 +638,8 @@ test('квитанцията носи номер и състоянието на 
 test('разпечатката на инвентарната книга казва какво точно съдържа', async () => {
   const rows = [
     { id: 1, inv_number: 1, title: 'А', register_date: '2026-01-01', price: 10, quantity: 2, status: 'наличен' },
-    { id: 2, inv_number: 2, title: 'Б', register_date: '2026-01-02', price: 5, quantity: 1, status: 'отчислен' }
+    { id: 2, inv_number: 2, title: 'Б', register_date: '2026-01-02', price: 5, quantity: 1, status: 'отчислен' },
+    { id: 3, inv_number: 3, title: 'В', register_date: '2026-01-03', price: 7, quantity: 1, status: 'липсващ' }
   ];
   const dom = buildDom({ 'invBook.list': rows });
   const { window } = dom;
@@ -650,9 +652,125 @@ test('разпечатката на инвентарната книга казв
   const t = printed(window);
   // Проверява се ГЛАВАТА на документа, не подписът под таблицата — иначе долният
   // ред „Настоящата разпечатка съдържа N вписвания“ сам изпълнява условието.
-  assert.match(t, /Разпечатано на [^·]+· 2 вписвания \(инвентарни номера\)/,
+  assert.match(t, /Разпечатано на [^·]+· 3 вписвания \(инвентарни номера\)/,
     'главата казва колко вписвания съдържа книгата');
-  assert.match(t, /1 налични и 1 отчислени/, 'а не всичките са наличен фонд');
-  assert.match(t, /2 библиотечни документа/, 'документите са друго число от вписванията');
-  assert.match(t, /20\.00/, 'и стойността следва бройките, не редовете');
+  assert.match(t, /2 неотчислени и 1 отчислени/, 'а не всичките са фонд');
+  assert.match(t, /Фонд по инвентарната книга \(без отчислените\): 3 библиотечни документа/,
+    'документите са друго число от вписванията');
+  assert.match(t, /27\.00/, 'и стойността следва бройките, не редовете');
+  /* „Неотчислен“ не значи „наличен“: липсващият документ е в сбора (както в
+     stockAt() на КДБФ), но листът, който се прошнурова и заверява по чл. 26,
+     ал. 2, НЕ бива да го обявява за наличен — състоянията се изброяват. */
+  assert.ok(!/наличен фонд/i.test(t), 'думата „наличен“ не бива да покрива липсващите');
+  assert.match(t, /състояние, различно от „наличен“: липсващ — 1/,
+    'липсващият се обявява поименно');
+});
+
+/* ==================================================================
+   10. ПРЕГЛЕД НА СОБСТВЕНИТЕ ПОПРАВКИ ОТ ТОЗИ КРЪГ
+       Всичко по-долу са дефекти, внесени от поправките в раздели 1 – 9.
+   ================================================================== */
+
+test('маскирането на лични данни е по поле, не по ред', () => {
+  /* Първият вариант на поправката вдигаше ЕДИН флаг за целия ред и го ИЗТРИВАШЕ
+     при следващото успешно поле. Ред с нечетим ЕГН и редовен № на лична карта
+     излизаше без флаг — и картонът пак печаташе „Защитени данни (ключът не
+     съвпада)“ на мястото на ЕГН, тоест точно каквото поправката трябваше да спре. */
+  const { db } = freshDb('inv-v2417-pdp-');
+  db.exec('ALTER TABLE settings ADD COLUMN pdp_salt TEXT');
+  db.exec('ALTER TABLE settings ADD COLUMN pdp_verifier TEXT');
+  const pii = require('../pii-crypto');
+  const ipcMain = fakeIpcMain();
+  const ret = require('../handlers/pdp')(ipcMain, { getDb: () => db, run: runDep, logAudit: () => {} });
+  ipcMain.invoke('pdp:setup', 'редовна-парола-11');
+  const key = pii.deriveKey('редовна-парола-11',
+    Buffer.from(db.prepare('SELECT pdp_salt FROM settings WHERE id=1').get().pdp_salt, 'base64'));
+  const foreign = pii.deriveKey('чужда-9999', pii.generateSalt(2));
+  const ins = db.prepare('INSERT INTO readers (name, egn, id_card_no) VALUES (?, ?, ?)');
+  // Ред 1: ЕГН нечетим, № на карта редовен — редът, който първата поправка изпускаше.
+  ins.run('Смесен', pii.encryptField('7501010001', foreign), pii.encryptField('АА1234567', key));
+  // Ред 2: ЕГН на ОТКРИТ ТЕКСТ (отпреди защитата), № на карта криптиран и редовен.
+  ins.run('Отчасти открит', '7502020002', pii.encryptField('ББ7654321', key));
+  // Ред 3: и двете редовни.
+  ins.run('Редовен', pii.encryptField('7503030003', key), pii.encryptField('ВВ1111111', key));
+
+  const rows = ret.maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY id').all());
+  assert.deepEqual(rows[0].pii_masked_fields, ['egn'],
+    'скрито е САМО ЕГН — успешното следващо поле не бива да трие флага');
+  assert.equal(rows[0].id_card_no, 'АА1234567');
+  assert.equal(rows[1].pii_masked, undefined, 'открит текст не е маскиране');
+  assert.equal(rows[1].egn, '7502020002');
+  assert.equal(rows[2].pii_masked, undefined);
+});
+
+test('читателският картон скрива само това, което наистина е скрито', async () => {
+  const dom = buildDom({
+    'readers.get': { id: 5, name: 'Читател', card_no: 'K-9', egn: '7502020002',
+      egn_plain: true, id_card_no: 'Защитени данни', pii_masked: true, pii_masked_fields: ['id_card_no'],
+      registered_at: '2026-01-01' },
+    'loans.byReader': []
+  });
+  const { window } = dom;
+  await settle();
+  await window.printReaderCard(5);
+  await settle();
+  const t = printed(window);
+  assert.match(t, /ЕГН: 7502020002/, 'ЕГН е било налично и няма причина да се крие');
+  assert.match(t, /Лична карта: № …/, 'а № на лична карта е скрит');
+  assert.match(t, /№ на лична карта не е отпечатан/, 'бележката назовава точно скритото поле');
+  assert.ok(!/ЕГН и № на лична карта не са отпечатани/.test(t));
+  assert.ok(!/Защитени данни/.test(t), 'вътрешната константа никога не стига до хартията');
+});
+
+test('картонът не печата баркод на вътрешния номер при липсваща карта', async () => {
+  /* Същият дефект като в readerCardHtml (core.js), пропуснат при първата
+     поправка: лентите кодираха rowid, сканирането търси по номер на карта, тоест
+     сочеха към читателя, чиято карта е с този номер — друг гражданин. */
+  const dom = buildDom({
+    'readers.get': { id: 7, name: 'Без карта', card_no: null, registered_at: '2026-01-01' },
+    'loans.byReader': []
+  });
+  const { window } = dom;
+  await settle();
+  await window.printReaderCard(7);
+  await settle();
+  assert.equal(printedHtml(window).match(/<svg/g), null, 'няма номер — няма баркод');
+  assert.match(printed(window), /Няма номер на карта/);
+});
+
+test('трите пояснения в един акт носят различни етикети', async () => {
+  /* Могат да излязат едновременно; три абзаца подред, всеки започващ с
+     „Забележка:“, са нечитаеми на документ, който отива подписан в
+     счетоводството. */
+  const acq = {
+    id: 20, no: 9, year: '2026', date: '2026-06-06', how: 'закупуване', from_source: 'К',
+    doc_type: 'без документ', doc_no: '1', doc_date: '2026-06-06',
+    total_count: 10, sum: 100, note: 'свободна бележка',
+    items: [{ inv_number: 1, title: 'А', price: 5, fund_qty: 1 }]
+  };
+  const dom = buildDom({ 'acquisitions.get': acq, 'settings.get': {} });
+  const { window } = dom;
+  await settle();
+  await window.printAcqNoDocDoc(20);
+  await settle();
+  const t = printed(window);
+  assert.match(t, /Относно стойността:/);
+  assert.match(t, /Относно броя:/);
+  assert.match(t, /Забележка по партидата: свободна бележка/);
+  assert.equal((t.match(/Забележка/g) || []).length, 1, 'само една дума „Забележка“ в документа');
+});
+
+test('акт без обявена стойност и без опис не печата изчислена нула', async () => {
+  /* Първата редакция печаташе „Обща стойност (изчислена по инвентираните
+     документи): 0.00 лв.“ точно над бележката, че инвентирани документи няма —
+     актът сам си противоречеше. */
+  const dom = buildDom({ 'acquisitions.get': { id: 21, no: 10, year: '2026', date: '2026-06-07',
+    how: 'дарение', from_source: 'Д', total_count: 4, sum: null, items: [] }, 'settings.get': {} });
+  const { window } = dom;
+  await settle();
+  await window.printDonationDoc(21);
+  await settle();
+  const t = printed(window);
+  assert.match(t, /не е обявена в документа и не може да бъде изчислена/);
+  assert.ok(!/0\.00/.test(t), 'нула, извлечена от празен опис, не е стойност');
 });

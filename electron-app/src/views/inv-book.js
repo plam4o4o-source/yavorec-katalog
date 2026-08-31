@@ -43,8 +43,11 @@ async function renderInvBook() {
         <div class="kpi-extra">от началото на книгата</div></div></div>
       <div class="kpi ok"><div class="kpi-ico">✅</div><div class="kpi-body">
         <div class="kpi-num">${activeCopies.toLocaleString('bg-BG')}</div>
-        <div class="kpi-lbl">Налични</div><div class="kpi-extra">${mny(value)}${
-          activeCopies !== active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' заглавия' : ''
+        ${/* „Неотчислени“, не „Налични“ — в сбора влизат и документите със
+              състояние „липсващ“ и „за реставрация“ (същото броене като stockAt()
+              в КДБФ). Виж същата поправка в разпечатката по-долу. */''}
+        <div class="kpi-lbl">Неотчислени</div><div class="kpi-extra">${mny(value)}${
+          activeCopies > active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' инв. номера' : ''
         }</div></div></div>
       <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">📕</div><div class="kpi-body">
         <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
@@ -169,14 +172,26 @@ function printInvBookDoc() {
   const deacc = rows.length - active.length;
   const copies = active.reduce((s, r) => s + qtyOf(r), 0);
   const value = active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0);
+  /* „Неотчислен“ НЕ е „наличен“. Първата редакция на тази глава наричаше сбора
+     „Наличен фонд“ — а в него влизат и документите със състояние „липсващ“ и
+     „за реставрация“. Библиотека със 100 вписвания, 5 отчислени и 12 липсващи
+     получаваше прошнурован и заверен по чл. 26, ал. 2 лист, който твърди, че 95
+     документа са налични, включително 12, за които собствената ѝ проверка е
+     установила обратното. Числото е вярно (същото, което брои и stockAt() в
+     КДБФ) — сгрешена беше ДУМАТА, затова се сменя тя, а състоянията се изброяват. */
+  const byStatus = {};
+  active.forEach(r => { const k = r.status || 'без състояние'; byStatus[k] = (byStatus[k] || 0) + qtyOf(r); });
+  const notOnShelf = Object.entries(byStatus).filter(([k]) => k !== 'наличен');
   setPrintPage({ name: `Инвентарна книга — ${bg(today())}`, landscape: true, margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ИНВЕНТАРНА КНИГА</h2>
     <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
     Разпечатано на ${bg(today())} г. · <b>${rows.length}</b> вписвания (инвентарни номера) от началото на книгата,
-    от които <b>${active.length}</b> налични и <b>${deacc}</b> отчислени.<br>
-    Наличен фонд: <b>${copies}</b> библиотечни документа на стойност <b>${mny(value)}</b>${
-      copies !== active.length ? ' (един инвентарен номер може да обхваща повече от един екземпляр)' : ''}.
+    от които <b>${active.length}</b> неотчислени и <b>${deacc}</b> отчислени.<br>
+    Фонд по инвентарната книга (без отчислените): <b>${copies}</b> библиотечни документа на стойност <b>${mny(value)}</b>${
+      copies > active.length ? ' (един инвентарен номер може да обхваща повече от един екземпляр)' : ''}.${
+      notOnShelf.length ? `<br>От тях със състояние, различно от „наличен“: ${
+        notOnShelf.map(([k, n]) => esc(k) + ' — ' + n).join(', ')}.` : ''}
     Отчислените се отбелязват, но не се заличават (чл. 39).</div>
     <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Бр.</th><th>Цена</th>
     <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th>Забележка</th></tr></thead><tbody>
