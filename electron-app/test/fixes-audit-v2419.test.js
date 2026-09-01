@@ -10,39 +10,22 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const Database = require('better-sqlite3');
-const { JSDOM, VirtualConsole } = require('jsdom');
+/* Общите опори (freshDb, pdpSetup, catalogSetup …) са в helpers/audit-fixtures.js
+   от одит v2.4.20 — дотук всеки кръг ги копираше дословно. */
+const fx = require('./helpers/audit-fixtures');
 
-const APP_DIR = path.join(__dirname, '..');
-const SRC_DIR = path.join(APP_DIR, 'src');
-const VIEWS_DIR = path.join(SRC_DIR, 'views');
-const tmpDirs = [];
-function mkTmpDir(p) { const d = fs.mkdtempSync(p); tmpDirs.push(d); return d; }
-test.after(() => {
-  for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* няма значение */ } }
-});
-function fakeIpcMain() {
-  const h = new Map();
-  return { handle: (c, fn) => h.set(c, fn), invoke: (c, ...a) => h.get(c)({}, ...a), has: (c) => h.has(c) };
-}
-function freshDb(prefix) {
-  const dir = mkTmpDir(path.join(os.tmpdir(), prefix));
-  const db = new Database(path.join(dir, 'library.db'));
-  db.pragma('foreign_keys = ON');
-  db.exec(fs.readFileSync(path.join(APP_DIR, 'db', 'schema.sql'), 'utf8'));
-  return { db, dir };
-}
-const runDep = (fn) => { try { return { ok: true, data: fn() }; } catch (e) { return { ok: false, error: e.message }; } };
+const APP_DIR = fx.APP_DIR;
+const VIEWS_DIR = path.join(APP_DIR, 'src', 'views');
+test.after(fx.cleanupTmpDirs);
 
 /* ==================================================================
    1. ПАЗАЧЪТ НАПРЕД — преди ЛЮБОЕ писане, не някъде по средата
    ================================================================== */
-function startAgainstDb(userVersion) {
+function startAgainstDb(userVersion, mode) {
   const out = execFileSync(process.execPath,
-    [path.join(__dirname, 'helpers', 'newer-schema-worker.js'), String(userVersion)],
+    [path.join(__dirname, 'helpers', 'newer-schema-worker.js'), String(userVersion)].concat(mode ? [mode] : []),
     { encoding: 'utf8', timeout: 60000 });
   return JSON.parse(out.trim().split('\n').filter(l => l.startsWith('{')).pop());
 }
@@ -74,9 +57,13 @@ test('съобщението не обещава повече, отколкот�
   assert.match(c, /НЕ възстановявайте резервно копие/);
   /* Прозорецът изобщо не се отваря, тоест „Настройки“ → „Работа в мрежа“ е
      недостижимо: работно място, насочено към общата папка, няма как да се върне
-     към локална база през самата програма. Пътят трябва да е назован. */
-  assert.match(c, /dbFolder/, 'назовава как се излиза, ако обновяването не е възможно веднага');
-  assert.match(c, /config\.json/);
+     към локална база през самата програма. Пътят трябва да е назован — но САМО
+     когато наистина има ред dbFolder (одит v2.4.20: тук се проверяваше локална
+     база, а диалогът въпреки това печаташе мрежовия съвет — невярна инструкция;
+     сега мрежовият случай се проверява в собствения си режим на worker-а). */
+  const net = startAgainstDb(99, 'network');
+  assert.match(net.dialogs[0].content, /dbFolder/, 'назовава как се излиза, ако обновяването не е възможно веднага');
+  assert.match(net.dialogs[0].content, /config\.json/);
 });
 
 test('позната версия на схемата се отваря, мигрира и пише както винаги', () => {
@@ -93,19 +80,6 @@ test('позната версия на схемата се отваря, миг�
 /* ==================================================================
    2. ЗАЩИТА НА ЛИЧНИ ДАННИ — сменена парола ≠ загубена стойност
    ================================================================== */
-function pdpSetup(prefix) {
-  const { db } = freshDb(prefix);
-  db.exec('ALTER TABLE settings ADD COLUMN pdp_salt TEXT');
-  db.exec('ALTER TABLE settings ADD COLUMN pdp_verifier TEXT');
-  const pii = require('../pii-crypto');
-  const ipcMain = fakeIpcMain();
-  const ret = require('../handlers/pdp')(ipcMain, { getDb: () => db, run: runDep, logAudit: () => {} });
-  ipcMain.invoke('pdp:setup', 'редовна-парола-11');
-  const key = pii.deriveKey('редовна-парола-11',
-    Buffer.from(db.prepare('SELECT pdp_salt FROM settings WHERE id=1').get().pdp_salt, 'base64'));
-  return { db, ipcMain, ret, pii, key };
-}
-
 test('сменена от друго работно място парола не се обявява за загубени данни', () => {
   /* Дефект в поправката от v2.4.18: причината за скриване се раздели на 'locked' и
      'unreadable', но състоянието PDP_STALE (паролата е сменена на друга станция,
@@ -113,7 +87,7 @@ test('сменена от друго работно място парола не
      възстановимо: pdp:unlock нулира флага и същите ЕГН-та се четат. Картонът
      обаче инструктираше библиотекаря да ги ВЪВЕДЕ НАНОВО — тоест да пренапише
      непокътнати данни. Обратната грешка на поправяната. */
-  const { db, ret, pii, key } = pdpSetup('inv-v2419-stale-');
+  const { db, ret, pii } = fx.pdpSetup('inv-v2419-stale-');
   const foreign = pii.deriveKey('чужда-9999', pii.generateSalt(2));
   const ins = db.prepare('INSERT INTO readers (name, egn, id_card_no) VALUES (?, ?, ?)');
   // ЦЯЛАТА партида е нечетима с текущия ключ → сесията се обявява за негодна.
@@ -130,7 +104,7 @@ test('сменена от друго работно място парола не
 
 test('нечетимо поле при изправна сесия си остава „unreadable“', () => {
   // Контрол: истинският невъзстановим случай не бива да се слее с 'stale'.
-  const { db, ret, pii, key } = pdpSetup('inv-v2419-unread-');
+  const { db, ret, pii, key } = fx.pdpSetup('inv-v2419-unread-');
   const foreign = pii.deriveKey('чужда-9999', pii.generateSalt(2));
   // Един ред е нечетим, но друг се чете — сесията остава изправна.
   db.prepare('INSERT INTO readers (name, egn, id_card_no) VALUES (?, ?, ?)')
@@ -159,40 +133,13 @@ test('несъществуващото състояние „mixed“ не се 
 /* ==================================================================
    3. DUBLIN CORE — бележката за езика не измества анотацията
    ================================================================== */
-function catalogSetup(prefix) {
-  const { db, dir } = freshDb(prefix);
-  db.prepare("UPDATE settings SET lib_name = 'НЧ Тест' WHERE id = 1").run();
-  const stub = () => {};
-  const { BOOK_SELECT } = require('../handlers/books')(fakeIpcMain(), {
-    getDb: () => db, run: runDep, logAudit: stub, today: () => '2026-08-04',
-    ftsQuery: stub, cnSortKey: () => '', diffFields: () => [], scheduleCatalogWrite: stub
-  });
-  const ipcMain = fakeIpcMain();
-  const ctx = { savePath: null };
-  require('../handlers/catalog')(ipcMain, {
-    getDb: () => db, run: runDep, logAudit: stub,
-    dialog: { showSaveDialog: async () => ({ canceled: false, filePath: ctx.savePath }) },
-    getMainWindow: () => ({}), fs, path,
-    execFile: (cmd, args, opts, cb) => cb(null, '', ''),
-    BOOK_SELECT, csvCell: require('../security-utils').csvCell,
-    flushCatalogWrite: () => ({ written: true }), buildCatalogPayload: () => ({ items: [] })
-  });
-  const exportTo = async (channel, name) => {
-    ctx.savePath = path.join(dir, name);
-    const res = await ipcMain.invoke(channel);
-    assert.equal(res.ok, true, channel + ': ' + (res.error || ''));
-    return fs.readFileSync(ctx.savePath, 'utf8');
-  };
-  return { db, exportTo };
-}
-
 test('бележката за езика не заема мястото на анотацията', async () => {
   /* Дефект в поправката от v2.4.18: бележката се извеждаше ПРЕДИ анотацията, а
      „друг“ е стойност по подразбиране в номенклатурата на езиците и я няма в
      LANG_ISO — тоест бележката излизаше на съвсем обикновени записи и приемаща
      система, която взима първия dc:description, показваше „Език по описание:
      друг“ на мястото на анотацията. */
-  const { db, exportTo } = catalogSetup('inv-v2419-dc-');
+  const { db, exportTo } = fx.catalogSetup('inv-v2419-dc-');
   db.prepare("INSERT INTO books (inv_number, title, language, annotation) VALUES (1, 'Книга', 'друг', 'Истинската анотация.')").run();
   const xml = await exportTo('catalog:exportDc', 'dc.xml');
   const descs = [...xml.matchAll(/<dc:description>([^<]*)<\/dc:description>/g)].map(m => m[1]);
