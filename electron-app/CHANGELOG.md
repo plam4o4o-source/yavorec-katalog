@@ -11,6 +11,55 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.20
+
+**BG:** Десети кръг — преглед на поправките от деветия. Тежката находка е
+огледалният образ на предишната.
+
+- **Пазачът срещу по-нова база — на двете места, не на едното.** v2.4.19 премести
+  проверката в началото на стартирането (за да не се докосва базата), но САМО я
+  премести — и отвори обратния процеп: в деня на обновяването другото, вече
+  обновено работно място може да мигрира общата база в секундите, в които това
+  стартиране тече, СЛЕД проверката при отварянето. Възпроизведено детерминирано с
+  истинската програма: версията на схемата скача по средата на стартирането и
+  програмата отваряше пълна работна сесия срещу по-новата база — записваща стари
+  формати в схема, която ги чете другояче. Проверката вече се повтаря и преди
+  миграциите (както беше във v2.4.18), като при този късен отказ диалогът НЕ
+  твърди „нищо не е записано“ — казва само каквото е вярно: спряно е, преди да се
+  отвори работна сесия.
+- **Диалогът съчиняваше мрежова папка.** Абзацът с изхода („изтрийте реда
+  dbFolder от config.json … базата е обща (мрежова папка)“) се печаташе
+  безусловно — включително за чисто локална база (пуснат по-стар инсталатор върху
+  вече мигрирани данни), където такъв ред изобщо няма. Невярна инструкция на
+  екрана, чийто смисъл е точното упътване. Вече се показва само когато редът
+  наистина съществува.
+- **„Данните са запазени“ на картона беше обещание, което не винаги се
+  изпълнява.** Състоянието „ключът не разчита нито един ред“ настъпва и когато
+  единствените криптирани редове в базата са повредени — тогава отключването
+  отказва (нарочно), а не връща данните. Бележката на картона вече дава верните
+  стъпки и за двата случая, без обещанието: първо отключване с актуалната парола;
+  въвеждане наново — само ако и отключването откаже.
+- Общите тестови опори (catalogSetup, pdpSetup, jsdom харнесът) са изнесени в
+  helpers/audit-fixtures.js — дотук всеки кръг ги копираше дословно, а
+  разминаващи се копия на тестови двойници вече веднъж струваха увиснал пакет
+  (v2.4.15).
+
+5 нови регресионни теста, всеки проверен с мутация (3 мутации, всяка убива поне
+един тест); два са контролни и е проверено, че остават зелени. Цялата пакетна
+проверка: 1100 теста, 0 провала.
+
+**EN:** Tenth round — a review of the ninth round's own fixes. Moving the
+newer-schema guard to open time (v2.4.19) silently dropped the late check it
+replaced, so a shared database migrated by the other workstation *while startup
+was already past the open-time check* was accepted and written to in the old
+format — reproduced deterministically and now refused by re-checking before
+migrations, with the dialog claiming only what is true for that late path. The
+same dialog also no longer invents a network folder (the `dbFolder` escape hatch
+is shown only when the line actually exists), and the reader card's "data is
+preserved" promise — false when the only encrypted rows are corrupt — is replaced
+by steps that are correct in both cases. Shared test fixtures extracted to
+helpers/audit-fixtures.js. 5 new mutation-verified tests; 1100 total, 0 failures.
+
 ## v2.4.19
 
 **BG:** Девети кръг — преглед на поправките от осмия. Кръгът, в който бяха

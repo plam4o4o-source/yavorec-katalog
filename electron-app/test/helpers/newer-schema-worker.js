@@ -8,7 +8,7 @@
    очаквано поведение; освен това main.js се зарежда веднъж на процес и базата
    трябва да е засята ПРЕДИ зареждането.
 
-   Извиква се с: node newer-schema-worker.js <user_version>
+   Извиква се с: node newer-schema-worker.js <user_version> [режим]
    Отпечатва един ред JSON: { exitCode, dialogs, sumAfter, versionAfter,
    consentAfter, journalAfter, untouched, sidecarsAfter }.
 
@@ -16,7 +16,20 @@
    най-важното: при отказ базата не е докосната. `untouched` сравнява контролната
    сума на целия файл и наличието на -wal/-shm до него, а `consentAfter` и
    `journalAfter` назовават поименно двете места, където по-ранен вариант на
-   пазача остави следа. */
+   пазача остави следа.
+
+   Режими (одит v2.4.20):
+     (без)     — локална база в userData, както винаги.
+     network   — config.json сочи dbFolder към „споделена“ папка и базата е ТАМ.
+                 Диалогът за по-нова база трябва да покаже изхода през dbFolder
+                 само в този режим — при локална база такъв ред в config.json
+                 няма и съветът би бил невярен.
+     race      — базата тръгва с ПОЗНАТАТА версия (пазачът при отварянето я
+                 пуска), а ДОКАТО initDb() тече, втора връзка я вдига до 99 —
+                 точно каквото прави другото, вече обновено работно място в деня
+                 на обновяването. Вдигането е закачено за четенето на schema.sql
+                 (fs.readFileSync се обвива), тоест става детерминирано СЛЕД
+                 проверката при отварянето и ПРЕДИ runMigrations(). */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -37,10 +50,19 @@ const MAIN_ID = require.resolve(path.join(APP_DIR, 'main.js'));
    двойници в тази папка). */
 const wantVersion = parseInt(process.argv[2], 10);
 if (!Number.isFinite(wantVersion)) return;
+const MODE = process.argv[3] || 'local';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-newer-db-'));
 const userData = path.join(dir, 'userData');
 fs.mkdirSync(userData, { recursive: true });
-const dbPath = path.join(userData, 'library.db');
+let dbPath = path.join(userData, 'library.db');
+if (MODE === 'network') {
+  // „Споделената“ папка: config.json я сочи, базата живее там — както при
+  // истинска работа в мрежа (resolveDbDir чете dbFolder от config.json).
+  const shared = path.join(dir, 'shared');
+  fs.mkdirSync(shared, { recursive: true });
+  fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({ dbFolder: shared }));
+  dbPath = path.join(shared, 'library.db');
+}
 
 /* Напълно ЗДРАВА база: истинската схема, плюс версия на схемата, каквато подадем.
    Два засадени реда, всеки — мярка за нещо различно:
@@ -57,10 +79,36 @@ const dbPath = path.join(userData, 'library.db');
   seed.pragma('user_version = ' + wantVersion);
   seed.close();
 }
+if (MODE === 'race') {
+  /* Симулира се ДРУГОТО, вече обновено работно място: втора, независима връзка
+     вдига версията на схемата, докато нашият initDb() е по средата. Мигът е
+     закачен детерминирано за четенето на schema.sql — то е СЛЕД проверката при
+     отварянето и ПРЕДИ runMigrations(). Базата тръгва с познатата версия
+     (argv[2] тук е версията, ДО която другата станция я вдига). */
+  const m = /const CURRENT_SCHEMA_VERSION = (\d+);/.exec(fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8'));
+  const current = parseInt(m[1], 10);
+  {
+    const fix = new Database(dbPath);
+    fix.pragma('user_version = ' + current);
+    fix.close();
+  }
+  const realRead = fs.readFileSync;
+  let bumped = false;
+  fs.readFileSync = function (p, ...rest) {
+    if (!bumped && String(p).endsWith('schema.sql')) {
+      bumped = true;
+      const other = new Database(dbPath);
+      other.pragma('user_version = ' + wantVersion);
+      other.close();
+    }
+    return realRead.call(fs, p, ...rest);
+  };
+}
+
 const hashOf = () => (fs.existsSync(dbPath)
   ? crypto.createHash('sha256').update(fs.readFileSync(dbPath)).digest('hex')
   : null);
-const sidecarsOf = () => fs.readdirSync(userData).filter(f => f.startsWith('library.db-')).sort();
+const sidecarsOf = () => fs.readdirSync(path.dirname(dbPath)).filter(f => f.startsWith('library.db-')).sort();
 const hashBefore = hashOf();
 const sidecarsBefore = sidecarsOf();
 
