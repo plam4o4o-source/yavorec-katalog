@@ -56,19 +56,36 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
       const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = @department' : ''}`)
         .get(s.department ? { department: s.department } : {});
-      /* Номер и година на протокола. Като при актовете за отчисляване: предлага се
-         следващият свободен за годината, а проверката се повтаря в записа. */
+      /* Номер и година на протокола. Точно както при партидите (acquisitions:create):
+         schema.sql няма UNIQUE(year, no) и не може да го получи наготово — съществуващи
+         бази може вече да носят дубликати и миграцията би счупила стартирането. Затова
+         номерът се ИЗБИРА и се ПРОВЕРЯВА вътре в транзакция с .immediate(): правото на
+         запис се взима ПРЕДИ проверката, тоест между нея и INSERT-а никой друг не може
+         да вмъкне същия номер.
+         Одит v2.4.18 (преглед на поправките от v2.4.17): дотук коментарът тук твърдеше,
+         че „проверката се повтаря в записа“, а такава проверка нямаше — нито транзакция.
+         Две работни места към обща мрежова база (изрично поддържан режим) получаваха
+         един и същ MAX(no)+1 и издаваха ДВА протокола по чл. 40 с номер № N/година;
+         ръчно въведен вече зает номер минаваше също така мълчаливо. */
       const year = String(s.date || '').slice(0, 4) || String(new Date().getFullYear());
-      const no = parseInt(s.no, 10)
-        || ((db.prepare('SELECT MAX(no) AS m FROM inventory_sessions WHERE year = ?').get(year).m || 0) + 1);
-      const info = db.prepare(`
-        INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3,
-                                        pool_size, closed, no, year, order_no)
-        VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0, @no, @year, @order_no)
-      `).run(Object.assign({}, s, {
-        department: s.department || null, pool_size: pool.n, no, year, order_no: s.order_no || null
-      }));
-      return info.lastInsertRowid;
+      const tx = db.transaction(() => {
+        const typed = parseInt(s.no, 10);
+        const no = typed
+          || ((db.prepare('SELECT MAX(no) AS m FROM inventory_sessions WHERE year = ?').get(year).m || 0) + 1);
+        if (db.prepare('SELECT 1 FROM inventory_sessions WHERE year = ? AND no = ?').get(year, no)) {
+          throw new Error('Протокол № ' + no + '/' + year + ' вече съществува — най-вероятно е създаден от друго '
+            + 'работно място към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
+        }
+        const info = db.prepare(`
+          INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3,
+                                          pool_size, closed, no, year, order_no)
+          VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0, @no, @year, @order_no)
+        `).run(Object.assign({}, s, {
+          department: s.department || null, pool_size: pool.n, no, year, order_no: s.order_no || null
+        }));
+        return info.lastInsertRowid;
+      });
+      return tx.immediate();
     })
   );
   ipcMain.handle('inventorySessions:get', (e, id) =>

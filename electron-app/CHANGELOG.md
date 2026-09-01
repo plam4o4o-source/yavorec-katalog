@@ -11,6 +11,70 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.18
+
+**BG:** Осми кръг — преглед на поправките от седмия. Двете тежки находки са от
+един и същ род: и двете се проявяват при **две работни места към обща мрежова
+база** (изрично поддържан режим) и всяка подкопава точно гаранцията, която
+v2.4.17 обяви за установена.
+
+- **Номерът на протокола по чл. 40 можеше да се повтори.** Предлагаше се с
+  MAX(№)+1, а коментарът в кода твърдеше, че проверката се повтаря при записа —
+  такава проверка нямаше, нито транзакция. Две станции получаваха един и същ
+  номер и издаваха ДВА протокола № N/година; ръчно въведен вече зает номер
+  минаваше също така мълчаливо. Сега номерът се избира и проверява в една
+  транзакция с право на запис — същият модел като при партидите и актовете.
+- **По-стара версия отваряше без възражение база, мигрирана от по-нова.**
+  Миграция 11 от v2.4.17 обръща смисъла на празната стойност в партида (0 вече
+  означава „обявена нула“, а не „непопълнено“). Станция, която още не е
+  обновена, продължаваше да пише 0 за непопълнено поле — и обновената станция
+  после печаташе „Обща стойност по документа: 0.00 лв.“ като обявена нула върху
+  подписан счетоводен документ. Обновяването на работните места едно по едно е
+  нормалното състояние в деня на обновяването, тоест това не е рядък случай.
+  Сега програмата спира със свое собствено съобщение и **не докосва базата** —
+  съветите от общия диалог за повредена база („възстановете резервно копие“) са
+  опасни тук и вече не могат да се появят: базата е здрава, а възстановяването
+  би изтрило работата на другите станции.
+- **Читателският картон обясняваше скритите лични данни винаги с „защитата е
+  заключена — отключете и отпечатайте наново“.** При несъвпадаща парола
+  отключването не помага: библиотекарят изпълняваше указанието, печаташе пак и
+  получаваше същия картон, а подписваният документ назоваваше грешна причина.
+  Причината вече идва от самата защита и документът я казва точно, заедно с
+  единствения път за поправка (въвеждане наново).
+- **Износ:** датата в задължителното поле UNIMARC 801 $c се изнасяше като
+  „2026-09-01“, а подполето е дата без разделители — стриктният валидатор, заради
+  когото полето изобщо беше добавено, отхвърляше точно него. Отделно `dc:language`
+  в Dublin Core още изнасяше „японски“ дословно: поправката на кодираното поле от
+  v2.4.17 беше направена за UNIMARC и пропусната тук. Непознат език вече дава
+  `und` и в двата износа, а наименованието се пази в бележка.
+- Дребно: списъкът с проверки показваше „null“ в колоната „В обхвата“ за
+  наследен ред без записан обхват.
+
+Проверена и отхвърлена находка: таванът от 1900 знака за писмото до читател не е
+регресия. Ограничението е на **Windows** (обработчикът на `mailto:` получава
+адреса през командния ред и го реже около 2000 знака), а програмата се издава
+само за Windows — тоест важи за всеки пощенски клиент там, включително
+Thunderbird. Отказът сочи работеща алтернатива („Копирай текста“), а мълчаливо
+отрязаното писмо се вписваше като изпратено.
+
+11 нови регресионни теста, всеки проверен с мутация (7 мутации в production кода,
+всяка убива поне един тест); два от тестовете са контролни — те трябва да
+ОСТАНАТ зелени при мутация и това е проверено изрично.
+
+**EN:** Eighth round — a review of the seventh round's own fixes. The two serious
+findings both affect the supported two-workstation shared-database mode: the
+чл. 40 inventory protocol number could be issued twice (no transaction and no
+duplicate re-check, despite a code comment claiming otherwise), and an older
+installation would silently open a database already migrated by a newer one —
+significant because v2.4.17's migration 11 inverted the meaning of a zero
+acquisition value, so the older station kept writing zeros that the newer one
+then printed as a declared zero on a signed accounting document. Startup now
+stops with its own message and leaves the database untouched. Also: the reader
+card no longer blames a locked data protection when the real cause is a
+mismatched password (unlocking does not help there), UNIMARC 801 $c now uses the
+ISO 8601 basic form YYYYMMDD, and Dublin Core gets the same `und` language
+fallback UNIMARC received. 11 new mutation-verified tests.
+
 ## v2.4.17
 
 **BG:** Седми кръг на одита — този път с един-единствен предмет: **документите,
@@ -133,7 +197,7 @@ reconciliation, undated documents disclosed rather than silently dropped), the
 inventory book printout, the daily register and annual report (column grouping,
 readable CSV headers with totals, no blank signed form), and the UNIMARC/Dublin
 Core/CSV exports (unique 001, deaccessioned records excluded, coded language
-field, field 801, series field, copy counts). 28 new mutation-verified tests.
+field, field 801, series field, copy counts). 33 new mutation-verified tests.
 
 ## v2.4.16
 
