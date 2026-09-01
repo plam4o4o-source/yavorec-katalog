@@ -55,6 +55,7 @@ async function renderAcq() {
 async function acqForm() {
   const y = yr();
   const no = await call(window.api.acquisitions.nextNo(y));
+  const s = await call(window.api.settings.get());
   modal('Нова партида — обща регистрация', `
     <div class="note"><b>Чл. 14, ал. 2</b> — вписват се: дата и номер, откъде и как са постъпили, вид/номер/дата на
     първичния документ, общ брой документи.</div>
@@ -72,10 +73,19 @@ async function acqForm() {
         ${fld('Дата на документа', 'doc_date', { val: today(), type: 'date' })}
       </div>
       <div class="grid g2">
-        ${fld('Обща стойност по документа (лв.)', 'sum', { type: 'number', step: '0.01' })}
+        ${fld('Обща стойност по документа (лв.)', 'sum', { type: 'number', step: '0.01', hint: 'оставете празно, ако документът не обявява стойност' })}
         ${fld('Адрес на дарителя', 'donor_address', { hint: 'задължително при дарение — чл. 6, ал. 5' })}
       </div>
       ${fld('Забележка', 'note', { type: 'textarea', rows: 2 })}
+      <fieldset><legend>Комисия — подписва акта за дарение / протокола по чл. 3, ал. 2</legend>
+        <div class="hint" style="margin-bottom:6px">Имената се запомнят В ПАРТИДАТА, за да остане препечатаният акт верен и след като
+        Настройките бъдат сменени от следващ акт за отчисляване.</div>
+        <div class="grid g3">
+          ${fld('Член 1', 'committee1', { val: s ? s.committee1 || '' : '' })}
+          ${fld('Член 2', 'committee2', { val: s ? s.committee2 || '' : '' })}
+          ${fld('Член 3 (счетоводител)', 'committee3', { val: s ? s.committee3 || '' : '' })}
+        </div>
+      </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveAcq()">Заведи партидата</button>`);
@@ -113,6 +123,48 @@ function acqMark(i) { return acqQty(i) !== 1 ? acqQty(i) + ' × ' : ''; }
    Закръглянето е същото, което ползва и handlers/account.js (toCents). */
 const cents = (n) => Math.round((Number(n) || 0) * 100);
 function acqDiffers(declared, items) { return cents(declared) !== cents(acqValue(items)); }
+/* Обявената в първичния документ стойност, или null, ако документът не обявява
+   такава. Одит v2.4.17: разпечатките четяха `a.sum || acqValue(a.items)` и
+   печатаха ИЗЧИСЛЕНИЯ сбор под надписа „Обща стойност по документа“, без да го
+   казват — а понеже старата схема пазеше празното поле като 0, това се случваше
+   при ВСЯКА партида без въведена стойност. Отделно изричната нула беше
+   неразличима от непопълнено поле. Схемата вече пази NULL (миграция 11). */
+function acqDeclared(a) {
+  if (!a || a.sum === null || a.sum === undefined || a.sum === '') return null;
+  const n = Number(a.sum);
+  return Number.isFinite(n) ? n : null;
+}
+/* Комисията, подписала партидата. СНИМКА от завеждането, не живите Настройки:
+   handlers/deaccession-acts.js презаписва settings.committee1..3 при всеки утвърден
+   акт за отчисляване, тоест препечатан акт за дарение от януари назоваваше
+   комисията от последното отчисляване. Стара партида (NULL) се печата с празни
+   редове за подпис — по-добре празно, отколкото чуждо име под чужд документ. */
+function acqCommittee(a) {
+  const names = [a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc);
+  return names.length ? names.join(', ') : '…………………';
+}
+// Същите имена, но подредени за реда за подпис: „1. Иванов 2. Петров 3. …".
+function acqSigNames(a) {
+  const names = [a.committee1, a.committee2, a.committee3];
+  return names.some(Boolean)
+    ? names.map((n, i) => (i + 1) + '. ' + (n ? esc(n) : '…………')).join(' ')
+    : '1. ………… 2. ………… 3. …………';
+}
+/* Обявеният общ брой срещу изброените отдолу. Актът излиза подписан и отива в
+   счетоводството; заглавието му казва „Общ брой документи: 50“, а таблицата под
+   него изброява 3 — дотук без нито дума. */
+function acqCountNote(a) {
+  const listed = acqCount(a.items), declared = Number(a.total_count) || 0;
+  if (listed === declared) return '';
+  if (!(a.items || []).length) {
+    return `<b>Относно описа:</b> към момента на отпечатване по партидата няма нито един инвентиран документ.
+      Настоящият документ удостоверява само общата регистрация по чл. 14 и НЕ съдържа опис на конкретни документи.<br>`;
+  }
+  return `<b>Относно броя:</b> обявеният общ брой (${declared}) не съвпада със сбора на изброените по-долу инвентирани документи (${listed}). `
+    + (listed < declared
+      ? `Останалите ${declared - listed} все още не са вписани в инвентарната книга и не се удостоверяват с настоящия опис.`
+      : `Изброените надхвърлят обявения брой с ${listed - declared} — проверете партидата преди подписване.`) + '<br>';
+}
 function acqHasMultiples(items) { return (items || []).some(i => acqQty(i) !== 1); }
 // Означението пред цената на един ред в разпечатките. Одит v2.4.14: редът ОБЩО
 // вече беше Σ(цена × бройка), но всеки ред печаташе гола единична цена и в
@@ -132,7 +184,10 @@ async function openAcq(id) {
       <div class="card"><div class="num">${Math.max(0, a.total_count - acqCount(a.items))}</div><div class="lbl">Остават</div></div>
     </div>
     <div class="hint" style="margin-bottom:10px">${esc(a.how || '')} · ${esc(a.from_source || '')} ·
-      ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}</div>
+      ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}<br>
+      ${acqDeclared(a) != null ? 'Обявена стойност по документа: <b>' + mny(acqDeclared(a)) + '</b>'
+        : 'Документът не обявява стойност — разпечатките сумират оценките на инвентираните документи.'}
+      · Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || 'не е записана (стара партида) — актът се печата с празни редове за подпис'}</div>
     ${a.items.length ? `<div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
       ${a.items.map(i => `<tr><td class="num">${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td>
       <td class="num">${esc(i.year || '')}</td><td class="num">${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
@@ -147,48 +202,69 @@ window.openAcq = openAcq;
 async function printDonationDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
-  const s = SETTINGS_CACHE || {};
+  const declared = acqDeclared(a);
   setPrintPage({ name: `Акт за дарение № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за приемане на дарение на библиотечни документи</span></h2>
-    <div class="pmeta">На основание чл. 6 от Наредба № 3 от 18.11.2014 г. комисия в състав
-    ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'} прие дарение от:<br>
+    <h2>АКТ № ${a.no} / ${a.year}<br><span style="font-size:12pt">за приемане на дарение на библиотечни документи</span></h2>
+    <div class="pmeta">Днес, ${bg(a.date)} г., на основание чл. 6 от Наредба № 3 от 18.11.2014 г. комисия в състав
+    ${acqCommittee(a)} прие дарение от:<br>
     <b>Дарител:</b> ${esc(a.from_source || '')}<br><b>Адрес:</b> ${esc(a.donor_address || '…………………')}<br>
-    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща стойност:</b> ${mny(a.sum || acqValue(a.items))}<br>
-    ${(a.sum && acqDiffers(a.sum, a.items)) ? `<b>Забележка:</b> обявената стойност (${mny(a.sum)}) се различава от сбора
+    <b>Общ брой документи по документа:</b> ${a.total_count}
+    ${/* Ред за стойност се печата само когато има ОТКЪДЕ да дойде число: обявена
+          стойност, или поне един инвентиран документ. Иначе актът твърдеше
+          „Обща стойност (изчислена по инвентираните документи): 0.00 лв.“ точно
+          над бележката, че инвентирани документи няма — сам си противоречи. */''}
+    ${declared != null
+      ? `&nbsp; <b>Обща стойност по документа:</b> ${mny(declared)}<br>`
+      : (a.items.length
+        ? `&nbsp; <b>Обща стойност (изчислена по инвентираните документи — документът не обявява стойност):</b> ${mny(acqValue(a.items))}<br>`
+        : `<br><b>Обща стойност:</b> не е обявена в документа и не може да бъде изчислена — по партидата още няма инвентирани документи.<br>`)}
+    ${(declared != null && acqDiffers(declared, a.items)) ? `<b>Относно стойността:</b> обявената стойност (${mny(declared)}) се различава от сбора
     на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
+    ${acqCountNote(a)}
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${acqQty(i)}</td><td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="5"><b>ОБЩО ${acqCount(a.items)} документа</b></td><td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>` : ''}
     <div class="pmeta">Актът е съставен в три екземпляра — за счетоводството, за библиотеката и за дарителя.</div>
-    ${ssig(['Дарител: …………………', 'Комисия: …………………', 'УТВЪРДИЛ: …………………'])}</div>`);
+    ${ssig(['Дарител: …………………', 'Комисия: ' + acqSigNames(a), 'УТВЪРДИЛ: …………………'])}</div>`);
 }
 window.printDonationDoc = printDonationDoc;
 async function printAcqNoDocDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
   const s = SETTINGS_CACHE || {};
-  const total = a.sum || acqValue(a.items);
+  const declared = acqDeclared(a);
   setPrintPage({ name: `Протокол за придобиване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2>ПРОТОКОЛ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за придобиване на библиотечни документи без съпроводителен документ</span></h2>
-    <div class="pmeta">Днес, ${bg(a.date)} г., комисия в състав ${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ') || '…………………'},
+    <h2>ПРОТОКОЛ № ${a.no} / ${a.year}<br><span style="font-size:12pt">за придобиване на библиотечни документи без съпроводителен документ</span></h2>
+    <div class="pmeta">Днес, ${bg(a.date)} г., комисия в състав ${acqCommittee(a)},
     установи наличието в библиотеката на посочените по-долу документи, за които <b>липсва</b> първичен счетоводен документ по чл. 3, ал. 2
     от Наредба № 3 от 18.11.2014 г. Комисията извърши експертна оценка на стойността им, за да послужи настоящият протокол като основание
     за редовно вписване в Книгата за движение на библиотечния фонд и в инвентарната книга.<br>
     <b>Начин на постъпване:</b> ${esc(a.how || '')} &nbsp; <b>Откъде/от кого:</b> ${esc(a.from_source || '')}<br>
-    <b>Общ брой документи:</b> ${a.total_count} &nbsp; <b>Обща оценена стойност:</b> ${mny(total)}
-    ${acqDiffers(total, a.items) ? `<br><b>Забележка:</b> обявената стойност по документа (${mny(total)}) се различава от
-    сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).` : ''}
-    ${a.note ? '<br><b>Забележка:</b> ' + esc(a.note) : ''}</div>
+    <b>Общ брой документи:</b> ${a.total_count}
+    ${declared != null
+      ? `&nbsp; <b>Обща оценена стойност:</b> ${mny(declared)}<br>`
+      : (a.items.length
+        ? `&nbsp; <b>Обща стойност по описа (сбор на оценките на изброените документи):</b> ${mny(acqValue(a.items))}<br>`
+        : `<br><b>Обща оценена стойност:</b> не е определена — по партидата още няма инвентирани документи.<br>`)}
+    ${(declared != null && acqDiffers(declared, a.items)) ? `<b>Относно стойността:</b> обявената при завеждането стойност (${mny(declared)}) се различава от
+    сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
+    ${acqCountNote(a)}
+    ${/* Трите пояснения по-горе носят РАЗЛИЧНИ етикети („Относно стойността“,
+          „Относно броя“, „Относно описа“) именно защото могат да излязат
+          едновременно: три последователни абзаца, всеки започващ с „Забележка:“,
+          са нечетими на документ, който отива подписан в счетоводството. Долният
+          ред е свободната бележка на самата партида. */''}
+    ${a.note ? '<b>Забележка по партидата:</b> ' + esc(a.note) : ''}</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th><th>Бр.</th><th>Оценена стойност</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td><td>${acqQty(i)}</td><td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="5"><b>ОБЩО ${acqCount(a.items)} документа</b></td><td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>`
     : '<div class="pmeta">Все още няма инвентирани документи по тази партида.</div>'}
     <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,
     част № 1, като заместващ първичен документ.</div>
-    ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${ssig(['Комисия: ' + acqSigNames(a), 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printAcqNoDocDoc = printAcqNoDocDoc;
 async function delAcq(id) {

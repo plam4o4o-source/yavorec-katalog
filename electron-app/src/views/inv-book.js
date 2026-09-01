@@ -43,8 +43,11 @@ async function renderInvBook() {
         <div class="kpi-extra">от началото на книгата</div></div></div>
       <div class="kpi ok"><div class="kpi-ico">✅</div><div class="kpi-body">
         <div class="kpi-num">${activeCopies.toLocaleString('bg-BG')}</div>
-        <div class="kpi-lbl">Налични</div><div class="kpi-extra">${mny(value)}${
-          activeCopies !== active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' заглавия' : ''
+        ${/* „Неотчислени“, не „Налични“ — в сбора влизат и документите със
+              състояние „липсващ“ и „за реставрация“ (същото броене като stockAt()
+              в КДБФ). Виж същата поправка в разпечатката по-долу. */''}
+        <div class="kpi-lbl">Неотчислени</div><div class="kpi-extra">${mny(value)}${
+          activeCopies > active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' инв. номера' : ''
         }</div></div></div>
       <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">📕</div><div class="kpi-body">
         <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
@@ -158,21 +161,49 @@ function invBookFilter(q) {
 window.invBookFilter = invBookFilter;
 function printInvBookDoc() {
   const rows = window._INVBOOK_ROWS || [];
+  /* Разпечатката е меродавният документ по чл. 26 и се прошнурова и заверява с
+     подпис — тя трябва да казва сама какво съдържа. Дотук в главата ѝ стоеше
+     единствено „записи: N", където N са РЕДОВЕТЕ, отчислените включително: числото
+     не е нито наличният фонд, нито броят документи (един ред може да е няколко
+     екземпляра), а под него следваше таблица, в която отчислените се различават
+     само по това дали в колоната „№/дата на акт" има нещо. */
+  const qtyOf = (r) => (r.quantity == null ? 1 : Number(r.quantity) || 0);
+  const active = rows.filter(r => r.status !== 'отчислен');
+  const deacc = rows.length - active.length;
+  const copies = active.reduce((s, r) => s + qtyOf(r), 0);
+  const value = active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0);
+  /* „Неотчислен“ НЕ е „наличен“. Първата редакция на тази глава наричаше сбора
+     „Наличен фонд“ — а в него влизат и документите със състояние „липсващ“ и
+     „за реставрация“. Библиотека със 100 вписвания, 5 отчислени и 12 липсващи
+     получаваше прошнурован и заверен по чл. 26, ал. 2 лист, който твърди, че 95
+     документа са налични, включително 12, за които собствената ѝ проверка е
+     установила обратното. Числото е вярно (същото, което брои и stockAt() в
+     КДБФ) — сгрешена беше ДУМАТА, затова се сменя тя, а състоянията се изброяват. */
+  const byStatus = {};
+  active.forEach(r => { const k = r.status || 'без състояние'; byStatus[k] = (byStatus[k] || 0) + qtyOf(r); });
+  const notOnShelf = Object.entries(byStatus).filter(([k]) => k !== 'наличен');
   setPrintPage({ name: `Инвентарна книга — ${bg(today())}`, landscape: true, margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ИНВЕНТАРНА КНИГА</h2>
     <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
-    Разпечатано на ${bg(today())} · записи: ${rows.length}</div>
-    <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
-    <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Забележка</th></tr></thead><tbody>
-    ${rows.map(r => `<tr><td>${bg(r.register_date)}</td><td>${r.inv_number ?? ''}</td>
+    Разпечатано на ${bg(today())} г. · <b>${rows.length}</b> вписвания (инвентарни номера) от началото на книгата,
+    от които <b>${active.length}</b> неотчислени и <b>${deacc}</b> отчислени.<br>
+    Фонд по инвентарната книга (без отчислените): <b>${copies}</b> библиотечни документа на стойност <b>${mny(value)}</b>${
+      copies > active.length ? ' (един инвентарен номер може да обхваща повече от един екземпляр)' : ''}.${
+      notOnShelf.length ? `<br>От тях със състояние, различно от „наличен“: ${
+        notOnShelf.map(([k, n]) => esc(k) + ' — ' + n).join(', ')}.` : ''}
+    Отчислените се отбелязват, но не се заличават (чл. 39).</div>
+    <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Бр.</th><th>Цена</th>
+    <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th>Забележка</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
       <td>${(r.checks || []).map(c => bg(c)).join(' ')}</td>
       <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
-      <td>${esc(r.year || '')}</td><td>${mny(r.price)}</td>
+      <td>${esc(r.year || '')}</td><td>${qtyOf(r)}</td><td>${mny(r.price)}</td>
       <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(r.call_number || '')}</td>
-      <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td><td>${esc(r.description || '')}</td></tr>`).join('')}
+      <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td>
+      <td>${esc(r.status || '')}</td><td>${esc(r.description || '')}</td></tr>`).join('')}
     </tbody></table>
-    <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} записа. Листовете се прошнуроват, номерират, подпечатват и
+    <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} вписвания. Листовете се прошнуроват, номерират, подпечатват и
     заверяват с подписа на ръководителя (чл. 26, ал. 2).</div>
     ${ssig(['Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………'), esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': ' + esc((SETTINGS_CACHE || {}).director || '…………………')])}</div>`);
 }

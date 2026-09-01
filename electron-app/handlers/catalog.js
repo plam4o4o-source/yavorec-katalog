@@ -319,7 +319,19 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const w = s.split(/\s+/);
     return w.length > 1 ? { a: w[w.length - 1], b: w.slice(0, -1).join(' ') } : { a: s, b: '' };
   }
-  function marcRecord(b) {
+  /* Контролният номер на записа (UNIMARC 001) трябва да е УНИКАЛЕН в рамките на
+     файла — приемащата система отхвърля или, по-лошо, презаписва запис с вече
+     срещнат 001. Дотук беше `b.inv_number ?? b.id`: инвентарният номер е UNIQUE в
+     схемата, но при документ БЕЗ инвентарен номер се падаше обратно към вътрешния
+     rowid, който спокойно може да съвпадне с нечий чужд инвентарен номер (книга с
+     инв. № 7 и некаталогизиран запис с id 7 дават два записа с 001 = 7).
+     Затова резервният номер носи представка, каквато инвентарен номер няма как да
+     има (колоната е INTEGER). Същото важи и за dc:identifier. */
+  function recordId(b) {
+    return (b.inv_number === null || b.inv_number === undefined || b.inv_number === '')
+      ? 'invlib-id-' + b.id : String(b.inv_number);
+  }
+  function marcRecord(b, s) {
     const df = [];
     const add = (tag, i1, i2, subs) => {
       const parts = subs.filter(([, v]) => String(v ?? '').trim() !== '');
@@ -329,31 +341,49 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         `\n    </datafield>`);
     };
     if (b.isbn) add('010', ' ', ' ', [['a', b.isbn]]);
-    if (b.language) add('101', '0', ' ', [['a', LANG_ISO[b.language] || b.language]]);
-    add('200', '1', ' ', [['a', b.title], ['e', b.subtitle], ['f', b.author]]);
+    /* 101$a е КОДИРАНО поле — трибуквен код по ISO 639-2. Дотук непознат за
+       таблицата език влизаше дословно („японски“), тоест файлът съдържаше кодирано
+       поле с некодирана стойност и валидиращите системи го отхвърлят. Непознатият
+       език става `und` (undetermined), а оригиналното наименование се пази в обща
+       бележка 300, за да не се загуби. */
+    const langCode = b.language ? (LANG_ISO[b.language] || 'und') : '';
+    if (langCode) add('101', '0', ' ', [['a', langCode]]);
+    // $h е „номер на част“ — томът на многотомно издание. Дотук той пътуваше в
+    // поле 225 ($v) БЕЗ задължителното $a, тоест като поредица без заглавие.
+    add('200', '1', ' ', [['a', b.title], ['e', b.subtitle], ['f', b.author], ['h', b.volume]]);
     add('210', ' ', ' ', [['a', b.city], ['c', b.publisher], ['d', b.year]]);
     add('215', ' ', ' ', [['a', b.pages]]);
-    if (b.volume) add('225', ' ', ' ', [['v', b.volume]]);
+    // 225 = заявка за поредица. $a (заглавие на поредицата) е задължително, затова
+    // полето се строи само когато поредица наистина има.
+    if (b.series) add('225', ' ', ' ', [['a', b.series], ['v', b.series_no]]);
+    if (b.language && langCode === 'und') add('300', ' ', ' ', [['a', 'Език: ' + b.language]]);
     add('330', ' ', ' ', [['a', b.annotation]]);
-    for (const kw of String(b.keywords || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
+    for (const kw of String(b.keywords || '').split(/[,;]/).map(s2 => s2.trim()).filter(Boolean)) {
       add('606', ' ', ' ', [['a', kw]]);
     }
     add('675', ' ', ' ', [['a', b.udk]]);
     const n = splitName(b.author);
     if (n) add('700', ' ', '1', [['a', n.a], ['b', n.b]]);
+    /* 801 (Източник на записа) е задължително поле в UNIMARC и дотук липсваше
+       изцяло: приемащата система нямаше как да разбере от коя библиотека идват
+       записите — при сводния каталог това е точно въпросът, на който файлът трябва
+       да отговори. $a страна, $b агенция (библиотеката), $c дата на обработката,
+       $g правила за каталогизация. */
+    const agency = ((s || {}).lib_name || (s || {}).org || '').trim();
+    add('801', ' ', '0', [['a', 'BG'], ['b', agency], ['c', new Date().toISOString().slice(0, 10)], ['g', 'unimarc']]);
     // 995 е полето за екземпляри в българската практика (COMARC).
     add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', b.call_number],
       ['o', b.category_name], ['r', b.status]]);
     return `  <record>\n` +
       `    <leader>     nam  22     3a 4500</leader>\n` +
-      `    <controlfield tag="001">${xesc(b.inv_number ?? b.id)}</controlfield>\n` +
+      `    <controlfield tag="001">${xesc(recordId(b))}</controlfield>\n` +
       df.join('\n') + `\n  </record>`;
   }
-  function buildMarcXml(books) {
+  function buildMarcXml(books, s) {
     return `<?xml version="1.0" encoding="UTF-8"?>\n` +
       `<!-- UNIMARC в MARCXML структура. Изведено от библиотечна система „InvLib“. -->\n` +
       `<collection xmlns="http://www.loc.gov/MARC21/slim">\n` +
-      books.map(marcRecord).join('\n') + `\n</collection>\n`;
+      books.map(b => marcRecord(b, s)).join('\n') + `\n</collection>\n`;
   }
   function buildDublinCore(books, s) {
     const rec = (b) => {
@@ -368,7 +398,9 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       put('type', b.category_name || 'text');
       put('format', b.pages);
       put('identifier', b.isbn ? 'ISBN ' + b.isbn : '');
-      put('identifier', 'inv:' + (b.inv_number ?? b.id));
+      // Същата представка като при UNIMARC 001 — иначе документ без инвентарен
+      // номер получава „inv:<rowid>“, който може да съвпадне с чужд инвентарен номер.
+      put('identifier', 'inv:' + recordId(b));
       put('coverage', b.city);
       put('rights', s.lib_name || s.org || '');
       for (const kw of String(b.keywords || '').split(/[,;]/).map(x => x.trim()).filter(Boolean)) put('subject', kw);
@@ -379,8 +411,26 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       `<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n` +
       books.map(rec).join('\n') + `\n</metadata>\n`;
   }
+  /* Изнасяните навън записи следват СЪЩИТЕ изключения като онлайн каталога
+     (buildCatalogPayload в main.js и двете броячки в catalog:status): без
+     отчислени и без служебния отдел. Дотук UNIMARC и Dublin Core изнасяха ЦЯЛАТА
+     таблица: сводният каталог получаваше записи за документи, които библиотеката
+     вече не притежава (чл. 30 – 39 ги е отчислила), плюс служебните екземпляри,
+     които никога не се предлагат на читател. Дотук числото в потвърждението
+     („N записа") също броеше тях. */
+  /* NULL-безопасно, за разлика от каталожния домейн по-горе, и това е съзнателна
+     разлика: онлайн каталогът обещава наличност пред читател и там непознат статус
+     основателно се пази вътре, а тук файлът е ПРЕНОС на записи към COBISS или към
+     сводния каталог — да се изгуби запис при мигриране, защото статусът му е NULL
+     (внесена база отпреди enum тригера), е по-тежко от това да пътува със статус,
+     който приемащата система вижда дословно в 995$r. */
+  const EXPORT_WHERE = `WHERE COALESCE(b.status,'') != 'отчислен' AND COALESCE(b.department,'') != 'служебен'`;
   function exportBooksFor() {
-    return getDb().prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
+    return getDb().prepare(`${BOOK_SELECT} ${EXPORT_WHERE} ORDER BY b.inv_number`).all();
+  }
+  function exportExcludedCount() {
+    return getDb().prepare(`SELECT COUNT(*) AS n FROM books b
+      WHERE COALESCE(b.status,'') = 'отчислен' OR COALESCE(b.department,'') = 'служебен'`).get().n;
   }
   ipcMain.handle('catalog:exportMarc', async () => {
     try {
@@ -391,9 +441,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
       const books = exportBooksFor();
-      fs.writeFileSync(filePath, buildMarcXml(books), 'utf8');
+      const s = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
+      fs.writeFileSync(filePath, buildMarcXml(books, s), 'utf8');
       logAudit('Извеждане UNIMARC', filePath + ' — ' + books.length + ' записа');
-      return { ok: true, data: { path: filePath, count: books.length } };
+      return { ok: true, data: { path: filePath, count: books.length, excluded: exportExcludedCount() } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
   ipcMain.handle('catalog:exportDc', async () => {
@@ -408,7 +459,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       const s = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
       fs.writeFileSync(filePath, buildDublinCore(books, s), 'utf8');
       logAudit('Извеждане Dublin Core', filePath + ' — ' + books.length + ' записа');
-      return { ok: true, data: { path: filePath, count: books.length } };
+      return { ok: true, data: { path: filePath, count: books.length, excluded: exportExcludedCount() } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
@@ -436,22 +487,39 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-      const rows = getDb().prepare(`${BOOK_SELECT} ORDER BY b.inv_number`).all();
+      /* Отделна заявка за бройките: BOOK_SELECT връща `quantity` = наличност за
+         заемане (COALESCE(i.quantity, 0)), а тук е нужна ОТЧЕТНАТА бройка
+         (COALESCE(i.quantity, 1)) — същото правило като в КДБФ и инвентарната
+         книга. Без колона за бройка сборът на цените в Excel дава стойност на
+         фонда, занижена с всеки втори и следващ екземпляр. */
+      const rows = getDb().prepare(`
+        ${BOOK_SELECT} ORDER BY b.inv_number
+      `).all();
+      const fq = new Map(getDb().prepare(
+        'SELECT b.id, COALESCE(i.quantity, 1) AS fund_qty FROM books b LEFT JOIN inventory i ON i.book_id = b.id'
+      ).all().map(r => [r.id, r.fund_qty]));
       const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Поредица', 'Място', 'Издателство',
-        'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Цена (лв.)', 'Цена (€)', 'Състояние'];
+        'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Бройки', 'Цена (лв.)', 'Цена (€)', 'Обща стойност (лв.)', 'Състояние'];
       // Защита срещу CSV/formula injection (Фаза 3): свободните текстови полета (заглавие,
       // автор и т.н.) идват от каталогизатора и биха могли случайно или нарочно да
       // започват с =, +, -, @ — символи, които Excel/LibreOffice изпълняват като формула
       // при отваряне на файла (напр. заглавие "=cmd|'/c calc'!A1"). Водещ апостроф
       // отпред неутрализира изпълнението, без видимо да променя стойността.
       const esc = csvCell;
-      const csv = [h.join(';')].concat(rows.map(b => [
-        b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title,
-        [b.series, b.series_no].filter(Boolean).join(' '), b.city, b.publisher,
-        b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
-        (b.price || 0).toFixed(2), ((b.price || 0) / 1.95583).toFixed(2), b.status
-      ].map(esc).join(';'))).join('\r\n');
+      const csv = [h.join(';')].concat(rows.map(b => {
+        const q = fq.has(b.id) ? fq.get(b.id) : 1;
+        return [
+          b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title,
+          [b.series, b.series_no].filter(Boolean).join(' '), b.city, b.publisher,
+          b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
+          q, (b.price || 0).toFixed(2), ((b.price || 0) / 1.95583).toFixed(2),
+          ((b.price || 0) * q).toFixed(2), b.status
+        ].map(esc).join(';');
+      })).join('\r\n');
       fs.writeFileSync(filePath, '﻿' + csv, 'utf8');
+      // Всяко друго извеждане на данни навън се вписва в одитната следа; това
+      // единствено не се вписваше — а изнася целия фонд заедно с цените.
+      logAudit('Извеждане на фонда (CSV)', filePath + ' — ' + rows.length + ' записа');
       return { ok: true, data: filePath };
     } catch (err) {
       return { ok: false, error: err.message };

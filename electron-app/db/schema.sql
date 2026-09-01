@@ -17,9 +17,20 @@ CREATE TABLE IF NOT EXISTS acquisitions (
   doc_no        TEXT,
   doc_date      TEXT,
   total_count   INTEGER DEFAULT 0,
-  sum           REAL DEFAULT 0,
+  -- NULL = стойност НЕ е обявена в първичния документ; 0 = обявена нула.
+  -- Дотук колоната беше `REAL DEFAULT 0` и празното поле влизаше като 0, тоест
+  -- двете състояния бяха неразличими и актът за дарение печаташе изчисления сбор
+  -- на мястото на обявената стойност, без да го казва.
+  sum           REAL,
   donor_address TEXT,
-  note          TEXT
+  note          TEXT,
+  -- Снимка на комисията към момента на завеждане — както при актовете за
+  -- отчисляване. Дотук актът се печаташе с ЖИВИТЕ имена от Настройки, а
+  -- handlers/deaccession-acts.js ги презаписва при всеки акт за отчисляване:
+  -- препечатан акт за дарение от януари назоваваше комисията от март.
+  committee1    TEXT,
+  committee2    TEXT,
+  committee3    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_acq_year ON acquisitions(year);
 
@@ -340,7 +351,18 @@ CREATE TABLE IF NOT EXISTS inventory_sessions (
   -- Вид на проверката, записан при приключване: 'full' (пълна — несканираното се
   -- смята за липсващо) или 'representative' (по чл. 40, т. 2 — протоколът важи само
   -- за сканираното). NULL = сесия отпреди v2.3.0, за която видът не е записван.
-  mode            TEXT
+  mode            TEXT,
+  -- Протоколът по чл. 40 е документ и се нуждае от номер и от заповедта, с която е
+  -- назначена комисията — както актът за отчисляване (одит на документите v2.4.17).
+  no              INTEGER,
+  year            TEXT,
+  order_no        TEXT,
+  -- Пулът и заетите документи КЪМ ПРИКЛЮЧВАНЕТО. pool_size е снимка от започването;
+  -- приключването пресмята пула наживо, така че книги, вписани докато проверката
+  -- тече, влизаха в липсващите, но не и в обхвата — протоколът можеше да гласи
+  -- „в обхвата 10 · липсващи 30“.
+  pool_final      INTEGER,
+  on_loan         INTEGER
 );
 CREATE TABLE IF NOT EXISTS inventory_session_scans (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

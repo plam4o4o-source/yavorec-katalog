@@ -60,22 +60,69 @@ async function renderKdbf() {
         <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
         <td class="num">${a.inv_from ? a.inv_from + ' – ' + a.inv_to : '—'}</td>
         <td style="font-size:12px">${esc(a.by_kind || '') || '—'}</td></tr>`).join('')
+          + `<tr style="background:var(--paper3);font-weight:700"><td colspan="4">ОБЩО за ${y} г.</td>
+             <td class="num">${r.part1.reduce((s, a) => s + (a.total_count || 0), 0)}</td>
+             <td class="num">${(r.part1Sum || {}).n || 0}</td><td class="num">${mny((r.part1Sum || {}).v || 0)}</td>
+             <td></td><td></td></tr>`
         : `<tr><td colspan="9" class="empty">Няма постъпления за ${y} г.</td></tr>`}
       </tbody></table></div>`
     : KDBF_TAB === 'p3' ? `
       <div class="note"><b>Приложение № 3 към чл. 13, ал. 3, т. 3</b> — отчислени документи за ${y} г.</div>
       <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Акт №</th><th>Причина</th>
         <th>Общо</th><th>Стойност</th></tr></thead><tbody>
-      ${r.part3.length ? r.part3.map(a => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no}</td>
-        <td>${esc(a.reason_text || '')}</td><td class="num">${a.item_count}</td><td class="num">${mny(a.item_value)}</td></tr>`).join('')
+      ${r.part3.length ? r.part3.map(a => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no} / ${esc(a.year || y)}</td>
+        <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}</td><td class="num">${a.item_count}</td><td class="num">${mny(a.item_value)}</td></tr>`).join('')
+          + `<tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО за ${y} г.</td>
+             <td class="num">${r.part3.reduce((s, a) => s + (a.item_count || 0), 0)}</td>
+             <td class="num">${mny(r.part3.reduce((s, a) => s + (a.item_value || 0), 0))}</td></tr>`
         : `<tr><td colspan="5" class="empty">Няма отчисления за ${y} г.</td></tr>`}
       </tbody></table></div>`
     : `
       <div class="note"><b>Приложение № 2 към чл. 13, ал. 3, т. 2</b> — резултати от движението на фонда към 31.12.${y} г.</div>
+      ${kdbfUndatedNote(r) ? `<div class="note d">${kdbfUndatedNote(r)}</div>` : ''}
+      ${kdbfCrossNote(r, y) ? `<div class="note">${kdbfCrossNote(r, y)}</div>` : ''}
       ${kdbfPart2Html(r, y)}`}
   `;
 }
 
+/* ---- Бележки за съгласуване на регистъра -------------------------------------
+   И двете се появяват САМО когато има какво да обяснят, и са еднакви на екрана и
+   в разпечатката — иначе проверяващият вижда в отпечатания документ число, което
+   не може да съгласува с друго число в СЪЩИЯ документ. */
+/* 1) Част № 1 брои по годината на ПАРТИДАТА, Част № 2 — по годината на ВПИСВАНЕ.
+      Партида от 30.12 с документи, инвентирани на 05.01, стои в Част № 1 за
+      едната година и в Част № 2 за другата. Разликата е точна: crossOut − crossIn
+      (виж извеждането в handlers/kdbf.js). */
+function kdbfCrossNote(r, y) {
+  const co = (r.crossOut || {}).n || 0, ci = (r.crossIn || {}).n || 0;
+  if (!co && !ci) return '';
+  const p1 = (r.part1Sum || {}).n || 0, p2 = (r.acquiredYear || {}).n || 0;
+  return `<b>Съгласуване на Част № 1 с Част № 2.</b> Част № 1 събира партидите по годината на партидата
+    (${p1} документа за ${y} г.), а Част № 2 брои постъпленията по датата на вписване в инвентарната книга
+    (${p2} документа). Разликата се дължи на:
+    ${co ? `<br>· ${co} документа по партиди от ${y} г., вписани в инвентарната книга през друга година (или още невписани);` : ''}
+    ${ci ? `<br>· ${ci} документа, вписани през ${y} г., но по партиди от друга година (или без партида).` : ''}
+    <br>Двете числа са верни всяко за своя показател; несъответствие в регистъра няма.`;
+}
+/* 2) Документ без дата на вписване не влиза нито в наличността, нито в
+      постъпленията — датата е ключът на Част № 2. Числото не се пипа; казва се. */
+function kdbfUndatedNote(r) {
+  const u = r.undated || {};
+  if (!u.n) return '';
+  const miss = u.missing_from_stock || 0;
+  /* Заглавието казва ТОЧНО каквото е вярно за всичките u.n документа: те не са
+     отчетени като постъпили през нито една година. Първата редакция твърдеше „не
+     участват в тази справка“ — но това е вярно само за онези с NULL дата; тези с
+     ПРАЗЕН низ се сравняват по азбучен ред, минават проверката на stockAt() и си
+     стоят в наличността. Числото, което липсва от наличността, е missing_from_stock. */
+  const doc = (n) => n + (n === 1 ? ' документ' : ' документа');
+  return `<b>Внимание — ${doc(u.n)} не са отчетени като постъпили през нито една година.</b> ${
+      u.rows === 1 ? 'Един запис няма' : u.rows + ' записа нямат'}
+    попълнена <b>дата на вписване</b> в инвентарната книга, а Част № 2 брои постъпленията именно по нея — затова тези документи
+    (на обща стойност ${mny(u.v)}) остават извън реда „Постъпили през ${'' + (r.year || '')} г.“ и през всяка друга година.${
+      miss ? ` <b>${doc(miss)}</b> от тях липсват и от наличността по-долу, тоест фондът в реда „Наличност към 31.12“ е с ${miss} по-малък от действителния.` : ''}
+    Поправя се в „Инвентарна книга“ → „Редакция“ на записа → полето „Дата на вписване“.`;
+}
 /* Част № 2 като поток на движението: начално салдо + постъпили − отчислени = крайно салдо.
    Началното салдо не идва от заявка — извежда се от крайното, за да съвпада винаги с него. */
 function kdbfPart2Html(r, y) {
@@ -146,16 +193,32 @@ function printKdbfDoc() {
      <td>${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} / ${bg(a.doc_date)}</td><td>${a.total_count}</td><td>${a.registered_count}</td>
      <td>${mny(a.registered_value)}</td><td>${a.inv_from ? a.inv_from + '–' + a.inv_to : ''}</td>
      <td>${esc(a.by_kind || '')}</td></tr>`).join('')}
-     ${r.part1.length ? '' : `<tr><td colspan="9" style="text-align:center">През ${y} г. няма регистрирани постъпления.</td></tr>`}
-     </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+     ${r.part1.length ? `<tr style="font-weight:700"><td colspan="4">ОБЩО за ${y} г.</td>
+       <td>${r.part1.reduce((s, a) => s + (a.total_count || 0), 0)}</td>
+       <td>${(r.part1Sum || {}).n || 0}</td><td>${mny((r.part1Sum || {}).v || 0)}</td><td></td><td></td></tr>`
+       : `<tr><td colspan="9" style="text-align:center">През ${y} г. няма регистрирани постъпления.</td></tr>`}
+     </tbody></table>
+     ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
+     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 3. Регистриране на отчислените книги, периодични издания и други материали</b><br>
      Приложение № 3 към чл. 13, ал. 3, т. 3 · ${y} г.</div>
-     <table><thead><tr><th>Дата</th><th>№</th><th>Акт № / дата</th><th>Общо</th><th>Стойност</th><th>Причина</th></tr></thead><tbody>
-     ${r.part3.map(a => `<tr><td>${bg(a.date)}</td><td>${a.no}</td><td>№ ${a.no} / ${bg(a.date)}</td>
-     <td>${a.item_count}</td><td>${mny(a.item_value)}</td><td>${esc(a.reason_text || '')}</td></tr>`).join('')}
-     ${r.part3.length ? '' : `<tr><td colspan="6" style="text-align:center">През ${y} г. няма отчислени документи.</td></tr>`}
+     <!-- Дотук колоните бяха „Дата | № | Акт № / дата“ и трите се пълнеха от ЕДИН И
+          СЪЩИ акт: датата се печаташе два пъти, номерът — два пъти, а третата
+          колона беше просто първите две, слепени. Отделно наборът колони не
+          съвпадаше с този на екрана (там причината е трета), тоест двата изгледа на
+          един и същ регистър се четяха различно. Сега подредбата следва екрана, а
+          отдолу стои ред ОБЩО — Приложение № 3 се подава със сбор. -->
+     <table><thead><tr><th>№ по ред</th><th>Дата на акта</th><th>Акт №</th><th>Причина (чл. 30)</th><th>Общо</th><th>Стойност</th></tr></thead><tbody>
+     ${r.part3.map((a, i) => `<tr><td>${i + 1}</td><td>${bg(a.date)}</td><td>№ ${a.no} / ${esc(a.year || y)}</td>
+     <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}</td>
+     <td>${a.item_count}</td><td>${mny(a.item_value)}</td></tr>`).join('')}
+     ${r.part3.length
+       ? `<tr style="font-weight:700"><td colspan="4">ОБЩО за ${y} г.</td>
+          <td>${r.part3.reduce((s, a) => s + (a.item_count || 0), 0)}</td>
+          <td>${mny(r.part3.reduce((s, a) => s + (a.item_value || 0), 0))}</td></tr>`
+       : `<tr><td colspan="6" style="text-align:center">През ${y} г. няма отчислени документи.</td></tr>`}
      </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
@@ -166,6 +229,9 @@ function printKdbfDoc() {
      <tr><td>Постъпили през ${y} г.</td><td>${r.acquiredYear.n}</td><td>${mny(r.acquiredYear.v)}</td></tr>
      <tr><td>Отчислени през ${y} г.</td><td>${r.deaccYear.n}</td><td>${mny(r.deaccYear.v)}</td></tr>
      <tr style="font-weight:700"><td>Наличност към 31.12.${y} г.</td><td>${r.stockEnd.n}</td><td>${mny(r.stockEnd.v)}</td></tr>
-     </tbody></table>${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
+     </tbody></table>
+     ${kdbfUndatedNote(r) ? `<div class="pmeta">${kdbfUndatedNote(r)}</div>` : ''}
+     ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printKdbfDoc = printKdbfDoc;

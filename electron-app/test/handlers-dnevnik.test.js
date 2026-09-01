@@ -136,9 +136,20 @@ test('dnevnik:exportCsv writes a semicolon-separated CSV with a BOM and all fiel
   const result = await ipcMain.invoke('dnevnik:exportCsv', { year: 2026, month: 5 });
   assert.equal(result.ok, true);
   const content = fs.readFileSync(result.data, 'utf8');
-  // Header row is joined raw (unescaped); only per-day data rows go through esc().
-  assert.ok(content.startsWith('﻿Дата;a_hours;'));
+  /* v2.4.17: заглавният ред носи ЧОВЕШКИ имена на колоните вместо имената им в
+     базата („a_prof_agrospec“) — файлът се отваря в Excel и се подава нагоре. */
+  assert.ok(content.startsWith('﻿Дата;А: Часове на обслужване (мин.);'),
+    'заглавният ред трябва да е четим, не имената на колоните в базата');
+  assert.ok(!/;a_hours;|;b_cat_0;/.test(content), 'сурови имена на колони не бива да излизат');
   assert.ok(content.includes('"2026-05-01"'));
+  // И двата обобщителни реда ги има на екрана и в разпечатката; дотук ги нямаше
+  // само в CSV — а точно оттам се вземат сборовете.
+  const lines = content.slice(1).split('\r\n');
+  assert.equal(lines.length, 1 + 31 + 2, 'заглавие + 31 дни + два обобщителни реда');
+  assert.match(lines[lines.length - 2], /^"Всичко за месеца";/);
+  assert.match(lines[lines.length - 1], /^"Всичко от началото на годината";/);
+  // Сборът е истински: единственият вписан ден има 3 минути.
+  assert.equal(lines[lines.length - 2].split(';')[1], '"3"');
 });
 
 test('dnevnik:exportCsv reports a friendly error when the user cancels the save dialog', async () => {

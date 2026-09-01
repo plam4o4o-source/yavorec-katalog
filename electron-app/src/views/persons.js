@@ -105,10 +105,22 @@ async function printPersons() {
   setPrintPage({ name: 'Персоналии', landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">ПЕРСОНАЛИИ</h2>
+    <!-- Разпечатката се прави от ТЕКУЩО ФИЛТРИРАНИЯ списък, но излиза на бланка,
+         със заглавие „ПЕРСОНАЛИИ" и два реда за подпис — тоест изглежда като целия
+         раздел. Обхватът се обявява винаги, за да няма съмнение какво е подписано. -->
+    <div class="pmeta">${PRS_Q
+      ? `<b>Обхват:</b> само записите, съдържащи „${esc(PRS_Q)}“ — <b>${rows.length}</b> от целия раздел. Това НЕ е пълният списък.`
+      : `Пълен списък — всички <b>${rows.length}</b> вписани персоналии към ${bg(today())} г.`}</div>
     ${rows.map(p => `<div style="margin-bottom:10px">
       <b>${esc(p.name)}</b>${personDates(p) ? ' · ' + esc(personDates(p)) : ''}
       ${p.activity ? `<div style="font-size:11pt"><i>${esc(p.activity)}</i></div>` : ''}
       ${p.bio ? `<div style="font-size:10.5pt">${esc(p.bio).replace(/\n/g, '<br>')}</div>` : ''}
+      ${/* Отличията и ИЗТОЧНИЦИТЕ ги имаше в картона на екрана, но не и на хартия —
+            а краеведска справка без посочен източник на сведенията не струва нищо
+            за онзи, който я чете и трябва да я провери. */''}
+      ${p.awards ? `<div style="font-size:10pt"><b>Отличия:</b> ${esc(p.awards)}</div>` : ''}
+      ${p.sources ? `<div style="font-size:10pt"><b>Източници:</b> ${esc(p.sources)}</div>`
+        : `<div style="font-size:10pt;color:#666"><i>Източници: непосочени</i></div>`}
     </div>`).join('')}
     ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
 }

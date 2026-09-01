@@ -217,10 +217,29 @@ async function printChronicle() {
   if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
   const byYear = {};
   for (const r of rows) { (byYear[r.year] = byYear[r.year] || []).push(r); }
-  const years = Object.keys(byYear).sort();
+  /* Годината е СВОБОДЕН текст („1878“, „ок. 1900“, „1878 – 1880“), затова
+     Object.keys(...).sort() я подреждаше АЗБУЧНО: „878“ след „1878“, а всичко,
+     което не започва с цифра, се разбъркваше между годините. В летопис, който се
+     чете отпред назад, това е хронология в грешен ред. Сортира се по първото
+     четирицифрено число в текста; записите без такова число отиват накрая, по
+     азбучен ред помежду си. */
+  const yearKey = (s) => { const m = String(s || '').match(/\d{3,4}/); return m ? Number(m[0]) : Infinity; };
+  const years = Object.keys(byYear).sort((a, b) => {
+    const ka = yearKey(a), kb = yearKey(b);
+    return ka !== kb ? ka - kb : String(a).localeCompare(String(b), 'bg');
+  });
   setPrintPage({ name: (CHR_YEAR ? `Летопис ${CHR_YEAR} г.` : 'Летопис'), landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">ЛЕТОПИС${CHR_YEAR ? ' — ' + esc(CHR_YEAR) + ' г.' : ''}</h2>
+    ${/* Разпечатката излиза с бланка и два реда за подпис и изглежда като пълния
+          летопис — а съдържа само това, което търсачката и филтърът за година са
+          оставили на екрана. Обхватът се обявява ВИНАГИ, включително когато е пълен. */
+      ''}
+    <div class="pmeta">${(CHR_Q || CHR_YEAR)
+      ? `<b>Обхват на разпечатката:</b> ${CHR_YEAR ? 'само ' + esc(CHR_YEAR) + ' г.' : 'всички години'}${
+          CHR_Q ? ', само записите, съдържащи „' + esc(CHR_Q) + '“' : ''} — <b>${rows.length}</b> записа.
+        Това НЕ е пълният летопис.`
+      : `Пълен летопис — всички <b>${rows.length}</b> вписани записа, към ${bg(today())} г.`}</div>
     ${years.map(y => `<h3 style="margin:10px 0 4px">${esc(y)} г.</h3>
       ${byYear[y].map(c => `<div style="margin-bottom:7px">
         <b>${esc(c.title)}</b>${c.date ? ' · ' + esc(bg(c.date)) : ''}${c.category ? ' · ' + esc(c.category) : ''}

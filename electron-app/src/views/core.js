@@ -10,7 +10,14 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
    като истински апостроф точно преди тялото на handler-а да се компилира. Затова
    име като „Жана д'Арк“ (или път на резервно копие с апостроф) чупеше бутона със
    SyntaxError и той просто не правеше нищо. */
-const jsq = (s) => esc(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+/* Одит на документите v2.4.17: новият ред НЕ се екранираше. Заглавие с прекъсване
+   (вносът от CSV ги запазва вътре в цитирани полета) даваше незатворен низ вътре в
+   onclick="…" — бутонът „Разписка“ просто не правеше нищо, без грешка и без
+   съобщение. U+2028/U+2029 са същият капан за JavaScript парсера. */
+const jsq = (s) => esc(String(s ?? '')
+  .replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  .replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+  .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
 const today = () => new Date().toISOString().slice(0, 10);
 const yr = (d) => (d || today()).slice(0, 4);
 const bg = (d) => d ? d.split('-').reverse().join('.') : '';
@@ -973,6 +980,23 @@ window.printLabelSheet = printLabelSheet;
    Ако „Организация“ не е попълнена (самостоятелна библиотека извън
    читалищна структура), пада се към старото едноредово наименование от
    „Наименование на библиотеката“. */
+/* Кодът върху етикета — ЕДИН източник за лентите и за цифрите под тях.
+
+   Одит на документите v2.4.17: баркодът се чертаеше от `barcode || inv_number`, а
+   човешкият текст под него беше `inv_number ?? barcode` — два различни източника.
+   Книга с попълнен ISBN в полето „баркод“ получаваше гръбен етикет, чиито ленти
+   кодират ISBN на ЗАГЛАВИЕТО, а цифрите под тях сочат ЕКЗЕМПЛЯРА. Тоест
+   идентичността на физическия екземпляр, заради която етикетът съществува, се
+   губеше. Точно този клас дефект беше поправен за читателските карти във v2.4.14
+   и остана тук.
+
+   Предпочита се ИНВЕНТАРНИЯТ НОМЕР: той е това, с което екземплярът е вписан в
+   инвентарната книга, в акта и в КДБФ, а books:byBarcode така или иначе търси и по
+   двете полета. Баркодът остава резервен само когато инвентарен номер няма. */
+function lblCode(b) {
+  if (b && b.inv_number != null && String(b.inv_number) !== '') return String(b.inv_number);
+  return (b && b.barcode) ? String(b.barcode) : '';
+}
 function lblCard(b) {
   const s = SETTINGS_CACHE || {};
   const head = s.org
@@ -981,8 +1005,8 @@ function lblCard(b) {
   return `<div class="lbl">
     ${head}
     ${s.place ? `<div class="lh3">${esc(s.place)}</div>` : ''}
-    ${code39svg(b.barcode || String(b.inv_number), 150, 40)}
-    <div class="l3">${esc(b.inv_number ?? b.barcode ?? '')}</div></div>`;
+    ${code39svg(lblCode(b), 150, 40)}
+    <div class="l3">${esc(lblCode(b))}</div></div>`;
 }
 /* Читателска карта, стандартен размер 90 x 60 мм. Оформена е като истинска карта:
    заглавна лента с логото и името на библиотеката, име на читателя и данни от
@@ -1008,14 +1032,32 @@ function readerCardHtml(r) {
       </div>
     </div>
     <div class="rc-bar">
-      ${code39svg(r.card_no || String(r.id), 200, 34)}
-      <div class="rc-no">№ ${esc(r.card_no || r.id)}</div>
+      ${/* Одит на документите v2.4.17: при празен номер на карта тук се падаше към
+            вътрешния номер на реда (readers.id) — и в лентите, и в текста. Но
+            readers:byCard сравнява САМО с card_no, тоест такава карта не се
+            намира при сканиране; а когато друг читател има номер на карта, равен
+            на този вътрешен номер (последователните числови номера са нормата),
+            картата сочи ЧУЖД гражданин и заемането, сметката и наказанието отиват
+            при него. Празният номер вече се казва вместо да се измисля. */ ''}
+      ${r.card_no
+        ? `${code39svg(r.card_no, 200, 34)}<div class="rc-no">№ ${esc(r.card_no)}</div>`
+        : `<div class="rc-no" style="color:#b00;font-size:8px;line-height:1.2">Няма номер на карта — въведете го в картона на читателя, преди да отпечатате картата.</div>`}
     </div>
   </div>`;
 }
 function sigLblCard(b) {
+  /* Книга без УДК и без авторски знак даваше празен ограден правоъгълник, разпръснат
+     из листа без нито дума — за разлика от всяко друго отрязване в програмата, което
+     се съобщава. Сега етикетът казва защо е празен, за да не бъде залепен така. */
+  const udk = b.udk || '';
+  const avt = b.author_mark || b.call_number || '';
+  if (!udk && !avt) {
+    return `<div class="lbl lbl-sig" style="color:#b00;font-size:8px;line-height:1.15;
+      display:flex;align-items:center;justify-content:center;text-align:center;padding:2px">
+      инв. № ${esc(String(b.inv_number ?? '—'))}: няма УДК и авторски знак</div>`;
+  }
   return `<div class="lbl lbl-sig">
-    <div class="ls-udk">${esc(b.udk || '')}</div>
-    <div class="ls-avt">${esc(b.author_mark || b.call_number || '')}</div>
+    <div class="ls-udk">${esc(udk)}</div>
+    <div class="ls-avt">${esc(avt)}</div>
   </div>`;
 }

@@ -155,7 +155,11 @@ test('UNIMARC/MARCXML: валиден XML, пълен кръг на стойно
   assert.equal(sub(r1, '010', 'a'), '954-01-1234-5');
   assert.equal(sub(r1, '101', 'a'), 'bul'); // 'български' → ISO код
   assert.equal(sub(r1, '675', 'a'), '886.7-1');
-  assert.equal(sub(r1, '225', 'v'), 'Т. 2');
+  /* Одит v2.4.17: томът върви в 200 $h („номер на част“). Дотук се изнасяше като
+     225 $v — заявка за поредица БЕЗ задължителното $a, тоест поредица без заглавие.
+     Записът няма поредица, затова поле 225 изобщо не се строи. */
+  assert.equal(sub(r1, '200', 'h'), 'Т. 2');
+  assert.equal(sub(r1, '225', 'v'), undefined);
   assert.equal(sub(r1, '995', 'f'), '1');
   assert.equal(sub(r1, '995', 'o'), 'Художествена литература');
 
@@ -171,7 +175,14 @@ test('UNIMARC/MARCXML: валиден XML, пълен кръг на стойно
   // Едносъставно име: само $a, празното $b не се изнася.
   assert.equal(sub(r2, '700', 'a'), 'Омир');
   assert.equal(sub(r2, '700', 'b'), undefined);
-  assert.equal(sub(r2, '101', 'a'), 'старогръцки'); // непознат език минава дословно
+  /* Одит v2.4.17: 101 $a е КОДИРАНО поле (ISO 639-2, три букви). Дотук непознат
+     език минаваше дословно и файлът съдържаше кодирано поле с некодирана стойност.
+     Сега → `und`, а оригиналното наименование се пази в обща бележка 300. */
+  assert.equal(sub(r2, '101', 'a'), 'und');
+  assert.equal(sub(r2, '300', 'a'), 'Език: старогръцки');
+  // 801 (източник на записа) — задължително в UNIMARC, дотук липсваше изцяло.
+  assert.equal(sub(r2, '801', 'a'), 'BG');
+  assert.equal(sub(r2, '801', 'b'), 'НЧ „Тест — 1900“');
 
   // Запис само със заглавие: без 010/101/210, но с 200 и 995.
   assert.equal(sub(r3, '010', 'a'), undefined);
@@ -212,8 +223,11 @@ test('JSON каталог: записаният файл се разчита о�
   assert.deepEqual(parsed.items[1], { inv: 2, title: '=SUM(A1:A9)', author: 'Омир' });
 });
 
-test('CSV: BOM, 18 колони на всеки ред, кавички и формули оцеляват кръга', async () => {
+test('CSV: BOM, 20 колони на всеки ред, кавички и формули оцеляват кръга', async () => {
   // v1.70.0: 17 → 18 колони — добавена „Поредица“ (books.series/series_no).
+  // v2.4.17: 18 → 20 — „Бройки“ и „Обща стойност (лв.)“. Без бройката сборът на
+  // колоната с цени в Excel дава стойност на фонда, занижена с всеки втори и
+  // следващ екземпляр на едно и също заглавие.
   const { exportTo } = setup();
   const raw = await exportTo('catalog:exportCsv', 'fond.csv');
 
@@ -222,11 +236,13 @@ test('CSV: BOM, 18 колони на всеки ред, кавички и фор
   assert.equal(lines.length, 4); // заглавен ред + 3 книги
 
   const header = lines[0].split(';');
-  assert.equal(header.length, 18);
+  assert.equal(header.length, 20);
   assert.ok(header.includes('Поредица'));
+  assert.ok(header.includes('Бройки'));
+  assert.ok(header.includes('Обща стойност (лв.)'));
   assert.equal(header[0], 'Инв. №');
   for (const line of lines.slice(1)) {
-    assert.equal(parseCsvLine(line).length, 18, 'ред с различен брой колони: ' + line);
+    assert.equal(parseCsvLine(line).length, 20, 'ред с различен брой колони: ' + line);
   }
 
   const r1 = parseCsvLine(lines[1]);

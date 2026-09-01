@@ -449,8 +449,12 @@ test('КДБФ Част № 1: колоната „По вид“ показва
   window.location.hash = '#kdbf';
   await window.route();
   await new Promise(r => setTimeout(r, 30));
-  const cells = [...window.document.querySelectorAll('.ledger tbody tr td')];
-  const last = cells[cells.length - 1].textContent;
+  /* Одит v2.4.17: Част № 1 вече има и ред ОБЩО, затова „последната клетка на
+     таблицата" вече не е колоната „По вид" на партидата, а празната клетка на
+     сбора. Взима се последната клетка на ПЪРВИЯ ред с данни — това е колоната,
+     за която е тестът. */
+  const firstRow = window.document.querySelector('.ledger tbody tr');
+  const last = firstRow.querySelector('td:last-child').textContent;
   assert.match(last, /книга: 2/, 'разбивката се изисква от чл. 13, ал. 3, т. 1 и данните за нея ги има');
   assert.match(last, /периодично издание: 1/);
 });

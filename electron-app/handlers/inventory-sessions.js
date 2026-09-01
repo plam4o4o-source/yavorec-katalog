@@ -56,10 +56,18 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
       const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = @department' : ''}`)
         .get(s.department ? { department: s.department } : {});
+      /* Номер и година на протокола. Като при актовете за отчисляване: предлага се
+         следващият свободен за годината, а проверката се повтаря в записа. */
+      const year = String(s.date || '').slice(0, 4) || String(new Date().getFullYear());
+      const no = parseInt(s.no, 10)
+        || ((db.prepare('SELECT MAX(no) AS m FROM inventory_sessions WHERE year = ?').get(year).m || 0) + 1);
       const info = db.prepare(`
-        INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3, pool_size, closed)
-        VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0)
-      `).run(Object.assign({}, s, { department: s.department || null, pool_size: pool.n }));
+        INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3,
+                                        pool_size, closed, no, year, order_no)
+        VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0, @no, @year, @order_no)
+      `).run(Object.assign({}, s, {
+        department: s.department || null, pool_size: pool.n, no, year, order_no: s.order_no || null
+      }));
       return info.lastInsertRowid;
     })
   );
@@ -73,6 +81,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         JOIN books b ON b.id = sc.book_id WHERE sc.session_id = ? ORDER BY sc.scanned_at DESC
       `).all(id);
       s.missing = db.prepare('SELECT * FROM inventory_session_missing WHERE session_id = ?').all(id);
+      /* Допустимите естествени загуби по чл. 41 се смятат ТУК, за да може протоколът
+         да ги отпечата. Одит на документите v2.4.17: приключването ги връщаше,
+         прозорецът ги показваше и сравняваше с тях, екранът ги показваше — а
+         документът, който излиза от сградата, ги нямаше. Тоест единственият въпрос,
+         на който протоколът съществува да отговори (в рамките на допустимото ли са
+         липсите), беше неотговорим от хартията. */
+      const cfg = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {};
+      const poolForLoss = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
+      s.allowedLoss = naturalLoss(poolForLoss, cfg.free_access_pct);
       return s;
     })
   );
@@ -181,13 +198,20 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            прозореца, затова в списъка приключена представителна проверка с 0 липсващи
            изглеждаше точно като пълна с 0 липсващи — а пред проверяващ от регионалната
            библиотека няма как да се докаже кое от двете е било. */
-        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ? WHERE id = ?').run(mode, sessionId);
+        /* Пулът и заетите се ЗАПИСВАТ такива, каквито са в момента на приключване.
+           pool_size е снимка от започването; книги, вписани докато проверката тече,
+           влизат в `unchecked`/`missing`, но не и в снимката — протоколът можеше да
+           гласи „в обхвата 10 · проверени 10 · липсващи 30“. Одит на документите
+           v2.4.17. */
+        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id)).length;
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ? WHERE id = ?')
+          .run(mode, pool.length, onLoanInPool, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
           ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
         return {
           mode, scanned: scannedIds.length, missing: missing.length, pool: pool.length,
-          unchecked: unchecked.length,
+          unchecked: unchecked.length, onLoan: onLoanInPool,
           allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
         };
       });

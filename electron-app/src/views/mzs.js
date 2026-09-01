@@ -7,9 +7,12 @@ async function renderMzs() {
   $('#view').innerHTML = `
     <div class="note">Регистър на заявките за междубиблиотечно заемане — изходящи и входящи.</div>
     <div class="toolbar"><button class="btn pri" onclick="mzsForm()">+ Нова заявка</button></div>
-    <div class="wrap"><table class="ledger"><thead><tr><th>№</th><th>Дата</th><th>Посока</th><th>Партньор</th>
+    <!-- Номерът е (година, №): регистърът брои отначало всяка година и проверката за
+         дубликат е по двойката (handlers/mzs.js). Голото „№ 1" в списъка сочи към
+         толкова заявки, колкото години има регистърът. -->
+    <div class="wrap"><table class="ledger"><thead><tr><th>№/год.</th><th>Дата</th><th>Посока</th><th>Партньор</th>
       <th>Документ</th><th>Заявител</th><th>Статус</th><th></th></tr></thead><tbody>
-    ${rows.length ? rows.map(m => `<tr><td class="num">${m.no}</td><td class="num">${bg(m.date)}</td>
+    ${rows.length ? rows.map(m => `<tr><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
       <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td>
       <td>${esc(m.requester || '')}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span></td>
       <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`).join('')
@@ -50,16 +53,33 @@ function printMzsDoc(id) {
   const m = (window._MZS_ROWS || []).find(x => x.id === id);
   if (!m) return;
   const s = SETTINGS_CACHE || {};
-  setPrintPage({ name: `Заявка за МЗС № ${m.no}-${m.year}`, landscape: false, margin: '14mm 12mm' });
+  /* ВХОДЯЩАТА заявка е чужд документ. Дотук и двете посоки се печатаха на НАШАТА
+     бланка, под заглавие „ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ" и с реда за подпис
+     „Библиотекар … / Ръководител …" — тоест библиотеката подписваше като СВОЯ
+     заявката, която друга библиотека е отправила към нея. При партньор, който
+     получи такъв лист, това е заявка от нас за документ, който сме дали ние.
+     Входящата се печата като извлечение от регистъра и се подписва като предаване. */
+  const inc = m.direction === 'входящо';
+  /* Номерът е (година, №) — така се пази в регистъра и така се проверява за
+     дубликат (handlers/mzs.js). Заглавието печаташе „№ 5 / 12.03.2026", тоест
+     номер, който не съвпада нито с регистъра, нито с името на самия файл. */
+  setPrintPage({ name: `${inc ? 'Входяща заявка за МЗС' : 'Заявка за МЗС'} № ${m.no}-${m.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2>ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ № ${m.no} / ${bg(m.date)}</h2>
+    <h2>${inc ? 'ВХОДЯЩА ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ' : 'ЗАЯВКА ЗА МЕЖДУБИБЛИОТЕЧНО ЗАЕМАНЕ'} № ${m.no} / ${m.year}</h2>
     <div class="pmeta">
-    <b>Посока:</b> ${esc(m.direction)} &nbsp; <b>Библиотека партньор:</b> ${esc(m.partner)}<br>
-    <b>Търсен документ:</b> ${esc([m.author, m.title].filter(Boolean).join('. '))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
-    ${m.requester ? '<b>Заявител:</b> ' + esc(m.requester) + '<br>' : ''}
+    <b>Дата на вписване:</b> ${bg(m.date)} г.<br>
+    ${inc
+      ? `Настоящото е извлечение от регистъра за междубиблиотечно заемане на ${esc(s.org || 'библиотеката')} по заявка,
+         <b>постъпила от</b> ${esc(m.partner)}. Не представлява заявка от страна на ${esc(s.org || 'библиотеката')}.<br>
+         <b>Заявяваща библиотека:</b> ${esc(m.partner)}<br>`
+      : `<b>До:</b> ${esc(m.partner)}<br>`}
+    <b>${inc ? 'Заявен документ' : 'Търсен документ'}:</b> ${esc([m.author, m.title].filter(Boolean).join('. '))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
+    ${m.requester ? `<b>${inc ? 'Читател при заявяващата библиотека' : 'Заявител (читател)'}:</b> ` + esc(m.requester) + '<br>' : ''}
     <b>Статус:</b> ${esc(m.status)}${m.due_date ? ' · срок за връщане ' + bg(m.due_date) : ''}
     ${m.note ? '<br><b>Забележка:</b> ' + esc(m.note) : ''}</div>
-    ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………'), esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${ssig(inc
+      ? ['Предал документа: ' + esc(s.librarian || '…………………'), 'Получил: …………………']
+      : ['Библиотекар: ' + esc(s.librarian || '…………………'), esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printMzsDoc = printMzsDoc;
 async function saveMzs(id) {

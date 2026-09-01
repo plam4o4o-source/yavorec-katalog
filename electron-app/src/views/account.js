@@ -6,6 +6,12 @@ async function accountModal(readerId) {
   if (!r || !acc) return;
   window._ACC_READER = r;
   window._ACC_LINES = acc.lines;
+  /* Квитанцията се печата от този списък и трябва да каже какво ОСТАВА да се
+     дължи след дадено движение — иначе читателят плаща глоба и си тръгва с лист
+     хартия, който не отговаря на единствения въпрос, който има. Балансът се пази
+     тук, а не се смята в разпечатката, за да е ЕДНО И СЪЩО число с това в горния
+     десен ъгъл на сметката (същото закръгляне до стотинки). */
+  window._ACC_BALANCE = Math.round((Number(acc.balance) || 0) * 100) / 100;
   /* Сравнява се закръглената до стотинки сума, а не суровата. account:get вече
      закръгля, но балансът минава и през стари/чужди пътища (кеширани данни от
      предишна версия), а разликата от порядъка на 1e-16 е достатъчна, за да се
@@ -95,13 +101,24 @@ function printReceiptLine(lineId) {
   const line = (window._ACC_LINES || []).find(l => l.id === lineId);
   const r = window._ACC_READER;
   if (!line || !r) return;
-  setPrintPage({ name: 'Квитанция — ' + r.name + ' — ' + bg(line.date), landscape: false, margin: '20mm' });
+  const bal = Number(window._ACC_BALANCE);
+  const hasBal = Number.isFinite(bal);
+  setPrintPage({ name: 'Квитанция № ' + line.id + ' — ' + r.name + ' — ' + bg(line.date), landscape: false, margin: '20mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2 style="font-size:16pt">КВИТАНЦИЯ</h2>
+    <h2 style="font-size:16pt">КВИТАНЦИЯ № ${line.id} / ${bg(line.date)}</h2>
     <div class="pmeta">Дата: <b>${bg(line.date)}</b><br>
     Читател: <b>${esc(r.name)}</b>${r.card_no ? ' (карта ' + esc(r.card_no) + ')' : ''}<br>
     ${line.kind === 'плащане' ? 'Платена сума' : 'Начислена сума'}: <b>${mny(Math.abs(line.amount))}</b><br>
-    Основание: <b>${esc(line.type || line.kind)}</b>${line.note ? '<br>Бележка: ' + esc(line.note) : ''}</div>
+    Основание: <b>${esc(line.type || line.kind)}</b>${line.note ? '<br>Бележка: ' + esc(line.note) : ''}
+    ${/* Дотук квитанцията носеше само сумата на едно движение и нищо повече:
+          читател, платил част от глобата си, си тръгваше с документ, от който не
+          личи дали дължи още. Състоянието на сметката КЪМ МОМЕНТА НА ПЕЧАТА се
+          изписва изрично, със същото число, което стои и в самата сметка. */''}
+    ${hasBal ? `<br><br>Състояние на сметката към ${bg(today())} г.: <b>${
+      bal > 0 ? 'дължими ' + mny(bal) : bal < 0 ? 'надплатени ' + mny(-bal) : 'няма задължение (0.00 лв.)'
+    }</b>` : ''}</div>
+    <div class="pmeta" style="font-size:9pt">Квитанцията отразява едно движение по сметката на читателя.
+    Номерът ѝ е поредният номер на движението в регистъра на сметките.</div>
     ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
 }
 window.printReceiptLine = printReceiptLine;

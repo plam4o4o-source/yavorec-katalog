@@ -51,17 +51,35 @@ function reportPairTable(rows, valCol) {
     return `<tr><td>${esc(k)}</td><td class="num">${n}</td>${valCol ? `<td class="num">${mny(v || 0)}</td>` : ''}</tr>`;
   }).join('')}</tbody></table>`;
 }
+/* Годишната справка А/Б е сборът на ВПИСАНИТЕ дни от „Дневник“ — не на годината.
+   Числото ѝ е толкова пълно, колкото е воден дневникът, а тя се подава към
+   регионалната библиотека и към Министерството на културата. Дотук покритието не
+   се казваше никъде, а предупреждението при нула вписани дни стоеше САМО на
+   екрана: разпечатката излизаше с нули, с бланка и с два реда за подпис, без нито
+   дума защо. Един и същ текст се ползва и на екрана, и на хартия. */
+function reportCoverageNote(r) {
+  if (r.id !== 'annual_ab') return '';
+  const d = r.daysRecorded || 0;
+  if (!d) return `<b>Внимание:</b> за ${r.year} г. в „Дневник на библиотеката“ няма нито един вписан ден.
+    Всички числа по-долу са нули, защото няма от какво да бъдат сметнати — справката не отразява действителната работа.`;
+  return `Справката обхваща <b>${d}</b> вписани работни ${d === 1 ? 'ден' : 'дни'} от „Дневник на библиотеката“ за ${r.year} г.
+    Числата са сбор от тях; дни, които не са вписани, не участват.`;
+}
 function reportBodyHtml(r) {
   if (r.id === 'annual_ab') {
     const rowHtml = (cols) => `<tr><td>За ${r.year} г.</td>${cols.map(([k]) => `<td>${dnevnikCell(r.totals, k)}</td>`).join('')}</tr>`;
     return `
-      ${r.daysRecorded ? '' : `<div class="hint" style="margin-bottom:10px">Няма вписани дни в „Дневник“ за ${r.year} г. — справката излиза с нулеви стойности.</div>`}
+      <div class="note ${r.daysRecorded ? '' : 'd'}" style="margin-bottom:10px">${reportCoverageNote(r)}</div>
       <div class="card"><h3 style="margin-top:0">А. Читатели и посещения</h3>
-        <div class="wrap"><table class="ledger" style="font-size:11px"><thead><tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        <div class="wrap"><table class="ledger" style="font-size:11px"><thead>
+        ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS)}
+        <tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_A_COLS)}</tbody></table></div>
       </div>
       <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Б. Заети материали</h3>
-        <div class="wrap"><table class="ledger" style="font-size:11px"><thead><tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        <div class="wrap"><table class="ledger" style="font-size:11px"><thead>
+        ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
+        <tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table></div>
       </div>`;
   }
@@ -122,11 +140,16 @@ function reportPrintHtml(r) {
   if (r.id === 'annual_ab') {
     const rowHtml = (cols) => `<tr><td>За ${r.year} г.</td>${cols.map(([k]) => `<td>${dnevnikCell(r.totals, k)}</td>`).join('')}</tr>`;
     return `
+      <div class="pmeta">${reportCoverageNote(r)}</div>
       <div class="pmeta"><b>А. РЕГИСТРИРАНЕ НА ЧИТАТЕЛИТЕ И ПОСЕЩЕНИЯТА</b></div>
-      <table style="font-size:7.5pt"><thead><tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+      <table style="font-size:7.5pt"><thead>
+      ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS)}
+      <tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
       <tbody>${rowHtml(DNEVNIK_A_COLS)}</tbody></table>
       <div class="pmeta" style="margin-top:6mm"><b>Б. РЕГИСТРИРАНЕ НА ЗАЕТИТЕ КНИГИ, ПЕРИОДИЧНИ ИЗДАНИЯ И ДРУГИ МАТЕРИАЛИ</b></div>
-      <table style="font-size:7.5pt"><thead><tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+      <table style="font-size:7.5pt"><thead>
+      ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
+      <tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
       <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table>`;
   }
   if (r.id === 'fund_breakdown') {
@@ -165,10 +188,20 @@ function reportPrintHtml(r) {
 function printReportDoc() {
   const r = window._REPORT;
   if (!r) return toast('Първо изберете справка и изчакайте да се зареди.', 'err');
+  /* Непозната справка (нова в REPORTS_CATALOG, но още без разпечатка тук) караше
+     reportPrintHtml да върне празен низ — и се печаташе бланка със заглавието на
+     справката, реда за подпис на библиотекаря и на ръководителя, и НИЩО помежду
+     им. Празен официален формуляр, готов за подпис, е по-опасен от липсваща
+     разпечатка. */
+  const body = reportPrintHtml(r);
+  if (!body || !body.trim()) {
+    return toast('За тази справка още няма готова форма за печат. Използвайте изгледа на екрана '
+      + '— празен подписан формуляр не се отпечатва.', 'err');
+  }
   setPrintPage({ name: (r.title || 'Справка') + ' — ' + r.year, landscape: r.id === 'annual_ab', margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">${esc(r.title || 'Справка')}</h2>
-    ${reportPrintHtml(r)}
+    ${body}
     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printReportDoc = printReportDoc;

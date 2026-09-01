@@ -77,22 +77,50 @@ window.printCardOne = printCardOne;
    програмата, което реже списък, го казва („Показани са N от M“ в Просрочени,
    броячът в Одитна следа, „Печатът винаги съдържа цялата книга“ в Инвентарна). */
 const CARD_LOAN_ROWS = 14;
+/* Одит на документите v2.4.17: readers:get връща ЕГН и № ЛК вече МАСКИРАНИ,
+   когато защитата на личните данни е заключена — тоест буквално низа „Защитени
+   данни“. Картонът ги вмъкваше право в реда „ЕГН:“ и този надпис отиваше върху
+   документ, който гражданинът подписва и който се подрежда в картотеката. А
+   заключеното състояние е нормалното в началото на всеки работен ден.
+   Сега маскираните полета се печатат като „…“ — точно както всяко друго празно
+   поле на същия ред — и на листа се отбелязва защо, за да не изглежда като
+   пропуск на библиотекаря. */
 async function printReaderCard(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;
   const loans = await call(window.api.loans.byReader(id)) || [];
+  /* ПО ПОЛЕ, не по ред (виж maskOne в handlers/pdp.js). Читател със записан на
+     ОТКРИТ ТЕКСТ ЕГН и криптиран № на лична карта не бива да губи ЕГН-то от
+     картона си, а ред с нечетим ЕГН и редовен № на карта трябва да скрие точно
+     ЕГН-то. Старата форма на флага се приема като „и двете“, за да работи и ако
+     редът дойде от по-стар канал. */
+  const piiMasked = new Set(Array.isArray(r.pii_masked_fields) ? r.pii_masked_fields
+    : (r.pii_masked ? ['egn', 'id_card_no'] : []));
+  const piiEgn = piiMasked.has('egn'), piiCard = piiMasked.has('id_card_no');
+  const piiNames = [piiEgn ? 'ЕГН' : '', piiCard ? '№ на лична карта' : ''].filter(Boolean).join(' и ');
   setPrintPage({ name: `Читателски картон — ${r.name}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ЧИТАТЕЛСКИ КАРТОН № ${esc(r.card_no || '')}</h2>
     <div class="pmeta">
     <b>Име:</b> ${esc(r.name)}<br>
-    <b>ЕГН:</b> ${esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
+    <b>ЕГН:</b> ${piiEgn ? '…' : esc(r.egn || '…')} &nbsp; <b>Лична карта:</b> № ${piiCard ? '…' : esc(r.id_card_no || '…')}, издадена на ${r.id_card_date ? bg(r.id_card_date) : '…'} от ${esc(r.id_card_issuer || '…')}<br>
     <b>Постоянен адрес:</b> ${esc(r.address || '…')}<br>
     <b>Телефон:</b> ${esc(r.phone || '…')} &nbsp; <b>Имейл:</b> ${esc(r.email || '…')}<br>
     <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}
+    ${piiNames ? `<br><span style="font-size:9pt">${esc(piiNames)} ${piiEgn && piiCard ? 'не са отпечатани' : 'не е отпечатан'}:
+      защитата на личните данни е заключена в момента. Отключете я от „Настройки“ и отпечатайте наново, ако картонът трябва да ${piiEgn && piiCard ? 'ги' : 'го'} съдържа.</span>` : ''}
     ${r.guarantor_name ? `<br><b>Родител/настойник:</b> ${esc(r.guarantor_name)} (${esc(r.guarantor_relation || 'родител')}) — тел. ${esc(r.guarantor_phone || '…')}` : ''}</div>
     <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
-      ${code39svg(r.card_no || String(r.id), 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no || '')}</div></div>
+      ${/* Същият дефект като в readerCardHtml (core.js), пропуснат тук при
+            първата поправка: при липсващ номер на карта баркодът кодираше
+            ВЪТРЕШНИЯ номер на реда, а под него не пишеше нищо. Сканирането
+            търси по номер на карта, тоест лентите сочат към читателя, чиято
+            карта е с този номер — най-често друг гражданин. По-добре без
+            баркод и с указание какво липсва. */
+        r.card_no
+        ? `${code39svg(r.card_no, 200, 50)}<div style="font-family:monospace;font-size:9pt">${esc(r.card_no)}</div>`
+        : `<div style="font-size:9pt;color:#b00">Няма номер на карта — въведете го в картона на читателя,
+            за да се отпечата баркод.</div>`}</div>
     <table><thead><tr><th>Дата на заемане</th><th>Инв. №</th><th>Заглавие</th><th>Срок</th><th>Върнат на</th></tr></thead><tbody>
     ${loans.slice(0, CARD_LOAN_ROWS).map(l => `<tr><td>${bg(l.date_out)}</td><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
       <td>${bg(l.date_due) || ''}</td><td>${l.date_in ? bg(l.date_in) : ''}</td></tr>`).join('')}
@@ -116,9 +144,18 @@ async function printOverdueNotices() {
      вписваше се СУТРЕШНАТА степен и ескалацията спираше на място. А ако
      прозорецът изобщо не е отварян, всички се вписваха като степен 1. Степените
      се изтеглят наново тук. */
+  /* Одит на документите v2.4.17: при провал call() връща null и се падаше към
+     window._REMINDERS, което често е празно — тогава ВСИЧКИ писма се вписваха като
+     степен 1, а самите писма пак се печатаха. Тоест провалът тихо нулираше
+     стълбицата на ескалацията. По-добре е да не се печата, отколкото да се
+     отпечатат писма с невярна степен. */
   const fresh = await call(window.api.loans.reminders());
+  if (!fresh) {
+    return toast('Степените на напомнянията не можаха да бъдат прочетени — писмата не са отпечатани, '
+      + 'за да не бъдат вписани с грешна степен. Опитайте отново.', 'err');
+  }
   const levels = {};
-  for (const r of (fresh || window._REMINDERS || [])) levels[r.reader_id] = r.level || 1;
+  for (const r of fresh) levels[r.reader_id] = r.level || 1;
   // v2.2.0: вписва се ЧАК след потвърден печат (или запис в PDF). От v1.71.0
   // doPrint() само отваря преглед с бутон „Отказ“ — дотогава при отказ в
   // регистъра вече стоеше „изпратено напомняне“ на всички просрочили читатели
@@ -145,6 +182,24 @@ async function printOverdueNotices() {
         + 'отпечатани, но следващият път ще тръгнат от същата степен.', 'err');
     }
   };
+  /* Ставката се вмъкваше сурова: при празни настройки писмото печаташе буквално
+     „undefined лв./ден“, а при изчистено поле — празно място точно преди цитата на
+     наредбата. Празното поле е обичайният случай: полето е числово, а въведена
+     българска десетична ЗАПЕТАЯ го оставя празно (и тогава обезщетение изобщо не
+     се начислява, докато библиотеката смята, че е настроила ставка). Ако ставка
+     няма, скобата отпада изцяло — сумата остава, обяснението не се измисля. */
+  const perDayNum = Number(s.fine_per_day);
+  const perDay = Number.isFinite(perDayNum) && perDayNum > 0 ? perDayNum.toFixed(2) : '';
+  /* Степента се ПЕЧАТА, а не само се вписва. Одит на документите v2.4.17: писмото
+     беше едно и също на степени 1, 2 и 3, докато в регистъра се вписваше ескалация,
+     за която читателят никога не е бил уведомен — а хартиеният канал обслужва точно
+     читателите без имейл, тоест тези, които виждат само текста от степен 1. Текстът
+     е същият като в имейла (LEVEL_LINES в handlers/notices.js). */
+  const levelLine = (lv) => lv === 2
+    ? '<div class="pmeta"><b>Това е ВТОРО напомняне.</b></div>'
+    : lv === 3
+      ? '<div class="pmeta"><b>Това е ТРЕТО напомняне.</b> При ново неизпълнение достъпът до заемане ще бъде временно преустановен.</div>'
+      : '';
   setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
   doPrint(rows.map(r => `<div class="pdoc">${shead()}
     <h2>НАПОМНИТЕЛНО ПИСМО</h2>
@@ -156,8 +211,10 @@ async function printOverdueNotices() {
     <table><thead><tr><th>Инв. №</th><th>Заглавие</th><th>Зает на</th><th>Срок</th></tr></thead><tbody>
     ${r.loans.map(l => `<tr><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td><td>${bg(l.date_out)}</td><td>${bg(l.date_due)}</td></tr>`).join('')}
     </tbody></table>
-    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b> (${s.fine_per_day} лв./ден забава съгласно Правилата за обслужване на читателите на библиотеката,
-    приети на основание чл. 43, ал. 2 от Наредба № 3 от 18.11.2014 г.).</div>
+    ${levelLine(levels[r.reader_id] || 1)}
+    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b>${perDay
+      ? ` (${esc(perDay)} лв./ден забава съгласно Правилата за обслужване на читателите на библиотеката,
+        приети на основание чл. 43, ал. 2 от Наредба № 3 от 18.11.2014 г.)` : ''}.</div>
     ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''), null, logNotices);
 }
 window.printOverdueNotices = printOverdueNotices;

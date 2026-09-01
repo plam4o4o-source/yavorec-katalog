@@ -529,7 +529,13 @@ test('миграция 8 изчиства дубликатите и слага �
   assert.throws(() => db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(s, b),
     /UNIQUE/, 'оттук нататък базата сама спира дубликата — двете станции вече не могат да го промушат');
 
-  assert.match(main, /const CURRENT_SCHEMA_VERSION = 9;/,
+  /* Одит v2.4.17: дотук тук стоеше буквалното число 9 и всяка НОВА миграция
+     чупеше този тест, вместо да провери каквото твърди. Проверява се самото
+     твърдение: константата е равна на НАЙ-ВИСОКАТА миграция. Ако не е, базата
+     остава на по-нисък user_version завинаги и следващата миграция се пропуска. */
+  const maxMig = Math.max(...[...main.matchAll(/\{ version: (\d+),/g)].map(m => Number(m[1])));
+  assert.ok(Number.isFinite(maxMig) && maxMig > 0, 'миграциите трябва да се разчитат от main.js');
+  assert.match(main, new RegExp('const CURRENT_SCHEMA_VERSION = ' + maxMig + ';'),
     'константата трябва да е равна на последната миграция, иначе изравняването е недостижимо');
 });
 
@@ -716,7 +722,9 @@ test('миграция 9 донася тригерите за enum и до ве�
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.match(main, /\{ version: 9, run: \(\) => \{ applyEnumTriggers\(db\); \} \}/,
     'трябва да има миграция, която прилага тригерите отново');
-  assert.match(main, /const CURRENT_SCHEMA_VERSION = 9;/, 'константата следва последната миграция');
+  const maxMig9 = Math.max(...[...main.matchAll(/\{ version: (\d+),/g)].map(m => Number(m[1])));
+  assert.match(main, new RegExp('const CURRENT_SCHEMA_VERSION = ' + maxMig9 + ';'),
+    'константата следва последната миграция');
 
   const { applyEnumTriggers } = require('../db/enum-triggers');
   const { db } = freshDb('inv-v2414-enum9-');

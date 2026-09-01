@@ -128,14 +128,29 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
   // пази от подаване на съвсем несвързан низ от читателската картотека към
   // shell.openExternal, а не само от техническа коректност на адреса (виж
   // security-utils.js за isValidEmail).
-  ipcMain.handle('loans:mailto', (e, { email, subject, body }) => {
+  ipcMain.handle('loans:mailto', async (e, { email, subject, body }) => {
     try {
       if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
       if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };
       const url = 'mailto:' + encodeURIComponent(email) +
         '?subject=' + encodeURIComponent(subject || '') +
         '&body=' + encodeURIComponent(body || '');
-      shell.openExternal(url);
+      /* Дължината се проверява ПРЕДИ отварянето. Кирилицата се кодира по 6 знака
+         на буква, тоест третото напомняне с десетина заглавия стига до ~6000 знака,
+         а обработчиците на mailto: под Windows режат около 2000 — списъкът с
+         документи излизаше отрязан по средата, а напомнянето се вписваше като
+         изпратено. По-добре е библиотекарят да разбере и да го копира. */
+      if (url.length > 1900) {
+        return { ok: false, error: 'Писмото е твърде дълго за пощенския клиент (' + url.length
+          + ' знака при около 2000 допустими) и би стигнало отрязано. Ползвайте „Копирай текста“ '
+          + 'и го поставете в пощата си.' };
+      }
+      /* Изчаква се. Одит на документите v2.4.17: обещанието не се чакаше и не се
+         връщаше, а openExternal ОТКАЗВА, когато няма регистриран пощенски клиент —
+         обичайно на библиотечен компютър. Отказът излизаше извън try/catch, екранът
+         виждаше ok:true, вписваше напомняне като „изпратено“ и следващото тръгваше
+         една степен по-високо, без нищо да е изпратено. */
+      await shell.openExternal(url);
       return { ok: true };
     } catch (err) { return { ok: false, error: err.message }; }
   });
