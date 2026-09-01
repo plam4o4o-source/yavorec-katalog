@@ -370,7 +370,11 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
        да отговори. $a страна, $b агенция (библиотеката), $c дата на обработката,
        $g правила за каталогизация. */
     const agency = ((s || {}).lib_name || (s || {}).org || '').trim();
-    add('801', ' ', '0', [['a', 'BG'], ['b', agency], ['c', new Date().toISOString().slice(0, 10)], ['g', 'unimarc']]);
+    /* $c е дата в ОСНОВНАТА форма по ISO 8601 — YYYYMMDD, без тирета (одит v2.4.18).
+       Дотук се изнасяше „2026-09-01“: стриктният валидатор — същият, заради който
+       полето 801 изобщо беше добавено — отхвърля точно него. */
+    add('801', ' ', '0', [['a', 'BG'], ['b', agency],
+      ['c', new Date().toISOString().slice(0, 10).replace(/-/g, '')], ['g', 'unimarc']]);
     // 995 е полето за екземпляри в българската практика (COMARC).
     add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', b.call_number],
       ['o', b.category_name], ['r', b.status]]);
@@ -393,7 +397,13 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       put('creator', b.author);
       put('publisher', b.publisher);
       put('date', b.year);
-      put('language', LANG_ISO[b.language] || b.language);
+      /* Същото правило като при UNIMARC 101 $a (одит v2.4.18: поправката там беше
+         направена, а тук — не). dc:language е КОДИРАНО поле по препоръката на Dublin
+         Core (ISO 639); „японски“ в него е неразчитаемо за приемащата система, която
+         подрежда по код. Непознат език → `und`, а самото наименование се пази в
+         бележка, за да не се губи сведението. */
+      put('language', b.language ? (LANG_ISO[b.language] || 'und') : '');
+      if (b.language && !LANG_ISO[b.language]) put('description', 'Език по описание: ' + b.language);
       put('description', b.annotation);
       put('type', b.category_name || 'text');
       put('format', b.pages);

@@ -64,7 +64,7 @@ async function renderInvent() {
       const poolShown = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
       const sp = poolShown ? Math.min(100, Math.round((s.scanned || 0) / poolShown * 100)) : 0;
       return `<tr><td class="num">${s.no ? s.no + ' / ' + esc(s.year || yr(s.date)) : '—'}<br><span class="hint">${bg(s.date)}</span></td><td>${esc(s.scope || '')}</td>
-      <td class="num">${s.pool_final != null ? s.pool_final : s.pool_size}</td>
+      <td class="num">${poolShown}</td>
       <td><div style="display:flex;align-items:center;gap:8px">
         <b class="num">${s.scanned || 0}</b>
         <div class="chartTrack" style="flex:1;min-width:60px;height:7px"><div class="chartFill" style="width:${sp}%"></div></div>

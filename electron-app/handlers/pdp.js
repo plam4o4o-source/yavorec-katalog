@@ -117,22 +117,40 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
           целия ред — и картонът скриваше и ЕГН, което е било налично.
      `pii_masked` остава като „поне едно поле е скрито“ за консуматори, на които
      това стига; `pii_masked_fields` казва КОИ точно. */
+  /* Освен КОИ полета са скрити, редът носи и ЗАЩО: 'locked' (защитата е заключена —
+     нормалното състояние в началото на работния ден, оправя се с отключване) или
+     'unreadable' (ключът не отговаря на данните — отключването НЕ помага, стойността
+     трябва да се въведе наново). Одит v2.4.18: картонът обясняваше всяко скриване със
+     „защитата е заключена в момента. Отключете я … и отпечатайте наново“. При
+     несъвпадащ ключ библиотекарят изпълнява указанието, отпечатва пак и получава
+     същия картон — а подписваният документ назовава грешна причина. Причината идва
+     оттук, вместо консуматорът да сравнява низове с константите на този модул. */
   function maskOne(r, stats) {
     if (!r) return r;
     const masked = [];
+    const reasons = new Set();
     for (const f of ['egn', 'id_card_no']) {
       if (!pii.isEncryptedField(r[f])) continue;
-      if (!PDP_KEY || PDP_STALE) { r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER; masked.push(f); continue; }
+      if (!PDP_KEY || PDP_STALE) {
+        r[f] = PDP_KEY ? PDP_UNREADABLE : PDP_PLACEHOLDER;
+        masked.push(f);
+        reasons.add(PDP_KEY ? 'unreadable' : 'locked');
+        continue;
+      }
       try { r[f] = pii.decryptField(r[f], PDP_KEY); if (stats) stats.ok++; }
       catch (e) {
         if (stats) stats.bad++;
         r[f] = PDP_UNREADABLE;
         masked.push(f);
+        reasons.add('unreadable');
         unreadableSeen++;
       }
     }
-    if (masked.length) { r.pii_masked = true; r.pii_masked_fields = masked; }
-    else { delete r.pii_masked; delete r.pii_masked_fields; }
+    if (masked.length) {
+      r.pii_masked = true;
+      r.pii_masked_fields = masked;
+      r.pii_masked_reason = reasons.size > 1 ? 'mixed' : [...reasons][0];
+    } else { delete r.pii_masked; delete r.pii_masked_fields; delete r.pii_masked_reason; }
     return r;
   }
   function maskReaderRow(r) { return maskOne(r, null); }

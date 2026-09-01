@@ -98,6 +98,19 @@ async function printReaderCard(id) {
     : (r.pii_masked ? ['egn', 'id_card_no'] : []));
   const piiEgn = piiMasked.has('egn'), piiCard = piiMasked.has('id_card_no');
   const piiNames = [piiEgn ? 'ЕГН' : '', piiCard ? '№ на лична карта' : ''].filter(Boolean).join(' и ');
+  /* Причината идва от maskOne (handlers/pdp.js), а не от сравняване на низове.
+     Одит v2.4.18: тук се печаташе едно и също обяснение за двата съвсем различни
+     случая — „защитата е заключена, отключете и отпечатайте наново“ важи само за
+     'locked'. При 'unreadable' (ключът не отговаря на данните) отключването вече е
+     станало и указанието праща библиотекаря да повтори нещо, което не помага. */
+  const piiWhy = {
+    locked: 'защитата на личните данни е заключена в момента. Отключете я от „Настройки“ и отпечатайте наново, '
+      + `ако картонът трябва да ${piiEgn && piiCard ? 'ги' : 'го'} съдържа.`,
+    unreadable: 'записаната стойност не се разчита с текущата парола за защита на личните данни (най-често е '
+      + 'сменяна). Отключването не помага — стойността трябва да бъде въведена наново в картотеката.',
+    mixed: 'едната стойност е скрита, защото защитата е заключена, а другата не се разчита с текущата парола '
+      + 'и трябва да бъде въведена наново в картотеката.'
+  }[r.pii_masked_reason] || 'защитата на личните данни не позволява отпечатването им в момента.';
   setPrintPage({ name: `Читателски картон — ${r.name}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ЧИТАТЕЛСКИ КАРТОН № ${esc(r.card_no || '')}</h2>
@@ -108,7 +121,7 @@ async function printReaderCard(id) {
     <b>Телефон:</b> ${esc(r.phone || '…')} &nbsp; <b>Имейл:</b> ${esc(r.email || '…')}<br>
     <b>Категория:</b> ${esc(r.category || '')} &nbsp; <b>Записан на:</b> ${bg(r.registered_at)}${r.re_registered_at ? ' · пререгистриран на ' + bg(r.re_registered_at) : ''}
     ${piiNames ? `<br><span style="font-size:9pt">${esc(piiNames)} ${piiEgn && piiCard ? 'не са отпечатани' : 'не е отпечатан'}:
-      защитата на личните данни е заключена в момента. Отключете я от „Настройки“ и отпечатайте наново, ако картонът трябва да ${piiEgn && piiCard ? 'ги' : 'го'} съдържа.</span>` : ''}
+      ${esc(piiWhy)}</span>` : ''}
     ${r.guarantor_name ? `<br><b>Родител/настойник:</b> ${esc(r.guarantor_name)} (${esc(r.guarantor_relation || 'родител')}) — тел. ${esc(r.guarantor_phone || '…')}` : ''}</div>
     <div style="width:60mm;border:1px solid #000;padding:2mm;text-align:center;margin-bottom:5mm">
       ${/* Същият дефект като в readerCardHtml (core.js), пропуснат тук при
