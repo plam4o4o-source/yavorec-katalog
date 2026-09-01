@@ -403,8 +403,13 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
          подрежда по код. Непознат език → `und`, а самото наименование се пази в
          бележка, за да не се губи сведението. */
       put('language', b.language ? (LANG_ISO[b.language] || 'und') : '');
-      if (b.language && !LANG_ISO[b.language]) put('description', 'Език по описание: ' + b.language);
       put('description', b.annotation);
+      /* СЛЕД анотацията, не преди нея (одит v2.4.18, преглед на поправката отгоре).
+         „друг“ е една от стойностите по подразбиране в номенклатурата на езиците и
+         НЕ е в LANG_ISO — тоест бележката излизаше на съвсем обикновени записи, и то
+         като ПЪРВИЯ dc:description. Приемаща система, която взима първия, показваше
+         „Език по описание: друг“ на мястото на анотацията. */
+      if (b.language && !LANG_ISO[b.language]) put('description', 'Език по описание: ' + b.language);
       put('type', b.category_name || 'text');
       put('format', b.pages);
       put('identifier', b.isbn ? 'ISBN ' + b.isbn : '');
