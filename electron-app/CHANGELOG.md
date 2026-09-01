@@ -11,6 +11,59 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.19
+
+**BG:** Девети кръг — преглед на поправките от осмия. Кръгът, в който бяха
+поправени чужди дефекти, остави свои; тежкият е от най-неприятния вид.
+
+- **Пазачът срещу по-нова база позволяваше точно това, срещу което съществува.**
+  Проверката стоеше в `runMigrations()` — тоест след превключването на журналния
+  режим, след схемата, след всички добавяния на колони и след старите еднократни
+  попълвания в `initDb()`. Измерено с истинската програма срещу здрава база от
+  по-нова версия: контролната сума на файла се сменяше, датата на съгласието на
+  читател се пренаписваше от празна на дата, базата се преобразуваше в WAL и до
+  нея оставаха работни файлове. А диалогът уверяваше библиотекаря, че „не ѝ е
+  направено нищо“. Проверката вече е **първото нещо след отварянето на файла** и
+  е измерено, че базата остава байт за байт същата.
+- **Съобщението не сочеше изход.** Прозорецът изобщо не се отваря, тоест
+  „Настройки“ → „Работа в мрежа“ е недостижимо: работно място, насочено към
+  общата папка, нямаше как да се върне към локална база през самата програма.
+  Съобщението вече назовава пътя (редът `dbFolder` в `config.json`, с пълния път
+  до файла) — заедно с предупреждението, че така компютърът работи със собствена
+  база.
+- **Смяна на паролата за лични данни от друго работно място се обявяваше за
+  загубени данни.** Разделянето на причините от миграция v2.4.18 сля това
+  състояние с „стойността не се разчита“ — и картонът инструктираше библиотекаря
+  да въведе наново ЕГН-та, които са напълно здрави и се връщат с едно отключване
+  с новата парола. Обратната грешка на поправяната. Състоянието вече е отделно и
+  документът казва точно него.
+- **Бележката за непознат език изместваше анотацията** в износа Dublin Core:
+  извеждаше се преди нея, а „друг“ е стойност по подразбиране в номенклатурата на
+  езиците — тоест бележката излизаше на съвсем обикновени записи и приемаща
+  система, която взима първата бележка, показваше „Език по описание: друг“ на
+  мястото на анотацията.
+- Премахнато е състояние „mixed“ при скритите лични данни: то не може да настъпи
+  (причината зависи от сесията, не от полето), а картонът носеше готов текст за
+  него.
+
+7 нови регресионни теста, всеки проверен с мутация (5 мутации, всяка убива поне
+един тест); два от тях са контролни и е проверено, че остават зелени. Цялата
+пакетна проверка: 1094 теста, 0 провала.
+
+**EN:** Ninth round — a review of the eighth round's own fixes. The serious one:
+the guard added in v2.4.18 to stop an older installation from touching a
+newer-schema database sat inside `runMigrations()`, i.e. after the journal mode
+switch, the schema, the column additions and the old one-off backfills in
+`initDb()`. Measured against a healthy newer database, the file's checksum
+changed, a reader's consent date was rewritten, the database was converted to WAL
+and left sidecar files behind — while the dialog told the librarian nothing had
+been done to it. The check is now the first thing after opening the file, and the
+database is verified to stay byte-for-byte identical. The message also names the
+only way out for a station pointed at the shared folder, since no window opens.
+Separately: a password changed on another workstation is no longer reported as
+lost data (unlocking with the new password restores it), and the unknown-language
+note no longer displaces the abstract in the Dublin Core export.
+
 ## v2.4.18
 
 **BG:** Осми кръг — преглед на поправките от седмия. Двете тежки находки са от

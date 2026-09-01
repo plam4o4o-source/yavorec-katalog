@@ -9,14 +9,18 @@
    трябва да е засята ПРЕДИ зареждането.
 
    Извиква се с: node newer-schema-worker.js <user_version>
-   Отпечатва един ред JSON: { exitCode, dialogs, sumAfter, versionAfter }.
+   Отпечатва един ред JSON: { exitCode, dialogs, sumAfter, versionAfter,
+   consentAfter, journalAfter, untouched, sidecarsAfter }.
 
-   `sumAfter`/`versionAfter` се четат ОТНОВО след опита за стартиране и доказват
-   най-важното: при отказ базата не е докосната — миграция 11 (която обръща
-   смисъла на acquisitions.sum = 0) не е пипнала засадения ред. */
+   Всичко след `dialogs` се чете ОТНОВО след опита за стартиране и доказва
+   най-важното: при отказ базата не е докосната. `untouched` сравнява контролната
+   сума на целия файл и наличието на -wal/-shm до него, а `consentAfter` и
+   `journalAfter` назовават поименно двете места, където по-ранен вариант на
+   пазача остави следа. */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const Module = require('module');
 const Database = require('better-sqlite3');
 
@@ -38,31 +42,50 @@ const userData = path.join(dir, 'userData');
 fs.mkdirSync(userData, { recursive: true });
 const dbPath = path.join(userData, 'library.db');
 
-/* Напълно ЗДРАВА база: истинската схема, плюс версия на схемата, каквато
-   подадем. Засаденият ред е с `sum = 0` — точно стойността, чийто смисъл
-   миграция 11 обръща (празно поле → обявена нула). */
+/* Напълно ЗДРАВА база: истинската схема, плюс версия на схемата, каквато подадем.
+   Два засадени реда, всеки — мярка за нещо различно:
+     • партида със `sum = 0` — стойността, чийто смисъл миграция 11 обръща
+       (празно поле → обявена нула);
+     • читател с отбелязано съгласие БЕЗ дата — точно редът, който пренаписва един
+       от СТАРИТЕ backfill-и в initDb(), много преди миграциите. Той показва дали
+       отказът идва преди писането (одит v2.4.19). */
 {
   const seed = new Database(dbPath);
   seed.exec(fs.readFileSync(path.join(APP_DIR, 'db', 'schema.sql'), 'utf8'));
   seed.prepare("INSERT INTO acquisitions (no, year, date, sum, total_count) VALUES (1, '2026', '2026-02-02', 0, 1)").run();
+  seed.prepare("INSERT INTO readers (name, registered_at, gdpr_consent) VALUES ('Читател', '2020-01-01', 1)").run();
   seed.pragma('user_version = ' + wantVersion);
   seed.close();
 }
+const hashOf = () => (fs.existsSync(dbPath)
+  ? crypto.createHash('sha256').update(fs.readFileSync(dbPath)).digest('hex')
+  : null);
+const sidecarsOf = () => fs.readdirSync(userData).filter(f => f.startsWith('library.db-')).sort();
+const hashBefore = hashOf();
+const sidecarsBefore = sidecarsOf();
 
 const dialogs = [];
 let finished = false;
 function finish(exitCode) {
   if (finished) return;
   finished = true;
-  let sumAfter = null, versionAfter = null;
+  let sumAfter = null, versionAfter = null, consentAfter = null, journalAfter = null;
+  const hashAfter = hashOf();
+  const sidecarsAfter = sidecarsOf();
   try {
     const chk = new Database(dbPath, { readonly: true });
     const row = chk.prepare('SELECT sum FROM acquisitions WHERE no = 1').get();
     sumAfter = row ? row.sum : null;
     versionAfter = chk.pragma('user_version', { simple: true });
+    consentAfter = chk.prepare('SELECT gdpr_consent_date AS d FROM readers WHERE id = 1').get().d;
+    journalAfter = chk.pragma('journal_mode', { simple: true });
     chk.close();
   } catch (e) { /* докладваме каквото имаме */ }
-  process.stdout.write(JSON.stringify({ exitCode, dialogs, sumAfter, versionAfter }) + '\n');
+  process.stdout.write(JSON.stringify({
+    exitCode, dialogs, sumAfter, versionAfter, consentAfter, journalAfter,
+    untouched: hashBefore === hashAfter && sidecarsBefore.length === sidecarsAfter.length,
+    sidecarsAfter
+  }) + '\n');
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* няма значение */ }
   process.exit(0);
 }
