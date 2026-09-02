@@ -84,7 +84,7 @@ test('registerBooksHandlers registers all 9 books: + 2 limits: channels, returns
 
 test('books:create inserts a book + inventory row, advances next_inv_number, logs audit and schedules a catalog write', async () => {
   const { db, ipcMain, auditLog, catalogWrites } = setup();
-  const result = await ipcMain.invoke('books:create', { title: 'Под игото', author: 'Вазов, Иван', inv_number: 5, quantity: 2 });
+  const result = await ipcMain.invoke('books:create', { title: 'Под игото', author: 'Вазов, Иван', inv_number: 5, quantity: 1 });
   assert.equal(result.ok, true);
   const id = result.data;
   const row = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
@@ -92,7 +92,10 @@ test('books:create inserts a book + inventory row, advances next_inv_number, log
   assert.equal(row.status, 'наличен'); // defaulted
   assert.equal(row.register_date, '2026-08-02'); // defaulted via today()
   const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id);
-  assert.equal(inv.quantity, 2);
+  /* v2.4.21: един инвентарен номер = един екземпляр. Дотук тестът подаваше
+     quantity: 2 и очакваше да се запише — а такъв запис инвентарната книга не
+     допуска. Отказът е закован отделно в fixes-audit-v2421.test.js. */
+  assert.equal(inv.quantity, 1);
   const nextInv = db.prepare('SELECT next_inv_number FROM settings WHERE id=1').get().next_inv_number;
   assert.equal(nextInv, 6);
   assert.ok(auditLog.some(a => a.action === 'Нов документ'));

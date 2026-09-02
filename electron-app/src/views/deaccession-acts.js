@@ -143,6 +143,7 @@ async function printActDoc(id) {
   const s = SETTINGS_CACHE || {};
   const total = actValue(a.items);
   const count = actCount(a.items);
+  const showQty = actHasMultiples(a.items);
   setPrintPage({ name: `Акт за отчисляване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за отчисляване на библиотечни документи</span></h2>
@@ -151,16 +152,21 @@ async function printActDoc(id) {
     1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
     на основание <b>чл. 30, т. ${a.reason_code}</b> от Наредба № 3 от 18.11.2014 г. — <b>${esc(a.reason_text)}</b> — отчислява от библиотечния фонд
     <b>${count}</b> библиотечни документа${actHasMultiples(a.items) ? ` (${a.items.length} заглавия)` : ''} на обща стойност <b>${mny(total)}</b></div>
-    <!-- Колоната „Бр." не е разкрасяване. Редът ОБЩО е Σ(цена × бройка), а редовете
-         печатаха гола единична цена: счетоводителят вижда колона, която се сумира на
-         едно число, и ред ОБЩО, който казва друго — във вътрешно противоречив
-         документ, подписан от комисия и приложен към КДБФ Приложение № 3. Същата
-         поправка беше направена за акта за дарение в v2.4.14; тук е била пропусната. -->
-    <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th><th>Бр.</th><th>Стойност, лв.</th></tr></thead><tbody>
+    ${/* Колоната „Бр." излиза САМО когато актът наистина носи ред с бройка,
+          различна от един документ. Един инвентарен номер отговаря на един
+          екземпляр, тоест при редовни данни колоната е константа 1 и е излишна —
+          но акт, съставен върху неразделен стар запис (виж „Настройки“ →
+          „Проверка на данните“), трябва да я има: редът ОБЩО е Σ(цена × бройка),
+          а редовете печатат единична цена, и без колоната документът се сумира
+          на едно число, а твърди друго. */''}
+    <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th>${
+      showQty ? '<th>Бр.</th>' : ''}<th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
-    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td><td>${actQty(l)}</td><td>${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
-    <tr><td colspan="5"><b>ОБЩО</b></td><td><b>${count}</b></td><td><b>${mny(total)}</b></td></tr></tbody></table>
+    <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td>${
+      showQty ? `<td>${actQty(l)}</td>` : ''}<td>${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
+    <tr><td colspan="5"><b>ОБЩО${showQty ? '' : ' ' + count + ' документа'}</b></td>${
+      showQty ? `<td><b>${count}</b></td>` : ''}<td><b>${mny(total)}</b></td></tr></tbody></table>
     <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
     Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>
     ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);

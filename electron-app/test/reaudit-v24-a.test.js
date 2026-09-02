@@ -42,7 +42,11 @@ test('два реални процеса, продължение (loans:extend) 
   for (let round = 0; round < ROUNDS; round++) {
     const dbFolder = makeSharedFolder();
     await boot(dbFolder);
-    const bookId = invokeHandler('books:create', { title: 'Под игото', quantity: 5 }).data;
+    /* v2.4.21: един инвентарен номер = един екземпляр, и books:create вече отказва
+       по-голяма бройка. Петицата тук беше само за да е книгата заемаема — за едно
+       заемане стига един екземпляр, а тестът е за две едновременни ПРОДЪЛЖЕНИЯ на
+       едно и също заемане. */
+    const bookId = invokeHandler('books:create', { title: 'Под игото', quantity: 1 }).data;
     const readerId = invokeHandler('readers:create', { name: 'Читател 1' }).data;
     const co = invokeHandler('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-01' });
     assert.equal(co.ok, true, 'заемането трябва да успее при засяването: ' + JSON.stringify(co));
