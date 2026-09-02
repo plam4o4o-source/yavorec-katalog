@@ -63,6 +63,14 @@ if (MODE === 'network') {
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({ dbFolder: shared }));
   dbPath = path.join(shared, 'library.db');
 }
+if (MODE === 'local-fallback') {
+  /* Одит v2.4.21: config.json СОЧИ мрежова папка, която липсва (изключен NAS), а
+     библиотекарят е избрал „Работи с локална база“ — редът dbFolder остава, но
+     resolveDbDir() пада към локалната папка и базата, която се отваря, е
+     локалната. Диалогът за по-нова база НЕ бива да съветва изтриване на dbFolder
+     за файл, който не е мрежов. Тук изборът се симулира с готов отговор 'local'. */
+  fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify({ dbFolder: path.join(dir, 'няма-такава-папка') }));
+}
 
 /* Напълно ЗДРАВА база: истинската схема, плюс версия на схемата, каквато подадем.
    Два засадени реда, всеки — мярка за нещо различно:
@@ -99,6 +107,29 @@ if (MODE === 'race') {
       bumped = true;
       const other = new Database(dbPath);
       other.pragma('user_version = ' + wantVersion);
+      other.close();
+    }
+    return realRead.call(fs, p, ...rest);
+  };
+}
+if (MODE === 'race-break') {
+  /* Одит v2.4.21, находка №3: другата станция не само вдига версията, а и
+     ПРОМЕНЯ схемата по начин, който старият код не познава (тук: преименувана
+     колона — напълно естествена бъдеща миграция). Тогава някой от старите
+     backfill-и в initDb() гърми с „no such column“ — грешка БЕЗ code
+     DB_NEWER_SCHEMA. Дотук тя падаше в общия диалог „повреден файл … преименувайте
+     library.db … възстановете копието“ върху здрава, по-нова база. */
+  const m = /const CURRENT_SCHEMA_VERSION = (\d+);/.exec(fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8'));
+  const current = parseInt(m[1], 10);
+  { const fix = new Database(dbPath); fix.pragma('user_version = ' + current); fix.close(); }
+  const realRead = fs.readFileSync;
+  let bumped = false;
+  fs.readFileSync = function (p, ...rest) {
+    if (!bumped && String(p).endsWith('schema.sql')) {
+      bumped = true;
+      const other = new Database(dbPath);
+      other.pragma('user_version = ' + wantVersion);
+      other.exec('ALTER TABLE readers RENAME COLUMN gdpr_consent TO consent_gdpr');
       other.close();
     }
     return realRead.call(fs, p, ...rest);

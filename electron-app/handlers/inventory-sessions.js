@@ -3,6 +3,7 @@
 // main.js, hoisted) и getDb/run/logAudit.
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
+  const { parseRegisterNo } = require('../security-utils');
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -68,8 +69,12 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          един и същ MAX(no)+1 и издаваха ДВА протокола по чл. 40 с номер № N/година;
          ръчно въведен вече зает номер минаваше също така мълчаливо. */
       const year = String(s.date || '').slice(0, 4) || String(new Date().getFullYear());
+      /* Празно поле → следващият свободен; въведено число → точно то, проверено.
+         Дотук `parseInt(s.no) || MAX+1`: въведена нула пропадаше през || и ставаше
+         следващият номер без дума, „-3“ и „1.5“ минаваха. Проверката е ПРЕДИ
+         транзакцията — правото на запис не се взима заради невалиден вход. */
+      const typed = parseRegisterNo(s.no, 'Протокол №', true);
       const tx = db.transaction(() => {
-        const typed = parseInt(s.no, 10);
         const no = typed
           || ((db.prepare('SELECT MAX(no) AS m FROM inventory_sessions WHERE year = ?').get(year).m || 0) + 1);
         if (db.prepare('SELECT 1 FROM inventory_sessions WHERE year = ? AND no = ?').get(year, no)) {

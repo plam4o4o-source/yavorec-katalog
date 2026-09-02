@@ -209,6 +209,17 @@ function resolveDbDir() {
   if (cfg.dbFolder && fs.existsSync(cfg.dbFolder)) return cfg.dbFolder;
   return defaultDbDir();
 }
+/* Обща ли е базата (мрежова папка)? Дотук отговорът се вземаше от
+   `!!readConfig().dbFolder` — но resolveDbDir() пада към ЛОКАЛНАТА папка, когато
+   dbFolder е зададена, а е недостъпна, и ensureDbFolderAvailable() с отговор
+   „Работи с локална база“ НЕ маха реда от config.json. Тогава journal_mode се
+   слагаше DELETE върху локален файл, а диалогът за по-нова база съветваше
+   „изтрийте реда dbFolder“ за база, която изобщо не е мрежова (одит v2.4.21).
+   Мрежова е тази база, чиято папка НЕ е локалната по подразбиране. */
+function dbIsNetwork() {
+  try { return path.resolve(resolveDbDir()) !== path.resolve(defaultDbDir()); }
+  catch (e) { return !!readConfig().dbFolder; }
+}
 function resolveDbPath() {
   const dir = resolveDbDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -274,8 +285,13 @@ function seedAuthorisedValues(category, defaults) {
 function initDb() {
   const dbPath = resolveDbPath();
   const isNew = !fs.existsSync(dbPath);
-  const isNetwork = !!readConfig().dbFolder; // персонализирана папка — обичайно мрежов диск
+  const isNetwork = dbIsNetwork(); // папката НЕ е локалната по подразбиране — обичайно мрежов диск
   db = new Database(dbPath);
+  /* busy_timeout е настройка на връзката, не запис във файла — и трябва да е ПРЕДИ
+     пазача: първото четене на user_version иначе чака подразбиращите се 5 s, а
+     миграция над 5 s на другата станция по мрежов дял дава „locked“ вместо
+     изчакване (одит v2.4.21). */
+  db.pragma('busy_timeout = ' + (isNetwork ? 20000 : 8000));
   /* ПЪРВОТО нещо след отварянето — преди journal_mode (който преобразува файла и
      оставя -wal/-shm до него), преди schema.sql и преди старите backfill-и
      по-долу. Виж дългата бележка при самата функция за какво беше измерено, че се
@@ -287,7 +303,6 @@ function initDb() {
   // веднага да гърми "database is locked", когато няколко компютъра пишат почти едновременно.
   db.pragma(isNetwork ? 'journal_mode = DELETE' : 'journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = ' + (isNetwork ? 20000 : 8000));
 
   // fs.readFileSync reads transparently through app.asar for plain text files,
   // so the same path works both in dev and in a packaged build.
@@ -682,7 +697,10 @@ const MIGRATIONS = [
    извикване (initDb() тръгва чак в app.whenReady()). */
 function assertSchemaNotNewer(late) {
   const v = db.pragma('user_version', { simple: true });
-  if (v <= CURRENT_SCHEMA_VERSION) return;
+  /* Връща прочетената версия: runMigrations() я ползва за `from`, вместо да чете
+     втори път. Две четения = процеп, в който скок на версията между тях минава
+     пазача и дава празен списък миграции (одит v2.4.21, възпроизведено с кука). */
+  if (v <= CURRENT_SCHEMA_VERSION) return v;
   /* Дръжката се затваря веднага: файлът е на споделена папка и няма причина да
      стои заключен от нас, докато библиотекарят чете съобщението. */
   try { db.close(); } catch (e) { /* при отказ няма какво да поправяме */ }
@@ -695,14 +713,14 @@ function assertSchemaNotNewer(late) {
      съветът да бъде изтрит би бил невярна инструкция (одит v2.4.20 — дотук се
      печаташе безусловно, включително „базата е обща (мрежова папка)“ за база,
      която не е). */
-  err.isNetwork = !!readConfig().dbFolder;
+  err.isNetwork = dbIsNetwork();
   err.configPath = configPath();
+  err.dbPath = path.join(resolveDbDir(), 'library.db');
   throw err;
 }
 function runMigrations() {
   // Повторение на пазача под прозореца на initDb() — виж дългата бележка горе.
-  assertSchemaNotNewer(true);
-  const from = db.pragma('user_version', { simple: true });
+  const from = assertSchemaNotNewer(true);
   const pending = MIGRATIONS.filter(m => m.version > from).sort((a, b) => a.version - b.version);
   for (const m of pending) {
     // Одит v2.3.1 №2/№22: `from` е прочетено ЕДНОКРАТНО, извън транзакция —
@@ -943,6 +961,32 @@ app.whenReady().then(() => {
      Затова тук: разбираемо съобщение, точния технически текст в дневника, и изход. */
   const detail = (err && err.message) ? err.message : String(err);
   try { logToFile('error', 'Стартирането пропадна: ' + detail); } catch (e) { /* дневникът е последната ни грижа тук */ }
+  /* Прекласифициране (одит v2.4.21). Между двата пазача старият код изпълнява СВОЯ
+     DDL и своите еднократни попълвания срещу схема, която не познава. Ако която и да
+     е от тези стъпки гръмне (бъдеща миграция с преименувана колона стига), грешката
+     няма code DB_NEWER_SCHEMA и падаше в общия диалог — „преименувайте library.db
+     … възстановете копието“ — върху здрава, по-нова база: точно съветът, срещу
+     който пазачът съществува. Затова тук се отваря втора връзка САМО за четене и се
+     пита версията; ако е по-висока от познатата, това е по-нова база, каквато и да е
+     била конкретната грешка. */
+  if (!(err && err.code === 'DB_NEWER_SCHEMA')) {
+    try {
+      const p = path.join(resolveDbDir(), 'library.db');
+      if (fs.existsSync(p)) {
+        const ro = new Database(p, { readonly: true });
+        let v;
+        try { v = ro.pragma('user_version', { simple: true }); } finally { try { ro.close(); } catch (e) { /* няма значение */ } }
+        if (Number.isFinite(v) && v > CURRENT_SCHEMA_VERSION) {
+          // Както прави самият пазач: файлът на споделената папка не стои заключен от нас.
+          try { if (db) db.close(); } catch (e) { /* няма какво да поправяме */ }
+          const e2 = new Error('Базата данни е с версия на схемата ' + v + ', а тази инсталация на InvLib познава до версия '
+            + CURRENT_SCHEMA_VERSION + '. Базата е обновена от по-нова версия на програмата. (Спряно при: ' + detail + ')');
+          e2.code = 'DB_NEWER_SCHEMA'; e2.late = true; e2.isNetwork = dbIsNetwork(); e2.configPath = configPath(); e2.dbPath = p;
+          err = e2;
+        }
+      }
+    } catch (e) { /* не можем да прекласифицираме — остава общият диалог */ }
+  }
   try {
     /* Съветът дотук беше „копирайте последното копие върху library.db“ и той е
        ОПАСЕН по два начина. Първо, при включена защита на личните данни най-новото
@@ -966,10 +1010,18 @@ app.whenReady().then(() => {
            невярна инструкция и се пропуска. */
     if (err && err.code === 'DB_NEWER_SCHEMA') {
       dialog.showErrorBox('InvLib на този компютър е по-стар от базата данни',
-        detail + '\n\n'
+        (err.message || detail) + '\n\nФайл: ' + (err.dbPath || '') + '\n\n'
+        /* Одит v2.4.21: при късния отказ сервизната част на стартирането ВЕЧЕ е
+           записала — журнал, липсващи колони, еднократни попълвания (измерено:
+           readers.gdpr_consent_date от NULL на дата, authorised_values, WAL). Това
+           са данни на библиотеката, пренаписани по стария начин, и „не е записала
+           ваши данни“ беше невярно. Казва се точно какво е станало и защо базата
+           все пак не бива да се пипа. */
         + (err.late
-          ? 'Друго работно място обнови базата точно докато тази програма стартираше. Програмата '
-            + 'спря, преди да отвори работна сесия и преди да запише каквито и да е ваши данни.'
+          ? 'Друго работно място обнови базата, докато тази програма стартираше. Програмата спря, преди да '
+            + 'отвори работна сесия — нищо от вашата работа не е въведено. Сервизната част на стартирането обаче '
+            + 'вече беше минала (журнал, липсващи колони, еднократни попълвания по стария начин), затова обновете '
+            + 'ТОЗИ компютър, преди отново да работите с базата.'
           : 'Базата НЕ е повредена и програмата не е записала нищо в нея — спря веднага '
             + 'след като я отвори, за да не запише данни по стария си начин.')
         + '\n\nКакво да направите:\n'

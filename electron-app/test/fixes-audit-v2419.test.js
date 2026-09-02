@@ -86,16 +86,21 @@ test('сменена от друго работно място парола не
      докато тази е била отворена) попадна в 'unreadable'. А то е напълно
      възстановимо: pdp:unlock нулира флага и същите ЕГН-та се четат. Картонът
      обаче инструктираше библиотекаря да ги ВЪВЕДЕ НАНОВО — тоест да пренапише
-     непокътнати данни. Обратната грешка на поправяната. */
+     непокътнати данни. Обратната грешка на поправяната.
+     v2.4.21: фикстурата вече прави каквото прави ИСТИНСКАТА смяна на паролата от
+     друго работно място — сменя pdp_salt/pdp_verifier в settings и прекриптира
+     редовете с новия ключ. Първата редакция на теста само вкарваше редове с чужд
+     ключ при непроменен проверител, тоест описваше повредени редове, не сменена
+     парола — и точно затова партидната евристика, която той закова, беше грешна. */
   const { db, ret, pii } = fx.pdpSetup('inv-v2419-stale-');
-  const foreign = pii.deriveKey('чужда-9999', pii.generateSalt(2));
+  const newSalt = pii.generateSalt(2);
+  const newKey = pii.deriveKey('нова-парола-на-другата-станция', newSalt);
+  db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
+    .run(newSalt.toString('base64'), pii.makeVerifier(newKey));
   const ins = db.prepare('INSERT INTO readers (name, egn, id_card_no) VALUES (?, ?, ?)');
-  // ЦЯЛАТА партида е нечетима с текущия ключ → сесията се обявява за негодна.
-  ins.run('Първи', pii.encryptField('7501010001', foreign), pii.encryptField('АА1234567', foreign));
-  ins.run('Втори', pii.encryptField('7502020002', foreign), pii.encryptField('ББ7654321', foreign));
-  ret.maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY id').all());
+  ins.run('Първи', pii.encryptField('7501010001', newKey), pii.encryptField('АА1234567', newKey));
+  ins.run('Втори', pii.encryptField('7502020002', newKey), pii.encryptField('ББ7654321', newKey));
 
-  // Сега сесията е негодна (PDP_STALE) — следващото четене минава по онзи клон.
   const rows = ret.maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY id').all());
   assert.equal(rows[0].pii_masked_reason, 'stale',
     'сменена отвън парола е СОБСТВЕНО състояние, не „стойността е загубена“');
@@ -140,10 +145,16 @@ test('бележката за езика не заема мястото на а�
      система, която взима първия dc:description, показваше „Език по описание:
      друг“ на мястото на анотацията. */
   const { db, exportTo } = fx.catalogSetup('inv-v2419-dc-');
-  db.prepare("INSERT INTO books (inv_number, title, language, annotation) VALUES (1, 'Книга', 'друг', 'Истинската анотация.')").run();
+  /* v2.4.21: „друг“ не носи сведение и НЕ ражда бележка (тя е шум в сводния
+     каталог на всеки такъв запис); истинско непознато наименование („японски“)
+     продължава да се пази — след анотацията. */
+  db.prepare("INSERT INTO books (inv_number, title, language, annotation) VALUES (1, 'Книга', 'японски', 'Истинската анотация.')").run();
+  db.prepare("INSERT INTO books (inv_number, title, language, annotation) VALUES (2, 'Друга', 'друг', 'Анотация две.')").run();
   const xml = await exportTo('catalog:exportDc', 'dc.xml');
-  const descs = [...xml.matchAll(/<dc:description>([^<]*)<\/dc:description>/g)].map(m => m[1]);
-  assert.equal(descs[0], 'Истинската анотация.', 'първата бележка е анотацията');
-  assert.equal(descs[1], 'Език по описание: друг', 'сведението за езика не се губи, само отстъпва');
-  assert.match(xml, /<dc:language>und<\/dc:language>/);
+  const recs = xml.split('<record>').slice(1);
+  const descs = (r) => [...r.matchAll(/<dc:description>([^<]*)<\/dc:description>/g)].map(m => m[1]);
+  assert.deepEqual(descs(recs[0]), ['Истинската анотация.', 'Език по описание: японски'],
+    'първата бележка е анотацията; сведението за езика не се губи, само отстъпва');
+  assert.deepEqual(descs(recs[1]), ['Анотация две.'], '„друг“ не носи сведение — без бележка');
+  assert.equal((xml.match(/<dc:language>und<\/dc:language>/g) || []).length, 2);
 });

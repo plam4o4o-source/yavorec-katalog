@@ -310,6 +310,20 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     'испански': 'spa', 'италиански': 'ita', 'турски': 'tur', 'гръцки': 'gre', 'румънски': 'rum',
     'сръбски': 'srp', 'македонски': 'mac', 'полски': 'pol', 'чешки': 'cze', 'украински': 'ukr'
   };
+  /* Кодът на езика и дали наименованието му носи сведение (одит v2.4.21).
+     Търсенето е без значение на главни букви и на крайни интервали: библиотекар,
+     преименувал „английски“ на „Английски“ в номенклатурата, изнасяше `und` за
+     всяка английска книга. А „друг“/„други“/„неизвестен“ са стойности по
+     подразбиране без съдържание — бележка „Език: друг“ в общото поле 300 или в
+     dc:description е шум в сводния каталог на всеки такъв запис. */
+  const LANG_EMPTY = new Set(['друг', 'други', 'неизвестен', 'неизвестно', 'няма', '-', '—']);
+  function langInfo(language) {
+    const name = String(language || '').trim();
+    if (!name) return { code: '', note: '' };
+    const code = LANG_ISO[name.toLowerCase()] || 'und';
+    const note = code === 'und' && !LANG_EMPTY.has(name.toLowerCase()) ? name : '';
+    return { code, note };
+  }
   // „Вазов, Иван“ → фамилия $a + име $b, както изисква UNIMARC 700.
   function splitName(name) {
     const s = String(name || '').trim();
@@ -346,8 +360,8 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
        поле с некодирана стойност и валидиращите системи го отхвърлят. Непознатият
        език става `und` (undetermined), а оригиналното наименование се пази в обща
        бележка 300, за да не се загуби. */
-    const langCode = b.language ? (LANG_ISO[b.language] || 'und') : '';
-    if (langCode) add('101', '0', ' ', [['a', langCode]]);
+    const lang = langInfo(b.language);
+    if (lang.code) add('101', '0', ' ', [['a', lang.code]]);
     // $h е „номер на част“ — томът на многотомно издание. Дотук той пътуваше в
     // поле 225 ($v) БЕЗ задължителното $a, тоест като поредица без заглавие.
     add('200', '1', ' ', [['a', b.title], ['e', b.subtitle], ['f', b.author], ['h', b.volume]]);
@@ -356,7 +370,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     // 225 = заявка за поредица. $a (заглавие на поредицата) е задължително, затова
     // полето се строи само когато поредица наистина има.
     if (b.series) add('225', ' ', ' ', [['a', b.series], ['v', b.series_no]]);
-    if (b.language && langCode === 'und') add('300', ' ', ' ', [['a', 'Език: ' + b.language]]);
+    if (lang.note) add('300', ' ', ' ', [['a', 'Език: ' + lang.note]]);
     add('330', ' ', ' ', [['a', b.annotation]]);
     for (const kw of String(b.keywords || '').split(/[,;]/).map(s2 => s2.trim()).filter(Boolean)) {
       add('606', ' ', ' ', [['a', kw]]);
@@ -402,14 +416,15 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
          Core (ISO 639); „японски“ в него е неразчитаемо за приемащата система, която
          подрежда по код. Непознат език → `und`, а самото наименование се пази в
          бележка, за да не се губи сведението. */
-      put('language', b.language ? (LANG_ISO[b.language] || 'und') : '');
+      const lang = langInfo(b.language);
+      put('language', lang.code);
       put('description', b.annotation);
       /* СЛЕД анотацията, не преди нея (одит v2.4.18, преглед на поправката отгоре).
          „друг“ е една от стойностите по подразбиране в номенклатурата на езиците и
          НЕ е в LANG_ISO — тоест бележката излизаше на съвсем обикновени записи, и то
          като ПЪРВИЯ dc:description. Приемаща система, която взима първия, показваше
          „Език по описание: друг“ на мястото на анотацията. */
-      if (b.language && !LANG_ISO[b.language]) put('description', 'Език по описание: ' + b.language);
+      if (lang.note) put('description', 'Език по описание: ' + lang.note);
       put('type', b.category_name || 'text');
       put('format', b.pages);
       put('identifier', b.isbn ? 'ISBN ' + b.isbn : '');

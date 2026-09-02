@@ -94,4 +94,22 @@ function normalizeScanCode(code) {
    се разминаваха с единица. */
 const ANON_READER_NAME = '— анонимизирани заемания —';
 
-module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, ANON_READER_NAME };
+/* Пореден номер на документ в регистър (партида, акт, протокол, заявка за МЗС).
+   Дотук навсякъде стоеше `parseInt(x, 10)`: „1.5“ ставаше 1, „1e3“ (валидно в
+   <input type=number>) ставаше 1, „-3“ се записваше като „№ -3“, а „0“ в
+   протокола по чл. 40 пропадаше през `typed || MAX+1` и мълчаливо ставаше
+   следващият номер (одит v2.4.21). Номерът е цяло положително число — или
+   грешка, която казва защо. `allowEmpty` е за регистрите, които сами предлагат
+   следващия номер при празно поле. */
+function parseRegisterNo(x, label, allowEmpty) {
+  const raw = x === undefined || x === null ? '' : String(x).trim();
+  if (raw === '') {
+    if (allowEmpty) return null;
+    throw new Error((label || 'Номерът') + ' е задължителен.');
+  }
+  if (!/^\d{1,9}$/.test(raw) || Number(raw) < 1) {
+    throw new Error((label || 'Номерът') + ' трябва да е цяло положително число (въведено: „' + raw + '“).');
+  }
+  return Number(raw);
+}
+module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, parseRegisterNo, ANON_READER_NAME };
