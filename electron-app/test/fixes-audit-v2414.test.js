@@ -69,17 +69,21 @@ test('остарял ключ: плейсхолдърът НИКОГА не се
          db.prepare('SELECT pdp_verifier FROM settings WHERE id=1').get().pdp_verifier);
   st2.db.prepare("INSERT INTO readers (name, egn) VALUES ('Иван', ?)").run(stored);
 
-  // Отключваме с ВЕРНАТА парола, после подменяме данните с криптирани с друг ключ —
-  // това пресъздава „ключът в паметта вече не отговаря на съдържанието“.
+  // Станция 2 отключва с ВЕРНАТА (за момента) парола...
   assert.equal(st2.ipcMain.invoke('pdp:unlock', 'нова-парола-2222').ok, true);
-  const otherKey = pii.deriveKey('трета-парола-3333', pii.generateSalt(pii.CURRENT_KDF_VERSION));
-  const foreign = pii.encryptField('7001011234', otherKey);
+  /* ...а станция 1 сменя паролата ОЩЕ ВЕДНЪЖ. Истинската смяна прави две неща:
+     сменя pdp_salt/pdp_verifier в settings и прекриптира редовете. Първата
+     редакция на теста подменяше само реда с чужд ключ при непроменен проверител —
+     това описва повреден ред, не сменена парола, и точно затова партидната
+     евристика, която тестът заковаваше, три кръга поред се оказваше грешна
+     (v2.4.21: решението се взима по проверителя). */
+  assert.equal(ipcMain.invoke('pdp:changePassword', { oldPassword: 'нова-парола-2222', newPassword: 'трета-парола-3333' }).ok, true);
+  const s1 = db.prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id=1').get();
+  st2.db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1').run(s1.pdp_salt, s1.pdp_verifier);
+  const foreign = db.prepare('SELECT egn FROM readers WHERE id = ?').get(id).egn;
   st2.db.prepare('UPDATE readers SET egn = ? WHERE name = ?').run(foreign, 'Иван');
 
-  /* Изчертава се ПАРТИДА (както прави readers:list). Одит v2.4.16: ключалка №1 се
-     задейства при партида, в която НИТО ЕДИН криптиран ред не се разчита — това е
-     подписът на „ключът не отговаря на базата“. Единичен провален ред НЕ убива
-     сесията; виж отделния тест по-долу. */
+  // Изчертава се ПАРТИДА (както прави readers:list).
   const rows = st2.returned.maskReaderRows(st2.db.prepare("SELECT * FROM readers").all());
   assert.match(rows[0].egn, /ключът не съвпада/, 'неразчетената стойност трябва да е РАЗЛИЧНА от „заключено“');
 
@@ -130,14 +134,20 @@ test('успешната смяна на паролата връща сесия�
   db.prepare("INSERT INTO readers (name, egn) VALUES ('Иван', ?)")
     .run(pii.encryptField('7001011234', pii.deriveKey('първа-парола-11', salt)));
 
-  // Изкуствено разваляме сесията, както би станало при смяна от друга станция:
-  // ЦЯЛАТА партида става нечетима, а това е признакът за негоден ключ.
-  const foreign = pii.encryptField('7001011234', pii.deriveKey('чужда-9999', pii.generateSalt(2)));
-  db.prepare("UPDATE readers SET egn = ? WHERE name='Иван'").run(foreign);
+  // Разваляме сесията, както би станало при смяна от друга станция: другата
+  // станция сменя pdp_salt/pdp_verifier и прекриптира реда (v2.4.21: признакът за
+  // негоден ключ е проверителят, не „цялата партида е нечетима“).
+  const orig = db.prepare('SELECT pdp_salt, pdp_verifier FROM settings WHERE id=1').get();
+  const otherSalt = pii.generateSalt(2);
+  const otherKey = pii.deriveKey('чужда-9999', otherSalt);
+  db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
+    .run(otherSalt.toString('base64'), pii.makeVerifier(otherKey));
+  db.prepare("UPDATE readers SET egn = ? WHERE name='Иван'").run(pii.encryptField('7001011234', otherKey));
   returned.maskReaderRows(db.prepare("SELECT * FROM readers").all());
   assert.equal(ipcMain.invoke('pdp:status').data.stale, true, 'сесията трябва да е негодна преди смяната');
 
-  // Връщаме читателя в изправно състояние и сменяме паролата.
+  // Другата станция връща всичко (настройки и ред) и тази сменя паролата.
+  db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1').run(orig.pdp_salt, orig.pdp_verifier);
   db.prepare("UPDATE readers SET egn = ? WHERE name='Иван'")
     .run(pii.encryptField('7001011234', pii.deriveKey('първа-парола-11', salt)));
   const res = ipcMain.invoke('pdp:changePassword', { oldPassword: 'първа-парола-11', newPassword: 'втора-парола-22' });

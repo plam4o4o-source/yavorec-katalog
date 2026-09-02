@@ -6,6 +6,7 @@
 // `yearOf` също по референция (const функция, дефинирана по-рано в main.js).
 module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf } = deps;
+  const { parseRegisterNo } = require('../security-utils');
 
   ipcMain.handle('acquisitions:list', () =>
     run(() => getDb().prepare(`
@@ -55,7 +56,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
   ipcMain.handle('acquisitions:create', (e, a) =>
     run(() => {
       const db = getDb();
-      const no = parseInt(a.no, 10);
+      const no = parseRegisterNo(a.no, '№ на вписване');
       const year = yearOf(a.date);
       /* Номерът се предлага с MAX(no)+1 при ОТВАРЯНЕ на формата, а schema.sql няма
          UNIQUE(year, no) и не може да го получи наготово (съществуващи бази може

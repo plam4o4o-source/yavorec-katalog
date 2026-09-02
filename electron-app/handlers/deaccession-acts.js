@@ -4,7 +4,7 @@
 // референция, функция дефинирана в main.js — отчисляването/анулирането
 // сменят видимостта на документи в онлайн каталога, затова насрочват
 // запис на katalog.json, точно както shelves.js).
-const { isValidIsoDate } = require('../security-utils');
+const { isValidIsoDate, parseRegisterNo } = require('../security-utils');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
@@ -86,7 +86,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          в тези колони. Проверката е тук, ПРЕДИ транзакцията да пипне базата —
          както при loans.js — за да не се налага частично отменяне. */
       if (!isValidIsoDate(act.date)) throw new Error('Датата на акта липсва или е невалидна.');
-      const no = parseInt(act.no, 10);
+      const no = parseRegisterNo(act.no, 'Акт №');
       const year = yearOf(act.date);
       const tx = db.transaction(() => {
         /* Номерът на акта се предлага с MAX(no)+1 при ОТВАРЯНЕ на формата, а

@@ -2,6 +2,7 @@
 // (Фаза 4, стъпка 27). Зависи само от getDb, run, logAudit, yearOf.
 module.exports = function registerMzsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, yearOf } = deps;
+  const { parseRegisterNo } = require('../security-utils');
 
   ipcMain.handle('mzs:list', () => run(() => getDb().prepare('SELECT * FROM mzs_requests ORDER BY date DESC, no DESC').all()));
   ipcMain.handle('mzs:nextNo', (e, year) =>
@@ -14,7 +15,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
   ipcMain.handle('mzs:create', (e, m) =>
     run(() => {
       const db = getDb();
-      const no = parseInt(m.no, 10);
+      const no = parseRegisterNo(m.no, '№ на заявката');
       const year = yearOf(m.date);
       /* Същото като при актовете за отчисляване и партидите на постъпленията:
          номерът се предлага с MAX(no)+1 при отваряне на формата, схемата няма
@@ -54,8 +55,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       const cur = db.prepare('SELECT * FROM mzs_requests WHERE id = ?').get(m.id);
       if (!cur) throw new Error('Заявката не е намерена.');
       const given = (v) => v !== undefined && v !== null && v !== '';
-      const no = given(m.no) ? parseInt(m.no, 10) : cur.no;
-      if (!Number.isFinite(no) || no <= 0) throw new Error('Номерът на заявката трябва да е цяло положително число.');
+      const no = given(m.no) ? parseRegisterNo(m.no, '№ на заявката') : cur.no;
       const date = given(m.date) ? m.date : cur.date;
       const year = yearOf(date);
       const tx = db.transaction(() => {
