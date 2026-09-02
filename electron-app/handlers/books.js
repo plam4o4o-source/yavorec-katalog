@@ -178,6 +178,38 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     run(() => { const c = normalizeScanCode(code); return getDb().prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c); })
   );
 
+  /* ЕДИН ИНВЕНТАРЕН НОМЕР = ЕДИН ЕКЗЕМПЛЯР.
+     Това е правилото на инвентарната книга и то важи навсякъде в програмата
+     (потвърдено от библиотеката, v2.4.21). Дотук `inventory.quantity` беше
+     свободно число, картонът предлагаше поле „Налични бройки“, а наръчникът
+     изрично учеше библиотекаря да впише там броя екземпляри — тоест самата
+     програма учеше на обратното на правилото, а цял слой аритметика Σ(бройки)
+     съществуваше, за да поддържа случай, който не бива да съществува.
+     Оттук нататък програмата НЕ създава ред с друга бройка освен 1. Втори
+     екземпляр от същото заглавие е ВТОРИ ЗАПИС със свой инвентарен номер
+     („+ Още екземпляр“ в картона).
+       • create: непосочено → 1;
+       • update: непосочено → ЗАПАЗВА текущата стойност. Дотук се нулираше на 1 —
+         а картонът вече не праща бройка. Стар неразделен запис (3 екземпляра под
+         един номер, внесена стара база), отворен за поправка на правописна
+         грешка, би загубил два документа от фонда тихо. Точно това е сплескването,
+         което правилото трябва да предотврати, не да причини;
+       • стойност > 1 се ОТХВЪРЛЯ с указание, вместо да се сплесква.
+     Вече съществуващите редове с бройка ≠ 1 се намират от books:multiCopyRecords
+     и се оправят от books:splitCopies / books:setLendable — там сборът не се
+     променя. */
+  function normalizeQuantity(q, keep) {
+    if (q === undefined || q === null || q === '') return keep === undefined ? 1 : keep;
+    const n = parseInt(q, 10);
+    if (!Number.isFinite(n) || n < 0) throw new Error('Бройката трябва да е 1 — един инвентарен номер отговаря на един екземпляр.');
+    if (n > 1) {
+      throw new Error('Един инвентарен номер отговаря на ЕДИН екземпляр. За втори екземпляр от същото '
+        + 'заглавие използвайте „+ Още екземпляр“ в картона — той създава нов запис със следващия '
+        + 'инвентарен номер, както изисква инвентарната книга.');
+    }
+    return n;
+  }
+
   ipcMain.handle('books:create', (e, book) =>
     run(() => {
       const db = getDb();
@@ -191,7 +223,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         `).run(payload);
         const id = info.lastInsertRowid;
         db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)')
-          .run(id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
+          .run(id, normalizeQuantity(b.quantity));
         if (payload.inv_number) {
           const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get();
           if (payload.inv_number >= s.next_inv_number) {
@@ -216,10 +248,11 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         db.prepare(`
           UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
         `).run(Object.assign({ id: b.id }, payload));
+        const cur = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
         db.prepare(`
           INSERT INTO inventory (book_id, quantity) VALUES (?, ?)
           ON CONFLICT(book_id) DO UPDATE SET quantity = excluded.quantity
-        `).run(b.id, b.quantity != null ? parseInt(b.quantity, 10) : 1);
+        `).run(b.id, normalizeQuantity(b.quantity, cur ? cur.quantity : 1));
         const diff = diffFields(prev, payload, BOOK_FIELDS);
         logAudit('Редакция на документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title, diff);
       });
@@ -357,6 +390,100 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         FROM books WHERE barcode = ? ORDER BY inv_number
       `);
       return dupBarcodes.map(barcode => ({ barcode, books: stmt.all(barcode) }));
+    })
+  );
+  /* ---------------- Записи с бройка, различна от 1 ----------------
+     Правилото е един инвентарен номер = един екземпляр, но база, внесена от
+     по-стара система (или водена по стария наръчник, който учеше броят да се
+     вписва в „Налични бройки“), може да носи редове с 2, 3 и повече — или с 0,
+     което прави документа невидим за всеки сбор на фонда. Тези редове НЕ се
+     пипат мълчаливо: каналът само ги намира, а поправката е отделно, изрично
+     действие. Отчислените се пропускат: те са история, бройката им живее в
+     снимката на акта (deaccession_items.quantity), а нов ред без дата на
+     отчисляване би се появил в наличността като жив документ. */
+  ipcMain.handle('books:multiCopyRecords', () =>
+    run(() => getDb().prepare(`
+      SELECT b.id, b.inv_number, b.title, b.author, b.price, b.status, i.quantity,
+             (SELECT COUNT(*) FROM loans l WHERE l.book_id = b.id AND l.date_in IS NULL) AS open_loans
+      FROM books b JOIN inventory i ON i.book_id = b.id
+      WHERE i.quantity <> 1
+        AND COALESCE(b.status, '') <> 'отчислен' AND b.deaccession_date IS NULL
+      ORDER BY b.inv_number
+    `).all())
+  );
+  /* Разделя един запис с N екземпляра на N записа по един — със СЪЩОТО
+     библиографско описание, същата цена, същата партида и същата дата на
+     вписване, но всеки със свой инвентарен номер (следващите свободни).
+     Сборовете НЕ се променят: преди — 1 ред × N бройки, след — N реда × 1
+     бройка; същият брой документи, същата стойност. Променя се само записът,
+     така че да отговаря на инвентарната книга.
+     Отказва при повече от едно отворено заемане: заеманията сочат към стария
+     ред и не може да се знае кой физически екземпляр е у кой читател — първо се
+     приемат върнатите документи. Отказва и за отчислен документ (виж по-горе). */
+  ipcMain.handle('books:splitCopies', (e, id) =>
+    run(() => {
+      const db = getDb();
+      const tx = db.transaction(() => {
+        const b = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
+        if (!b) throw new Error('Документът не е намерен.');
+        if (b.status === 'отчислен' || b.deaccession_date) {
+          throw new Error('Инв. № ' + (b.inv_number ?? '—') + ' е отчислен. Отчисленият запис е история — бройката му '
+            + 'стои в самия акт за отчисляване и не се разделя.');
+        }
+        const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {};
+        const n = parseInt(inv.quantity, 10) || 0;
+        if (n <= 1) throw new Error('Този запис вече е за един екземпляр — няма какво да се разделя.');
+        const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(id).n;
+        if (open > 1) {
+          throw new Error('По този запис има ' + open + ' незавършени заемания, а те сочат към стария общ ред — '
+            + 'не може да се определи кой читател кой екземпляр държи. Приемете върнатите документи (да остане '
+            + 'най-много едно заемане) и разделете записа отново.');
+        }
+        const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
+        let next = parseInt(s.next_inv_number, 10) || 1;
+        const taken = db.prepare('SELECT 1 FROM books WHERE inv_number = ?');
+        const cols = BOOK_FIELDS.filter(f => f !== 'inv_number' && f !== 'barcode');
+        const insert = db.prepare(`
+          INSERT INTO books (inv_number, ${cols.join(',')})
+          VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
+        `);
+        const created = [];
+        for (let k = 1; k < n; k++) {
+          while (taken.get(next)) next++;   // никога върху зает номер
+          const row = { inv_number: next };
+          cols.forEach(f => { row[f] = b[f] === undefined ? null : b[f]; });
+          const info = insert.run(row);
+          /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
+             дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
+             Новият екземпляр получава свой етикет от „Баркод етикети“. */
+          db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
+          created.push(next);
+          next++;
+        }
+        db.prepare('UPDATE inventory SET quantity = 1 WHERE book_id = ?').run(id);
+        db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(next);
+        logAudit('Разделяне на екземпляри',
+          'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + n + ' екземпляра станаха '
+          + n + ' отделни записа; нови инвентарни номера: ' + created.join(', '));
+        return { created, inv_number: b.inv_number, title: b.title };
+      });
+      const out = tx.immediate();
+      scheduleCatalogWrite();
+      return out;
+    })
+  );
+  /* Бройка 0 (стар запис): документът е вписан в инвентарната книга, но не влиза
+     в нито един сбор на фонда и не може да се заема. Единствената смислена
+     стойност под правилото е 1. */
+  ipcMain.handle('books:setLendable', (e, id) =>
+    run(() => {
+      const db = getDb();
+      const b = db.prepare('SELECT inv_number, title FROM books WHERE id = ?').get(id);
+      if (!b) throw new Error('Документът не е намерен.');
+      db.prepare(`INSERT INTO inventory (book_id, quantity) VALUES (?, 1)
+        ON CONFLICT(book_id) DO UPDATE SET quantity = 1`).run(id);
+      logAudit('Поправка на бройка', 'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — бройката е върната на 1');
+      scheduleCatalogWrite();
     })
   );
   ipcMain.handle('books:addCheck', (e, { bookId, date }) =>

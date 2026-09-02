@@ -231,6 +231,21 @@ async function renderSetup() {
       <div class="toolbar"><button class="btn pri" onclick="saveLimits()">Запиши ограниченията</button></div>
     </div>
 
+    <!-- Проверка на данните (v2.4.21). Двете проверки са за неща, които базата не
+         може да гарантира сама: правилото „един инвентарен номер = един екземпляр“
+         не е изразимо като ограничение върху вече съществуваща база, а UNIQUE върху
+         баркода беше нарочно пропуснат при миграция v4, за да не гръмне върху база с
+         вече съществуващи дубликати. Каналът books:findDuplicateBarcodes стоеше от
+         тогава без нито един екран, който да го вика — коментарът при него обещаваше
+         „отделен слой“, който така и не се появи. -->
+    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Проверка на данните</h3>
+      <div class="note" style="margin-top:0">Търси два вида несъответствия, които програмата не може да поправи
+      сама. Нищо не се променя без ваше изрично действие, и нито едно от поправянията не променя броя
+      документи или стойността на фонда.</div>
+      <div class="toolbar"><button class="btn" onclick="runDataChecks()">Провери сега</button></div>
+      <div id="dataChecks"></div>
+    </div>
+
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Външен вид — цветова тема</h3>
       <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -867,3 +882,81 @@ async function copyDevEmail() {
   }
 }
 window.copyDevEmail = copyDevEmail;
+
+/* ---------------- Проверка на данните (v2.4.21) ----------------
+   Двете проверки са за несъответствия, които базата не може да улови сама, и
+   поправките са ЗАПИСНИ по същество, не числови: разделянето на екземпляри
+   превръща 1 ред × N бройки в N реда × 1 бройка (същият брой документи, същата
+   стойност), нулевата бройка се връща на 1 (документът е в инвентарната книга и
+   трябва да влиза в сборовете), а дубликатът на баркод се решава на ръка. */
+async function runDataChecks() {
+  const box = $('#dataChecks');
+  if (!box) return;
+  box.innerHTML = '<div class="hint">Проверявам…</div>';
+  const [multi, dups] = await Promise.all([
+    call(window.api.books.multiCopyRecords()),
+    call(window.api.books.findDuplicateBarcodes())
+  ]);
+  if (multi === null || dups === null) { box.innerHTML = ''; return; }
+  const many = multi.filter(r => Number(r.quantity) > 1);
+  const zero = multi.filter(r => Number(r.quantity) === 0);
+  const copies = many.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  const nameOf = (r) => esc([r.author, r.title].filter(Boolean).join('. '));
+  box.innerHTML = `
+    <h4 style="font-size:14px;margin:16px 0 6px">Записи с повече от един екземпляр под един инвентарен номер</h4>
+    ${many.length ? `
+      <div class="note d" style="margin-top:0">Един инвентарен номер отговаря на <b>един</b> екземпляр.
+      ${many.length === 1 ? 'Един запис носи' : many.length + ' записа носят'} общо <b>${copies}</b> екземпляра —
+      най-вероятно от внесена стара база. Разделянето създава по един запис на екземпляр със следващите свободни
+      инвентарни номера; <b>броят документи и стойността на фонда остават същите</b>.</div>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th>
+        <th>Бройки</th><th>Заети</th><th></th></tr></thead><tbody>
+      ${many.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td>
+        <td class="num">${r.quantity}</td><td class="num">${r.open_loans || 0}</td>
+        <td><button class="btn sm" onclick="splitBookCopies(${r.id})">Раздели на ${r.quantity} записа</button></td></tr>`).join('')}
+      </tbody></table></div>`
+      : '<div class="hint">Няма такива записи — навсякъде един инвентарен номер отговаря на един екземпляр.</div>'}
+
+    ${zero.length ? `
+      <h4 style="font-size:14px;margin:20px 0 6px">Записи с бройка 0</h4>
+      <div class="note d" style="margin-top:0">Документът е вписан в инвентарната книга, но с бройка 0 не влиза в нито един
+      сбор на фонда (КДБФ, инвентарна книга, табло) и не може да се заема. Ако документът е във фонда, бройката трябва да е 1;
+      ако не е — той се отчислява с акт, не с нула.</div>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th></th></tr></thead><tbody>
+      ${zero.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td><td>${esc(r.status || '')}</td>
+        <td><button class="btn sm" onclick="setBookLendable(${r.id})">Върни бройката на 1</button></td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+
+    <h4 style="font-size:14px;margin:20px 0 6px">Един и същ баркод на повече от един документ</h4>
+    ${dups.length ? `
+      <div class="note d" style="margin-top:0">Сканирането намира <b>първия</b> от тях — може да завери или отчисли
+      грешния физически екземпляр. Отворете документите и оставете баркода само на един (или дайте нови етикети).</div>
+      ${dups.map(g => `<div style="margin-bottom:10px"><b>Баркод ${esc(g.barcode)}</b>
+        <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th></th></tr></thead><tbody>
+        ${g.books.map(b => `<tr><td class="num">${b.inv_number ?? '—'}</td><td>${nameOf(b)}</td><td>${esc(b.status || '')}</td>
+          <td><button class="btn sm" onclick="bookForm(${b.id})">Отвори</button></td></tr>`).join('')}
+        </tbody></table></div></div>`).join('')}`
+      : '<div class="hint">Няма повтарящи се баркодове.</div>'}`;
+}
+window.runDataChecks = runDataChecks;
+async function splitBookCopies(id) {
+  if (!confirm('РАЗДЕЛЯНЕ НА ЕКЗЕМПЛЯРИ\n\n'
+    + 'Записът ще бъде разделен на отделни записи — по един за всеки екземпляр, всеки със свой '
+    + 'инвентарен номер, както изисква инвентарната книга.\n\n'
+    + 'Броят документи и стойността на фонда НЕ се променят. Новите записи получават празен баркод '
+    + '(етикетът се лепи на конкретния екземпляр).\n\nДа продължа ли?')) return;
+  const res = await call(window.api.books.splitCopies(id));
+  if (res === null) return;
+  markSaved();
+  toast('Инв. № ' + (res.inv_number ?? '—') + ': добавени са нови инвентарни номера '
+    + res.created.join(', ') + '.', 'ok');
+  runDataChecks();
+}
+window.splitBookCopies = splitBookCopies;
+async function setBookLendable(id) {
+  const ok = await call(window.api.books.setLendable(id), 'Бройката е върната на 1.');
+  if (ok === null) return;
+  markSaved();
+  runDataChecks();
+}
+window.setBookLendable = setBookLendable;

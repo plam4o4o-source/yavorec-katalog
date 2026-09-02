@@ -276,19 +276,27 @@ function avSelectOpts(avList, fallback, current) {
   if (current && !vals.includes(current)) vals.push(current);
   return vals;
 }
-async function bookForm(id, presetAcqId) {
+/* `prefill` (v2.4.21) идва само от bookCopyForm: НОВ запис, чието описание е
+   копирано от съществуващ екземпляр. Формата е същата — различава се само откъде
+   идват началните стойности и заглавието на прозореца. */
+async function bookForm(id, presetAcqId, prefill) {
   const b = id ? await call(window.api.books.get(id)) : null;
   const [cats, acqs, sug, av] = await Promise.all([
     call(window.api.categories.list()), call(window.api.acquisitions.list()), loadAuthSuggest(),
     call(window.api.av.options())
   ]);
-  const v = b || { register_date: today(), status: 'наличен', language: 'български', department: 'за възрастни', acquisition_id: presetAcqId || '' };
+  const v = prefill || b || { register_date: today(), status: 'наличен', language: 'български', department: 'за възрастни', acquisition_id: presetAcqId || '' };
   const AV = av || {};
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
-  modal(id ? 'Инв. № ' + v.inv_number + ' — редакция' : 'Нов документ във фонда', `
+  modal(id ? 'Инв. № ' + v.inv_number + ' — редакция'
+    : prefill ? 'Още един екземпляр от „' + (v.title || '') + '“'
+    : 'Нов документ във фонда', `
     <div class="note"><b>Чл. 16, ал. 1</b> — индивидуалната регистрация съдържа: дата на вписване, инвентарен номер, автор,
     заглавие, том, година, цена, номер и дата на вписване в КДБФ, сигнатура.</div>
+    ${prefill ? `<div class="note d">Това е <b>нов запис</b> със <b>свой инвентарен номер</b> — един инвентарен номер
+      отговаря на един екземпляр. Описанието е копирано от инв. № ${esc(String(prefill.copied_from ?? ''))};
+      баркодът остава празен (етикетът се лепи на конкретния екземпляр) и се попълва от „Баркод етикети“.</div>` : ''}
     <form id="bookF" onsubmit="return false">
     <fieldset><legend>Инвентиране</legend>
       <div class="grid g3">
@@ -305,7 +313,22 @@ async function bookForm(id, presetAcqId) {
         ${fld('Цена (лв.)', 'price', { val: v.price ?? 0, type: 'number', step: '0.01', req: 1 })}
         ${fld('Цена (€)', 'price_eur', { val: eur(v.price || 0), type: 'number', step: '0.01', hint: 'автоматично при промяна' })}
         ${fld('Отдел / местонахождение', 'department', { type: 'select', opts: avSelectOpts(AV.department, OTDELI, v.department), val: v.department })}
-        ${fld('Налични бройки', 'quantity', { val: v.quantity ?? 1, type: 'number', min: 0 })}
+        ${/* ЕДИН ИНВЕНТАРЕН НОМЕР = ЕДИН ЕКЗЕМПЛЯР. Дотук тук стоеше свободно
+              числово поле „Налични бройки“, а наръчникът изрично учеше библиотекаря
+              да впише в него броя екземпляри — тоест програмата предлагаше запис,
+              който инвентарната книга не допуска. Полето отпада: картонът не
+              праща бройка, книгата е един екземпляр, а вторият се завежда с бутона
+              „+ Още екземпляр“ по-долу. Стар неразделен запис (бройка ≠ 1, внесена
+              стара база) се показва като предупреждение — и НЕ се пипа при
+              записване (books:update пази непратена бройка), защото сплескването
+              му до 1 би отнело документи от фонда тихо. */
+          (id && v.quantity != null && Number(v.quantity) !== 1)
+          ? `<div class="field"><label>Екземпляри под този номер</label>
+              <input type="text" value="${esc(String(v.quantity))} — стар запис" disabled>
+              <span class="fh" style="color:#b00">Един инвентарен номер отговаря на един екземпляр. Поправя се от „Настройки“ → „Проверка на данните“; записването тук не променя бройката.</span></div>`
+          : `<div class="field"><label>Екземпляр</label>
+              <input type="text" value="1 — един инвентарен номер, един екземпляр" disabled>
+              <span class="fh">втори екземпляр: бутонът „+ Още екземпляр“</span></div>`}
       </div>
       <div class="grid g4">
         ${fld('Постоянно място', 'permanent_location', { type: 'select',
@@ -385,7 +408,9 @@ async function bookForm(id, presetAcqId) {
     </fieldset>
     </form>
     ${datalistsHtml(sug || {})}`,
-    `<button class="btn" onclick="closeModal()">Отказ</button>
+    `${id ? `<button class="btn l" onclick="bookCopyForm(${id})"
+        title="Създава НОВ запис със следващия инвентарен номер и същото описание — един инвентарен номер отговаря на един екземпляр">+ Още екземпляр</button>` : ''}
+     <button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
   const priceEl = $('#bookF [name=price]'), priceEurEl = $('#bookF [name=price_eur]');
@@ -395,6 +420,31 @@ async function bookForm(id, presetAcqId) {
   }
 }
 window.bookForm = bookForm;
+/* „+ Още екземпляр“ — вторият екземпляр от едно заглавие е ВТОРИ ЗАПИС със свой
+   инвентарен номер, а не число в полето на първия. Копира се библиографското
+   описание, цената, партидата в КДБФ и отделът; НЕ се копират инвентарният номер
+   (взима се следващият свободен), баркодът (лепи се на конкретния екземпляр и
+   дубликат в него разваля сканирането), забележката за конкретния екземпляр,
+   датата на последното сканиране и датата на статуса. */
+async function bookCopyForm(id) {
+  const src = await call(window.api.books.get(id));
+  if (!src) return;
+  const s = await call(window.api.settings.get());
+  const v = Object.assign({}, src);
+  delete v.id;
+  v.copied_from = src.inv_number;
+  v.inv_number = (s && s.next_inv_number) || '';
+  v.barcode = '';
+  v.description = '';
+  v.status = 'наличен';
+  v.status_date = '';
+  v.datelastseen = '';
+  v.quantity = 1;
+  v.register_date = today();
+  closeModal();
+  bookForm(null, null, v);
+}
+window.bookCopyForm = bookCopyForm;
 /* ---------------- Избор на УДК от таблицата ----------------
    Прозорецът се отваря върху формата за книга. Изборът замества стойността в
    полето, а определителите се добавят накрая — полето остава свободен текст, за
