@@ -59,6 +59,46 @@ repairs legacy records with a copy count other than 1 without changing the fund'
 document count or value. Printouts no longer claim an inventory number can cover
 several copies. 20 new mutation-verified tests.
 
+## v2.4.22
+
+**BG:** Преглед на поправката от v2.4.21 („един инвентарен номер = един
+екземпляр“). Две находки, и двете в handlers/books.js:
+
+- **`normalizeQuantity()` отхвърляше бройка над 1, но мълчаливо приемаше 0** —
+  точно стойността, която `books:setLendable` и „Проверка на данните“
+  съществуват да откриват и оправят, защото прави документа невидим за всеки
+  сбор на фонда. Дупка в единствената врата към бройката от картона. Изрична
+  бройка 0 вече се отказва при създаване и при редакция със същото основание;
+  редът остава достижим само през целенасочените инструменти.
+- **Разделянето на стар неразделен запис копираше статуса, датата на статуса и
+  бележката непроменени върху всеки нов екземпляр.** Тези три полета описват
+  състоянието на ЕДИН физически екземпляр (напр. status „липсващ“ или бележка
+  „скъсана корица, липсва том 2“) — стар запис с 3 бройки и такава бележка я
+  носеше най-много за един от трите след разделяне, а получаваше я и за трите.
+  Ръчният път „+ Още екземпляр“ вече нулираше тези полета за новия запис;
+  автоматичното разделяне сега прави същото — оригиналният ред остава
+  непроменен с каквото си е имал.
+
+Наръчникът (3.1 и нов раздел 12.3 „Проверка на данните“, с последващо
+преномериране на 12.3 – 12.5 → 12.4 – 12.6) и DOCX презентацията отразяват
+новия бутон „+ Още екземпляр“ и новия екран; и трите останали изречения в
+DOCX-а, които все още говореха за „свободни бройки“, са поправени.
+
+5 нови регресионни теста, всеки проверен с мутация (2 мутации, всяка убива
+поне един тест); един тест е контролен и е проверено, че остава зелен. Цялата
+пакетна проверка: 1125 теста, 0 провала.
+
+**EN:** A review of v2.4.21's own fix ("one inventory number = one copy").
+`normalizeQuantity()` refused a copy count above 1 but silently accepted an
+explicit 0 — the exact value the release's own repair tools exist to find and
+fix, since it hides the record from every fund total. And `books:splitCopies`
+copied a legacy record's status/status-date/description onto every new split
+copy unchanged, even though those fields describe a single physical copy's
+condition — a note like "missing volume 2" ended up on every resulting copy,
+not just the one it actually applied to; the manual "+ Another copy" path
+already reset those fields for the new record, and the automatic split now
+does the same. 5 new mutation-verified tests.
+
 ## v2.4.20
 
 **BG:** Десети кръг — преглед на поправките от деветия. Тежката находка е

@@ -202,6 +202,18 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     if (q === undefined || q === null || q === '') return keep === undefined ? 1 : keep;
     const n = parseInt(q, 10);
     if (!Number.isFinite(n) || n < 0) throw new Error('Бройката трябва да е 1 — един инвентарен номер отговаря на един екземпляр.');
+    /* Одит v2.4.22 (преглед на поправката от v2.4.21): дотук минаваше и n=0 — точно
+       стойността, която books:setLendable и „Проверка на данните“ по-долу
+       съществуват да откриват и оправят, защото прави документа невидим за всеки
+       сбор на фонда. Функцията, която трябва да е единствената врата към
+       inventory.quantity от създаване/редакция на картон, имаше дупка за точно тази
+       стойност. 0 се записва само от целенасочените инструменти (books:setLendable
+       я връща на 1; books:splitCopies пише 1 директно за всеки нов ред) — никога
+       през това поле, независимо какво е подадено. */
+    if (n === 0) {
+      throw new Error('Бройка 0 прави документа невидим за фонда. Ако записът е стар и наистина е с бройка 0, '
+        + 'поправете го от „Настройки“ → „Проверка на данните“, не от картона.');
+    }
     if (n > 1) {
       throw new Error('Един инвентарен номер отговаря на ЕДИН екземпляр. За втори екземпляр от същото '
         + 'заглавие използвайте „+ Още екземпляр“ в картона — той създава нов запис със следващия '
@@ -447,11 +459,26 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           INSERT INTO books (inv_number, ${cols.join(',')})
           VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
         `);
+        /* Одит v2.4.22 (преглед на поправката от v2.4.21): status/status_date/
+           description описват СЪСТОЯНИЕТО НА ЕДИН ФИЗИЧЕСКИ ЕКЗЕМПЛЯР — стар
+           неразделен запис с бележка „скъсана корица, липсва том 2“ или
+           status='липсващ' я носи най-много за ЕДИН от N-те екземпляра под номера,
+           не за всичките. Копирането им непроменени (каквото правеше кодът дотук)
+           обявява N-1 здрави екземпляра за повредени/липсващи в инвентарната книга
+           и КДБФ. Ръчният път „+ Още екземпляр“ (bookCopyForm в src/views/books.js)
+           вече нулира точно тези три полета за новия запис — тук се прави същото,
+           а ОРИГИНАЛНИЯТ ред (същия id, само с бройка вече 1) си остава непипнат
+           с каквото е имал. */
+        const perCopyReset = { status: 'наличен', status_date: null, description: null };
         const created = [];
         for (let k = 1; k < n; k++) {
           while (taken.get(next)) next++;   // никога върху зает номер
           const row = { inv_number: next };
-          cols.forEach(f => { row[f] = b[f] === undefined ? null : b[f]; });
+          cols.forEach(f => {
+            row[f] = Object.prototype.hasOwnProperty.call(perCopyReset, f)
+              ? perCopyReset[f]
+              : (b[f] === undefined ? null : b[f]);
+          });
           const info = insert.run(row);
           /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
              дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
