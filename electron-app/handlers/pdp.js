@@ -45,6 +45,8 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
   // Броят неразчетени полета, срещнати в тази сесия — служи само за диагностика
   // в pdp:status, за да може екранът да каже колко записа са засегнати.
   let unreadableSeen = 0;
+  // Вписва се веднъж на сесия — виж maskReaderRows.
+  let badLogged = false;
   /* Минимална дължина на НОВА парола. Беше 4 знака — при сол и проверител, които
      стоят в самата база, а базата по документиран сценарий е на споделен мрежов
      дял, четиризначна парола се намира офлайн за секунди дори с по-скъпото
@@ -223,12 +225,24 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     /* Тук вече НЯМА заключване по статистика — решението „сменен ключ или повреден
        ред“ се взима във maskOne, по проверителя, за всеки ред поотделно. Тук остава
        само одитната следа за повредените редове. */
-    if (stats.bad) {
+    if (stats.bad && !badLogged) {
       /* Смесен резултат: конкретни повредени редове. Вписва се в одитната следа
          (а не само в дневника за грешки), защото библиотекарят трябва да разбере,
-         че тези ЕГН-та са за въвеждане наново — иначе разбира чак при проверка. */
-      logAudit('Защита на лични данни', stats.bad + ' записа не се разчитат с текущата парола и се показват '
-        + 'като „' + PDP_UNREADABLE + '“ — стойностите им трябва да бъдат въведени наново');
+         че тези ЕГН-та са за въвеждане наново — иначе разбира чак при проверка.
+         Одит v2.4.24, две неща:
+         • ВЕДНЪЖ на сесия. maskReaderRows е връщащият път на readers:list, който
+           се вика при всяко натискане на клавиш в търсачката на читатели и от
+           подсказващите полета на заемането и резервациите — един работен ден
+           наливаше стотици еднакви реда в следата, която инспекторът чете.
+         • В try. Това е ПИШЕЩО действие в ЧЕТЯЩ път — точно съображението, заради
+           което markStale по-горе е обвит. По мрежов дял SQLITE_BUSY върху този
+           диагностичен ред превръщаше отварянето на списъка с читатели в
+           „Друг компютър записва в базата данни в момента“. */
+      badLogged = true;
+      try {
+        logAudit('Защита на лични данни', stats.bad + ' записа не се разчитат с текущата парола и се показват '
+          + 'като „' + PDP_UNREADABLE + '“ — стойностите им трябва да бъдат въведени наново');
+      } catch (err) { console.error('[pdp] следата за неразчитаеми записи не се записа:', err); }
     }
     return rows;
   }
@@ -285,16 +299,31 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     const rows = db.prepare(`SELECT id, egn, id_card_no FROM readers
       WHERE (egn IS NOT NULL AND egn <> '') OR (id_card_no IS NOT NULL AND id_card_no <> '')`).all();
     const upd = db.prepare('UPDATE readers SET egn = ?, id_card_no = ? WHERE id = ?');
-    for (const r of rows) {
-      const plainEgn = readKey ? pii.decryptField(r.egn, readKey) : r.egn;
-      const plainIdc = readKey ? pii.decryptField(r.id_card_no, readKey) : r.id_card_no;
-      upd.run(
-        plainEgn ? pii.encryptField(plainEgn, writeKey) : plainEgn,
-        plainIdc ? pii.encryptField(plainIdc, writeKey) : plainIdc,
-        r.id
-      );
-    }
-    return rows.length;
+    /* Одит v2.4.24: ЕДИН неразчитаем ред спираше смяната на паролата ЗАВИНАГИ.
+       pii.decryptField хвърля при несъвпадащ GCM етикет, извикването беше без
+       try, а цялата смяна върви в една транзакция — тоест повреден ред (напр.
+       презаписан от станция с мъртъв ключ, точно случаят, заради който съществува
+       ключалка №3 по-долу) отменяше всичко и връщаше суровото английско
+       „Unsupported state or unable to authenticate data“, без да назове читател и
+       без изход. А pdpDataReadable нарочно ТЪРПИ същите редове, отключва и казва
+       „стойностите им трябва да бъдат въведени наново“ — тоест програмата ти
+       разрешава да работиш, но не и да смениш компрометирана парола.
+       Сега неразчитаемото поле се оставя както си е (нищо не се губи — то и без
+       това е нечетимо) и се брои, а извикващият вписва броя в следата. */
+    let unreadable = 0;
+    /* Връща стойността, ГОТОВА ЗА ЗАПИС: разчетена и прекриптирана с новия ключ,
+       или — ако не се разчита — точно каквато е била. */
+    const convert = (v) => {
+      if (v == null || v === '') return v;
+      let plain = v;
+      if (readKey) {
+        try { plain = pii.decryptField(v, readKey); }
+        catch (e) { unreadable++; return v; }
+      }
+      return plain ? pii.encryptField(plain, writeKey) : plain;
+    };
+    for (const r of rows) upd.run(convert(r.egn), convert(r.id_card_no), r.id);
+    return { count: rows.length, unreadable };
   }
   /* Ключалка №3: проверителят доказва само че паролата ражда ключа, с който е
      направен САМИЯТ проверител — не че този ключ разчита данните. Двете се
@@ -317,12 +346,19 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
            единствената проверена стойност е от „добрата“ половина.
        Редовете се вземат от двата края на подредбата, за да покрият и двата
        случая. */
-    const rows = getDb().prepare(`SELECT egn, id_card_no FROM readers
+    /* Двата края се СЛИВАТ по id (одит v2.4.24). При 25 или по-малко криптирани
+       читатели двете заявки връщат едни и същи редове, тоест всеки се разчиташе и
+       броеше ДВА пъти: при 3 читатели с един повреден следата гласеше „2 от
+       проверените 6 записа не се разчитат“ вместо 1 от 3 — а точно това число
+       библиотекарят ползва, за да прецени колко ЕГН-та трябва да въведе наново от
+       личните карти. */
+    const head = getDb().prepare(`SELECT id, egn, id_card_no FROM readers
       WHERE egn LIKE 'PDPv1:%' OR id_card_no LIKE 'PDPv1:%'
-      ORDER BY id LIMIT 25`).all().concat(
-      getDb().prepare(`SELECT egn, id_card_no FROM readers
-        WHERE egn LIKE 'PDPv1:%' OR id_card_no LIKE 'PDPv1:%'
-        ORDER BY id DESC LIMIT 25`).all());
+      ORDER BY id LIMIT 25`).all();
+    const tail = getDb().prepare(`SELECT id, egn, id_card_no FROM readers
+      WHERE egn LIKE 'PDPv1:%' OR id_card_no LIKE 'PDPv1:%'
+      ORDER BY id DESC LIMIT 25`).all();
+    const rows = [...new Map(head.concat(tail).map(r => [r.id, r])).values()];
     if (!rows.length) return true;
     let readable = 0, unreadable = 0;
     let skipped = 0;
@@ -368,7 +404,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       db.transaction(() => {
         db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
           .run(salt.toString('base64'), verifier);
-        n = reencryptAllReaders(null, key);
+        n = reencryptAllReaders(null, key).count;
       }).immediate();
       setPdpKey(password, key, 'setup');
       logAudit('Защита на лични данни', 'зададена е парола за защита на ЕГН/№ ЛК (' + n + ' читатели засегнати)');
@@ -390,6 +426,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       }
       PDP_STALE = false;
       unreadableSeen = 0;
+      badLogged = false;
       setPdpKey(password, key, 'unlock');
       /* Старите инсталации не се прекриптират сами: база отпреди v2 си остава на
          по-евтините параметри, а изискването за 10 знака важи само при ЗАДАВАНЕ
@@ -404,7 +441,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         : true;
     })
   );
-  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; pii.clearSession(); }));
+  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; badLogged = false; pii.clearSession(); }));
   ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
@@ -420,18 +457,22 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       const newSalt = pii.generateSalt(pii.CURRENT_KDF_VERSION);
       const newKey = pii.deriveKey(newPassword, newSalt);
       const newVerifier = pii.makeVerifier(newKey);
+      let bad = 0;
       db.transaction(() => {
         db.prepare('UPDATE settings SET pdp_salt = ?, pdp_verifier = ? WHERE id = 1')
           .run(newSalt.toString('base64'), newVerifier);
-        reencryptAllReaders(oldKey, newKey);
+        bad = reencryptAllReaders(oldKey, newKey).unreadable;
       }).immediate();
       // Новият ключ е току-що изведен и е верен по построение — сесията вече не е
       // негодна. Без този ред успешната смяна оставяше всяко ЕГН с надпис
       // „ключът не съвпада“ и мълчаливо отхвърляше всяка редакция.
       PDP_STALE = false;
       unreadableSeen = 0;
+      badLogged = false;
       setPdpKey(newPassword, newKey, 'change', oldPassword);
-      logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена');
+      logAudit('Защита на лични данни', 'паролата за защита на ЕГН/№ ЛК е сменена'
+        + (bad ? ' — ' + (bad === 1 ? '1 стойност не се разчиташе и остана както си е'
+          : bad + ' стойности не се разчитаха и останаха както са') + '; трябва да бъдат въведени наново' : ''));
       return true;
     })
   );

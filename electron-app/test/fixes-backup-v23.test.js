@@ -395,7 +395,9 @@ test('картата остава вярна и за старите три съ�
     today: null, plainDailyCount: 30, last: null, failure: null, warning: 'Автоматичните дневни копия НЕ са криптирани' });
   assert.match(html, /НЕ са криптирани/);
   assert.match(html, /Включи защита на личните данни/);
-  assert.match(html, /30<\/b> некриптирани дневни копия/, 'експозицията се показва с число');
+  // v2.4.24: числото важи и за предпазните копия отпреди възстановяване, затова
+  // текстът е „некриптирани копия“, а не само „дневни“.
+  assert.match(html, /30<\/b>\s*некриптирани дневни копия/, 'експозицията се показва с число');
 
   html = await render({ encrypted: true, state: 'encrypted', pdpConfigured: true, pdpUnlocked: true,
     today: { date: TODAY, path: 'auto.invbak', encrypted: true }, last: { date: TODAY, encrypted: true },

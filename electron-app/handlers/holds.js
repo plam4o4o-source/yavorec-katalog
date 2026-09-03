@@ -3,6 +3,8 @@
 // обратно към main.js, защото ги ползва и все още неизвадения домейн
 // "Заемания" (loans:checkout/return/extend/checkoutByCode/returnByCode) —
 // същият модел, както calendar.js/circ-rules.js по-рано.
+const { resolveScannedBook } = require('../security-utils');
+
 module.exports = function registerHoldsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, normalizeScanCode } = deps;
 
@@ -65,14 +67,20 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
   // върне книгата на рафта. Връща резервацията, за да я покаже екранът.
   function activateHoldOnReturn(bookId) {
     const db = getDb();
-    const h = firstActiveHold(bookId);
-    if (!h) return null;
-    if (h.status === 'чака') {
-      db.prepare("UPDATE holds SET status = 'заделена', ready_at = datetime('now') WHERE id = ?").run(h.id);
-      h.status = 'заделена';
-      logAudit('Заделена книга', 'инв. № ' + h.inv_number + ' — ' + h.title + ' за ' + h.reader_name);
-    }
-    return h;
+    const queue = activeHolds(bookId);
+    if (!queue.length) return null;
+    /* Първата ЧАКАЩА, не главата на опашката (одит v2.4.24). При глава, която вече
+       е „заделена“, старият вариант не активираше никого: върната втора бройка
+       (стар неразделен запис) отиваше обратно на рафта, а вторият чакащ оставаше
+       „чака“ завинаги. Същото важи и когато заделената е била отказана или е
+       изтекла — тогава тази функция е единственият път, по който следващият
+       изобщо може да бъде повикан. */
+    const next = queue.find(h => h.status === 'чака');
+    if (!next) return queue[0];   // няма кого да повикаме — книгата вече чака някого
+    db.prepare("UPDATE holds SET status = 'заделена', ready_at = datetime('now') WHERE id = ?").run(next.id);
+    next.status = 'заделена';
+    logAudit('Заделена книга', 'инв. № ' + next.inv_number + ' — ' + next.title + ' за ' + next.reader_name);
+    return next;
   }
 
   ipcMain.handle('holds:list', () =>
@@ -101,7 +109,9 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
       const db = getDb();
       const c = normalizeScanCode(code);
       const tx = db.transaction(() => {
-        const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(c, c);
+        // Одит v2.4.24 — виж resolveScannedBook() в security-utils.js: числов баркод,
+        // съвпадащ с чужд инвентарен номер, тихо резервираше другата книга.
+        const b = resolveScannedBook(db, c);
         if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
         /* Резервира се само това, което наистина не може да се вземе сега. Две неща
@@ -113,9 +123,18 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
              loans:checkoutByCode веднага след това отказваше със „заделена, чака
              взимане" и той не можеше нито да я вземе, нито да се нареди на опашката. */
         const out = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id).n;
-        const shelved = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE book_id = ? AND status = 'заделена'").get(b.id).n;
-        const free = freeCopies(b.id) - shelved;
-        if (free > 0 || (!out && !shelved)) {
+        /* Брои се ЦЯЛАТА активна опашка, не само заделените (одит v2.4.24).
+           Дотук чакащите („чака“) не намаляваха свободните бройки и се получаваше
+           точно задънената улица, която коментарът по-горе обявява за премахната:
+           книга без отворено заемане, но с чакаща резервация (състоянието, което
+           holds:cancel и expireStaleHolds оставят след себе си) караше holds:add да
+           каже „свободен е — заемете го направо“, а loans:checkoutByCode веднага
+           след това отказваше с „резервирана за …“. Условието вече е ТОЧНО
+           огледално на consumeHoldOnCheckout: свободните трябва да надхвърлят
+           опашката, за да е книгата наистина за директно заемане. */
+        const queued = db.prepare(`SELECT COUNT(*) AS n FROM holds WHERE book_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id).n;
+        const free = freeCopies(b.id) - queued;
+        if (free > 0 || (!out && !queued)) {
           throw new Error('Инв. № ' + b.inv_number + ' е свободен' + (free > 1 ? ' (' + free + ' свободни бройки)' : '') +
             ' — заемете го направо, без резервация.');
         }
@@ -132,12 +151,26 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
       return tx.immediate();
     })
   );
+  /* Отказът на ЗАДЕЛЕНА резервация освобождава физическия екземпляр от рафта за
+     резервации — и следващият на опашката трябва да бъде повикан веднага (одит
+     v2.4.24). Дотук нищо не го правеше: книгата вече не е заета, тоест
+     activateHoldOnReturn няма да бъде извикана никога повече, и вторият читател
+     оставаше „чака“ завинаги, докато екземплярът стои заделен за никого. */
   ipcMain.handle('holds:cancel', (e, id) =>
     run(() => {
       const db = getDb();
-      const h = db.prepare(`${HOLD_SELECT} WHERE h.id = ?`).get(id);
-      db.prepare("UPDATE holds SET status = 'отказана', resolved_at = datetime('now') WHERE id = ?").run(id);
-      if (h) logAudit('Отказана резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' (' + h.reader_name + ')');
+      const tx = db.transaction(() => {
+        const h = db.prepare(`${HOLD_SELECT} WHERE h.id = ?`).get(id);
+        if (!h) return null;
+        const upd = db.prepare(`UPDATE holds SET status = 'отказана', resolved_at = datetime('now')
+          WHERE id = ? AND status IN ${HOLD_ACTIVE}`).run(id);
+        if (!upd.changes) return null;   // вече отказана/изпълнена от друго работно място
+        logAudit('Отказана резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' (' + h.reader_name + ')');
+        return h.status === 'заделена' ? activateHoldOnReturn(h.book_id) : null;
+      });
+      const next = tx.immediate();
+      return next ? { next: { reader_name: next.reader_name, card_no: next.card_no, phone: next.phone,
+        title: next.title, inv_number: next.inv_number } } : null;
     })
   );
 
@@ -178,18 +211,37 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
      в одитната следа с отделно действие „Изтекла резервация". */
   function expireStaleHolds() {
     const db = getDb();
-    const stale = db.prepare(`${HOLD_SELECT}
-      WHERE h.status = 'заделена' AND h.ready_at IS NOT NULL
-        AND julianday('now') - julianday(h.ready_at) >= ?`).all(HOLD_EXPIRE_DAYS);
-    if (!stale.length) return 0;
-    const upd = db.prepare(`UPDATE holds SET status = 'отказана', resolved_at = datetime('now'),
-      note = trim(coalesce(note || ' ', '') || 'изтекла — непотърсена над ' || ? || ' дни') WHERE id = ?`);
-    for (const h of stale) {
-      upd.run(HOLD_EXPIRE_DAYS, h.id);
-      logAudit('Изтекла резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' за ' + h.reader_name +
-        ' (непотърсена над ' + HOLD_EXPIRE_DAYS + ' дни — автоматично отказана, книгата се освобождава)');
-    }
-    return stale.length;
+    /* Всичко в ЕДНА транзакция с .immediate() (одит v2.4.24). Дотук това беше
+       единственият писащ път в домейна без транзакция и без пазач в UPDATE-а:
+       две работни места, стартиращи едновременно срещу общата база, отказваха
+       една и съща резервация два пъти — с два реда в одитната следа и с двойно
+       долепена бележка. */
+    const tx = db.transaction(() => {
+      const stale = db.prepare(`${HOLD_SELECT}
+        WHERE h.status = 'заделена' AND h.ready_at IS NOT NULL
+          AND julianday('now') - julianday(h.ready_at) >= ?`).all(HOLD_EXPIRE_DAYS);
+      if (!stale.length) return 0;
+      /* Числото се подава като НИЗ: better-sqlite3 връзва JS число като REAL и
+         бележката в базата излизаше „непотърсена над 3.0 дни“, докато одитната
+         следа на същия ред казваше „3 дни“. */
+      const days = String(HOLD_EXPIRE_DAYS);
+      const upd = db.prepare(`UPDATE holds SET status = 'отказана', resolved_at = datetime('now'),
+        note = trim(coalesce(note || ' ', '') || 'изтекла — непотърсена над ' || ? || ' дни')
+        WHERE id = ? AND status = 'заделена'`);
+      let n = 0;
+      for (const h of stale) {
+        if (!upd.run(days, h.id).changes) continue;   // изпреварени от другото работно място
+        n++;
+        logAudit('Изтекла резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' за ' + h.reader_name +
+          ' (непотърсена над ' + HOLD_EXPIRE_DAYS + ' дни — автоматично отказана, книгата се освобождава)');
+        /* „Книгата се освобождава“ вече е вярно: следващият на опашката се
+           повиква тук. Дотук изречението беше обещание, което нищо не изпълняваше —
+           consumeHoldOnCheckout продължаваше да отказва книгата на всеки друг. */
+        activateHoldOnReturn(h.book_id);
+      }
+      return n;
+    });
+    return tx.immediate();
   }
   /* НЯМА ipcMain.handle('holds:expireStale', ...) тук — нарочно. Нов канал би
      означавал и нов мост в preload.js (test/preload-ipc-channels.test.js

@@ -12,6 +12,8 @@
 //   - logAudit(action, detail) — запис в одитната следа
 //   - scheduleCatalogWrite() — насрочва (debounced) запис на katalog.json,
 //     за да се отрази промяната при следващото автоматично публикуване
+const { resolveScannedBook } = require('../security-utils');
+
 module.exports = function registerShelvesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, scheduleCatalogWrite, normalizeScanCode } = deps;
 
@@ -62,8 +64,8 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
   ipcMain.handle('shelves:addBook', (e, { shelfId, code }) =>
     run(() => {
       const c = normalizeScanCode(code);
-      const b = getDb().prepare('SELECT id, inv_number, title, status, department FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)')
-        .get(c, c);
+      // Одит v2.4.24 — виж resolveScannedBook() в security-utils.js.
+      const b = resolveScannedBook(getDb(), c, 'SELECT id, inv_number, title, status, department FROM books');
       if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
       if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен — не се публикува в каталога.');
       /* Същото условие като в износа на каталога (buildCatalogPayload в main.js) и
@@ -117,8 +119,11 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
         }
       }).immediate();
       const sh = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(shelfId);
-      logAudit('Витрина в каталога', added + ' документа добавени в „' + (sh ? sh.name : shelfId) + '“'
-        + (skipped.length ? ', ' + skipped.length + ' пропуснати' : ''));
+      // Съгласуване в единствено число (одит v2.4.24).
+      logAudit('Витрина в каталога',
+        (added === 1 ? '1 документ добавен' : added + ' документа добавени')
+        + ' в „' + (sh ? sh.name : shelfId) + '“'
+        + (skipped.length ? ', ' + skipped.length + (skipped.length === 1 ? ' пропуснат' : ' пропуснати') : ''));
       scheduleCatalogWrite();
       return { added, skipped };
     })

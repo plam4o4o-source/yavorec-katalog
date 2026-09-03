@@ -15,7 +15,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
 
 {list}
 {fine_line}
-{level_line}Молим да ги върнете при първа възможност или да заявите удължаване на срока.
+{level_line}Молим да {it_them} върнете при първа възможност или да заявите удължаване на срока.
 
 С уважение,
 {librarian_line}{library}{place_line}`;
@@ -97,7 +97,14 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
         GROUP BY l.reader_id ORDER BY r.name
       `).all();
       const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
-      const d2 = s.remind2_days == null ? 14 : s.remind2_days, d3 = s.remind3_days == null ? 30 : s.remind3_days;
+      /* Одит v2.4.24: `== null` не хваща ПРАЗЕН НИЗ, а формата на настройките праща
+         точно него, когато полето е изчистено (formData() чете el.value). '' не е
+         null → подразбиращото се 14/30 не влизаше, а `overdueDays >= ''` се привежда
+         към `>= 0`, тоест винаги вярно. Читател с ДВА дни забава получаваше трето
+         напомняне със заплаха за спиране на достъпа, и notice_log го вписваше като
+         ниво 3. Числото се чете като число, а не се сравнява с null. */
+      const days = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : def; };
+      const d2 = days(s.remind2_days, 14), d3 = days(s.remind3_days, 30);
       const lastNoticeQ = db.prepare(`SELECT level, ts FROM notice_log WHERE reader_id = ? ORDER BY ts DESC LIMIT 1`);
       for (const r of rows) {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);

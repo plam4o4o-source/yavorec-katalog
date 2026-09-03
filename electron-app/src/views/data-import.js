@@ -117,6 +117,19 @@ async function importRun() {
       <div class="hint" style="margin-top:6px">${r.usedInv.slice(0, 12).map(u =>
         `ред ${u.line} → № ${u.inv}`).join(' · ')}${r.usedInv.length > 12 ? ' …' : ''}</div>
     </div>` : ''}
+    ${(r.deaccessionedToNote || r.statusToNote) ? `<div class="note" style="margin-top:12px">
+      <b>Състояния, които не са пренесени като състояние</b>
+      ${r.deaccessionedToNote ? `<div style="margin-top:6px">${r.deaccessionedToNote}
+        ${r.deaccessionedToNote === 1 ? 'ред беше отбелязан' : 'реда бяха отбелязани'} „отчислен“ във файла.
+        Документ напуска фонда само с <b>акт за отчисляване</b> (чл. 35, ал. 2) — той е и единственото нещо,
+        по което КДБФ и годишният отчет броят отписаното. Затова
+        ${r.deaccessionedToNote === 1 ? 'този ред е въведен' : 'тези редове са въведени'} като „наличен“,
+        а текстът е записан в забележката. Ако документите наистина са отчислени, съставете акт от
+        „Отчисляване“; ако не са — няма какво да се прави.</div>` : ''}
+      ${r.statusToNote ? `<div style="margin-top:6px">${r.statusToNote}
+        ${r.statusToNote === 1 ? 'ред носеше непознато състояние' : 'реда носеха непознато състояние'} —
+        въведени са като „наличен“, а оригиналният текст е добавен към забележката.</div>` : ''}
+    </div>` : ''}
     ${r.errors.length ? `<div class="note" style="border-left-color:var(--red);margin-top:12px">
       <b style="color:var(--red)">Редове с грешка: ${r.errors.length}</b>
       <div class="hint" style="margin-top:6px">${r.errors.slice(0, 15).map(x =>

@@ -4,6 +4,8 @@
 // подават по референция — всички са function declarations (hoisted) или
 // стабилен модулен export в main.js, затворени над реалните мутируеми
 // състояния там (PDP_KEY, db) — работят коректно и извикани оттук.
+const { ANON_READER_NAME } = require('../security-utils');
+
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, ftsQuery,
@@ -11,10 +13,18 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     dialog, getMainWindow, fs, csvCell, normalizeScanCode
   } = deps;
 
+  /* Одит v2.4.24: `alert_note` липсваше в този списък, а и INSERT-ът, и UPDATE-ът
+     се строят ИЗЦЯЛО от него — тоест „Бележка при заемане“ никога не е стигала до
+     базата. Полето го има във формуляра (src/views/readers.js), колоната я има в
+     схемата и в миграцията, и ДВА екрана я четат: 📌 в списъка на читателите и
+     открояващата се кутия на гишето (src/views/loans.js). Библиотекарят пишеше
+     „Носи още старата книга на брат си“, получаваше зеленото „Читателят е
+     обновен.“ — и на гишето предупреждение не се появяваше никога. */
   const READER_FIELDS = ['name', 'phone', 'address', 'address2', 'email', 'card_no', 'egn',
     'id_card_no', 'id_card_date', 'id_card_issuer', 'birth_date', 'category', 'registered_at',
     're_registered_at', 'status', 'gdpr_consent', 'gdpr_consent_date', 'parent_consent',
-    'parent_consent_date', 'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note'];
+    'parent_consent_date', 'guarantor_name', 'guarantor_relation', 'guarantor_phone', 'note',
+    'alert_note'];
 
   /* prev — досегашният ред (при редакция). Датата на съгласието се записва в момента
      на отбелязване и се пази при следващи записи; голият флаг 0/1 без дата е слаба
@@ -157,14 +167,33 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         throw new Error('Читателят дължи ' + Number(acc.balance).toFixed(2) + ' лв. по сметката си и не може да бъде изтрит. '
           + 'Първо отчетете плащането или отпишете задължението от „Сметка“ в картона на читателя.');
       }
+      /* Одит v2.4.24: служебният ред „— анонимизирани заемания —“ (handlers/gdpr.js)
+         е обикновен ред в readers, вижда се в списъка като всеки друг читател и си
+         има бутон „Изтрий“. Всичките му заемания са затворени и балансът му е нула,
+         тоест двете спирачки по-горе не го хващат, а loans.reader_id е ON DELETE
+         CASCADE — два клика заличаваха ЦЯЛАТА анонимизирана история, тоест точно
+         статистиката, която анонимизирането съществува да запази. Отгоре на това
+         съобщението съветваше „ползвайте Анонимизиране“ за записа, който Е
+         резултатът от анонимизирането. */
+      const r0 = db.prepare('SELECT name, card_no FROM readers WHERE id = ?').get(id);
+      if (r0 && r0.name === ANON_READER_NAME) {
+        throw new Error('Това не е читател, а служебният запис, под който се пазят анонимизираните заемания. '
+          + 'Изтриването му би заличило цялата анонимизирана история и статистиката за минали години. '
+          + 'Записът е нужен на програмата и остава.');
+      }
       const past = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ?').get(id).n;
       const holds = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE reader_id = ?").get(id).n;
       const visits = db.prepare('SELECT COUNT(*) AS n FROM housebound_visits WHERE reader_id = ?').get(id).n;
+      // Съгласуване в единствено число (одит v2.4.24): изтриването на сгрешен
+      // дубликат с едно заемане е НАЙ-ЧЕСТИЯТ случай тук, а текстът се вписва
+      // дословно и в одитната следа, която чете проверяващият.
+      const pl = (n, one, many) => n + ' ' + (n === 1 ? one : many);
       const attached = [
-        past ? past + ' записа в историята на заеманията' : '',
-        acc.n ? acc.n + ' движения по сметката (включително от минали години)' : '',
-        holds ? holds + ' резервации' : '',
-        visits ? visits + ' посещения по домовете' : ''
+        past ? pl(past, 'запис в историята на заеманията', 'записа в историята на заеманията') : '',
+        acc.n ? pl(acc.n, 'движение по сметката (включително от минали години)',
+          'движения по сметката (включително от минали години)') : '',
+        holds ? pl(holds, 'резервация', 'резервации') : '',
+        visits ? pl(visits, 'посещение по домовете', 'посещения по домовете') : ''
       ].filter(Boolean);
       if (attached.length && !askedTwice(pendingReaderDelete, id)) {
         throw new Error('Изтриването на този читател ще заличи заедно с него и: ' + attached.join(', ')
@@ -172,7 +201,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           + 'данни ползвайте „Анонимизиране“ в „Настройки“ → „Лични данни“. Ако записът е сгрешен и изобщо не е трябвало '
           + 'да съществува, натиснете „Изтрий“ още веднъж до 2 минути.');
       }
-      const r = db.prepare('SELECT name, card_no FROM readers WHERE id = ?').get(id);
+      const r = r0;
       db.prepare('DELETE FROM readers WHERE id = ?').run(id);
       if (attached.length) {
         logAudit('Изтрит читател с история', ((r && r.name) || ('читател № ' + id)) +

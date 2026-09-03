@@ -142,6 +142,16 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         SELECT COALESCE(SUM(fine), 0) AS val FROM loans
         WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?
       `).get(y).val;
+      /* Начислено по ОЩЕ НЕВЪРНАТИ заемания (v2.4.24). От този кръг loans:extend
+         начислява при продължение на просрочено заемане, тоест сумата стои върху
+         отворен ред, а finesCharged по построение брои затворените (годината се
+         взима от date_in — датата на връщане). Такова начисление нямаше как да се
+         види никъде: показва се отделно, вместо да се приписва на година, за която
+         базата не пази дата на начисляване. Числото е КЪМ ДНЕС, не за годината —
+         затова и се връща само за текущата година. */
+      const finesOpen = String(y) === String(new Date().getFullYear())
+        ? db.prepare('SELECT COALESCE(SUM(fine), 0) AS val FROM loans WHERE date_in IS NULL').get().val
+        : 0;
       const fundByCategory = db.prepare(`
         SELECT COALESCE(c.name,'—') AS k,
                COALESCE(SUM(COALESCE(i.quantity, 1)),0) AS n
@@ -176,7 +186,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
            date_out) означаваше точно това. */
         returnedOnTime: returnedYear.filter(l => l.date_due && l.date_in <= l.date_due).length,
         returnedLate: returnedYear.filter(l => l.date_due && l.date_in > l.date_due).length,
-        finesCollected, finesCharged,
+        finesCollected, finesCharged, finesOpen,
         fundByLanguage: byGroup(fund, 'language'),
         fundByDepartment: byGroup(fund, 'department'),
         fundByCategory,
@@ -246,18 +256,59 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         };
       }
       if (id === 'readers_by_category') {
+        /* Снимка КЪМ КРАЯ НА ИЗБРАНАТА ГОДИНА (одит v2.4.24). Справката е обявена с
+           needsYear и се печата със заглавие „… — 2024“ и подписи, но и таблицата, и
+           общият брой се четяха НАЖИВО: препечатана през 2026 г. справка за 2024 г.
+           показваше 312 читатели под заглавие „2024“, където истината е 180. Съседната
+           справка (fund_breakdown) отдавна се води „към 31.12.Y“. */
+        const asOf = y + '-12-31';
+        /* Границата е ДАТАТА НА РЕГИСТРАЦИЯ, не пререгистрацията (преглед на
+           поправките от този кръг). re_registered_at е ГОДИШНАТА пререгистрация —
+           тоест носи скорошна дата точно за читателите, които СА били активни през
+           стара година; COALESCE(re_registered_at, registered_at) <= 31.12.2024
+           изхвърляше именно тях и справката за 2024 г. отчиташе 1 вместо 3. Ред без
+           дата на регистрация (внесена стара база) се БРОИ, вместо да отпада тихо.
+           Състоянието „прекратен“ се чете живо: програмата не пази история на
+           състоянията, затова числото е „регистрирани до 31.12.Y, активни днес“ —
+           и екранът и разпечатката го казват точно така, вместо да обещават снимка,
+           каквато базата не може да даде. */
         const byCategory = db.prepare(`
-          SELECT COALESCE(category,'—') AS k, COUNT(*) AS n FROM readers WHERE status != 'прекратен' GROUP BY k ORDER BY n DESC
-        `).all().map(r => [r.k, r.n]);
+          SELECT COALESCE(category,'—') AS k, COUNT(*) AS n FROM readers
+          WHERE status != 'прекратен' AND name != ?
+            AND (registered_at IS NULL OR registered_at = '' OR registered_at <= ?)
+          GROUP BY k ORDER BY n DESC
+        `).all(ANON_READER_NAME, asOf).map(r => [r.k, r.n]);
+        /* Читателите БЕЗ вписана дата на регистрация (внесена стара база) се броят
+           — иначе цял внесен фонд от читатели изчезва от справката — но се и
+           ОБЯВЯВАТ, защото за тях годината не значи нищо: същите 180 души излизат
+           под заглавие 2019, 2020 и 2021. Същият подход като „undated“ в КДБФ. */
+        const undated = db.prepare(`SELECT COUNT(*) AS n FROM readers
+          WHERE status != 'прекратен' AND name != ? AND (registered_at IS NULL OR registered_at = '')`)
+          .get(ANON_READER_NAME).n;
         const total = byCategory.reduce((s, [, n]) => s + n, 0);
+        /* Същият филтър за състояние като при общия брой — иначе „новорегистрирани
+           през Y“ надхвърляше „активни читатели“ и справката излизаше аритметично
+           невъзможна (20 нови срещу 12 активни). */
         const newThisYear = db.prepare(`SELECT COUNT(*) AS n FROM readers
-          WHERE substr(registered_at,1,4) = ? AND name != ?`).get(y, ANON_READER_NAME).n;
-        return { id, year: y, total, byCategory, newThisYear };
+          WHERE substr(registered_at,1,4) = ? AND name != ? AND status != 'прекратен'`).get(y, ANON_READER_NAME).n;
+        return { id, year: y, total, byCategory, newThisYear, asOf, undated };
       }
       if (id === 'fund_movement') {
+        /* Стойността пада обратно към ВПИСАНАТА, когато документът не обявява
+           стойност (одит v2.4.24). acquisitions.sum е нарочно nullable — NULL значи
+           „стойност не е обявена в първичния документ“, а самият формуляр подканя да
+           се остави празно. SUM() прескача NULL, тоест дарение от 30 книги по 8 лв.
+           се отпечатваше като „30 бр., 0,00 лв.“ — в справка, чиято подсказка твърди,
+           че чете „както Част № 1 на КДБФ“, а Част № 1 печата точно вписаната
+           стойност (registered_value в handlers/kdbf.js), не a.sum. */
         const acquired = db.prepare(`
-          SELECT COALESCE(how,'—') AS k, COUNT(*) AS n, COALESCE(SUM(total_count),0) AS cnt, COALESCE(SUM(sum),0) AS val
-          FROM acquisitions WHERE year = ? GROUP BY k ORDER BY cnt DESC
+          SELECT COALESCE(a.how,'—') AS k, COUNT(*) AS n, COALESCE(SUM(a.total_count),0) AS cnt,
+                 COALESCE(SUM(COALESCE(a.sum, (
+                   SELECT COALESCE(SUM(b.price * COALESCE(i.quantity, 1)), 0)
+                   FROM books b LEFT JOIN inventory i ON i.book_id = b.id
+                   WHERE b.acquisition_id = a.id
+                 ))), 0) AS val
+          FROM acquisitions a WHERE a.year = ? GROUP BY k ORDER BY cnt DESC
         `).all(y);
         // Бройки, за да се събира до deaccessionedCount в stats:report — двете
         // числа влизат в един и същи годишен отчет.

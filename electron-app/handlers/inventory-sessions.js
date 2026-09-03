@@ -3,7 +3,7 @@
 // main.js, hoisted) и getDb/run/logAudit.
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
-  const { parseRegisterNo } = require('../security-utils');
+  const { parseRegisterNo, resolveScannedBook } = require('../security-utils');
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -123,7 +123,10 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
       if (!s || s.closed) throw new Error('Няма отворена сесия за инвентаризация.');
       const c = normalizeScanCode(code);
-      const b = db.prepare(`SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`).get(c, c);
+      // Одит v2.4.24 — виж resolveScannedBook() в security-utils.js: иначе
+      // протоколът отбелязваше като „проверен" ДРУГ документ, а истинският
+      // оставаше в липсите.
+      const b = resolveScannedBook(db, c);
       if (!b) throw new Error('Непознат баркод/инв. № ' + code);
       /* Одит v2.4.14: тук се приемаше и ОТЧИСЛЕН документ, за разлика от
          deaccessionActs:findBook, който изрично го изключва. Пулът, спрямо който
@@ -204,7 +207,24 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           .all(...(s.department ? [s.department] : []));
         const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
         const scannedSet = new Set(scannedIds);
-        const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id));
+        /* Одит v2.4.24: извинени са само заетите. Документ „за реставрация“ е при
+           подвързвача — по определение не може да бъде сканиран на място, а
+           „за реставрация“ е валидно състояние, което библиотекарят задава изрично
+           от картона. Дотук той влизаше в липсите: 3 книги при подвързвача правеха
+           протокола „липси над норматива с 2.0 документа — прилага се редът по
+           чл. 51 – 53“, а състоянието им се презаписваше на „липсващ“ наведнъж
+           (връщането е ръчно, книга по книга). Броят им се връща отделно, за да го
+           обяви протоколът, вместо да го скрие. */
+        /* Четирите категории трябва да са ВЗАИМНО ИЗКЛЮЧВАЩИ СЕ, иначе протоколът
+           не се събира. Документ „за реставрация“ може да е бил върнат от
+           подвързвача и сканиран (inventorySessions:scan приема такъв документ и
+           нулира само „липсващ“), а може и да е зает — броен два пъти, протоколът
+           щеше да гласи „в обхвата 100 · проверени 40 · заети 5 · за реставрация 3 ·
+           липсващи 53“, тоест 101 от 100. */
+        const excused = pool.filter(b => b.status === 'за реставрация'
+          && !scannedSet.has(b.id) && !openLoanIds.has(b.id));
+        const excusedIds = new Set(excused.map(b => b.id));
+        const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id) && !excusedIds.has(b.id));
         // При представителна проверка непроверените НЕ са липсващи — те просто не
         // са влизали в обхвата на тазгодишната извадка.
         const missing = mode === 'full' ? unchecked : [];
@@ -225,15 +245,21 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            влизат в `unchecked`/`missing`, но не и в снимката — протоколът можеше да
            гласи „в обхвата 10 · проверени 10 · липсващи 30“. Одит на документите
            v2.4.17. */
-        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id)).length;
-        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ? WHERE id = ?')
-          .run(mode, pool.length, onLoanInPool, sessionId);
+        /* Заетите се броят СРЕД НЕПРОВЕРЕНИТЕ, по същата причина като „за реставрация“
+           по-горе: четирите числа в протокола трябва да се събират до обхвата.
+           Заета книга, която все пак е сканирана (върната на гишето, но още
+           нерегистрирана), е ПРОВЕРЕНА — тя е била в ръцете на комисията. */
+        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id)).length;
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ? WHERE id = ?')
+          .run(mode, pool.length, onLoanInPool, excused.length, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
-          ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length);
+          ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length +
+          (excused.length ? ', ' + excused.length + (excused.length === 1 ? ' документ за реставрация (не се проверява на място)'
+            : ' документа за реставрация (не се проверяват на място)') : ''));
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
         return {
           mode, scanned: scannedIds.length, missing: missing.length, pool: pool.length,
-          unchecked: unchecked.length, onLoan: onLoanInPool,
+          unchecked: unchecked.length, onLoan: onLoanInPool, atBinder: excused.length,
           allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
         };
       });

@@ -89,7 +89,9 @@ contextBridge.exposeInMainWorld('api', {
     findDuplicateBarcodes: invoke('books:findDuplicateBarcodes'),
     multiCopyRecords: invoke('books:multiCopyRecords'),
     splitCopies: invoke('books:splitCopies'),
-    setLendable: invoke('books:setLendable')
+    setLendable: invoke('books:setLendable'),
+    deaccessionedWithoutAct: invoke('books:deaccessionedWithoutAct'),
+    clearOrphanDeaccession: invoke('books:clearOrphanDeaccession')
   },
   isbn: {
     lookup: invoke('isbn:lookup')

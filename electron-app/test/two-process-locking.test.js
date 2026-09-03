@@ -108,6 +108,14 @@ test('40 едновременни заемания на РАЗЛИЧНИ кни�
     bookIds.push(invokeHandler('books:create', { title: 'Книга ' + i, quantity: 1 }).data);
   }
   const readerId = invokeHandler('readers:create', { name: 'Многолюден читател' }).data;
+  /* Лимитът от документи за читател се вдига ИЗРИЧНО: този тест проверява
+     заключването при 40 паралелни записа, а не правилата на обслужването.
+     От v2.4.24 loans:checkout спазва max_books наравно с loans:checkoutByCode
+     (дотук само вторият го правеше), тоест при подразбиращите се 5 останалите 35
+     заемания получават съвсем правилния отказ „Достигнат е лимитът…“ и тестът
+     мери него вместо конкуренцията. 0 = без лимит (виж circRule). */
+  invokeHandler('settings:update', Object.assign(
+    invokeHandler('settings:get').data, { max_books: 0 }));
   closeApp();
 
   const WORKERS = 4;

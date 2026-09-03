@@ -120,7 +120,8 @@ test('gdpr:anonymize replaces reader_id with the placeholder reader, snapshots c
   assert.equal(event.reader_id, null, 'old events should lose their reader link');
 
   assert.equal(auditLog.length, 1);
-  assert.match(auditLog[0].detail, /1 върнати заемания/);
+  // Съгласуване в единствено число (одит v2.4.24) — този ред отива в следата.
+  assert.match(auditLog[0].detail, /1 върнато заемане отпреди .* е анонимизирано/);
 });
 
 test('gdpr:anonymize reuses the same placeholder reader across multiple runs', async () => {

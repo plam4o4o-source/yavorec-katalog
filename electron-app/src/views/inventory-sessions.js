@@ -307,6 +307,9 @@ async function printInventProtocol(id) {
      Старите сесии нямат записано pool_final и падат обратно към pool_size. */
   const pool = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
   const onLoan = s.on_loan;
+  // Одит v2.4.24 — виж at_binder в db/schema.sql. Старите сесии нямат снимка (NULL)
+  // и редът просто не се отпечатва, вместо да се твърди „0 за реставрация“.
+  const atBinder = s.at_binder;
   /* Видът има ТРИ състояния, не две. Сесия отпреди v2.3.0 няма записан вид и
      старият тернар я пращаше в клона „пълна“ — тоест протоколът удостоверяваше
      пълна инвентаризация, каквато никой не е обявявал. Списъкът на екрана нарочно
@@ -336,11 +339,13 @@ async function printInventProtocol(id) {
     <b>Какво е проверявано:</b> ${esc(s.scope || 'целият фонд')}${s.department ? ' · отдел „' + esc(s.department) + '“' : ''}<br>
     <b>Документи в обхвата:</b> ${pool} &nbsp; <b>Проверени документи:</b> ${scanned}
     &nbsp; <b>Липсващи:</b> ${missing}${onLoan != null && onLoan > 0
-      ? `<br><b>Заети от читатели към деня на проверката:</b> ${onLoan} — не се проверяват на място и не се смятат за липсващи.` : ''}</div>
+      ? `<br><b>Заети от читатели към деня на проверката:</b> ${onLoan} — не се проверяват на място и не се смятат за липсващи.` : ''}${
+      atBinder != null && atBinder > 0
+      ? `<br><b>За реставрация към деня на проверката:</b> ${atBinder} — при подвързвача, не се проверяват на място и не се смятат за липсващи.` : ''}</div>
     ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, лв. / €</th></tr></thead><tbody>
     ${s.missing.map((m, n) => `<tr><td>${n + 1}</td><td>${m.inv_number ?? ''}</td>
       <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td><td>${m.price == null ? '—' : mny(m.price)}</td></tr>`).join('')}
-    <tr><td colspan="3"><b>ОБЩО ${missing} документа</b></td><td><b>${mny(missingValue)}</b></td></tr>
+    <tr><td colspan="3"><b>ОБЩО ${missing} ${missing === 1 ? 'документ' : 'документа'}</b></td><td><b>${mny(missingValue)}</b></td></tr>
     </tbody></table>`
     : '<div class="pmeta">При проверката не са установени липсващи документи.</div>'}
     ${Number.isFinite(allowed) ? `<div class="pmeta">

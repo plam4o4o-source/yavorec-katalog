@@ -53,8 +53,20 @@ window.removeHousebound = removeHousebound;
 async function extendLoan(id) {
   const res = await window.api.loans.extend({ id });
   if (!res.ok) return toast(res.error, 'err');
-  const { date_due, renewals, max } = res.data;
+  const { date_due, renewals, max, daysLate, fine, suspendedUntil } = res.data;
+  /* Продължението на ПРОСРОЧЕНО заемане урежда натрупаното (обезщетение и наказание
+     в дни) — виж loans:extend. Дотук екранът показваше само зеленото „Срокът е
+     продължен“, а наказанието изникваше чак при следващото заемане, без обяснение
+     откъде идва. Пътят при връщане (returnBook по-долу) отдавна ги показва. */
+  // Успехът си остава зелен — червените известия отдолу носят лошата новина.
   toast('Срокът е продължен до ' + bg(date_due) + ' (продължение ' + renewals + (max ? '/' + max : '') + ').', 'ok');
+  if (daysLate) {
+    toast('Начислена забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни')
+      + (fine ? ' — обезщетение ' + mny(fine) : '') + '.', 'err');
+  }
+  if (suspendedUntil) {
+    toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(suspendedUntil) + '.', 'err');
+  }
   markSaved();
   if (VIEW === 'over') renderOver(true); else renderCirc();
 }

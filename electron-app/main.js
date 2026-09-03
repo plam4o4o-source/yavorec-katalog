@@ -530,7 +530,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -660,6 +660,26 @@ const MIGRATIONS = [
   { version: 11, run: () => {
     ensureColumns('acquisitions', { committee1: 'TEXT', committee2: 'TEXT', committee3: 'TEXT' });
     db.prepare('UPDATE acquisitions SET sum = NULL WHERE sum = 0').run();
+  } },
+  /* v12 (v2.4.24) — протоколът по чл. 40 трябва да се СЪБИРА. Документ „за
+     реставрация“ е при подвързвача и по определение не може да бъде сканиран на
+     място; дотук той влизаше в липсите наравно с изчезналите и състоянието му се
+     презаписваше на „липсващ“. Сега се извинява като заетите — а за да не остане
+     необяснима разлика между „в обхвата“ и сбора на редовете, броят му се снима
+     до pool_final/on_loan и се отпечатва в протокола. Старите сесии остават с
+     NULL и протоколът не твърди нищо за тях. */
+  { version: 12, run: () => {
+    ensureColumns('inventory_sessions', { at_binder: 'INTEGER' });
+    /* Изчистените числови настройки, записани като ПРАЗЕН НИЗ преди v2.4.24
+       (handlers/settings.js вече ги нормализира при запис). SQLite пази '' като
+       текст, а `x == null ? подразбиращо : x` го подминава — remind2_days = ''
+       правеше всяко напомняне ниво 3, extensions_count = '' махаше лимита от
+       продължения. Празно поле значи „по подразбиране“, тоест NULL. */
+    for (const col of ['loan_days', 'max_books', 'extensions_count', 'extension_days',
+      'fine_per_day', 'annual_fee', 'free_access_pct', 'next_inv_number',
+      'suspend_per_day', 'suspend_max', 'remind2_days', 'remind3_days', 'anonymize_years']) {
+      db.prepare(`UPDATE settings SET ${col} = NULL WHERE typeof(${col}) = 'text' AND trim(${col}) = ''`).run();
+    }
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от
@@ -1517,7 +1537,16 @@ function writeCatalogIfConfigured() {
         }
       } catch (e) { /* повреден/нечетим съществуващ файл — продължи с обичайния запис */ }
     }
-    fs.writeFileSync(file, JSON.stringify(payload, null, 2), 'utf8');
+    /* Записва се настрани и се преименува (одит v2.4.24) — точно както writeConfig
+       по-горе, и по същата причина, само че тук залогът е по-голям: файлът е
+       няколко мегабайта при 15 000 заглавия и по проект стои в git/мрежова папка.
+       Обикновеният запис първо ИЗПРАЗВА файла; прекъсване насред него (спиране на
+       тока, паднал мрежов диск) оставяше пресечен JSON, а публичният каталог на
+       сайта тъмнееше до следващата успешна редакция на книга, без нищо на екрана
+       да го каже. Преименуването на едно и също устройство е атомарно. */
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+    fs.renameSync(tmp, file);
     return { written: true };
   } catch (err) {
     console.error('Автоматичен запис на каталога:', err.message);

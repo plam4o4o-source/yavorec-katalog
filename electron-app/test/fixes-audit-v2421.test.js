@@ -255,7 +255,10 @@ test('проверката на данните показва трите вид�
     ],
     'books.findDuplicateBarcodes': [{ barcode: 'BC1', books: [
       { id: 1, inv_number: 1, title: 'А', status: 'наличен' },
-      { id: 2, inv_number: 2, title: 'Б', status: 'наличен' }] }]
+      { id: 2, inv_number: 2, title: 'Б', status: 'наличен' }] }],
+    // Четвъртата проверка (одит v2.4.24) — тук нарочно празна, за да остане този
+    // тест за трите отклонения; собственият ѝ тест е в fixes-audit-v2424.test.js.
+    'books.deaccessionedWithoutAct': []
   });
   const { window } = dom;
   await settle();
@@ -330,7 +333,8 @@ test('актът за отчисляване — същото правило', a
   const one = buildDom({ 'deaccessionActs.get': act([{ inv_number: 1, title: 'П', price: 10, quantity: 1 }]), 'settings.get': {} });
   await settle(); await one.window.printActDoc(2); await settle();
   assert.ok(!/<th>Бр\.<\/th>/.test(one.window.document.querySelector('#ppSheet').innerHTML));
-  assert.match(printed(one.window), /ОБЩО 1 документа\s*10\.00/);
+  // Съгласуване в единствено число (одит v2.4.24) — актът се подписва.
+  assert.match(printed(one.window), /ОБЩО 1 документ\s*10\.00/);
   assert.equal(rowWidths(one.window).size, 1);
   const many = buildDom({ 'deaccessionActs.get': act([{ inv_number: 1, title: 'П', price: 10, quantity: 3 }]), 'settings.get': {} });
   await settle(); await many.window.printActDoc(2); await settle();

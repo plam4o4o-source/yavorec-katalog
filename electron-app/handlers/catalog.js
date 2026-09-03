@@ -123,6 +123,24 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     LAST_AUTO_PUSH.error = error || null;
     if (!error) LAST_AUTO_PUSH.okAt = now;
   }
+  /* Едно публикуване в даден момент (одит v2.4.24). Таймерът на всеки 5 минути и
+     бутонът „Публикувай сега“ пускаха git в ЕДНО И СЪЩО работно копие, без нищо да
+     ги разделя, а gitPublish вериги до осем execFile-а по 30 секунди — прозорецът е
+     широк. Резултатът беше не просто забавяне, а НЕВЯРНО СЪОБЩЕНИЕ: `git add`
+     срещу зает .git/index.lock връщаше суровото английско „fatal: Unable to create
+     …/index.lock: File exists“ (точно това, което обвивката наоколо съществува да
+     не се случва), а в обратния ред rebase-ът на таймера се спъваше в незаписания
+     katalog.json и програмата съветваше библиотекаря да изпълни „git pull“ ръчно —
+     инструкция, която няма да помогне, защото хранилището изобщо не е изостанало. */
+  let PUBLISHING = false;
+  async function gitPublishExclusive(folder) {
+    if (PUBLISHING) {
+      return { ok: false, error: 'Публикуване вече тече — изчакайте няколко секунди и опитайте пак.' };
+    }
+    PUBLISHING = true;
+    try { return await gitPublish(folder); }
+    finally { PUBLISHING = false; }
+  }
   let AUTO_PUSH_TIMER = null;
   function startAutoPushTimer() {
     if (AUTO_PUSH_TIMER) return;
@@ -136,7 +154,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
           noteAutoPush(null);
           return;
         }
-        const r = await gitPublish(s.catalog_folder);
+        // Ако точно сега тече ръчно публикуване, този цикъл се пропуска мълчаливо —
+        // ръчното ще качи същото. Затова тук няма noteAutoPush за отказа.
+        if (PUBLISHING) return;
+        const r = await gitPublishExclusive(s.catalog_folder);
         if (r.ok && r.committed) {
           console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
           noteAutoPush(null);
@@ -276,7 +297,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const w = flushCatalogWrite();
     try { assertCatalogWriteOk(w); }
     catch (err) { noteAutoPush(err.message); return { ok: false, error: err.message }; }
-    const r = await gitPublish(s.catalog_folder);
+    const r = await gitPublishExclusive(s.catalog_folder);
     if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
     /* И ръчното публикуване обновява състоянието — иначе предупреждението за
        провалено автоматично публикуване продължава да твърди, че каталогът на
