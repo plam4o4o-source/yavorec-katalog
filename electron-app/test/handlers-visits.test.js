@@ -47,7 +47,8 @@ function setup() {
     run: (fn) => {
       try { return { ok: true, data: fn() }; }
       catch (err) { return { ok: false, error: err.message }; }
-    }
+    },
+    logAudit: () => {}
   };
   registerVisitsHandlers(ipcMain, deps);
   return { db, ipcMain };
@@ -74,9 +75,12 @@ test('visits:add accumulates (upserts) the count for the same date', async () =>
   assert.equal(row.count, 7);
 });
 
-test('visits:add defaults a non-numeric count to 0', async () => {
+test('visits:add refuses a non-numeric count instead of silently recording 0', async () => {
+  // Одит v2.4.25: дотук undefined/„abc“ ставаха 0 и се записваше „Посещенията са
+  // вписани.“ за нищо; сега броят е задължително цяло число ≥ 0.
   const { db, ipcMain } = setup();
-  await ipcMain.invoke('visits:add', { date: '2026-08-03', count: undefined });
-  const row = db.prepare('SELECT count FROM visits WHERE date = ?').get('2026-08-03');
-  assert.equal(row.count, 0);
+  const res = await ipcMain.invoke('visits:add', { date: '2026-08-03', count: undefined });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /цяло число/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM visits').get().n, 0);
 });

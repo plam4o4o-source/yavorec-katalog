@@ -95,7 +95,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     const ceiling = addDays(today(), cap) > base ? addDays(today(), cap) : base;
     if (untilStr > ceiling) untilStr = ceiling;
     db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run(untilStr, readerId);
-    logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + effDaysLate + ' работни дни забава)');
+    logAudit('Наложено наказание', 'преустановено заемане до ' + untilStr + ' (' + effDaysLate + (effDaysLate === 1 ? ' работен ден' : ' работни дни') + ' забава)');
     return untilStr;
   }
   function checkSuspended(readerId) {
@@ -285,7 +285,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         // Дължимото на гишето е ЦЯЛОТО натрупано по заемането, не само днешната част.
         const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(id).fine || 0;
         const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
-        if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+        if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ')' : ''));
         const hold = l ? activateHoldOnReturn(l.book_id) : null;
         let suspendedUntil = null;
         if (l) {
@@ -485,7 +485,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         /* Противоречив е редът, при който отворените заемания са ПОВЕЧЕ ОТ БРОЙКИТЕ
            — не само при една бройка (втори преглед на кръга: 3 заемания при
            коригирани на 2 бройки минаваха и затваряха чуждо заемане с чужда глоба). */
-        if (open.length > qty) {
+        /* `open.length > 1 &&` (одит v2.4.25): стар ред с бройка 0 („Проверка на
+           данните“ го признава за поправим) и ЕДНО заемане, отворено преди
+           нулирането, не е противоречие — а се отказваше с „зает от 1 читатели при
+           0 налични бройки“. Противоречие има само при повече от едно заемане. */
+        if (open.length > 1 && open.length > qty) {
           throw new Error('Инв. № ' + b.inv_number + ' е заведен като зает от ' + open.length + ' читатели ('
             + open.map(l => l.reader_name).join(', ') + ') при ' + qty + (qty === 1 ? ' налична бройка' : ' налични бройки')
             + '. Приемете връщането от екрана „Просрочени“ или от картона на читателя в „Заемане и връщане“, '
@@ -503,7 +507,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           .run(inDate, fine, loan.id);
         if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
         const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(loan.id).fine || 0;
-        logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
+        logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ')' : ''));
         logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
         return {
           title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate,

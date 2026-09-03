@@ -138,7 +138,7 @@ module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
       // без превръщане, което cmd да разчете погрешно.
       fs.writeFileSync(filePath, Buffer.from(b.content, 'latin1'));
       logAudit('Антивирусна защита', 'генериран скрипт за изключения: ' + filePath
-        + (b.rejected.length ? ' (' + b.rejected.length + ' папки не можаха да влязат автоматично)' : ''));
+        + (b.rejected.length ? ' (' + (b.rejected.length === 1 ? '1 папка не можа да влезе' : b.rejected.length + ' папки не можаха да влязат') + ' автоматично)' : ''));
       return { ok: true, data: filePath };
     } catch (err) { return { ok: false, error: err.message }; }
   });

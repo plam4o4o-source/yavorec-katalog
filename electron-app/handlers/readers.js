@@ -36,9 +36,15 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     out.parent_consent = r.parent_consent ? 1 : 0;
     out.gdpr_consent_date = out.gdpr_consent ? ((prev && prev.gdpr_consent_date) || today()) : null;
     out.parent_consent_date = out.parent_consent ? ((prev && prev.parent_consent_date) || today()) : null;
-    out.category = r.category || 'възрастен';
-    out.status = r.status || 'активен';
-    out.registered_at = r.registered_at || today();
+    /* При РЕДАКЦИЯ празното поле пази досегашната стойност (одит v2.4.25). Дотук
+       `|| today()` важеше и за редакция: читател от внесена стара база без дата на
+       регистрация (точно случаят, който „Читатели по категории“ обявява отделно)
+       получаваше днешната дата само защото му е поправен телефонът — и ставаше
+       „новорегистриран през 2026“ в годишния отчет, на таблото и в справката, а
+       пререгистрацията тръгваше от измислена дата. Днешната дата е за НОВ читател. */
+    out.category = r.category || (prev && prev.category) || 'възрастен';
+    out.status = r.status || (prev && prev.status) || 'активен';
+    out.registered_at = r.registered_at || (prev ? prev.registered_at : today());
     return out;
   }
 

@@ -105,8 +105,10 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
   function xmlUnescape(str) {
     return String(str || '')
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-      .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
+      // Извън Unicode (> 0x10FFFF) String.fromCodePoint хвърля RangeError и цялото
+      // търсене се докладваше като „няма връзка със сървъра“ (одит v2.4.25).
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => { const c = parseInt(n, 16); return c <= 0x10FFFF ? String.fromCodePoint(c) : ''; })
+      .replace(/&#(\d+);/g, (_, n) => { const c = parseInt(n, 10); return c <= 0x10FFFF ? String.fromCodePoint(c) : ''; })
       .replace(/&amp;/g, '&');
   }
   // Целенасочен парсер само за MARCXML структурата (leader/controlfield/datafield/subfield),
@@ -161,8 +163,21 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     };
   }
   async function sruLookupIsbn(isbn, endpoint) {
-    const url = `${endpoint}?version=1.1&operation=searchRetrieve&recordSchema=marcxml&maximumRecords=1` +
-      `&query=${encodeURIComponent('bath.isbn=' + isbn)}`;
+    /* Адресът се сглобява през URL, а не с „?…“ на сляпо (одит v2.4.25): адрес,
+       записан с вече наличен „?x=1“, получаваше втори „?“ и същото невярно
+       „няма връзка“. */
+    let url;
+    try {
+      const u = new URL(endpoint);
+      u.searchParams.set('version', '1.1');
+      u.searchParams.set('operation', 'searchRetrieve');
+      u.searchParams.set('recordSchema', 'marcxml');
+      u.searchParams.set('maximumRecords', '1');
+      u.searchParams.set('query', 'bath.isbn=' + isbn);
+      url = u.toString();
+    } catch (err) {
+      throw new Error('Адресът на SRU сървъра не е валиден: ' + endpoint);
+    }
     const res = await net.fetch(url, {
       headers: { 'User-Agent': 'Inventar-Library-System' },
       signal: AbortSignal.timeout(10000)

@@ -14,8 +14,23 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
   ipcMain.handle('categories:create', (e, name) =>
     run(() => getDb().prepare('INSERT INTO categories (name) VALUES (?)').run(name.trim()))
   );
+  /* Със следа (одит v2.4.25): преименуването преетикетира „Вид документ“ на всяка
+     книга в инвентарната книга (Приложение № 4), а изтриването е в следата от
+     v2.4.14 — преименуването трябва да е също. */
   ipcMain.handle('categories:update', (e, { id, name }) =>
-    run(() => getDb().prepare('UPDATE categories SET name = ? WHERE id = ?').run(name.trim(), id))
+    run(() => {
+      const db = getDb();
+      const cur = db.prepare('SELECT name FROM categories WHERE id = ?').get(id);
+      if (!cur) throw new Error('Видът документ не е намерен.');
+      const next = String(name || '').trim();
+      if (!next) throw new Error('Името не може да е празно.');
+      db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(next, id);
+      if (next !== cur.name) {
+        const n = db.prepare('SELECT COUNT(*) AS n FROM books WHERE category_id = ?').get(id).n;
+        logAudit('Преименуван вид документ', '„' + cur.name + '“ → „' + next + '“'
+          + (n ? ' (' + n + (n === 1 ? ' документ' : ' документа') + ')' : ''));
+      }
+    })
   );
   /* books.category_id е обявена като ON DELETE SET NULL (db/schema.sql) и
      PRAGMA foreign_keys е включена, тоест изтриването на категория изчиства вида
@@ -34,7 +49,7 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
       const n = db.prepare('SELECT COUNT(*) AS n FROM books WHERE category_id = ?').get(id).n;
       db.prepare('DELETE FROM categories WHERE id = ?').run(id);
       logAudit('Категория', 'изтрита „' + (c ? c.name : id) + '“'
-        + (n ? ' — ' + n + ' документа останаха без вид' : ''));
+        + (n ? ' — ' + (n === 1 ? '1 документ остана' : n + ' документа останаха') + ' без вид' : ''));
       return n;
     })
   );

@@ -208,7 +208,7 @@ async function printOverdueNotices() {
       } catch (e) { failed++; }
     }
     if (failed) {
-      toast(failed + ' от ' + rows.length + ' напомняния не се вписаха в регистъра — писмата са '
+      toast(failed + ' от ' + pl(rows.length, 'напомняне', 'напомняния') + (failed === 1 ? ' не се вписа' : ' не се вписаха') + ' в регистъра — писмата са '
         + 'отпечатани, но следващият път ще тръгнат от същата степен.', 'err');
     }
   };

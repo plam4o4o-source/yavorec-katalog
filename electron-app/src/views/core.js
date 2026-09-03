@@ -43,6 +43,10 @@ window.yearOptions = yearOptions;
    в сила от 01.01.2026 г. Не е борсов курс и не се обновява. */
 const EUR_RATE = 1.95583;
 const bgn = (n) => (Number(n) || 0).toFixed(2);
+/* Съгласуване по число (одит v2.4.25): „1 документ“, „2 документа“. Връща числото
+   и формата; за наречията/глаголите (остана/останаха) се подава цял израз. */
+const pl = (n, one, many) => n + ' ' + (Number(n) === 1 ? one : many);
+const dni = (n) => pl(n, 'ден', 'дни');
 const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
 /* Огледало на csvCell() от security-utils.js за изнасянията, които се сглобяват
@@ -417,6 +421,7 @@ function fld(label, name, opts) {
   // firstMissingRequired() по-долу за защо самият required не стига).
   return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
+      ${opts.min != null ? 'min="' + esc(String(opts.min)) + '"' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}
       ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''} value="${esc(val)}"></div>`;
 }
 

@@ -94,7 +94,12 @@ function invBookRowsHtml(rows) {
       <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
       <td class="num">${esc(r.call_number || '')}</td>
       <td class="num" style="font-size:11px">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>
-      <td>${off ? '<span class="badge warn">отчислен</span>' : '<span class="badge ok">наличен</span>'}</td>
+      ${/* Одит v2.4.25: значката различаваше само „отчислен“ и всичко останало —
+            липсващ от инвентаризация стоеше в регистъра със зелено „наличен“.
+            Разпечатката печата r.status от v2.4.17 („Неотчислен ≠ наличен“). */''}
+      <td>${off ? '<span class="badge warn">отчислен</span>'
+        : (!r.status || r.status === 'наличен') ? '<span class="badge ok">наличен</span>'
+        : `<span class="badge warn">${esc(r.status)}</span>`}</td>
       <td><button class="btn sm" onclick="invBookEdit(${r.id})">Редакция</button></td>
     </tr>`;
   }).join('');

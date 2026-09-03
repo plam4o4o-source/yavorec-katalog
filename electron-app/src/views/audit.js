@@ -92,7 +92,8 @@ async function renderOdit() {
   $('#oditSearch').addEventListener('input', debounce(e => { ODIT_Q = e.target.value; refreshAudit(); }, 300));
 }
 async function exportAuditCSV() {
-  const rows = await call(window.api.audit.list(ODIT_Q));
+  // audit:export — без лимита на екрана (одит v2.4.25): файлът е за проверяващия.
+  const rows = await call(window.api.audit.export(ODIT_Q));
   if (!rows) return;
   const h = ['Дата/час', 'Служител', 'Действие', 'Подробност'];
   /* Одит v2.4.14: това беше ЕДИНСТВЕНОТО изнасяне в CSV, което преизмисляше

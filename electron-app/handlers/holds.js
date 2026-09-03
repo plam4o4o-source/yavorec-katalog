@@ -161,10 +161,17 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
       const db = getDb();
       const tx = db.transaction(() => {
         const h = db.prepare(`${HOLD_SELECT} WHERE h.id = ?`).get(id);
-        if (!h) return null;
+        /* Отказ, а не ok:true за нищо (одит v2.4.25) — същият клас, затворен при
+           анулиране на акт и при изтриване на касов ред: другото работно място вече
+           е отказало №7 и е повикало следващия, а тази станция с остарял списък
+           виждаше зелено „Резервацията е отказана“ и не научаваше за повикания. */
+        if (!h) throw new Error('Резервацията не е намерена — вероятно вече е отказана или изпълнена от друго работно място.');
         const upd = db.prepare(`UPDATE holds SET status = 'отказана', resolved_at = datetime('now')
           WHERE id = ? AND status IN ${HOLD_ACTIVE}`).run(id);
-        if (!upd.changes) return null;   // вече отказана/изпълнена от друго работно място
+        if (!upd.changes) {
+          throw new Error('Резервацията вече не е активна (' + h.status + ') — отказана или изпълнена от друго работно място. '
+            + 'Обновете списъка.');
+        }
         logAudit('Отказана резервация', 'инв. № ' + h.inv_number + ' — ' + h.title + ' (' + h.reader_name + ')');
         return h.status === 'заделена' ? activateHoldOnReturn(h.book_id) : null;
       });

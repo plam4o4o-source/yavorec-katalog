@@ -36,6 +36,11 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     loanActColumnChecked = db;
   }
 
+  /* „Отчислен с акт“ = има акт или дата на отчисляване. Самият статус не стига:
+     редове със status='отчислен' без акт идват от внос на стара таблица и по
+     чл. 35, ал. 2 НЕ са отчислени — тепърва им трябва акт. */
+  const deaccessionedByAct = (b) => b.deaccession_act_id != null || b.deaccession_date != null;
+
   ipcMain.handle('deaccessionActs:list', () =>
     run(() => getDb().prepare(`
       SELECT a.*, (SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
@@ -83,7 +88,11 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
        във фонда. Филтърът „не е отчислен" се прилага след намирането, за да не
        се превърне отчисленият документ в „непознат баркод". */
     const b = c ? resolveScannedBook(db, c, BOOK_SELECT) : null;
-    if (!b || b.status === 'отчислен') return undefined;
+    /* Отчислен С АКТ не влиза във втори акт. Отчислен БЕЗ акт (внесен от стара
+       таблица — виж books:deaccessionedWithoutAct) влиза: „Проверка на данните“
+       съветва „съставете акт от Отчисляване“, а дотук това поле отказваше точно
+       него с „Няма документ с баркод/инв. №“ — задънена улица (одит v2.4.25). */
+    if (!b || deaccessionedByAct(b)) return undefined;
     const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
     b.fund_qty = q ? q.quantity : null;
     return b;
@@ -100,6 +109,17 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          в тези колони. Проверката е тук, ПРЕДИ транзакцията да пипне базата —
          както при loans.js — за да не се налага частично отменяне. */
       if (!isValidIsoDate(act.date)) throw new Error('Датата на акта липсва или е невалидна.');
+      /* Причината е ЗАДЪЛЖИТЕЛНА (одит v2.4.25): parseInt('') е NaN, better-sqlite3 го
+         записва като NULL, и актът — документ, който се подписва от комисията и отива
+         в счетоводството — печаташе „на основание чл. 30, т. null“. Точно една причина
+         от т. 1 – 8 на чл. 30. Проверката е тук, преди транзакцията, като при датата. */
+      const reasonCode = parseInt(act.reason_code, 10);
+      if (!Number.isInteger(reasonCode) || reasonCode < 1 || reasonCode > 8 || String(act.reason_code).trim() === '') {
+        throw new Error('Причината за отчисляване е задължителна — изберете точка от чл. 30.');
+      }
+      if (!act.reason_text || !String(act.reason_text).trim()) {
+        throw new Error('Причината за отчисляване е без текст — изберете я отново от списъка.');
+      }
       const no = parseRegisterNo(act.no, 'Акт №');
       const year = yearOf(act.date);
       const tx = db.transaction(() => {
@@ -121,7 +141,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach, @committee1, @committee2, @committee3)
         `).run({
           no, year, date: act.date, order_no: act.order_no || null,
-          reason_code: parseInt(act.reason_code, 10), reason_text: act.reason_text,
+          reason_code: reasonCode, reason_text: String(act.reason_text).trim(),
           disposal: act.disposal || null, attach: act.attach || null,
           committee1: act.committee1 || null, committee2: act.committee2 || null, committee3: act.committee3 || null
         });
@@ -171,7 +191,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
              е отворена. Без тази проверка един и същи инв. № влизаше в ДВА акта —
              КДБФ (Приложение № 3) отчиташе два документа и двойна стойност излизаше
              от фонда, а Приложение № 2 показваше завишена наличност към 01.01. */
-          if (b.status === 'отчислен') {
+          if (deaccessionedByAct(b)) {
             throw new Error('Инв. № ' + b.inv_number + ' вече е отчислен с акт — вероятно от друго работно място, '
               + 'докато формата е била отворена. Актът НЕ е съставен. Отворете „Отчисляване“ наново.');
           }
@@ -207,7 +227,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         logAudit('Отчисляване', 'акт № ' + no + '/' + year + ' — ' + docCount + (docCount === 1 ? ' документ' : ' документа')
           + (docCount !== bookIds.length ? ' (' + bookIds.length + ' заглавия)' : '')
           + ', причина: ' + act.reason_text
-          + (cancelledHolds ? (' (отказани ' + cancelledHolds + ' резервации на отчислените документи)') : ''));
+          + (cancelledHolds ? (' (' + (cancelledHolds === 1 ? 'отказана 1 резервация' : 'отказани ' + cancelledHolds + ' резервации') + ' на отчислените документи)') : ''));
         return actId;
       });
       // .immediate() — виж проверката на номера в транзакцията по-горе.
@@ -265,7 +285,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         // `id` е вътрешният rowid, а не номерът на акта — те съвпадат само в първата
         // година. Одит v2.4.24: следата сочеше несъществуващ акт.
         logAudit('Анулиране на акт', 'акт № ' + act.no + '/' + act.year + ' е анулиран, документите са върнати във фонда'
-          + (reopened ? ' (' + reopened + ' заемания са отворени обратно)' : ''));
+          + (reopened ? ' (' + (reopened === 1 ? '1 заемане е отворено обратно' : reopened + ' заемания са отворени обратно') + ')' : ''));
       });
       tx.immediate();
       scheduleCatalogWrite();

@@ -16,7 +16,7 @@ async function renderCatalog() {
      5 минути. Ако последният опит е бил неуспешен, това се казва тук. */
   const autoPushWarn = ap && ap.error ? `<div class="note" style="border-left-color:var(--red)">
       <b>Автоматичното публикуване не е успяло.</b> Последен опит:
-      ${esc(String(ap.at || '').slice(0, 16).replace('T', ' '))} ч. — ${esc(ap.error)}<br>
+      ${esc(ap.at ? new Date(ap.at).toLocaleString('bg-BG', { dateStyle: 'short', timeStyle: 'short' }) : '')} ч. — ${esc(ap.error)}<br>
       Каталогът на сайта <b>остава със старото съдържание</b>, докато това не се оправи.
       Натиснете „Публикувай сега“ по-долу, за да видите пълното съобщение.</div>` : '';
   $('#view').innerHTML = `

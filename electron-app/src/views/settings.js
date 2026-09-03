@@ -13,7 +13,12 @@ function fmtBytes(n) {
 }
 function fmtDateTime(ms) {
   const d = new Date(ms);
-  return bg(d.toISOString().slice(0, 10)) + ' ' + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
+  // Датата и часът от ЕДНА и съща зона (одит v2.4.25): дотук датата идваше от
+  // toISOString() (UTC), а часът — местен, и копие от 01:15 на 03.09 се водеше
+  // „02.09.2026 01:15“.
+  const pad = (n) => String(n).padStart(2, '0');
+  return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() + ' '
+    + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
 }
 async function renderSetup() {
   const [s, dbLoc, backups, employees, cats, limits] = await Promise.all([
@@ -465,7 +470,7 @@ async function saveAv(category) {
   }).filter(v => v.value);
   const n = await call(window.api.av.save({ category, values }), null);
   if (n == null) return;
-  toast('Списъкът е записан (' + n + ' стойности). Менютата го ползват веднага.', 'ok');
+  toast('Списъкът е записан (' + pl(n, 'стойност', 'стойности') + '). Менютата го ползват веднага.', 'ok');
   markSaved();
 }
 window.saveAv = saveAv;
@@ -495,12 +500,14 @@ async function runAnonymize() {
   if (!r.years) return toast('Първо задайте срок в години (и запишете настройките).', 'err');
   const total = (r.count || 0) + (r.auditCount || 0) + (r.searchCount || 0);
   if (!total) return toast('Няма нищо за анонимизиране.', 'ok');
-  if (!confirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${r.count || 0} върнати заемания губят връзката с имената ` +
-    `(остава само „категория · година“), ${r.auditCount || 0} записа в одитната следа се обезличават и ` +
-    `${r.searchCount || 0} стари търсения се изтриват. Да продължа?`)) return;
+  const c = r.count || 0, a = r.auditCount || 0, q = r.searchCount || 0;
+  if (!confirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${c === 1 ? '1 върнато заемане губи' : c + ' върнати заемания губят'} връзката с имената ` +
+    `(остава само „категория · година“), ${a === 1 ? '1 запис в одитната следа се обезличава' : a + ' записа в одитната следа се обезличават'} и ` +
+    `${q === 1 ? '1 старо търсене се изтрива' : q + ' стари търсения се изтриват'}. Да продължа?`)) return;
   const res = await call(window.api.gdpr.anonymize());
   if (!res) return;
-  toast('Анонимизирани ' + res.anonymized + ' заемания, обезличени ' + res.auditCleared + ' записа в следата.', 'ok');
+  toast((res.anonymized === 1 ? 'Анонимизирано 1 заемане' : 'Анонимизирани ' + res.anonymized + ' заемания')
+    + ', ' + (res.auditCleared === 1 ? 'обезличен 1 запис' : 'обезличени ' + res.auditCleared + ' записа') + ' в следата.', 'ok');
   markSaved();
   loadAnonHint();
 }
@@ -606,10 +613,10 @@ window.pdpDoChangePassword = pdpDoChangePassword;
    документи" с намерение да ЗАБРАНИ заемането за тази категория, получаваше точно
    обратното. Затова подсказката вече е за всяко поле поотделно. */
 const CIRC_RULE_FIELDS = [
-  ['loan_days', 'Срок (дни)', 'празно = общото'],
+  ['loan_days', 'Срок (дни)', 'празно или 0 = общото'],
   ['max_books', 'Максимум документи', 'празно = общото · 0 = без ограничение'],
   ['extensions_count', 'Продължения', 'празно = общото · 0 = без ограничение'],
-  ['extension_days', 'Дни на продължение', 'празно = общото'],
+  ['extension_days', 'Дни на продължение', 'празно или 0 = общото'],
   ['suspend_per_day', 'Наказание (дни/ден забава)', 'празно = общото · 0 = изключено'],
   ['suspend_max', 'Таван на наказанието', 'празно = общото · 0 = 90 дни']
 ];
@@ -680,7 +687,8 @@ async function loadCalendarBox() {
 async function saveWorkDays() {
   const days = [];
   WEEKDAY_NAMES.forEach((_, i) => { const el = document.querySelector(`[name=wd${i}]`); if (el && el.checked) days.push(i); });
-  if (!days.length && !confirm('Няма отбелязан нито един работен ден — библиотеката ще излиза „затворена“ всеки ден. Наистина ли?')) return;
+  // Празният списък се отказва от обработчика с обяснение — дотук тук стоеше
+  // предупреждение, което обещаваше обратното на това, което програмата правеше.
   const ok = await call(window.api.calendar.saveWorkDays(days), 'Работните дни са записани.');
   if (ok !== null) { markSaved(); loadCalendarBox(); }
 }
@@ -977,7 +985,8 @@ async function runDataChecks() {
       „отчислен“ без акт — най-вероятно от внос на стара таблица с колона „Състояние“. Затова таблото и инвентарната
       книга ${orphanDeacc.length === 1 ? 'не го броят' : 'не ги броят'} във фонда, а справките
       ${orphanDeacc.length === 1 ? 'го броят' : 'ги броят'}: едно и също число излиза различно на два екрана.
-      Ако документите наистина са отчислени, съставете акт от „Отчисляване“; ако не са — върнете ги във фонда.</div>
+      Ако документите наистина са отчислени, съставете акт от „Отчисляване“ — сканирайте ги там както всеки друг
+      документ; ако не са — върнете ги във фонда.</div>
       <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>От дата</th><th></th></tr></thead><tbody>
       ${orphanDeacc.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td>
         <td>${r.status_date ? bg(r.status_date) : '—'}</td>

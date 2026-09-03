@@ -54,11 +54,18 @@ async function saveHold(readerId) {
   if (!res.ok) return toast(res.error, 'err');
   const who = (window._HOLD_READER || {}).name || '';
   closeModal();
-  toast('Резервирана: инв. № ' + res.data.inv_number + ' за ' + who + ' — на опашката е ' + res.data.queue + '-ри.', 'ok');
+  toast('Резервирана: инв. № ' + res.data.inv_number + ' за ' + who + ' — на опашката е ' + ordBg(res.data.queue) + '.', 'ok');
   markSaved();
   renderCirc();
 }
 window.saveHold = saveHold;
+// 1-ви, 2-ри, 3-ти, 4-ти … (одит v2.4.25: дотук „1-ри“, „3-ри“).
+function ordBg(n) {
+  n = Number(n) || 0;
+  const d = n % 10, t = n % 100;
+  if (t >= 11 && t <= 19) return n + '-ти';
+  return n + (d === 1 ? '-ви' : d === 2 ? '-ри' : (d === 7 || d === 8) ? '-ми' : '-ти');
+}
 async function cancelHold(id) {
   if (!confirm('Отказ от резервацията?')) return;
   const res = await window.api.holds.cancel(id);

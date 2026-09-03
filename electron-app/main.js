@@ -1437,7 +1437,7 @@ require('./handlers/audit')(ipcMain, { getDb: () => db, run });
 require('./handlers/search-history')(ipcMain, { getDb: () => db, run, getCurrentUser: () => CURRENT_USER });
 
 /* ---------------- Посещения ---------------- */
-require('./handlers/visits')(ipcMain, { getDb: () => db, run });
+require('./handlers/visits')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Справки и статистика + Готови справки ----------------
    Извадени в handlers/stats.js (Фаза 4, стъпка 29 от разбиването на

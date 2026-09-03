@@ -108,7 +108,13 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       const lastNoticeQ = db.prepare(`SELECT level, ts FROM notice_log WHERE reader_id = ? ORDER BY ts DESC LIMIT 1`);
       for (const r of rows) {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);
-        r.fine = r.loans.reduce((sum, d) => sum + effectiveDaysLate(d.date_due, today()) * perDay, 0);
+        /* Начисленото по заемането се ДОБАВЯ (одит v2.4.25). v2.4.24 поправи
+           loans:overdue и loans:overdueByReader (печатното писмо), но напомнянията
+           имат ТРИ пътя, и този — екранът „Напомняния“, имейлът, SMS-ът, „Копирай
+           текста“ — още смяташе само днешните дни: писмото искаше 2,05 лв., имейлът
+           0,25 лв., гишето 2,05 лв. Точно трите различни суми, обявени за затворени. */
+        r.loans.forEach(d => { d.fine = (Number(d.fine) || 0) + effectiveDaysLate(d.date_due, today()) * perDay; });
+        r.fine = r.loans.reduce((sum, d) => sum + d.fine, 0);
         const overdueDays = Math.round((new Date(today()) - new Date(r.oldest_due)) / 864e5);
         r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
         const last = lastNoticeQ.get(r.reader_id);

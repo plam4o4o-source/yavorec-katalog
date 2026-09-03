@@ -113,19 +113,41 @@ function ringSvg(pct, label) {
       <div class="rt-l">${esc(label || 'върнати в срок')}</div></div>
   </div>`;
 }
+/* Одит v2.4.25: формата казва, че броят се ДОБАВЯ към вече вписаното за деня, и
+   показва колко е то; отметката „замени“ е изходът за сгрешено число (дотук 50
+   вместо 5 се поправяше само с −45). Датата е задължителна — виж handlers/visits.js. */
 function addVisits() {
   modal('Вписване на посещения', `
-    <form id="vsF" onsubmit="return false">${fld('Дата', 'date', { val: today(), type: 'date' })}${fld('Брой посещения', 'count', { type: 'number' })}</form>
+    <form id="vsF" onsubmit="return false">
+      ${fld('Дата', 'date', { val: today(), type: 'date', req: 1, onchange: 'visitsDayHint()' })}
+      ${fld('Брой посещения', 'count', { type: 'number', min: 0, req: 1,
+        hint: 'добавя се към вече вписаното за деня' })}
+      <label class="chk"><input type="checkbox" name="replace"> Замени вписаното за деня с това число (поправка)</label>
+    </form>
+    <div class="hint" id="vsDayHint"></div>
     <div class="hint">Дневникът на посещенията се води за годишния статистически отчет (БДС ISO 2789).</div>`,
     `<button class="btn" onclick="closeModal()">Отказ</button><button class="btn pri" onclick="saveVisits()">Впиши</button>`);
+  visitsDayHint();
 }
 window.addVisits = addVisits;
+async function visitsDayHint() {
+  const el = $('#vsDayHint'); if (!el) return;
+  const date = (document.querySelector('#vsF [name=date]') || {}).value;
+  if (!date) { el.textContent = ''; return; }
+  const n = await call(window.api.visits.get(date));
+  if (n === null) return;
+  el.textContent = n ? 'Вече вписани за ' + bg(date) + ': ' + n + '.' : 'За ' + bg(date) + ' още няма вписани посещения.';
+}
+window.visitsDayHint = visitsDayHint;
 async function saveVisits() {
   const d = formData('#vsF');
-  if (!d.count) return;
+  if (!d.date) return toast('Изберете дата.', 'err');
+  if (d.count === '' || d.count == null) return toast('Въведете брой посещения.', 'err');
   // Затваря се само при успех (v2.2.0) — при отказан запис въведените дата и
   // брой остават на екрана.
-  if (await call(window.api.visits.add(d), 'Посещенията са вписани.') === null) return;
+  const r = await call(window.api.visits.add(d));
+  if (r === null) return;
+  toast('Посещенията са вписани — общо за ' + bg(d.date) + ': ' + r.total + '.', 'ok');
   closeModal(); renderStats();
 }
 window.saveVisits = saveVisits;
