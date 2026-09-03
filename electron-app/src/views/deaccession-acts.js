@@ -57,8 +57,14 @@ async function actForm() {
 window.actForm = actForm;
 async function actAdd() {
   const el = $('#actScan'), code = el.value.trim(); if (!code) return;
-  const b = await call(window.api.deaccessionActs.findBook(code));
+  /* call() вече показва обяснението при отказ (напр. двусмислен код — виж
+     resolveScannedBook) и връща null. Затова тук се различава ОТКАЗ от „няма такъв“:
+     иначе върху точното обяснение се наслагваше второ, противоречащо му известие
+     „Няма документ с баркод…“. */
+  const res = await window.api.deaccessionActs.findBook(code);
   el.value = '';
+  if (!res.ok) return toast(res.error, 'err');
+  const b = res.data;
   if (!b) return toast('Няма документ с баркод/инв. № ' + code, 'err');
   if (ACT_LIST.some(x => x.id === b.id)) return toast('Инв. № ' + b.inv_number + ' вече е в списъка.', 'err');
   if (b.available < b.quantity) toast('Внимание: инв. № ' + b.inv_number + ' в момента е зает от читател.', 'err');
@@ -89,6 +95,10 @@ function actValue(items) { return (items || []).reduce((s, l) => s + (Number(l.p
    изчезва точно когато е най-нужно, а в таблицата стои ред с цена, който не
    участва нито в бройката, нито в сбора. */
 function actHasMultiples(items) { return (items || []).some(l => actQty(l) !== 1); }
+// Съгласуване в единствено число (одит v2.4.24) — текстът стои върху акт, който се
+// подписва и отива в счетоводството, и в потвърждението на екрана.
+function actDocs(n) { return n + (n === 1 ? ' документ' : ' документа'); }
+function actTitles(n) { return n + (n === 1 ? ' заглавие' : ' заглавия'); }
 // Означението пред цената на един ред. Показва се при ВСЯКА бройка, различна от
 // един документ — включително изричната нула, иначе редът изглежда като пропуск.
 function actQtyMark(l) { return actQty(l) !== 1 ? actQty(l) + ' × ' : ''; }
@@ -101,8 +111,8 @@ function drawActList() {
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td><td class="num">${esc(l.year || '')}</td>
     <td class="num">${actQtyMark(l)}${mny(l.price)}</td><td><button type="button" class="btn sm dgr" onclick="actDel(${n})">×</button></td></tr>`).join('')}
-    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(ACT_LIST)} документа${
-      actHasMultiples(ACT_LIST) ? ` (${ACT_LIST.length} заглавия)` : ''}</td>
+    <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actDocs(actCount(ACT_LIST))}${
+      actHasMultiples(ACT_LIST) ? ` (${actTitles(ACT_LIST.length)})` : ''}</td>
     <td class="num">${mny(actValue(ACT_LIST))}</td><td></td></tr>
     </tbody></table></div>`;
 }
@@ -114,8 +124,9 @@ async function saveAct() {
   const p = PRICHINI.find(x => x.k == d.reason_code);
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
-  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': отчислени са ' + actCount(ACT_LIST) + ' документа'
-    + (actHasMultiples(ACT_LIST) ? ' (' + ACT_LIST.length + ' заглавия)' : '') + '.', 'ok'); markSaved(); }
+  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': ' + (actCount(ACT_LIST) === 1 ? 'отчислен е ' : 'отчислени са ')
+    + actDocs(actCount(ACT_LIST))
+    + (actHasMultiples(ACT_LIST) ? ' (' + actTitles(ACT_LIST.length) + ')' : '') + '.', 'ok'); markSaved(); }
 }
 window.saveAct = saveAct;
 async function openAct(id) {
@@ -151,7 +162,8 @@ async function printActDoc(id) {
     ${esc(s.director_role || 'ръководителя')} на ${esc(s.org || '')}, в състав:<br>
     1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
     на основание <b>чл. 30, т. ${a.reason_code}</b> от Наредба № 3 от 18.11.2014 г. — <b>${esc(a.reason_text)}</b> — отчислява от библиотечния фонд
-    <b>${count}</b> библиотечни документа${actHasMultiples(a.items) ? ` (${a.items.length} заглавия)` : ''} на обща стойност <b>${mny(total)}</b></div>
+    <b>${count}</b> ${count === 1 ? 'библиотечен документ' : 'библиотечни документа'}${
+      actHasMultiples(a.items) ? ` (${actTitles(a.items.length)})` : ''} на обща стойност <b>${mny(total)}</b></div>
     ${/* Колоната „Бр." излиза САМО когато актът наистина носи ред с бройка,
           различна от един документ. Един инвентарен номер отговаря на един
           екземпляр, тоест при редовни данни колоната е константа 1 и е излишна —
@@ -165,7 +177,7 @@ async function printActDoc(id) {
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
     <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td>${
       showQty ? `<td>${actQty(l)}</td>` : ''}<td>${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
-    <tr><td colspan="5"><b>ОБЩО${showQty ? '' : ' ' + count + ' документа'}</b></td>${
+    <tr><td colspan="5"><b>ОБЩО${showQty ? '' : ' ' + actDocs(count)}</b></td>${
       showQty ? `<td><b>${count}</b></td>` : ''}<td><b>${mny(total)}</b></td></tr></tbody></table>
     <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
     Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>

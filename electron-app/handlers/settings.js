@@ -15,8 +15,39 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path } = deps;
 
   ipcMain.handle('settings:get', () => run(() => getDb().prepare('SELECT * FROM settings WHERE id = 1').get()));
-  ipcMain.handle('settings:update', (e, s) =>
+  /* Числовите настройки минават през нормализиране (одит v2.4.24). Формата праща
+     `el.value`, тоест ИЗЧИСТЕНОТО поле пристига като празен низ, а колоната е
+     INTEGER/REAL без NOT NULL — SQLite пази '' като ТЕКСТ (празният низ няма
+     числова стойност, така че афинитетът не го преобразува). Оттам нататък всяка
+     проверка от вида `x == null ? подразбиращо : x` подминава подразбиращото се и
+     сравнява с празен низ, който в числов контекст е 0:
+       • remind2_days/remind3_days: всяко напомняне ставаше НИВО 3 („при ново
+         неизпълнение достъпът ще бъде преустановен“) още от първия ден забава;
+       • extensions_count: `max && used >= max` с '' → лимитът от продължения
+         отпадаше изцяло, вместо да падне към подразбиращите се 2.
+     Празно поле значи „по подразбиране“ и се записва като NULL — точно това, което
+     всички консуматори вече очакват. Изрична нула се пази като нула. */
+  const NUM_SETTINGS = {
+    loan_days: 'int', max_books: 'int', extensions_count: 'int', extension_days: 'int',
+    fine_per_day: 'real', annual_fee: 'real', free_access_pct: 'real',
+    next_inv_number: 'int', suspend_per_day: 'real', suspend_max: 'int',
+    remind2_days: 'int', remind3_days: 'int', anonymize_years: 'int'
+  };
+  function normalizeNumericSettings(s) {
+    const out = Object.assign({}, s);
+    for (const [k, kind] of Object.entries(NUM_SETTINGS)) {
+      if (!(k in out)) continue;
+      const raw = out[k];
+      if (raw === '' || raw === null || raw === undefined) { out[k] = null; continue; }
+      const n = kind === 'int' ? parseInt(raw, 10) : parseFloat(raw);
+      out[k] = Number.isFinite(n) ? n : null;
+    }
+    return out;
+  }
+
+  ipcMain.handle('settings:update', (e, s0) =>
     run(() => {
+      const s = normalizeNumericSettings(s0);
       getDb().prepare(`
         UPDATE settings SET org=@org, lib_name=@lib_name, place=@place, bulstat=@bulstat, reg_no=@reg_no,
           director=@director, director_role=@director_role, librarian=@librarian, cat_url=@cat_url,

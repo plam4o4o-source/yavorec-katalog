@@ -115,7 +115,23 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       const db = getDb();
       const cnt = db.prepare('SELECT COUNT(*) AS n FROM periodical_issues WHERE periodical_id = ?').get(id).n;
       if (cnt > 0) throw new Error('Изданието има вписани броеве и не може да бъде изтрито.');
+      /* Второто дете на изданието — аналитичните описания (одит v2.4.24). Там
+         връзката е ON DELETE SET NULL (db/schema.sql), а не CASCADE, тоест
+         изтриването не се проваля: то тихо ЗАЛИЧАВА ИЗТОЧНИКА на всяка статия.
+         Читалище, което описва статии от вестник, без да води самия вестник брой
+         по брой, има празен кардекс — проверката по-горе минава — и след един клик
+         всичките му краеведски описания печатат източник „—“, безвъзвратно.
+         Изтриването се и вписва в следата: това е последният от трите пътя тук,
+         който мълчеше, докато създаването и редакцията вписват. */
+      const anl = db.prepare('SELECT COUNT(*) AS n FROM analytics WHERE periodical_id = ?').get(id).n;
+      if (anl > 0) {
+        throw new Error('Към изданието има ' + anl + (anl === 1 ? ' аналитично описание' : ' аналитични описания')
+          + ' и то не може да бъде изтрито — източникът им ще изчезне. Първо пренасочете или изтрийте статиите.');
+      }
+      const p0 = db.prepare('SELECT title FROM periodicals WHERE id = ?').get(id);
+      if (!p0) throw new Error('Изданието не е намерено.');
       db.prepare('DELETE FROM periodicals WHERE id = ?').run(id);
+      logAudit('Изтрито периодично издание', p0.title);
     })
   );
   ipcMain.handle('periodicalIssues:add', (e, issue) =>

@@ -368,14 +368,34 @@ async function loadAutoBackupBox() {
      се криптират“ се чете като бъдещо време; числото показва вече натрупаната
      експозиция — всяко от тези копия е пълен списък с имена, адреси, телефони и
      ЕГН на читателите. */
-  const plainNote = st.plainDailyCount > 0
-    ? ` В папката с резервните копия в момента има <b>${Number(st.plainDailyCount)}</b> некриптирани дневни копия
+  const plainDaily = Number(st.plainDailyCount) || 0;
+  const plainRestore = Number(st.plainRestoreCount) || 0;
+  const plainNote = plainDaily > 0
+    ? ` В папката с резервните копия в момента има <b>${plainDaily}</b>
+        ${plainDaily === 1 ? 'некриптирано дневно копие' : 'некриптирани дневни копия'}
         (всяко е пълен списък с личните данни на читателите).`
     : '';
+  /* Предпазните копия отпреди възстановяване се броят ОТДЕЛНО и НЕ се предлагат за
+     изтриване: те не са дневни копия и са единственият изход от сгрешено
+     възстановяване. Одит v2.4.24, преглед на поправките от същия кръг. */
+  const restoreNote = plainRestore > 0
+    ? `<div class="hint" style="margin-top:6px">В папката има и <b>${plainRestore}</b>
+        ${plainRestore === 1 ? 'предпазно копие' : 'предпазни копия'} отпреди възстановяване
+        (<code>before-restore-…</code>) в чист текст. <b>Не ги изтривайте</b> — те са изходът,
+        ако възстановяване се окаже сгрешено. Ако личните данни в тях са проблем, преместете ги
+        на място, което не е споделено в мрежата.</div>`
+    : '';
   if (state === 'encrypted') {
-    el.innerHTML = `<div class="note" style="margin-top:0">🔒 Автоматичните дневни копия се
+    /* Одит v2.4.24: тук се показваше САМО зеленото „копията се криптират“. Но
+       включването на защитата криптира само днешното копие — вчерашните остават в
+       чист текст завинаги, тоест точно в мига, в който библиотекарят вижда
+       успокоителния надпис, на дяла стоят до 30 пълни регистъра с лични данни. */
+    el.innerHTML = `<div class="note${plainNote ? ' d' : ''}" style="margin-top:0">🔒 Автоматичните дневни копия се
       <b>криптират</b> с паролата за защита на личните данни.
-      ${st.last ? 'Последно копие: ' + esc(st.last.date) + '.' : ''}</div>`;
+      ${st.last ? 'Последно копие: ' + esc(st.last.date) + '.' : ''}${plainNote}
+      ${plainNote ? `<div class="hint" style="margin-top:6px">Криптирането важи за копията отсега нататък.
+        Старите некриптирани <b>дневни</b> копия могат да се изтрият от папката с копията — базата и днешното
+        копие остават.</div>` : ''}${restoreNote}</div>`;
     return;
   }
   if (state === 'failed') {
@@ -384,7 +404,7 @@ async function loadAutoBackupBox() {
        провалило и се дава пряк изход — ръчно криптирано копие сега. */
     el.innerHTML = `<div class="note d" style="margin-top:0">
       <b>⚠ Днешното копие НЕ е криптирано, въпреки че защитата е включена.</b>
-      ${esc(st.warning || '')}${plainNote}
+      ${esc(st.warning || '')}${plainNote}${restoreNote}
       <div class="toolbar" style="margin:8px 0 0">
         <button type="button" class="btn pri" onclick="backupNowForm()">Направи копие с парола сега…</button>
         <button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button>
@@ -394,7 +414,7 @@ async function loadAutoBackupBox() {
   }
   el.innerHTML = `<div class="note ${state === 'locked' ? 'w' : 'd'}" style="margin-top:0">
     <b>${state === 'locked' ? '⚠ Копията не се криптират в момента.' : '⚠ Копията НЕ са криптирани.'}</b>
-    ${esc(st.warning || '')}${plainNote}
+    ${esc(st.warning || '')}${plainNote}${restoreNote}
     ${state === 'locked'
       ? '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button></div>'
       : '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn pri" onclick="pdpSetupForm()">Включи защита на личните данни…</button></div>'}
@@ -454,22 +474,33 @@ async function loadAnonHint() {
   const el = $('#anonHint'); if (!el) return;
   const r = await call(window.api.gdpr.candidates());
   if (!r) { el.textContent = ''; return; }
+  /* Анонимизирането прави ТРИ неща (handlers/gdpr.js): заемания, одитна следа,
+     история на търсенията. Одит v2.4.24: и подсказката, и бутонът се водеха само
+     по заеманията, тоест библиотека без стари заемания, но с хиляди имена в следата
+     и в търсенията, четеше „нищо за анонимизиране“ и нямаше как да ги изчисти. */
+  const parts = [
+    r.count ? `${r.count} ${r.count === 1 ? 'върнато заемане' : 'върнати заемания'}` : '',
+    r.auditCount ? `${r.auditCount} ${r.auditCount === 1 ? 'запис' : 'записа'} в одитната следа` : '',
+    r.searchCount ? `${r.searchCount} ${r.searchCount === 1 ? 'старо търсене' : 'стари търсения'}` : ''
+  ].filter(Boolean);
   el.textContent = !r.years
     ? 'Анонимизирането е изключено (0 години).'
-    : (r.count
-        ? `Готови за анонимизиране: ${r.count} върнати заемания отпреди ${bg(r.cutoff)}.`
-        : `Няма върнати заемания отпреди ${bg(r.cutoff)} — нищо за анонимизиране.`);
+    : (parts.length
+        ? `Готови за анонимизиране отпреди ${bg(r.cutoff)}: ${parts.join(', ')}.`
+        : `Няма нищо отпреди ${bg(r.cutoff)} за анонимизиране.`);
 }
 async function runAnonymize() {
   const r = await call(window.api.gdpr.candidates());
   if (!r) return;
   if (!r.years) return toast('Първо задайте срок в години (и запишете настройките).', 'err');
-  if (!r.count) return toast('Няма заемания за анонимизиране.', 'ok');
-  if (!confirm(`НЕОБРАТИМО: ${r.count} върнати заемания отпреди ${bg(r.cutoff)} ще загубят връзката с имената ` +
-    'на читателите (остава само „категория · година“). Да продължа?')) return;
+  const total = (r.count || 0) + (r.auditCount || 0) + (r.searchCount || 0);
+  if (!total) return toast('Няма нищо за анонимизиране.', 'ok');
+  if (!confirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${r.count || 0} върнати заемания губят връзката с имената ` +
+    `(остава само „категория · година“), ${r.auditCount || 0} записа в одитната следа се обезличават и ` +
+    `${r.searchCount || 0} стари търсения се изтриват. Да продължа?`)) return;
   const res = await call(window.api.gdpr.anonymize());
   if (!res) return;
-  toast('Анонимизирани ' + res.anonymized + ' заемания.', 'ok');
+  toast('Анонимизирани ' + res.anonymized + ' заемания, обезличени ' + res.auditCleared + ' записа в следата.', 'ok');
   markSaved();
   loadAnonHint();
 }
@@ -746,8 +777,18 @@ async function restoreWithPassword(path, fromList) {
   if (!res.ok) return toast(res.error, 'err');
 }
 window.restoreWithPassword = restoreWithPassword;
+/* Втори преглед на кръга v2.4.24: предпазното копие вече се КРИПТИРА (иначе беше
+   пълна база в чист текст, трайно, в папката с копията — а тя по документиран
+   сценарий е споделена в мрежата). Паролата обаче е тази на базата, която се
+   ЗАМЕНЯ: ако възстановявате база с друга парола или без такава, след рестарта
+   програмата вече не знае с какво е заключено предпазното копие. Затова се казва
+   изрично тук, ПРЕДИ потвърждението — същото предупреждение, което ръчното
+   резервно копие носи отдавна. */
 const RESTORE_WARN = 'Възстановяването ще замени текущите данни в програмата и ще я рестартира. ' +
-  'Текущата база се пази автоматично като допълнително копие преди възстановяването. Продължавате ли?';
+  'Текущата база се пази автоматично като допълнително копие преди възстановяването (файл ' +
+  '„before-restore-…“ в папката с копията). Ако защитата на личните данни е включена и отключена, ' +
+  'това копие се криптира с ТЕКУЩАТА ѝ парола — запишете си я, ако базата, която възстановявате, ' +
+  'е с друга парола или без парола. Продължавате ли?';
 async function restoreBackupFromList(path) {
   if (!confirm(RESTORE_WARN)) return;
   const res = await window.api.backup.restoreFromList({ path });
@@ -893,11 +934,12 @@ async function runDataChecks() {
   const box = $('#dataChecks');
   if (!box) return;
   box.innerHTML = '<div class="hint">Проверявам…</div>';
-  const [multi, dups] = await Promise.all([
+  const [multi, dups, orphanDeacc] = await Promise.all([
     call(window.api.books.multiCopyRecords()),
-    call(window.api.books.findDuplicateBarcodes())
+    call(window.api.books.findDuplicateBarcodes()),
+    call(window.api.books.deaccessionedWithoutAct())
   ]);
-  if (multi === null || dups === null) { box.innerHTML = ''; return; }
+  if (multi === null || dups === null || orphanDeacc === null) { box.innerHTML = ''; return; }
   const many = multi.filter(r => Number(r.quantity) > 1);
   const zero = multi.filter(r => Number(r.quantity) === 0);
   const copies = many.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
@@ -927,6 +969,21 @@ async function runDataChecks() {
         <td><button class="btn sm" onclick="setBookLendable(${r.id})">Върни бройката на 1</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
 
+    ${orphanDeacc.length ? `
+      <h4 style="font-size:14px;margin:20px 0 6px">Документи „отчислен“ без акт за отчисляване</h4>
+      <div class="note d" style="margin-top:0">Документ напуска фонда само с <b>акт за отчисляване</b> (чл. 35, ал. 2),
+      и КДБФ, годишният отчет и „Движение на фонда“ броят отписаното по акта.
+      ${orphanDeacc.length === 1 ? 'Този документ е' : 'Тези ' + orphanDeacc.length + ' документа са'} в състояние
+      „отчислен“ без акт — най-вероятно от внос на стара таблица с колона „Състояние“. Затова таблото и инвентарната
+      книга ${orphanDeacc.length === 1 ? 'не го броят' : 'не ги броят'} във фонда, а справките
+      ${orphanDeacc.length === 1 ? 'го броят' : 'ги броят'}: едно и също число излиза различно на два екрана.
+      Ако документите наистина са отчислени, съставете акт от „Отчисляване“; ако не са — върнете ги във фонда.</div>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>От дата</th><th></th></tr></thead><tbody>
+      ${orphanDeacc.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td>
+        <td>${r.status_date ? bg(r.status_date) : '—'}</td>
+        <td><button class="btn sm" onclick="clearOrphanDeaccession(${r.id})">Върни във фонда</button></td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+
     <h4 style="font-size:14px;margin:20px 0 6px">Един и същ баркод на повече от един документ</h4>
     ${dups.length ? `
       <div class="note d" style="margin-top:0">Сканирането намира <b>първия</b> от тях — може да завери или отчисли
@@ -939,6 +996,17 @@ async function runDataChecks() {
       : '<div class="hint">Няма повтарящи се баркодове.</div>'}`;
 }
 window.runDataChecks = runDataChecks;
+async function clearOrphanDeaccession(id) {
+  if (!confirm('ВРЪЩАНЕ ВЪВ ФОНДА\n\n'
+    + 'Документът е отбелязан „отчислен“, но за него няма акт за отчисляване. Състоянието му ще стане '
+    + '„наличен“ и той ще влиза еднакво във всички сборове на фонда.\n\n'
+    + 'Ако документът наистина е отчислен, откажете и съставете акт от „Отчисляване“ — така отписването '
+    + 'ще личи и в КДБФ, и в годишния отчет.')) return;
+  const res = await call(window.api.books.clearOrphanDeaccession(id), 'Документът е върнат във фонда.');
+  if (res === null) return;
+  runDataChecks();
+}
+window.clearOrphanDeaccession = clearOrphanDeaccession;
 async function splitBookCopies(id) {
   if (!confirm('РАЗДЕЛЯНЕ НА ЕКЗЕМПЛЯРИ\n\n'
     + 'Записът ще бъде разделен на отделни записи — по един за всеки екземпляр, всеки със свой '

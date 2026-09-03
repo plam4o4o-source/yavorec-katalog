@@ -112,4 +112,46 @@ function parseRegisterNo(x, label, allowEmpty) {
   }
   return Number(raw);
 }
-module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, parseRegisterNo, ANON_READER_NAME };
+/* Разчита сканиран/въведен код до ЕДИН документ.
+   Дотук на пет места стоеше `WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)`
+   с `.get()`. Числов баркод се преобразува и към инвентарен номер, тоест един
+   скан можеше да съвпадне И с баркода на един документ, И с инвентарния номер на
+   ДРУГ — а SQLite връща реда с по-малкия rowid, обикновено съвпадението по
+   инвентарен номер. Проверено (одит v2.4.24): „Под игото“ инв. № 123 без баркод и
+   „Тютюн“ инв. № 500 с етикет 0000123 — сканирането на етикета на „Тютюн“ заемаше
+   „Под игото“, а по-късно същият скан затваряше чуждото заемане.
+   Баркодът е физически залепен на конкретния екземпляр и е по-силният признак,
+   затова се търси ПЪРВО той. Истинска двусмислица (баркодът сочи един документ,
+   номерът — друг, или един баркод стои на няколко документа) не се решава с
+   догадка: това е данни за поправяне и се казва на библиотекаря, вместо да се
+   завери, заеме или отчисли грешният физически екземпляр. */
+function resolveScannedBook(db, code, select) {
+  const c = String(code == null ? '' : code).trim();
+  if (!c) throw new Error('Не е въведен баркод или инвентарен номер.');
+  const sel = select || 'SELECT * FROM books';
+  const byBarcode = db.prepare(`${sel} WHERE barcode = ? ORDER BY id`).all(c);
+  const byInv = /^\d{1,9}$/.test(c)
+    ? db.prepare(`${sel} WHERE inv_number = CAST(? AS INTEGER) ORDER BY id`).all(c)
+    : [];
+  const name = (b) => 'инв. № ' + (b.inv_number == null ? '—' : b.inv_number) + (b.title ? ' — ' + b.title : '');
+  if (byBarcode.length > 1) {
+    throw new Error('Баркод „' + c + '“ стои на ' + byBarcode.length + ' документа (' +
+      byBarcode.map(name).join('; ') + '). Сканирането не може да познае кой е пред вас. ' +
+      'Поправете дубликата от „Настройки“ → „Проверка на данните“.');
+  }
+  if (byBarcode.length === 1) {
+    const other = byInv.find(b => b.id !== byBarcode[0].id);
+    if (other) {
+      throw new Error('Кодът „' + c + '“ е баркод на ' + name(byBarcode[0]) + ', но е и инвентарен номер на ' +
+        name(other) + '. Въведете кода на другия документ или поправете етикета — програмата няма да гадае ' +
+        'кой физически екземпляр държите.');
+    }
+    return byBarcode[0];
+  }
+  if (byInv.length > 1) {
+    // inv_number е UNIQUE в схемата — до тук се стига само при ръчно пипана база.
+    throw new Error('Инвентарен номер ' + c + ' стои на ' + byInv.length + ' документа. Поправете базата.');
+  }
+  return byInv[0] || null;
+}
+module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, parseRegisterNo, resolveScannedBook, ANON_READER_NAME };

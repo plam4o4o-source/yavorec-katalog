@@ -2,6 +2,8 @@
 // стъпка 36). Вместо RFID: страница (mobile-template.html), която се отваря
 // на телефона и ползва камерата като баркод четец. Списъкът се пренася
 // обратно като текст или файл и се внася в отворена сесия за инвентаризация.
+const { resolveScannedBook } = require('../security-utils');
+
 module.exports = function registerMobileHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, normalizeScanCode } = deps;
 
@@ -33,7 +35,12 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       // номер (виж books:byBarcode в handlers/books.js за пълното обяснение).
       const list = [...new Set((codes || []).map(c => normalizeScanCode(c)).filter(Boolean))];
       if (!list.length) throw new Error('Списъкът е празен.');
-      const find = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)');
+      /* Одит v2.4.24: `barcode = ? OR inv_number = CAST(? AS INTEGER)` с .get()
+         връщаше при двусмислен код просто реда с по-малък rowid — в протокол за
+         инвентаризация това значи „проверен" за чужд документ, а истинският остава
+         в липсите. resolveScannedBook() хвърля при двусмислие; тук ГРЕШКАТА НЕ
+         спира целия внос (списъкът е от стотици сканирания), а кодът влиза в
+         пропуснатите с причината, за да я види библиотекарят поименно. */
       const already = db.prepare('SELECT 1 FROM inventory_session_scans WHERE session_id = ? AND book_id = ?');
       const addScan = db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)');
       const addCheck = db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)');
@@ -48,7 +55,9 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       const res = { added: 0, duplicates: 0, unknown: [], skipped: [] };
       db.transaction(() => {
         for (const code of list) {
-          const b = find.get(code, code);
+          let b;
+          try { b = resolveScannedBook(db, code); }
+          catch (err) { res.skipped.push({ inv_number: code, reason: err.message }); continue; }
           if (!b) { res.unknown.push(code); continue; }
           if (b.status === 'отчислен') {
             res.skipped.push({ inv_number: b.inv_number, reason: 'отчислен' });

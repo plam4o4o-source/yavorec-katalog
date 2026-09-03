@@ -31,8 +31,23 @@ function auditDiffHtml(diffJson) {
     `<div><b>${esc(FIELD_LABELS[d.field] || d.field)}:</b> ${esc(d.before ?? '—')} → ${esc(d.after ?? '—')}</div>`
   ).join('')}</div>`;
 }
+/* Часът се пази в UTC (audit_log.ts по подразбиране е datetime('now') на SQLite),
+   а `new Date('2026-09-03 06:30:00')` се тълкува от V8 като МЕСТНО време — тоест
+   дотук екранът и CSV-то показваха суровия UTC час като местен. Одит v2.4.24:
+   действие в 09:30 се четеше „06:30“, а действие в 00:40 на 4 януари — „22:40“ на
+   3 януари, тоест В ДРУГ ДЕН, в документа, който съществува, за да възстанови
+   какво се е случило и кога. */
+function auditTs(ts) {
+  const raw = String(ts || '');
+  if (!raw) return '—';
+  // Стойността е „YYYY-MM-DD HH:MM:SS“ без часова зона. Ако някой ред вече носи
+  // зона (T…Z или отместване), не се пипа.
+  const iso = /[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
+  const d = new Date(iso);
+  return isNaN(d) ? raw : d.toLocaleString('bg-BG');
+}
 function auditRowsHtml(rows) {
-  return rows.length ? rows.map(a => `<tr><td class="num">${new Date(a.ts).toLocaleString('bg-BG')}</td><td>${esc(a.user || '—')}</td>
+  return rows.length ? rows.map(a => `<tr><td class="num">${auditTs(a.ts)}</td><td>${esc(a.user || '—')}</td>
     <td><span class="badge">${esc(a.action)}</span></td><td style="font-size:12.5px">${esc(a.detail)}${auditDiffHtml(a.diff)}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty">Няма записи.</td></tr>`;
 }
@@ -47,7 +62,7 @@ const AUDIT_LIMIT = 500;
 function auditCountText(n) {
   return n >= AUDIT_LIMIT
     ? 'показани са последните ' + AUDIT_LIMIT + ' записа (има и по-стари — стеснете с търсенето)'
-    : n + ' записа';
+    : n + (n === 1 ? ' запис' : ' записа');
 }
 /* Търсенето пипа само тялото на таблицата и брояча — полето #oditSearch НЕ се
    пресъздава. Дотогава debounce-ът викаше цялата renderOdit() и подменяше #view
@@ -88,7 +103,7 @@ async function exportAuditCSV() {
      започват направо с данни: името на служителя, заглавие на предложение за
      покупка, име на нов служител. csvSafe е същите три реда, изнесени в
      src/views/core.js, защото екранният слой няма достъп до модула. */
-  const csv = [h.join(';')].concat(rows.map(a => [new Date(a.ts).toLocaleString('bg-BG'), a.user, a.action, a.detail]
+  const csv = [h.join(';')].concat(rows.map(a => [auditTs(a.ts), a.user, a.action, a.detail]
     .map(csvSafe).join(';'))).join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);

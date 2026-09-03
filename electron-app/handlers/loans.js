@@ -10,7 +10,7 @@
 // вече разчита logEvent да е hoisted в main.js). BOOK_SELECT (по стойност)
 // и scheduleCatalogWrite (по референция, hoisted по-долу в main.js) идват
 // от все още неизвадения домейн "Книги"/"Онлайн каталог".
-const { isValidIsoDate } = require('../security-utils');
+const { isValidIsoDate, resolveScannedBook } = require('../security-utils');
 
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
@@ -130,7 +130,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
       rows.forEach(r => {
         r.daysLate = effectiveDaysLate(r.date_due, now);
-        r.fine = r.daysLate * perDay;
+        /* Начисленото по заемането се ДОБАВЯ, не се презаписва (преглед на
+           поправките от този кръг). Дотук loans.fine се пишеше само при връщане и
+           презаписването беше безвредно; от v2.4.24 loans:extend начислява по
+           ОТВОРЕНО заемане, а този ред го изхвърляше — екранът „Просрочени“ и
+           напомнителното писмо искаха 0.25 лв., а гишето после 2.05 лв. Точно
+           трите различни суми, срещу които е бележката по-горе. */
+        r.fine = (Number(r.fine) || 0) + r.daysLate * perDay;
       });
       return rows;
     })
@@ -168,7 +174,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const now = today();
       rows.forEach(r => {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);
-        r.fine = r.loans.reduce((sum, d) => sum + effectiveDaysLate(d.date_due, now) * perDay, 0);
+        // Виж бележката при loans:overdue: натрупаното по заемането се добавя.
+        r.loans.forEach(d => { d.fine = (Number(d.fine) || 0) + effectiveDaysLate(d.date_due, now) * perDay; });
+        r.fine = r.loans.reduce((sum, d) => sum + d.fine, 0);
       });
       return rows;
     })
@@ -185,11 +193,26 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(book_id).n;
         const qty = inv ? inv.quantity : 0;
         if (outCount >= qty) throw new Error('Няма свободни бройки от тази книга.');
+        /* ДВЕ ВРАТИ, ЕДНИ ПРАВИЛА (одит v2.4.24). Заемането по баркод
+           (loans:checkoutByCode по-долу) отказва отчислен документ, спазва лимита
+           от документи за читател и винаги изчислява падеж; този — по-старият
+           път, който остава изложен през preload — не правеше нито едно от трите.
+           Най-тежкото е падежът: `date_due || null` записваше заемане БЕЗ СРОК, а
+           всяка справка за просрочие пита `date_due IS NOT NULL` — такова заемане
+           никога не става просрочено, никога не носи обезщетение и никога не
+           попада в напомнянията. Книгата просто изчезва от погледа. */
+        const b0 = db.prepare('SELECT inv_number, status FROM books WHERE id = ?').get(book_id);
+        if (!b0) throw new Error('Документът не е намерен.');
+        if (b0.status === 'отчислен') throw new Error('Инв. № ' + b0.inv_number + ' е отчислен от фонда.');
+        const s = circRule(readerCategory(reader_id));
+        const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
+        if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
         checkSuspended(reader_id);
         consumeHoldOnCheckout(book_id, reader_id);
+        const dueStr = date_due || nextWorkDay(addDays(date_out, s.loan_days || 30));
         const info = db.prepare(`
           INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)
-        `).run(reader_id, book_id, date_out, date_due || null);
+        `).run(reader_id, book_id, date_out, dueStr);
         const b = db.prepare('SELECT title, inv_number FROM books WHERE id = ?').get(book_id);
         logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : ''));
         logEvent('заемане', { bookId: book_id, readerId: reader_id, date: date_out });
@@ -207,46 +230,60 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       }
       const db = getDb();
       const inDate = date_in || today();
-      const before = db.prepare('SELECT date_due, date_in FROM loans WHERE id = ?').get(id);
-      /* Защита срещу повторно връщане на едно и също заемане. Пътят през баркод
-         (loans:returnByCode) винаги е проверявал за ОТВОРЕН заем; бутонът „Приеми"
-         в „Заемане и връщане"/„Просрочени" — не, и не се заключваше след клик.
-         Второ извикване значеше: applySuspension стъпва върху ВЕЧЕ наложеното
-         наказание (base = suspended_until) и го удвоява, а logEvent('връщане') се
-         вписва повторно и изкривява дневника. Проверено: 16 дни забава при 1 ден
-         наказание на ден давà 02.09; двоен клик — 18.09, и двата пъти с ok:true. */
-      if (!before) throw new Error('Заемането не е намерено.');
-      if (before.date_in) {
-        throw new Error('Това заемане вече е върнато на ' +
-          before.date_in.split('-').reverse().join('.') + ' — не се приема втори път.');
-      }
-      // v1.70.0: тук по-рано fine никога не се пресмяташе/записваше — loans:return
-      // (бутон „Приеми“ в Заемане и връщане/Просрочени) и loans:returnByCode
-      // (сканиране на баркод) са двата пътя за връщане на книга, но само вторият
-      // смяташе глоба, при това по календарни дни (без да изважда затворените —
-      // за разлика от наказанието в дни, което ги изважда още от самото начало).
-      // Резултатът: „Събрани глоби“ в справките зависеше от това кой бутон е
-      // натиснат, и дори когато глоба се пресмяташе, беше с по-малко дни, отколкото
-      // наказанието за същото просрочие. Сега и двата пътя ползват еднакво
-      // effectiveDaysLate() (виж applySuspension по-горе) и еднакво записват fine.
-      const daysLate = effectiveDaysLate(before.date_due, inDate);
-      const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
-      const fine = daysLate * ((s && s.fine_per_day) || 0);
-      /* Едно връщане пипа ЧЕТИРИ таблици: loans (затваря заемането), holds
-         (активира следващата резервация), events (захранва дневника и годишния
-         отчет) и readers (наказанието). Дотук те се записваха едно по едно, без
-         транзакция: прекъсване по средата — спиране на тока, прекъсната мрежа към
-         споделената база — оставяше заемането затворено, но без събитие, и
-         годишният отчет тихо оставаше с едно заемане по-малко от инвентарната
-         книга. Сега или минават всичките, или нито едно, точно както при
-         loans:extend по-горе. `.immediate()` взима правото на запис още в началото,
-         за да не се стигне до „database is locked“ насред поредицата. */
+      /* Редът и глобата се четат ВЪТРЕ в транзакцията (одит v2.4.24). Дотук
+         `SELECT date_due` беше извън нея: другото работно място можеше да продължи
+         срока между четенето и записа, а `AND date_in IS NULL` не улавя това —
+         записваше се глоба за падеж, който вече не съществува. */
       const tx = db.transaction(() => {
+        const before = db.prepare('SELECT date_due, date_in FROM loans WHERE id = ?').get(id);
+        /* Защита срещу повторно връщане на едно и също заемане. Пътят през баркод
+           (loans:returnByCode) винаги е проверявал за ОТВОРЕН заем; бутонът „Приеми"
+           в „Заемане и връщане"/„Просрочени" — не, и не се заключваше след клик.
+           Второ извикване значеше: applySuspension стъпва върху ВЕЧЕ наложеното
+           наказание (base = suspended_until) и го удвоява, а logEvent('връщане') се
+           вписва повторно и изкривява дневника. Проверено: 16 дни забава при 1 ден
+           наказание на ден давà 02.09; двоен клик — 18.09, и двата пъти с ok:true. */
+        if (!before) throw new Error('Заемането не е намерено.');
+        if (before.date_in) {
+          throw new Error('Това заемане вече е върнато на ' +
+            before.date_in.split('-').reverse().join('.') + ' — не се приема втори път.');
+        }
+        // v1.70.0: тук по-рано fine никога не се пресмяташе/записваше — loans:return
+        // (бутон „Приеми“ в Заемане и връщане/Просрочени) и loans:returnByCode
+        // (сканиране на баркод) са двата пътя за връщане на книга, но само вторият
+        // смяташе глоба, при това по календарни дни (без да изважда затворените —
+        // за разлика от наказанието в дни, което ги изважда още от самото начало).
+        // Резултатът: „Събрани глоби“ в справките зависеше от това кой бутон е
+        // натиснат, и дори когато глоба се пресмяташе, беше с по-малко дни, отколкото
+        // наказанието за същото просрочие. Сега и двата пътя ползват еднакво
+        // effectiveDaysLate() (виж applySuspension по-горе) и еднакво записват fine.
+        const daysLate = effectiveDaysLate(before.date_due, inDate);
+        const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+        const fine = daysLate * ((s && s.fine_per_day) || 0);
+        /* Едно връщане пипа ЧЕТИРИ таблици: loans (затваря заемането), holds
+           (активира следващата резервация), events (захранва дневника и годишния
+           отчет) и readers (наказанието). Дотук те се записваха едно по едно, без
+           транзакция: прекъсване по средата — спиране на тока, прекъсната мрежа към
+           споделената база — оставяше заемането затворено, но без събитие, и
+           годишният отчет тихо оставаше с едно заемане по-малко от инвентарната
+           книга. Сега или минават всичките, или нито едно, точно както при
+           loans:extend по-горе. `.immediate()` взима правото на запис още в началото,
+           за да не се стигне до „database is locked“ насред поредицата. */
         // `AND date_in IS NULL` е втората (атомарна) половина на защитата по-горе:
         // ако два прозореца натиснат „Приеми" едновременно, само първият ще запише.
-        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
+        /* `fine = COALESCE(fine, 0) + ?`, а не `fine = ?` (одит v2.4.24, преглед на
+           поправките от същия кръг). loans:extend вече урежда натрупаното при
+           продължение на просрочено заемане и го ДОБАВЯ — а тук записът беше
+           присвояване. След продължение падежът е в бъдещето, тоест при връщането
+           daysLate = 0 и глобата излиза 0: присвояването заличаваше точно това,
+           което продължението току-що начисли (проверено: 2.40 лв. → 0.00).
+           Двойно броене няма: продължението начислява до деня на продължението и
+           мести падежа напред, а тук се смята забава спрямо НОВИЯ падеж. */
+        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = COALESCE(fine, 0) + ? WHERE id = ? AND date_in IS NULL')
           .run(inDate, fine, id);
         if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
+        // Дължимото на гишето е ЦЯЛОТО натрупано по заемането, не само днешната част.
+        const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(id).fine || 0;
         const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
         if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
         const hold = l ? activateHoldOnReturn(l.book_id) : null;
@@ -255,14 +292,14 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: inDate });
           suspendedUntil = applySuspension(l.reader_id, l.date_due, inDate);
         }
-        return { hold, suspendedUntil };
+        return { hold, suspendedUntil, daysLate, fine: fineTotal, fineNow: fine };
       });
-      const { hold, suspendedUntil } = tx.immediate();
+      const { hold, suspendedUntil, daysLate, fine, fineNow } = tx.immediate();
       // Извън транзакцията: пише файл, не база — не бива да я държи отворена.
       scheduleCatalogWrite();
       return {
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
-        suspendedUntil, daysLate, fine
+        suspendedUntil, daysLate, fine, fineNow
       };
     })
   );
@@ -315,12 +352,37 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            в списъка на просрочените още в същия миг, а едно от позволените
            продължавания беше изхабено. */
         const t = today();
-        const base = (l.date_due && l.date_due > t) ? l.date_due : t;
-        const newDue = nextWorkDay(addDays(base, s.extension_days || 30));
+        /* НАТРУПАНОТО СЕ УРЕЖДА, ПРЕДИ СРОКЪТ ДА СЕ ПРЕНАПИШЕ (одит v2.4.24).
+           Дотук продължението само отместваше date_due — а бутонът „Продължи“ стои
+           на ВСЕКИ ред от екрана „Просрочени“, точно под текста, който цитира
+           чл. 43, ал. 2 и показва „Общо дължимо обезщетение“. Едно натискане
+           заличаваше и обезщетението, и наказанието: проверено — заемане с 36 дни
+           забава и 1.80 лв дължими излизаше от списъка на просрочените с fine = 0 и
+           suspended_until = NULL, а върнато навреме след това даваше „забава 0 дни“.
+           Парите не оставяха следа никъде, включително в „Начислено“ на справките
+           (handlers/stats.js). „Събрани глоби“ се води по ПЛАЩАНИЯТА и не се
+           влияе; „Начислено“ по заеманията брои затворените, затова начисленото по
+           още отворено заемане се отчита отделно като „начислено по незавършени
+           заемания“ — виж finesOpen в handlers/stats.js.
+           Начислява се СЪЩОТО, което би начислило връщане на днешна дата — същият
+           effectiveDaysLate и същият applySuspension — и се добавя към вече
+           начисленото по това заемане, за да не се губи при второ продължение. */
+        const lateNow = effectiveDaysLate(l.date_due, t);
+        let addedFine = 0, suspendedUntil = null;
+        if (lateNow > 0) {
+          const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+          addedFine = lateNow * ((cfg && cfg.fine_per_day) || 0);
+          if (addedFine) {
+            db.prepare('UPDATE loans SET fine = COALESCE(fine, 0) + ? WHERE id = ?').run(addedFine, id);
+          }
+          suspendedUntil = applySuspension(l.reader_id, l.date_due, t);
+        }
+        const newDue = nextWorkDay(addDays((l.date_due && l.date_due > t) ? l.date_due : t, s.extension_days || 30));
         db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
-        logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')');
+        logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')'
+          + (lateNow ? ' — начислена забава ' + lateNow + ' дни' + (addedFine ? ', ' + addedFine.toFixed(2) + ' лв.' : '') : ''));
         logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
-        return { date_due: newDue, renewals: used + 1, max };
+        return { date_due: newDue, renewals: used + 1, max, daysLate: lateNow, fine: addedFine, suspendedUntil };
       });
       return tx.immediate();
     })
@@ -338,7 +400,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const db = getDb();
       const tx = db.transaction(() => {
         const c = normalizeScanCode(code);
-        const b = db.prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c);
+        /* Одит v2.4.24: дотук беше `barcode = ? OR inv_number = CAST(? AS INTEGER)`
+           с .get() — при числов баркод, който съвпада с ЧУЖД инвентарен номер,
+           SQLite връщаше просто реда с по-малък rowid, тихо и без предупреждение,
+           и на гишето се заемаше друга книга. resolveScannedBook() (security-utils.js)
+           дава предимство на баркода и ОТКАЗВА, вместо да гадае, когато кодът сочи
+           два различни документа. */
+        const b = resolveScannedBook(db, c, BOOK_SELECT);
         if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
         /* Свободна бройка, а не „има ли изобщо отворен заем". Моделът на данните
@@ -382,39 +450,74 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       }
       const db = getDb();
       const c = normalizeScanCode(code);
-      const b = db.prepare('SELECT * FROM books WHERE barcode = ? OR inv_number = CAST(? AS INTEGER)').get(c, c);
-      if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
-      const loan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL`).get(b.id);
-      if (!loan) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
       const inDate = date_in || today();
-      const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
-      // v1.70.0: effectiveDaysLate() вместо суров брой календарни дни — виж
-      // бележката при loans:return по-горе; наказанието в дни за същото
-      // просрочие вече ползваше изчистените от затворени дни.
-      const daysLate = effectiveDaysLate(loan.date_due, inDate);
-      const fine = daysLate * ((s && s.fine_per_day) || 0);
       /* Същата транзакция и същата атомарна защита като при loans:return — това
          е ДРУГИЯТ път за връщане (сканиране на баркод) и на гишето минава по-често
          от бутона. Дотук тук нямаше нито транзакция, нито `AND date_in IS NULL`:
          прекъсване между UPDATE-а и logEvent оставяше заемането затворено без
          събитие (годишният отчет тихо с едно по-малко), а двойно сканиране на
-         един и същ баркод удвояваше наказанието. */
+         един и същ баркод удвояваше наказанието.
+         Одит v2.4.24: и намирането на документа, и намирането на заемането, и
+         пресмятането на глобата вече са ВЪТРЕ в транзакцията — иначе другото
+         работно място можеше да продължи срока между четенето на date_due и
+         записа, и се начисляваше глоба за вече несъществуващ падеж. */
       const tx = db.transaction(() => {
-        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = ? WHERE id = ? AND date_in IS NULL')
+        const b = resolveScannedBook(db, c);
+        if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
+        /* ORDER BY + отказ при повече от едно отворено заемане (одит v2.4.24):
+           дотук .get() без подредба вземаше произволното (по rowid) от няколкото
+           отворени заемания на стар неразделен ред с няколко бройки — връщаше се
+           чуждо заемане, с чужда глоба и чуждо наказание. */
+        const open = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL ORDER BY l.date_due, l.id`).all(b.id);
+        if (!open.length) throw new Error('Инв. № ' + b.inv_number + ' не е заето в момента.');
+        /* Няколко отворени заемания на един ред е НОРМАЛНО, когато редът наистина
+           носи няколко бройки (loans:checkoutByCode по-долу изрично го допуска —
+           втората бройка на учебник). Тогава връщането се отнася за най-просроченото
+           заемане: подредбата по падеж е определена и повтаряема, а дотук .get() без
+           ORDER BY вземаше произволното по rowid.
+           ОТКАЗВА се само когато редът е ПРОТИВОРЕЧИВ — една бройка, две заемания:
+           там не може да се знае чие е връщането, а грешката струва чужда глоба и
+           чуждо наказание. (Първата редакция на тази поправка отказваше при всеки
+           втори отворен заем и правеше гишето по баркод неизползваемо за всяко
+           заглавие с повече от една бройка — намерено при прегледа на кръга.) */
+        const invRow = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
+        const qty = invRow && invRow.quantity != null ? Number(invRow.quantity) : 1;
+        /* Противоречив е редът, при който отворените заемания са ПОВЕЧЕ ОТ БРОЙКИТЕ
+           — не само при една бройка (втори преглед на кръга: 3 заемания при
+           коригирани на 2 бройки минаваха и затваряха чуждо заемане с чужда глоба). */
+        if (open.length > qty) {
+          throw new Error('Инв. № ' + b.inv_number + ' е заведен като зает от ' + open.length + ' читатели ('
+            + open.map(l => l.reader_name).join(', ') + ') при ' + qty + (qty === 1 ? ' налична бройка' : ' налични бройки')
+            + '. Приемете връщането от екрана „Просрочени“ или от картона на читателя в „Заемане и връщане“, '
+            + 'за да е ясно кой връща, и проверете реда от „Настройки“ → „Проверка на данните“.');
+        }
+        const loan = open[0];
+        const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+        // v1.70.0: effectiveDaysLate() вместо суров брой календарни дни — виж
+        // бележката при loans:return по-горе; наказанието в дни за същото
+        // просрочие вече ползваше изчистените от затворени дни.
+        const daysLate = effectiveDaysLate(loan.date_due, inDate);
+        const fine = daysLate * ((cfg && cfg.fine_per_day) || 0);
+        // Натрупване, не присвояване — виж бележката при loans:return по-горе.
+        const upd = db.prepare('UPDATE loans SET date_in = ?, fine = COALESCE(fine, 0) + ? WHERE id = ? AND date_in IS NULL')
           .run(inDate, fine, loan.id);
         if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
+        const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(loan.id).fine || 0;
         logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + ' дни)' : ''));
         logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
         return {
+          title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate,
+          fine: fineTotal, fineNow: fine,
           suspendedUntil: applySuspension(loan.reader_id, loan.date_due, inDate),
           hold: activateHoldOnReturn(b.id)
         };
       });
-      const { suspendedUntil, hold } = tx.immediate();
+      const r = tx.immediate();
       scheduleCatalogWrite(); // пише файл, не база — извън транзакцията
       return {
-        title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate, fine, suspendedUntil,
-        hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null
+        title: r.title, inv_number: r.inv_number, reader_name: r.reader_name,
+        daysLate: r.daysLate, fine: r.fine, fineNow: r.fineNow, suspendedUntil: r.suspendedUntil,
+        hold: r.hold ? { reader_name: r.hold.reader_name, card_no: r.hold.card_no, phone: r.hold.phone } : null
       };
     })
   );

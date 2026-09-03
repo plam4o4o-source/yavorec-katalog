@@ -10,6 +10,8 @@
 // require('./handlers/books') в main.js, за да няма TDZ — точно както при
 // LOAN_SELECT/firstActiveHold и другите вече установени модели за връщане
 // на споделена стойност напред.
+const { resolveScannedBook } = require('../security-utils');
+
 module.exports = function registerBooksHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode } = deps;
   /* Одит v2.3.1 №9(a) — позволените стойности се четат от същия списък, който
@@ -175,7 +177,10 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     // двата индекса). normalizeScanCode() (v1.70.1) — виж security-utils.js:
     // баркод четецът е клавиатура, а активна кирилска разредба на Windows
     // превръща букви от Code 39 баркода (напр. B) в кирилски еквивалент (Б).
-    run(() => { const c = normalizeScanCode(code); return getDb().prepare(`${BOOK_SELECT} WHERE b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)`).get(c, c); })
+    // Одит v2.4.24: resolveScannedBook() вместо `OR ... CAST` + .get() — при код,
+    // който е баркод на един документ и инвентарен номер на друг, се отказва с
+    // ясно съобщение, вместо да се върне произволният (по rowid) от двата.
+    run(() => { const c = normalizeScanCode(code); return c ? resolveScannedBook(getDb(), c, BOOK_SELECT) : null; })
   );
 
   /* ЕДИН ИНВЕНТАРЕН НОМЕР = ЕДИН ЕКЗЕМПЛЯР.
@@ -510,6 +515,39 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       db.prepare(`INSERT INTO inventory (book_id, quantity) VALUES (?, 1)
         ON CONFLICT(book_id) DO UPDATE SET quantity = 1`).run(id);
       logAudit('Поправка на бройка', 'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — бройката е върната на 1');
+      scheduleCatalogWrite();
+    })
+  );
+  /* Отчислен без акт (одит v2.4.24). Документ напуска фонда САМО с акт по
+     чл. 35, ал. 2, и всички сборове на фонда се водят по deaccession_date /
+     deaccession_act_id, които актът попълва. Ред със status='отчислен', но без
+     акт, е противоречие: таблото и инвентарната книга (гледат status) го изваждат
+     от фонда, а КДБФ, годишният отчет и „Движение на фонда“ (гледат
+     deaccession_date) продължават да го броят — един и същи „библиотечен фонд“ с
+     две различни числа в едно и също меню. Такива редове идваха от вноса на стара
+     таблица с колона „Състояние“; вносът вече не ги приема (handlers/data-import.js),
+     а вече внесените се показват тук и се поправят изрично, не мълчаливо. */
+  ipcMain.handle('books:deaccessionedWithoutAct', () =>
+    run(() => getDb().prepare(`
+      SELECT id, inv_number, title, author, status_date
+      FROM books
+      WHERE COALESCE(status, '') = 'отчислен' AND deaccession_date IS NULL AND deaccession_act_id IS NULL
+      ORDER BY inv_number
+    `).all())
+  );
+  ipcMain.handle('books:clearOrphanDeaccession', (e, id) =>
+    run(() => {
+      const db = getDb();
+      const b = db.prepare('SELECT inv_number, title, status, deaccession_act_id, deaccession_date FROM books WHERE id = ?').get(id);
+      if (!b) throw new Error('Документът не е намерен.');
+      if (b.deaccession_act_id != null || b.deaccession_date != null) {
+        throw new Error('Инв. № ' + (b.inv_number ?? '—') + ' е отчислен с акт — състоянието му не се променя оттук. '
+          + 'Ако актът е сгрешен, анулирайте го от „Отчисляване“.');
+      }
+      if (b.status !== 'отчислен') throw new Error('Документът не е в състояние „отчислен“.');
+      db.prepare("UPDATE books SET status = 'наличен', status_date = date('now') WHERE id = ?").run(id);
+      logAudit('Поправка на състояние', 'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — „отчислен“ без акт се връща на „наличен“; '
+        + 'отчисляване се прави само с акт по чл. 35, ал. 2');
       scheduleCatalogWrite();
     })
   );

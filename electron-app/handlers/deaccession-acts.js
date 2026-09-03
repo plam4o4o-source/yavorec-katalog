@@ -4,7 +4,7 @@
 // референция, функция дефинирана в main.js — отчисляването/анулирането
 // сменят видимостта на документи в онлайн каталога, затова насрочват
 // запис на katalog.json, точно както shelves.js).
-const { isValidIsoDate, parseRegisterNo } = require('../security-utils');
+const { isValidIsoDate, parseRegisterNo, resolveScannedBook } = require('../security-utils');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
@@ -24,6 +24,15 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     if (loanActColumnChecked === db) return;
     const has = db.prepare('PRAGMA table_info(loans)').all().some(c => c.name === 'deaccession_act_id');
     if (!has) db.exec('ALTER TABLE loans ADD COLUMN deaccession_act_id INTEGER');
+    /* Одит v2.4.24: анулирането връщаше ВСЕКИ документ на „наличен“, защото
+       предишното състояние не се пазеше никъде. Най-честият ред по чл. 30, т. 6 е
+       точно „липсващ“ (установен от инвентаризация) → отчислен: сгрешен акт,
+       анулиран веднага, и книгата, която физически я няма, се обявява за налична —
+       вижда се в публичния каталог (handlers/catalog.js) и може да се резервира
+       (handlers/holds.js). Състоянието се снима в реда на акта, който и без това е
+       снимка по чл. 35, ал. 2 (виж quantity в db/schema.sql). */
+    const hasStatus = db.prepare('PRAGMA table_info(deaccession_items)').all().some(c => c.name === 'status_before');
+    if (!hasStatus) db.exec('ALTER TABLE deaccession_items ADD COLUMN status_before TEXT');
     loanActColumnChecked = db;
   }
 
@@ -68,8 +77,13 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
     const c = normalizeScanCode(code);
     const db = getDb();
-    const b = db.prepare(`${BOOK_SELECT} WHERE (b.barcode = ? OR b.inv_number = CAST(? AS INTEGER)) AND (b.status != 'отчислен' OR b.status IS NULL)`).get(c, c);
-    if (!b) return b;
+    /* Одит v2.4.24 — виж resolveScannedBook() в security-utils.js. Тук цената на
+       мълчаливото гадаене е най-висока: числов баркод, съвпадащ с чужд инвентарен
+       номер, вкарваше в АКТ ЗА ОТЧИСЛЯВАНЕ друг документ, а сканираният оставаше
+       във фонда. Филтърът „не е отчислен" се прилага след намирането, за да не
+       се превърне отчисленият документ в „непознат баркод". */
+    const b = c ? resolveScannedBook(db, c, BOOK_SELECT) : null;
+    if (!b || b.status === 'отчислен') return undefined;
     const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
     b.fund_qty = q ? q.quantity : null;
     return b;
@@ -113,8 +127,8 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         });
         const actId = info.lastInsertRowid;
         const insItem = db.prepare(`
-          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language, quantity)
-          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language, @quantity)
+          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language, quantity, status_before)
+          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language, @quantity, @status_before)
         `);
         // Принудително закритите заемания се отбелязват с номера на акта — за да
         // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
@@ -143,7 +157,24 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         let docCount = 0;
         bookIds.forEach(bookId => {
           const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
-          if (!b) return;
+          /* Одит v2.4.24: дотук липсващият ред просто се ПРОПУСКАШЕ (`if (!b) return`).
+             Другото работно място може да изтрие документа, докато формата стои
+             отворена (handlers/books.js спира само вече отчислените) — актът се
+             утвърждаваше с един документ по-малко, прозорецът обявяваше „отчислени
+             са 2 документа“, а следата вписваше разликата като „(2 заглавия)“, тоест
+             като стар многоекземплярен ред. Подписаният акт излизаше от библиотеката
+             с друго съдържание. По-добре отказ, отколкото тих недоимък. */
+          if (!b) throw new Error('Документ от списъка вече не съществува в базата — вероятно е изтрит от друго '
+            + 'работно място. Актът НЕ е съставен. Отворете „Отчисляване“ наново и подберете документите отново.');
+          /* Същата причина, огледално: филтърът „не е отчислен“ живее само в
+             deaccessionActs:findBook, тоест в сканирането, и остарява, докато формата
+             е отворена. Без тази проверка един и същи инв. № влизаше в ДВА акта —
+             КДБФ (Приложение № 3) отчиташе два документа и двойна стойност излизаше
+             от фонда, а Приложение № 2 показваше завишена наличност към 01.01. */
+          if (b.status === 'отчислен') {
+            throw new Error('Инв. № ' + b.inv_number + ' вече е отчислен с акт — вероятно от друго работно място, '
+              + 'докато формата е била отворена. Актът НЕ е съставен. Отворете „Отчисляване“ наново.');
+          }
           insItem.run({
             act_id: actId, book_id: b.id, inv_number: b.inv_number, author: b.author, title: b.title,
             volume: b.volume, year: b.year, price: b.price, udk: b.udk,
@@ -158,7 +189,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                изрично 0 бройки“ (→ 0). Слети в едно, вторият случай изваждаше от
                КДБФ документ, който фондът никога не е броял. Същото разграничение
                като fund_qty в handlers/acquisitions.js. */
-            quantity: invQty.get(b.id)
+            quantity: invQty.get(b.id),
+            // Състоянието ПРЕДИ отчисляването — за да може анулирането да го върне
+            // (виж ensureLoanActColumn по-горе).
+            status_before: b.status || null
           });
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
           db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
@@ -168,7 +202,9 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
-        logAudit('Отчисляване', 'акт № ' + act.no + ' — ' + docCount + ' документа'
+        // `no`, а не `act.no`: parseRegisterNo() вече е нормализирал „007“ до 7 —
+        // следата трябва да сочи номера, който Е ВПИСАН в регистъра.
+        logAudit('Отчисляване', 'акт № ' + no + '/' + year + ' — ' + docCount + (docCount === 1 ? ' документ' : ' документа')
           + (docCount !== bookIds.length ? ' (' + bookIds.length + ' заглавия)' : '')
           + ', причина: ' + act.reason_text
           + (cancelledHolds ? (' (отказани ' + cancelledHolds + ' резервации на отчислените документи)') : ''));
@@ -202,11 +238,21 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       const db = getDb();
       ensureLoanActColumn(db);
       const tx = db.transaction(() => {
-        const items = db.prepare('SELECT book_id FROM deaccession_items WHERE act_id = ?').all(id);
+        /* Одит v2.4.24: актът не се проверяваше за съществуване — анулиране на вече
+           анулиран (или изобщо несъществуващ) акт се връщаше с ok:true, прозорецът
+           обявяваше „Актът е анулиран“, а в дневника се вписваше събитие за акт,
+           който никога не е бил съставен. */
+        const act = db.prepare('SELECT no, year FROM deaccession_acts WHERE id = ?').get(id);
+        if (!act) throw new Error('Актът не е намерен — вероятно вече е анулиран, включително от друго работно място.');
+        const items = db.prepare('SELECT book_id, status_before FROM deaccession_items WHERE act_id = ?').all(id);
         items.forEach(it => {
           if (it.book_id) {
-            db.prepare(`UPDATE books SET status='наличен', status_date=date('now'), deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
-              .run(it.book_id);
+            // Връща се ТОВА, което документът е бил преди акта (виж
+            // ensureLoanActColumn). Старите актове нямат снимка — за тях остава
+            // 'наличен', както досега.
+            const back = it.status_before && it.status_before !== 'отчислен' ? it.status_before : 'наличен';
+            db.prepare(`UPDATE books SET status=?, status_date=date('now'), deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
+              .run(back, it.book_id);
           }
         });
         /* Заеманията, закрити принудително от този акт (най-често при причина
@@ -216,7 +262,9 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         const reopened = db.prepare('UPDATE loans SET date_in = NULL, deaccession_act_id = NULL WHERE deaccession_act_id = ?')
           .run(id).changes;
         db.prepare('DELETE FROM deaccession_acts WHERE id = ?').run(id);
-        logAudit('Анулиране на акт', 'акт № ' + id + ' е анулиран, документите са върнати във фонда'
+        // `id` е вътрешният rowid, а не номерът на акта — те съвпадат само в първата
+        // година. Одит v2.4.24: следата сочеше несъществуващ акт.
+        logAudit('Анулиране на акт', 'акт № ' + act.no + '/' + act.year + ' е анулиран, документите са върнати във фонда'
           + (reopened ? ' (' + reopened + ' заемания са отворени обратно)' : ''));
       });
       tx.immediate();

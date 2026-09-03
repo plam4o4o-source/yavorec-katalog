@@ -63,7 +63,18 @@ async function cancelHold(id) {
   if (!confirm('Отказ от резервацията?')) return;
   const res = await window.api.holds.cancel(id);
   if (!res.ok) return toast(res.error, 'err');
-  toast('Резервацията е отказана.', 'ok'); markSaved();
+  /* Отмяната на ЗАДЕЛЕНА резервация повиква следващия по опашката (holds:cancel).
+     Дотук екранът казваше само „Резервацията е отказана.“ — библиотекарят връщаше
+     бройката на рафта, никой не се обаждаше на следващия читател, а първото
+     заемане на гишето се отказваше със „заделена“. Пътят при връщане показва
+     същото известие отдавна (src/views/loans.js). */
+  const next = res.data && res.data.next;
+  toast('Резервацията е отказана.', 'ok');
+  if (next) {
+    toast('📌 Бройката се заделя за ' + next.reader_name + ' (карта ' + (next.card_no || '—') + ')'
+      + (next.phone ? ', тел. ' + next.phone : '') + ' — не се връща на рафта!', 'err');
+  }
+  markSaved();
   renderCirc();
 }
 window.cancelHold = cancelHold;

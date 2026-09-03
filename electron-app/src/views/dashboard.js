@@ -155,6 +155,12 @@ async function dashLookup(code) {
           : `<span class="badge ok">активен</span>`}
         <span class="hint" style="margin-left:8px">заети в момента: <b>${open.length}</b></span>
       </div></div>`;
+  } else if (!book.ok || !reader.ok) {
+    /* Одит v2.4.24: сканирането вече ОТКАЗВА при двусмислен код (баркод на един
+       документ, инвентарен номер на друг — виж resolveScannedBook). Дотук отказът
+       се сливаше с „няма такъв“ и библиотекарят четеше, че етикетът, който държи в
+       ръцете си, не съществува, вместо да разбере кое точно е двусмислено. */
+    box.innerHTML = `<div class="note d">${esc((!book.ok ? book.error : reader.error) || 'Търсенето не успя.')}</div>`;
   } else {
     box.innerHTML = `<div class="note w">Няма намерен документ или читател с код <b>${esc(code)}</b>.</div>`;
   }

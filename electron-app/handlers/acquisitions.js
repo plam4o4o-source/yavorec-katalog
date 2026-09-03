@@ -92,18 +92,41 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
              утвърден акт за отчисляване handlers/deaccession-acts.js ги презаписва. */
           committee1: a.committee1 || null, committee2: a.committee2 || null, committee3: a.committee3 || null
         });
-        logAudit('Постъпление', 'партида № ' + a.no + ' — ' + a.total_count + ' бр. от ' + a.from_source);
+        /* Одит v2.4.24: следата четеше СУРОВИТЕ полета на формата, а в регистъра
+           влизат нормализираните. „№ 007“ с „12бр“ броя се вписваше като партида
+           № 7/2026 с 12 бр., а дневникът твърдеше „партида № 007 — 12бр бр.“ —
+           номер, който Част № 1 на КДБФ не съдържа. */
+        logAudit('Постъпление', 'партида № ' + no + '/' + year + ' — ' + (parseInt(a.total_count, 10) || 0)
+          + ' бр. от ' + (a.from_source || '—'));
         return info.lastInsertRowid;
       });
       return tx.immediate();
     })
   );
+  /* Одит v2.4.24. Три неща в пет реда:
+     • Партидата е вписване в Част № 1 на КДБФ — официален регистър. Това е
+       единственият път, по който такъв ред изчезва, и дотук той не оставяше
+       НИКАКВА следа, докато създаването, отчисляването и анулирането на акт
+       оставят. Номерът се освобождава веднага (acquisitions:nextNo връща MAX+1),
+       тоест втора, съвсем друга партида получава същия № — а акт за дарение
+       № 3/2026 може вече да е подписан и предаден на дарителя.
+     • Броенето и изтриването не бяха в транзакция: документ, инвентиран в
+       партидата от другото работно място между двете, губи партидата си
+       (books.acquisition_id → NULL при ON DELETE SET NULL) и изпада от Част № 1. */
   ipcMain.handle('acquisitions:delete', (e, id) =>
     run(() => {
       const db = getDb();
-      const cnt = db.prepare('SELECT COUNT(*) AS n FROM books WHERE acquisition_id = ?').get(id).n;
-      if (cnt > 0) throw new Error('Партидата има инвентирани документи и не може да бъде изтрита.');
-      db.prepare('DELETE FROM acquisitions WHERE id = ?').run(id);
+      const tx = db.transaction(() => {
+        const acq = db.prepare('SELECT no, year, from_source, total_count FROM acquisitions WHERE id = ?').get(id);
+        if (!acq) throw new Error('Партидата не е намерена — вероятно вече е изтрита от друго работно място.');
+        const cnt = db.prepare('SELECT COUNT(*) AS n FROM books WHERE acquisition_id = ?').get(id).n;
+        if (cnt > 0) throw new Error('Партидата има инвентирани документи и не може да бъде изтрита.');
+        db.prepare('DELETE FROM acquisitions WHERE id = ?').run(id);
+        logAudit('Изтрита партида', 'партида № ' + acq.no + '/' + acq.year + ' — '
+          + (acq.total_count || 0) + ' бр. от ' + (acq.from_source || '—')
+          + '; номерът се освобождава и ще бъде предложен наново');
+      });
+      tx.immediate();
     })
   );
 };

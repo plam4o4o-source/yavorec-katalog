@@ -62,7 +62,7 @@ function reportCoverageNote(r) {
   const d = r.daysRecorded || 0;
   if (!d) return `<b>Внимание:</b> за ${r.year} г. в „Дневник на библиотеката“ няма нито един вписан ден.
     Всички числа по-долу са нули, защото няма от какво да бъдат сметнати — справката не отразява действителната работа.`;
-  return `Справката обхваща <b>${d}</b> вписани работни ${d === 1 ? 'ден' : 'дни'} от „Дневник на библиотеката“ за ${r.year} г.
+  return `Справката обхваща <b>${d}</b> ${d === 1 ? 'вписан работен ден' : 'вписани работни дни'} от „Дневник на библиотеката“ за ${r.year} г.
     Числата са сбор от тях; дни, които не са вписани, не участват.`;
 }
 function reportBodyHtml(r) {
@@ -95,7 +95,9 @@ function reportBodyHtml(r) {
   if (r.id === 'readers_by_category') {
     return `
       <div class="kpis" style="margin-bottom:16px">
-        ${kpi('👥', r.total.toLocaleString('bg-BG'), 'Активни читатели')}
+        ${kpi('👥', r.total.toLocaleString('bg-BG'), 'Активни читатели',
+          'регистрирани до 31.12.' + r.year + ' г. · състоянието е към днешна дата'
+          + (r.undated ? ' · от тях ' + r.undated + ' без вписана дата на регистрация' : ''))}
         ${kpi('🆕', r.newThisYear.toLocaleString('bg-BG'), 'Новорегистрирани през ' + r.year + ' г.')}
       </div>
       <div class="card"><h3 style="margin-top:0">По категория</h3>${reportPairTable(r.byCategory)}</div>`;
@@ -120,8 +122,10 @@ function reportBodyHtml(r) {
   if (r.id === 'fees_income') {
     return `
       <div class="kpis" style="margin-bottom:16px">
-        ${kpi('💰', mny(r.chargedValue), 'Начислено през ' + r.year + ' г.', r.chargedTotal + ' начисления')}
-        ${kpi('✅', mny(r.paidValue), 'Събрано през ' + r.year + ' г.', r.paidCount + ' плащания')}
+        ${kpi('💰', mny(r.chargedValue), 'Начислено през ' + r.year + ' г.',
+          r.chargedTotal + (r.chargedTotal === 1 ? ' начисление' : ' начисления'))}
+        ${kpi('✅', mny(r.paidValue), 'Събрано през ' + r.year + ' г.',
+          r.paidCount + (r.paidCount === 1 ? ' плащане' : ' плащания'))}
       </div>
       <div class="card"><h3 style="margin-top:0">Начислено по вид</h3>${reportPairTable(r.charged, true)}</div>`;
   }
@@ -161,7 +165,10 @@ function reportPrintHtml(r) {
   }
   if (r.id === 'readers_by_category') {
     return `
-      <div class="pmeta">Активни читатели: ${r.total} · новорегистрирани през ${r.year} г.: ${r.newThisYear}</div>
+      <div class="pmeta">Активни читатели, регистрирани до 31.12.${r.year} г.: ${r.total}
+      (състоянието „активен/прекратен“ е към днешна дата — програмата не пази история на състоянията${
+        r.undated ? `; ${r.undated} от тях са без вписана дата на регистрация и влизат във всяка година` : ''}) ·
+      новорегистрирани през ${r.year} г.: ${r.newThisYear}</div>
       ${prTable(['Категория', 'Бр.'], r.byCategory)}`;
   }
   if (r.id === 'fund_movement') {

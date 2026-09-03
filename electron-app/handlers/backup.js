@@ -358,7 +358,13 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     const { date: today } = todayPaths();
     let files = [];
     try {
-      files = fs.readdirSync(dir).filter(f => /^auto-\d{4}-\d{2}-\d{2}\.invbak$/.test(f));
+      /* И предпазните копия отпреди възстановяване (одит v2.4.24, преглед на
+         поправките от същия кръг). Откакто те също се криптират, филтърът само за
+         `auto-…` ги оставяше заключени със СТАРАТА парола завинаги: смяна на
+         паролата след напускане на служител правеше единствената снимка отпреди
+         едно възстановяване нечетима, а backup:list продължаваше да я показва. */
+      files = fs.readdirSync(dir)
+        .filter(f => /^auto-\d{4}-\d{2}-\d{2}\.invbak$/.test(f) || /^before-restore-.+\.invbak$/.test(f));
     } catch (e) { return { done: 0, failed: [] }; }
     let done = 0;
     const failed = [];
@@ -464,10 +470,30 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       // намерението — какво ЩЕ стане при следващото копие.
       const encrypted = today ? today.encrypted : (configured && unlocked);
 
+      /* Броят НЕкриптирани дневни копия се смята ПРЕДИ решението за състоянието
+         (одит v2.4.24): включването на защитата криптира само ДНЕШНОТО копие
+         (upgradeTodayAutoBackup) — вчерашните 29 остават в чист текст завинаги
+         (reencryptOldBackups се вика само при СМЯНА на парола и хваща само
+         auto-*.invbak). Дотук в този случай състоянието беше „encrypted“ с
+         warning: null, екранът показваше само „🔒 копията се криптират“, а 29
+         пълни регистъра с лични данни си стояха на споделения дял, без нищо на
+         екрана да го каже. */
+      let plainDailyCount = 0, plainRestoreCount = 0;
+      try {
+        const names = fs.readdirSync(backupsDir()).filter(f => f.endsWith('.db'));
+        plainDailyCount = names.filter(f => f.startsWith('auto-')).length;
+        // Предпазните копия отпреди възстановяване са различен вид файл и НЕ бива
+        // да се съветва изтриването им: те са единственият изход от сгрешено
+        // възстановяване. Броят се отделно точно за да не се слеят в един съвет.
+        plainRestoreCount = names.filter(f => f.startsWith('before-restore-')).length;
+      } catch (e) { plainDailyCount = 0; plainRestoreCount = 0; }
+
       let state, warning;
       if (encrypted) {
         state = 'encrypted';
-        warning = null;
+        warning = plainDailyCount
+          ? 'В папката с резервните копия все още стоят некриптирани дневни копия отпреди включването на защитата.'
+          : null;
       } else if (failure) {
         state = 'failed';
         warning = 'Опитът днешното копие да се криптира не се получи: ' + failure.message + '. '
@@ -493,16 +519,11 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
           + 'въпреки че защитата на личните данни е отключена. Заключете и отключете защитата, '
           + 'за да бъде презаписано криптирано.';
       }
-      /* Колко НЕкриптирани дневни копия стоят на диска в момента. Одитът отбеляза,
-         че 30-те копия при изключена защита са пълен регистър от лични данни в
-         незащитен файл, често на споделен мрежов дял. Едно число е по-разбираемо
-         от общото „копията не са криптирани“ и не е поредното натрапчиво
-         съобщение, което библиотекарят се научава да пропуска. */
-      let plainDailyCount = 0;
-      try {
-        plainDailyCount = fs.readdirSync(backupsDir())
-          .filter(f => f.startsWith('auto-') && f.endsWith('.db')).length;
-      } catch (e) { plainDailyCount = 0; }
+      /* plainDailyCount и plainRestoreCount се смятат по-горе: едно число е
+         по-разбираемо от общото „копията не са криптирани“ и не е поредното
+         натрапчиво съобщение, което библиотекарят се научава да пропуска. Двата
+         вида се броят ОТДЕЛНО — предпазното копие отпреди възстановяване не бива
+         да се предлага за изтриване (виж performRestore). */
       return {
         encrypted,
         state,
@@ -510,6 +531,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         pdpUnlocked: unlocked,
         today,
         plainDailyCount,
+        plainRestoreCount,
         last: lastAutoBackup,
         failure,
         warning
@@ -567,11 +589,24 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       realSource = decryptBackupToTemp(sourcePath, password);
       tmpToClean = realSource;
     }
-    const safetyPath = path.join(backupsDir(), `before-restore-${backupTimestamp()}.db`);
+    /* Предпазното копие се КРИПТИРА, когато паролата е налична (одит v2.4.24).
+       Дотук тук се записваше пълна база в чист текст — трайно, в папката с копията,
+       която по документиран сценарий е споделена в мрежата. Точно този файл
+       противоречеше на цялото останало поведение на модула (виж местенето на
+       временния plaintext извън папката по-горе и триенето на „голото“ копие след
+       криптиране); при това не се чистеше от pruneOldAutoBackups, не се хващаше от
+       reencryptOldBackups и не влизаше в plainDailyCount, тоест всяко възстановяване
+       оставяше по още един невидим регистър с ЕГН-та. */
+    const safetyPw = autoBackupPassword();
+    const safetyPath = path.join(backupsDir(),
+      `before-restore-${backupTimestamp()}.` + (safetyPw ? 'invbak' : 'db'));
     const db = getDb();
     if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); }
     const activePath = resolveDbPath();
-    if (fs.existsSync(activePath)) fs.copyFileSync(activePath, safetyPath);
+    if (fs.existsSync(activePath)) {
+      if (safetyPw) doBackupTo(safetyPath, safetyPw);
+      else fs.copyFileSync(activePath, safetyPath);
+    }
 
     /* Редът тук е важен. Досега базата се затваряше ПРЕДИ копирането върху нея: ако
        копирането се провалеше (пълен диск, изчезнал файл, прекъснат мрежов дял),
@@ -591,10 +626,25 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     try {
       fs.renameSync(stagedPath, activePath);
     } catch (err) {
-      try { if (fs.existsSync(safetyPath)) fs.copyFileSync(safetyPath, activePath); } catch (e) { /* виж съобщението долу */ }
+      /* Връщането минава през разшифроване, ако предпазното копие е криптирано —
+         иначе на мястото на базата би легнал криптиран блок и програмата не би
+         тръгнала изобщо. */
+      try {
+        if (fs.existsSync(safetyPath)) {
+          if (safetyPw) {
+            const back = decryptBackupToTemp(safetyPath, safetyPw);
+            fs.copyFileSync(back, activePath);
+            try { fs.unlinkSync(back); } catch (e2) { /* временният файл ще се изчисти от системата */ }
+          } else {
+            fs.copyFileSync(safetyPath, activePath);
+          }
+        }
+      } catch (e) { /* виж съобщението долу */ }
       try { fs.unlinkSync(stagedPath); } catch (e) { /* нищо за чистене */ }
       throw new Error('Възстановяването се провали и предишната база беше върната на място. '
-        + 'Предпазното копие е запазено в „' + safetyPath + '“. Грешка: ' + err.message);
+        + 'Предпазното копие е запазено в „' + safetyPath + '“'
+        + (safetyPw ? ' и е КРИПТИРАНО с паролата за защита на личните данни' : '')
+        + '. Грешка: ' + err.message);
     }
     if (tmpToClean) { try { fs.unlinkSync(tmpToClean); } catch (e) { /* временният файл ще се изчисти от системата */ } }
     app.relaunch();

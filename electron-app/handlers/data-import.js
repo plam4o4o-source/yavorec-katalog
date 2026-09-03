@@ -268,12 +268,24 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
                редът, нито информацията се губят: статусът пада към „наличен“, а
                оригиналният текст се дописва към забележката. */
             const rawStatus = String(cell(row, 'status') || '').trim();
-            const knownStatus = BOOK_STATUSES.includes(rawStatus);
+            /* „Отчислен“ НЕ се внася като състояние (одит v2.4.24). Документ напуска
+               фонда само с акт по чл. 35, ал. 2 — актът е този, който попълва
+               deaccession_act_id и deaccession_date, а всички сборове на фонда
+               (КДБФ, годишният отчет, „Движение на фонда“) се водят по ТЯХ.
+               Внесен ред със status='отчислен' и без акт е противоречие: таблото и
+               инвентарната книга (те гледат status) го изваждаха от фонда, а КДБФ и
+               справките (гледат deaccession_date) го броят — 60 отчислени реда от
+               стара таблица правеха два различни „библиотечен фонд“ в едно и също
+               меню. Текстът не се губи: отива в забележката, точно както при
+               непознат статус, и редът се брои отделно в отчета за вноса. */
+            const deaccStatus = rawStatus === 'отчислен';
+            const knownStatus = !deaccStatus && BOOK_STATUSES.includes(rawStatus);
             const noteParts = [
               cell(row, 'description') || null,
               (rawStatus && !knownStatus) ? 'Състояние: ' + rawStatus : null
             ].filter(Boolean);
-            if (rawStatus && !knownStatus) report.statusToNote = (report.statusToNote || 0) + 1;
+            if (deaccStatus) report.deaccessionedToNote = (report.deaccessionedToNote || 0) + 1;
+            else if (rawStatus && !knownStatus) report.statusToNote = (report.statusToNote || 0) + 1;
             const payload = {
               inv_number: inv,
               barcode: cell(row, 'barcode') || String(inv),

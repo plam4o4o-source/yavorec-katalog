@@ -369,7 +369,11 @@ CREATE TABLE IF NOT EXISTS inventory_sessions (
   -- тече, влизаха в липсващите, но не и в обхвата — протоколът можеше да гласи
   -- „в обхвата 10 · липсващи 30“.
   pool_final      INTEGER,
-  on_loan         INTEGER
+  on_loan         INTEGER,
+  -- Документи „за реставрация“ към приключването: при подвързвача са, не могат да
+  -- бъдат сканирани на място и не са липсващи. Снимат се, за да се събира
+  -- протоколът: в обхвата = проверени + заети + за реставрация + липсващи.
+  at_binder       INTEGER
 );
 CREATE TABLE IF NOT EXISTS inventory_session_scans (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -79,6 +79,7 @@ async function renderStats() {
             <div><span>Върнати със забава</span><b style="color:var(--red)">${r.returnedLate}</b></div>
             <div><span>Начислени обезщетения</span><b>${mny(r.finesCharged || 0)}</b></div>
             <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
+            ${r.finesOpen ? `<div><span>Начислени по незавършени заемания (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
           </div>
           <div class="hint" style="margin-top:8px">Броят се връщанията <b>през</b> отчетната
           година, независимо кога е заета книгата. „Начислени“ е сумата, начислена при

@@ -42,16 +42,39 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
   ipcMain.handle('account:pay', (e, { reader_id, amount, note, date }) =>
     run(() => {
       const db = getDb();
-      const amt = Math.abs(Number(amount) || 0); // виж account:charge за знака
-      if (!amt || !Number.isFinite(amt)) throw new Error('Сумата трябва да е положителна.');
+      const raw = Math.abs(Number(amount) || 0); // виж account:charge за знака
+      if (!Number.isFinite(raw)) throw new Error('Сумата трябва да е положителна.');
+      /* Одит v2.4.24: проверката гледаше СУРОВАТА сума, а записът — закръглената
+         (същата разлика, поправена при account:charge по-горе, но само там). 0.004
+         лв. минаваше, влизаше ред от 0.00 лв. и веднага се отпечатваше квитанция
+         „Платена сума: 0.00 лв.“ за подпис от читателя. */
+      const amt = toCents(raw);
+      if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 лв.).');
       const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(reader_id, date || today(), 'плащане', 'плащане', -toCents(amt), note || null);
+        .run(reader_id, date || today(), 'плащане', 'плащане', -amt, note || null);
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
       logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' лв.');
       return info.lastInsertRowid;
     })
   );
+  /* Изтриването на ред от сметката е ЕДИНСТВЕНИЯТ път, по който касов запис
+     изчезва — и дотук единственият в този модул, който не оставяше следа, докато
+     начислението и плащането оставят. Одит v2.4.24: сгрешен клик по „✕“ в картона
+     махаше плащане от МИНАЛА, вече подадена година и справката „Приходи от такси и
+     обезщетения“ започваше да показва друго число, без нищо, по което разликата да
+     се възстанови (точно рискът, заради който handlers/readers.js спира изтриването
+     на читател с движения по сметката). Липсващият ред пък се връщаше с ok:true и
+     прозорецът обявяваше „Изтрито.“ за нищо. */
   ipcMain.handle('account:deleteLine', (e, id) =>
-    run(() => { getDb().prepare('DELETE FROM account_lines WHERE id = ?').run(id); })
+    run(() => {
+      const db = getDb();
+      const l = db.prepare('SELECT reader_id, date, kind, type, amount, note FROM account_lines WHERE id = ?').get(id);
+      if (!l) throw new Error('Записът вече не съществува — вероятно е изтрит от друго работно място.');
+      db.prepare('DELETE FROM account_lines WHERE id = ?').run(id);
+      const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(l.reader_id);
+      logAudit('Изтрит ред от сметката', (r ? r.name : 'читател № ' + l.reader_id)
+        + ' — ' + l.date + ', ' + (l.type || l.kind) + ' ' + Math.abs(Number(l.amount) || 0).toFixed(2) + ' лв.'
+        + (l.note ? ' (' + l.note + ')' : ''));
+    })
   );
 };

@@ -38,7 +38,8 @@ async function renderCirc() {
       beep(r.hold || r.daysLate ? 'err' : 'ok');
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
-        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>` : ''}</div>`);
+        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>`
+          : r.fine ? `<br>Дължимо обезщетение по това заемане: <b>${mny(r.fine)}</b>` : ''}</div>`);
       if (r.suspendedUntil) {
         log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">⛔ Наложено наказание: заемането за
           <b>${esc(r.reader_name)}</b> е преустановено до <b>${bg(r.suspendedUntil)}</b>.</div>`);
@@ -48,7 +49,13 @@ async function renderCirc() {
           <b>${esc(r.hold.reader_name)}</b> (карта ${esc(r.hold.card_no || '—')}${r.hold.phone ? ', тел. ' + esc(r.hold.phone) : ''})</div>`);
         toast('📌 Заделена за ' + r.hold.reader_name + ' — не се връща на рафта!', 'err');
       } else {
-        toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')' : 'Приета обратно: инв. № ' + r.inv_number, r.daysLate ? 'err' : 'ok');
+        /* Сумата се показва по ПАРИТЕ, не по дните (втори преглед на кръга v2.4.24):
+           след продължение на просрочено заемане забавата спрямо новия падеж е 0, а
+           начисленото от продължението си стои — екранът казваше „Приета обратно“ и
+           не споменаваше дължимите 1.80 лв. */
+        toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')'
+          : r.fine ? 'Приета обратно: инв. № ' + r.inv_number + ' — дължимо обезщетение ' + mny(r.fine)
+          : 'Приета обратно: инв. № ' + r.inv_number, (r.daysLate || r.fine) ? 'err' : 'ok');
       }
       markSaved();
     });
@@ -214,6 +221,10 @@ async function returnBook(id) {
     // v1.70.0: преди тук нямаше никакво съобщение за забава/глоба — само
     // сканираното връщане ("returnByCode") показваше тази информация.
     toast('Върната със забава ' + res.data.daysLate + ' дни (' + mny(res.data.fine) + ').', 'err');
+  } else if (res.data && res.data.fine) {
+    // Виж бележката при сканирането по-горе: начисленото при продължение остава
+    // дължимо, макар спрямо новия падеж да няма забава.
+    toast('Книгата е върната. Дължимо обезщетение по това заемане: ' + mny(res.data.fine) + '.', 'err');
   } else {
     toast('Книгата е върната.', 'ok');
   }

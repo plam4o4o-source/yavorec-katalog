@@ -244,8 +244,9 @@ async function applyBulkShelf() {
      витрината без нито дума защо — точно тихият отказ, срещу който единичното
      добавяне вече дава подробно обяснение. */
   const skipped = (r && r.skipped) || [];
-  toast(r.added + ' документа добавени във витрината'
-    + (skipped.length ? ', ' + skipped.length + ' пропуснати' : '') + '.', skipped.length ? 'err' : 'ok');
+  toast((r.added === 1 ? '1 документ добавен' : r.added + ' документа добавени') + ' във витрината'
+    + (skipped.length ? ', ' + skipped.length + (skipped.length === 1 ? ' пропуснат' : ' пропуснати') : '') + '.',
+    skipped.length ? 'err' : 'ok');
   if (skipped.length) {
     modal('Документи, които не влязоха във витрината', `
       <div class="note" style="border-left-color:var(--red);margin-top:0">

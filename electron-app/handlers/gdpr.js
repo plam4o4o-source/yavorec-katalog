@@ -20,17 +20,42 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
   }
   function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
 
+  /* Списъците стоят тук (а не вътре в gdpr:anonymize), защото gdpr:candidates
+     трябва да брои ТОЧНО каквото анонимизирането после ще пипне — одит v2.4.24:
+     дотук броячът гледаше само заеманията, а бутонът се заключваше от него
+     (src/views/settings.js: `if (!r.count) return toast('Няма заемания за
+     анонимизиране.')`). Библиотека, компютризирана през 2020 г. и започнала да
+     заема през 2023 г., получаваше „няма нищо за анонимизиране“, докато 400 имена,
+     адреса и телефона от ръчното въвеждане си стояха в audit_log и в търсенията —
+     завинаги, включително в резервните копия на споделения диск. */
+  const MONEY_ACTIONS = "('Начисление', 'Плащане')";
+  const NAME_ACTIONS = `('Нов читател', 'Редакция на читател', 'Изтрит читател с история',
+                     'Снето наказание',
+                     -- резервации: handlers/holds.js вписва името на читателя
+                     'Заделена книга', 'Резервация', 'Отказана резервация', 'Изтекла резервация',
+                     -- надомно обслужване: handlers/housebound.js
+                     'Обслужване по домовете', 'Посещение по домовете')`;
+  const AUDIT_MONEY_WHERE = `substr(ts, 1, 10) < ? AND action IN ${MONEY_ACTIONS}
+      AND detail IS NOT NULL AND instr(detail, ' — ') > 0
+      AND detail NOT LIKE '[анонимизиран читател]%'`;
+  const AUDIT_NAME_WHERE = `substr(ts, 1, 10) < ? AND action IN ${NAME_ACTIONS}
+      AND COALESCE(detail, '') != '[анонимизирано по GDPR]'`;
+
   ipcMain.handle('gdpr:candidates', () =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
       const years = parseInt(s.anonymize_years, 10) || 0;
-      if (!years) return { years: 0, count: 0 };
+      if (!years) return { years: 0, count: 0, auditCount: 0, searchCount: 0 };
       const anonId = db.prepare('SELECT id FROM readers WHERE name = ?').get(ANON_READER_NAME);
       const count = db.prepare(`SELECT COUNT(*) AS n FROM loans
         WHERE date_in IS NOT NULL AND date_in < ? AND anon_category IS NULL ${anonId ? 'AND reader_id != ?' : ''}`)
         .get(...(anonId ? [anonCutoff(years), anonId.id] : [anonCutoff(years)])).n;
-      return { years, count, cutoff: anonCutoff(years) };
+      const cutoff = anonCutoff(years);
+      const auditCount = db.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE ${AUDIT_MONEY_WHERE}`).get(cutoff).n
+        + db.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE ${AUDIT_NAME_WHERE}`).get(cutoff).n;
+      const searchCount = db.prepare('SELECT COUNT(*) AS n FROM search_history WHERE substr(ts, 1, 10) < ?').get(cutoff).n;
+      return { years, count, auditCount, searchCount, cutoff };
     })
   );
   ipcMain.handle('gdpr:anonymize', () =>
@@ -74,27 +99,15 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            12.00 лв."). Сумата не е личен данни и е част от отчетността — затова
            тук се маха само името, а остатъкът се запазва. При останалите действия
            целият текст е самоличност и отпада изцяло. */
-        const MONEY_ACTIONS = "('Начисление', 'Плащане')";
-        const NAME_ACTIONS = `('Нов читател', 'Редакция на читател', 'Изтрит читател с история',
-                           'Снето наказание',
-                           -- резервации: handlers/holds.js вписва името на читателя
-                           'Заделена книга', 'Резервация', 'Отказана резервация', 'Изтекла резервация',
-                           -- надомно обслужване: handlers/housebound.js
-                           'Обслужване по домовете', 'Посещение по домовете')`;
         const anonMoney = db.prepare(`
           UPDATE audit_log
              SET detail = '[анонимизиран читател]' || substr(detail, instr(detail, ' — ')),
                  diff = NULL
-           WHERE substr(ts, 1, 10) < ?
-             AND action IN ${MONEY_ACTIONS}
-             AND detail IS NOT NULL AND instr(detail, ' — ') > 0
-             AND detail NOT LIKE '[анонимизиран читател]%'
+           WHERE ${AUDIT_MONEY_WHERE}
         `).run(cutoff).changes;
         const anonNames = db.prepare(`
           UPDATE audit_log SET detail = '[анонимизирано по GDPR]', diff = NULL
-          WHERE substr(ts, 1, 10) < ?
-            AND action IN ${NAME_ACTIONS}
-            AND COALESCE(detail, '') != '[анонимизирано по GDPR]'
+          WHERE ${AUDIT_NAME_WHERE}
         `).run(cutoff).changes;
         const auditCleared = anonMoney + anonNames;
 
@@ -107,9 +120,15 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         return { n, auditCleared, searchCleared };
       });
       const { n, auditCleared, searchCleared } = tx.immediate();
-      logAudit('Анонимизиране', n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани'
-        + (auditCleared ? '; ' + auditCleared + ' записа в одитната следа са обезличени' : '')
-        + (searchCleared ? '; ' + searchCleared + ' стари търсения са изтрити' : ''));
+      // Съгласуване в единствено число (одит v2.4.24) — този ред отива в следата,
+      // която проверяващият чете.
+      logAudit('Анонимизиране',
+        (n === 1 ? '1 върнато заемане отпреди ' + cutoff + ' е анонимизирано'
+                 : n + ' върнати заемания отпреди ' + cutoff + ' са анонимизирани')
+        + (auditCleared ? '; ' + (auditCleared === 1 ? '1 запис в одитната следа е обезличен'
+            : auditCleared + ' записа в одитната следа са обезличени') : '')
+        + (searchCleared ? '; ' + (searchCleared === 1 ? '1 старо търсене е изтрито'
+            : searchCleared + ' стари търсения са изтрити') : ''));
       return { anonymized: n, auditCleared, searchCleared, cutoff };
     })
   );
