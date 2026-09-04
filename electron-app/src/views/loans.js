@@ -138,7 +138,11 @@ async function renderCirc() {
       if (!q) { $('#pSug').innerHTML = ''; return; }
       // limit: полето показва само първите шест — няма смисъл да пренасяме останалите
       const rows = await call(window.api.readers.list(q, 20)) || [];
-      $('#pSug').innerHTML = rows.length
+      /* Баркод четецът праща знаците и Enter за милисекунди: Enter-ът по-долу вече
+         е пречертал екрана, а закъснелият debounce пише в откачен #pSug → TypeError
+         при всяко сканиране на карта (одит v2.4.27, e2e). */
+      const box = $('#pSug'); if (!box) return;
+      box.innerHTML = rows.length
         ? rows.slice(0, 6).map(r => `<button class="btn" style="display:block;width:100%;text-align:left;margin-bottom:4px"
             onclick="selectCircReader(${r.id})"><b>${esc(r.name)}</b> · ${esc(r.card_no || '')} · ${esc(r.category || '')}</button>`).join('')
         : `<div class="hint">Няма съвпадение. <button class="btn sm" onclick="readerForm()">+ Нов читател</button></div>`;
@@ -232,7 +236,8 @@ async function returnBook(id) {
     toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(res.data.suspendedUntil) + '.', 'err');
   }
   markSaved();
-  if (VIEW === 'over') renderOver(true); else renderCirc();
+  // Пречертава се ТЕКУЩИЯТ екран (v2.4.27): бутонът вече стои и на таблото.
+  if (VIEW === 'over') renderOver(true); else if (VIEW === 'circ') renderCirc(); else if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.returnBook = returnBook;
 /* Брояч „читалня" — едно натискане = едно ползване на място. Влиза в потока от

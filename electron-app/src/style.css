@@ -131,14 +131,24 @@ body{
 .nav-grp{
   display:flex; align-items:center; gap:9px;
   font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:#8A8168;
-  padding:17px 20px 8px;
+  padding:13px 20px 6px;
+}
+/* На лаптоп 1366×768 при мащаб 125 % лентата има ~614 px височина, а менюто
+   (24 реда + 7 групи + логото) минаваше 1 400 px — „Отчети“ и „Настройки“ бяха
+   под ръба при всяко стартиране (v2.4.27, A5). Логото отстъпва при ниска
+   височина; редовете са по-плътни; рамката с наименованието остава. */
+@media (max-height:780px){
+  .brandIcon{display:none}
+  .brand{padding:12px 14px 12px}
+  #nav a{padding:4px 10px; font-size:13px}
+  .nav-grp{padding:9px 20px 4px}
 }
 .nav-grp::after{content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--spine3),transparent)}
 /* Лявата ивица е винаги заделена (прозрачна извън активния ред), за да не
    подскача текстът при смяна на раздел. */
 #nav a{
   display:flex; align-items:center; gap:10px;
-  margin:1px 10px; padding:8px 10px; border-radius:5px;
+  margin:1px 10px; padding:6px 10px; border-radius:5px;
   border-left:3px solid transparent;
   color:#DCD4BB; text-decoration:none; font-size:13.5px;
   transition:background .12s, color .12s, border-color .12s;
@@ -396,7 +406,10 @@ table.ledger td{padding:8px 12px; border-bottom:1px solid var(--rule)}
 /* Лека „зебра“ подложка — дългите регистри се четат ред по ред по-лесно */
 table.ledger tbody tr:nth-child(even){background:color-mix(in srgb, var(--paper3) 38%, transparent)}
 table.ledger tbody tr:hover{background:var(--paper3)}
-table.ledger .num{font-family:var(--mono)}
+/* font-size/weight/color се връщат изрично (v2.4.27): .card .num (KPI плочките,
+   32px) важеше и за колоните .num на регистър, поставен В карта — датите и
+   размерите на резервните копия и правилата по категория излизаха с 32px. */
+table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; color:inherit}
 .badge{padding:2px 8px; border-radius:10px; font-size:11px}
 .badge.ok{background:var(--greenL); color:var(--green)}
 .badge.warn{background:var(--redL); color:var(--red)}
@@ -865,3 +878,75 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 .chrTitle{font-weight:700; font-size:13.5px; color:var(--ink)}
 .chrDate{font-family:var(--mono); font-size:11.5px; color:var(--brassD)}
 .chrText{font-size:12.5px; color:var(--ink2); line-height:1.45; margin-top:4px}
+
+/* ---------- Настройки (преустроени във v2.4.27) ----------
+   Лява лепкава навигация по раздели, търсене, свити рядко пипани карти. */
+.setupWrap{display:grid; grid-template-columns:210px minmax(0,1fr); gap:24px; align-items:start}
+.setupNav{position:sticky; top:0; display:flex; flex-direction:column; gap:2px; padding-top:2px}
+.setupNav #setupSearch{
+  width:100%; box-sizing:border-box; margin:0 0 10px; padding:7px 10px; font:inherit; font-size:13px;
+  border:1px solid var(--rule2); border-radius:5px; background:var(--paper2); color:var(--ink);
+}
+.setupNav a{
+  display:block; padding:7px 10px 7px 12px; border-left:3px solid transparent; border-radius:0 5px 5px 0;
+  color:var(--ink2); text-decoration:none; line-height:1.25;
+}
+.setupNav a:hover{background:var(--paper3); color:var(--ink)}
+.setupNav a.on{border-left-color:var(--brass); background:color-mix(in srgb, var(--brass) 10%, var(--paper2)); color:var(--ink)}
+.setupNavT{display:block; font-size:13.5px; font-weight:600}
+.setupNavS{display:block; font-size:11px; color:var(--ink3); margin-top:1px}
+.setupNavHint{margin-top:10px; padding:0 12px}
+.setupBody{min-width:0; display:flex; flex-direction:column; gap:14px}
+.setupSec{scroll-margin-top:8px; padding-bottom:12px; border-bottom:1px solid var(--rule)}
+.setupSec:last-child{border-bottom:0}
+.setupHead{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:6px 0 12px}
+.setupHead h2{font-family:var(--serif); font-size:21px; margin:0; color:var(--spine2); letter-spacing:.005em}
+.setupSub{margin:3px 0 0; font-size:12.5px; color:var(--ink3); max-width:60ch}
+.setupChips{display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end}
+.chip{
+  display:inline-block; padding:3px 9px; border-radius:11px; font-size:11.5px; white-space:nowrap;
+  background:var(--paper3); color:var(--ink2); border:1px solid var(--rule);
+}
+.chip.ok{background:var(--greenL); color:var(--green); border-color:transparent}
+.chip.w{background:color-mix(in srgb, var(--brass) 14%, var(--paper3)); color:var(--brassD); border-color:transparent}
+.setupSec .card + .card, .setupSec .card + .setupMore, .setupSec .setupMore + .card, .setupSec .setupMore + .setupMore,
+.setupSec form + .card, .setupSec [data-setup-form] + .card, .setupSec [data-setup-form] + .setupMore,
+.setupSec .card + [data-setup-form], .setupSec .setupMore + [data-setup-form]{margin-top:14px}
+.setupSec .grid.g2 > div > .card + .card{margin-top:14px}
+.setupSave{margin-top:12px; padding-top:12px; border-top:1px dashed var(--rule)}
+.setupH4{font-size:13px; margin:16px 0 8px; color:var(--ink2)}
+/* „Как работи“ — обяснението е зад едно щракване, за да е страницата прегледна. */
+.setupHow{margin:0 0 10px}
+.setupHow summary{cursor:pointer; font-size:12px; color:var(--brassD); list-style:none; display:inline-flex; align-items:center; gap:5px}
+.setupHow summary::-webkit-details-marker{display:none}
+.setupHow summary::before{content:'▸'; font-size:11px; transition:transform .12s}
+.setupHow[open] summary::before{transform:rotate(90deg)}
+.setupHow summary:hover{text-decoration:underline}
+/* Свита карта с едноредово обобщение. */
+.setupMore{background:var(--paper2); border:1px solid var(--rule); border-radius:6px; box-shadow:var(--sh)}
+.setupMore summary{
+  cursor:pointer; list-style:none; display:flex; align-items:baseline; gap:12px; padding:13px 18px;
+}
+.setupMore summary::-webkit-details-marker{display:none}
+.setupMore summary::before{content:'▸'; color:var(--ink3); font-size:12px; align-self:center; transition:transform .12s}
+.setupMore[open] summary::before{transform:rotate(90deg)}
+.setupMoreTitle{font-weight:700; font-size:14px}
+.setupMoreSum{font-size:12px; color:var(--ink3); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.setupMore[open] .setupMoreSum{display:none}
+.setupMoreBody{padding:0 18px 16px}
+/* Цветови теми — образци. */
+.themeRow{display:flex; gap:12px; flex-wrap:wrap}
+.themeSw{width:112px; border:2px solid var(--rule2); border-radius:4px; padding:0; overflow:hidden; cursor:pointer; background:none; text-align:left}
+.themeSw.on{border-color:var(--ink)}
+.themeSw:hover{border-color:var(--brass)}
+.themeSwSpine{display:block; height:36px}
+.themeSwBrass{display:block; height:15px}
+.themeSwName{display:block; padding:6px 8px; font-size:11px; color:#1B1813}
+@media (max-width:1100px){
+  .setupWrap{grid-template-columns:1fr}
+  .setupNav{position:static; flex-direction:row; flex-wrap:wrap; gap:6px}
+  .setupNav #setupSearch{flex:1 1 100%}
+  .setupNavS{display:none}
+  .setupNavHint{flex:1 1 100%}
+}
+@media (prefers-reduced-motion:reduce){ .setupHow summary::before, .setupMore summary::before{transition:none} }

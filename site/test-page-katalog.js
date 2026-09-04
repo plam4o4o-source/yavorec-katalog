@@ -149,7 +149,7 @@ async function runScenario(name, opts) {
    */
   const dom = new JSDOM(html, {
     runScripts: 'dangerously',
-    url: 'https://localhost/',
+    url: 'https://localhost/' + (opts.hash || ''),
     pretendToBeVisual: true,
     beforeParse(w) {
       if (!w.AbortController) {
@@ -321,12 +321,30 @@ async function main() {
       '(ж) диагностиката трябва да каже, че е изтекло времето за изчакване — намерено: ' + r.ftHtml);
   }
 
+  /* --- Сценарий (з) — v2.4.27: кавичка в споделен адрес (#zapis=") ---
+     revealShared() вграждаше стойността от адреса направо в CSS селектор;
+     кавичка хвърляше от querySelector, изключението стигаше до общия catch на
+     boot() и живият каталог се заменяше с трите демонстрационни записа плюс
+     червена лента „Каталогът не можа да се зареди“. Сега стойността се екранира
+     (CSS.escape) и страницата просто не намира записа. */
+  {
+    var r = await runScenario('z: quote in #zapis= share link', {
+      primary: 'ok',
+      primaryBody: { generated: '2026-08-21', items: [{ inv: 1, a: 'X', t: 'Y', v: 'книга' }] },
+      localStorage: {},
+      hash: '#zapis=%22'
+    });
+    assert(r.ftHtml.indexOf('21.08.2026') !== -1, '(з) живият каталог трябва да остане — намерено: ' + r.ftHtml);
+    assert(r.ftHtml.indexOf('Няма връзка') === -1, '(з) не бива да пада на static-fallback заради кавичка в адреса');
+    assert(r.uncaughtErrors.length === 0, '(з) необработено изключение: ' + r.uncaughtErrors.join(' | '));
+  }
+
   if (failures.length) {
     console.error('ПРОВАЛ — ' + failures.length + ' проверка(и) не преминаха:');
     failures.forEach(function (f) { console.error('  - ' + f); });
     process.exit(1);
   } else {
-    console.log('ВСИЧКИ 7 СЦЕНАРИЯ МИНАХА (' + targetPath + ')');
+    console.log('ВСИЧКИ 8 СЦЕНАРИЯ МИНАХА (' + targetPath + ')');
     process.exit(0);
   }
 }

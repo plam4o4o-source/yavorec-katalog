@@ -18,8 +18,11 @@ const INDEX_HTML = fs.readFileSync(path.join(SRC_DIR, 'index.html'), 'utf8');
 const SETTINGS_JS = fs.readFileSync(path.join(VIEWS_DIR, 'settings.js'), 'utf8');
 
 test('settings.js: картата "Библиотека" съдържа собствен бутон "Запиши настройките", преди картата "Обслужване"', () => {
-  const libCardIdx = SETTINGS_JS.indexOf('<h3 style="margin-top:0">Библиотека</h3>');
-  const serviceCardIdx = SETTINGS_JS.indexOf('<h3 style="margin-top:0">Обслужване</h3>');
+  /* v2.4.27: Настройките са преустроени в раздели; картата „Библиотека“ е първата
+     в раздел #setup-biblioteka, „Обслужване“ — в #setup-obsluzhvane. Смисълът на
+     теста е същият: бутонът е горе, при полетата, не само в дъното. */
+  const libCardIdx = SETTINGS_JS.indexOf('<div class="card setupCard"><h3 style="margin-top:0">Библиотека</h3>');
+  const serviceCardIdx = SETTINGS_JS.indexOf('<div class="card setupCard"><h3 style="margin-top:0">Обслужване</h3>');
   assert.ok(libCardIdx >= 0, 'липсва картата "Библиотека"');
   assert.ok(serviceCardIdx > libCardIdx, 'липсва картата "Обслужване" след "Библиотека"');
   const libCard = SETTINGS_JS.slice(libCardIdx, serviceCardIdx);

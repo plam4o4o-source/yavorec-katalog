@@ -19,7 +19,8 @@ function readersRowsHtml(shown) {
     <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
       <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
-      <td><button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
+      <td><button class="btn sm pri" onclick="CIRC.readerId=${r.id};CIRC.mode='out';location.hash='#circ'" title="Отваря гишето с този читател">Заемане</button>
+          <button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
           <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
           <button class="btn sm" onclick="printCardOne(${r.id})" title="Печат на читателската карта само на този читател">Карта</button>
           <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>

@@ -5,6 +5,7 @@
 async function initUserBadge() {
   const name = await call(window.api.app.getUser());
   renderUserBadge(name);
+  if (window.api.app.onUserChanged) window.api.app.onUserChanged((n) => renderUserBadge(n));
 }
 function renderUserBadge(name) {
   const el = $('#userBadge');

@@ -1,6 +1,6 @@
 /* ---------------- Категории (управляват се в „Настройки“) ---------------- */
 function categoriesCardHtml(cats) {
-  return `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Категории (видове документи)</h3>
+  return `<div class="card setupCard"><h3 style="margin-top:0">Категории (видове документи)</h3>
     <div class="note" style="margin-top:0">Категориите се избират при вписване на всеки документ във фонда
     и излизат в справките и в онлайн каталога.</div>
     <div class="toolbar"><button class="btn pri" onclick="categoryForm()">+ Нова категория</button></div>

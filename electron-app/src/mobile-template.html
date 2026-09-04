@@ -174,16 +174,23 @@ document.getElementById('startBtn').addEventListener('click', async function () 
     video.style.display = 'block';
     this.style.display = 'none';
     document.getElementById('stopBtn').style.display = 'inline-block';
-    var last = '', lastAt = 0;
+    var last = '', misses = 0;
     timer = setInterval(async function () {
       try {
         var found = await detector.detect(video);
         if (found && found.length) {
           var v = found[0].rawValue;
-          var now = Date.now();
           // Един и същ баркод пред камерата се разчита многократно в секунда —
-          // приема се повторно едва след 2 секунди.
-          if (v !== last || now - lastAt > 2000) { last = v; lastAt = now; addCode(v); }
+          // приема се повторно едва когато е ИЗЛЯЗЪЛ от кадъра (last се нулира
+          // по-долу). Дотук (v2.4.27) се приемаше пак след 2 секунди: етикет,
+          // задържан под телефона, докато се прочете номерът, даваше „повторно“
+          // с грешен сигнал и завишен брояч на повторните.
+          if (v !== last) { last = v; addCode(v); }
+          misses = 0;
+        } else if (++misses >= 3) {
+          // Три празни кадъра (≈1 с): етикетът наистина е излязъл от кадъра, а не е
+          // изпуснат от автофокуса за миг.
+          last = ''; misses = 0;
         }
       } catch (e) {}
     }, 350);

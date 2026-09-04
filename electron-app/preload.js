@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld('api', {
     checkForUpdates: invoke('app:checkForUpdates'),
     installUpdate: invoke('app:installUpdate'),
     openLogsFolder: invoke('app:openLogsFolder'),
-    onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data))
+    onUpdateStatus: (cb) => ipcRenderer.on('update:status', (e, data) => cb(data)),
+    // Значката „Служител“ следва преименуване/деактивиране от „Настройки“ (v2.4.27).
+    onUserChanged: (cb) => ipcRenderer.on('app:userChanged', (e, name) => cb(name))
   },
   employees: {
     list: invoke('employees:list'),

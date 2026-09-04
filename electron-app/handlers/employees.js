@@ -3,7 +3,8 @@
 // само `getDb()`, `run` и `logAudit`, никакви върнати функции назад към
 // main.js — никой друг домейн не вика функции оттук.
 module.exports = function registerEmployeesHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit } = deps;
+  // syncCurrentUser(name?) — чете/задава текущия служител на тази станция (main.js).
+  const { getDb, run, logAudit, syncCurrentUser } = deps;
 
   ipcMain.handle('employees:list', () => run(() => getDb().prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
   ipcMain.handle('employees:create', (e, name) =>
@@ -28,6 +29,10 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
          може да се възстанови. */
       if (nextName !== cur.name) logAudit('Преименуван служител', '„' + cur.name + '“ → „' + nextName + '“');
       if (nextActive !== cur.active) logAudit('Служител', '„' + nextName + '“ — ' + (nextActive ? 'активиран' : 'деактивиран'));
+      /* Значката „Служител: …“ следва промяната (одит v2.4.27): дотук след
+         преименуване или деактивиране всяко следващо действие — и всяка следваща
+         сесия — се вписваше в следата на старото име. */
+      if (syncCurrentUser && cur.name === syncCurrentUser()) syncCurrentUser(nextActive ? nextName : '');
     })
   );
   ipcMain.handle('employees:delete', (e, id) =>
@@ -37,6 +42,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       if (!cur) throw new Error('Служителят не е намерен.');
       db.prepare('DELETE FROM employees WHERE id = ?').run(id);
       logAudit('Изтрит служител', '„' + cur.name + '“ — старите записи в следата остават с името му');
+      if (syncCurrentUser && cur.name === syncCurrentUser()) syncCurrentUser('');
     })
   );
 };

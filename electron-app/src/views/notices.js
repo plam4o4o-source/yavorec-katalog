@@ -74,7 +74,27 @@ async function remLog(i, channel) {
 async function remMail(i) {
   const r = (window._REMINDERS || [])[i];
   if (!r) return;
-  const res = await window.api.loans.mailto({ email: r.email, subject: r.subject, body: $('#remB' + i).value });
+  const body = $('#remB' + i).value;
+  let res = await window.api.loans.mailto({ email: r.email, subject: r.subject, body });
+  /* Твърде дълго за mailto: (одит v2.4.27, e2e): с шаблона по подразбиране и
+     попълнени име на библиотеката, библиотекар и населено място дори ЕДИН
+     просрочен документ надхвърля ~2000 знака (кирилицата се кодира по 6 знака на
+     буква) — бутонът стоеше активен и отказваше всеки път. Сега текстът се копира в
+     системния буфер, а писмото се отваря с адресата, темата и кратка бележка
+     „поставете с Ctrl+V“. Регистърът се пипа само ако и двете са минали. */
+  if (!res.ok && /твърде дълго/.test(res.error || '')) {
+    let copied = false;
+    try { await navigator.clipboard.writeText(body); copied = true; } catch (e) { copied = false; }
+    if (copied) {
+      res = await window.api.loans.mailto({ email: r.email, subject: r.subject,
+        body: 'Текстът на напомнянето е копиран в системния буфер — поставете го тук с Ctrl+V.' });
+      if (res.ok) {
+        await remLog(i, 'имейл');
+        return toast('Писмото е отворено без текста (твърде дълъг за пощенския клиент). Текстът е копиран — поставете го с Ctrl+V.', 'ok');
+      }
+      return toast((res.error || 'Пощата не се отвори.') + ' Текстът на напомнянето е копиран в буфера — поставете го в пощата си с Ctrl+V.', 'err');
+    }
+  }
   if (!res.ok) return toast(res.error, 'err');
   await remLog(i, 'имейл');
   toast('Писмото е отворено в пощенския клиент.', 'ok');

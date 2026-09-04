@@ -304,7 +304,9 @@ async function saveDnevnikDay(date) {
   d.a_hours = parseHhmm(d.a_hours_hhmm); delete d.a_hours_hhmm;
   d.b_hours = parseHhmm(d.b_hours_hhmm); delete d.b_hours_hhmm;
   const ok = await call(window.api.dnevnik.saveDay(d), 'Денят е записан.');
-  if (ok !== null) { closeModal(); renderDnevnik(); }
+  // Пречертава се ТЕКУЩИЯТ екран (преглед на кръга v2.4.27): формата се отваря
+  // и от таблото — иначе месечната таблица заместваше таблото под заглавие „Табло“.
+  if (ok !== null) { closeModal(); if (VIEW === 'dnevnik') renderDnevnik(); else if (RENDERERS[VIEW]) RENDERERS[VIEW](); }
 }
 window.saveDnevnikDay = saveDnevnikDay;
 function printDnevnikDoc() {
