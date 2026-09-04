@@ -34,9 +34,19 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
      на ЕДНО място, тук, и екранът и гишето казват едно и също. Останалите полета
      нарочно остават NULL: за тях NULL значи „без лимит“/„изключено“ и консуматорите
      го тълкуват сами. */
+  /* Одит v2.4.26 (преглед на поправките от v2.4.25): дотук тук минаваха покрай
+     подразбиращото се само null/'' — а редове, записани ПРЕДИ валидацията в
+     circRules:save по-горе (всяка версия преди v2.4.25 приемаше `Number(v)` без
+     граница), можеха да носят буквално 0 или отрицателно число. Такъв ред се
+     показваше на екрана като „Срок за заемане: 0 дни“ (или отрицателен), докато
+     handlers/loans.js смята датата с `s.loan_days || 30` — 0 е falsy, тоест
+     реално се прилагат 30 дни. Точно разминаването между показано и приложено,
+     което тази поредица от кръгове съществува да затваря. Миграция 13 чисти
+     заварените редове; тази проверка е предпазна мрежа за база, отворена преди
+     обновяването на друго работно място. */
   function withDefaults(o) {
-    o.loan_days = o.loan_days == null || o.loan_days === '' ? 30 : o.loan_days;
-    o.extension_days = o.extension_days == null || o.extension_days === '' ? 30 : o.extension_days;
+    o.loan_days = o.loan_days == null || o.loan_days === '' || o.loan_days <= 0 ? 30 : o.loan_days;
+    o.extension_days = o.extension_days == null || o.extension_days === '' || o.extension_days <= 0 ? 30 : o.extension_days;
     return o;
   }
   function readerCategory(readerId) {

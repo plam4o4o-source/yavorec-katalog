@@ -130,7 +130,7 @@ test('позната версия на схемата се отваря и ми�
   const r = startAgainstDb(10);
   assert.equal(r.exitCode, 0);
   assert.deepEqual(r.dialogs, [], 'нормалното стартиране не показва съобщения за грешка');
-  assert.equal(r.versionAfter, 12, 'схемата е обновена до текущата версия');
+  assert.equal(r.versionAfter, fx.currentSchemaVersion(), 'схемата е обновена до текущата версия');
   assert.equal(r.sumAfter, null, 'миграция 11 е приложена');
 });
 

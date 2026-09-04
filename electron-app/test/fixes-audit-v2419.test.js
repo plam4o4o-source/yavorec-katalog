@@ -71,7 +71,7 @@ test('позната версия на схемата се отваря, миг�
   const r = startAgainstDb(10);
   assert.equal(r.exitCode, 0);
   assert.deepEqual(r.dialogs, []);
-  assert.equal(r.versionAfter, 12, 'миграциите минават');
+  assert.equal(r.versionAfter, fx.currentSchemaVersion(), 'миграциите минават');
   assert.equal(r.sumAfter, null, 'миграция 11 е приложена');
   assert.equal(r.consentAfter, '2020-01-01', 'старите backfill-и също минават');
   assert.equal(r.untouched, false, 'нормалният старт СЕ очаква да пише в базата');

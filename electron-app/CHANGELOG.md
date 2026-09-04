@@ -11,6 +11,39 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.26
+
+**BG:** Преглед на поправките от петнадесетия кръг (v2.4.25). Една истинска
+находка, тясна, но същия клас, който тази поредица кръгове съществува да
+затваря: показаното на екрана не съвпадаше с приложеното.
+
+- **Правила за обслужване по категория — заварен срок 0 или отрицателен
+  показваше грешен срок.** `circRules:save` от всяка версия ПРЕДИ v2.4.25
+  приемаше срока за заемане и дните за продължение без никаква проверка на
+  границата — ред, записан тогава с `loan_days = 0` (или отрицателен),
+  оставаше си такъв. v2.4.25 добави подразбираща се стойност (`withDefaults()`),
+  но само за `NULL`/празно, не и за заварен буквален `0`: екранът на служителите
+  показваше „Срок за заемане: 0 дни“, докато `handlers/loans.js` мълчаливо
+  прилагаше 30 дни (`s.loan_days || 30`, 0 е falsy) — самото разминаване, което
+  v2.4.25 обяви за затворено. Поправено на две места: `withDefaults()` вече
+  третира `<= 0` както `NULL`, а нова миграция (13) изчиства заварените редове
+  в `circulation_rules` в самата база, не само на екрана.
+- Два по-стари теста (v2418, v2419) четяха версията на схемата като преписано
+  число вместо от `CURRENT_SCHEMA_VERSION` — гръмваха при всяко вдигане на
+  версията, не защото поведението е сгрешено. Проверката вече следва
+  константата.
+
+4 нови регресионни теста, всеки проверен с мутация. Цялата пакетна проверка:
+1192 теста, 0 провала.
+
+**EN:** A review of v2.4.25's own fix. `circRules:save` accepted an unbounded
+loan-term value in every version before v2.4.25; a pre-existing row saved with
+`loan_days = 0` (or negative) still showed that value on the staff screen while
+checkout code silently fell back to 30 days (`s.loan_days || 30`) — the exact
+displayed-vs-applied mismatch this release line exists to close. `withDefaults()`
+now treats `<= 0` the same as `NULL`, and a new migration (13) cleans the
+pre-existing rows in the database itself. 4 new mutation-verified tests.
+
 ## v2.4.25
 
 **BG:** Петнадесети кръг — екранният слой (`src/views`) и поправките от v2.4.24 с
