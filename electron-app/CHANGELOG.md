@@ -11,6 +11,36 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.28
+
+**BG:** Преглед на поправките от шестнадесетия кръг (v2.4.27). Самите поправки
+в кода са добри; един от регресионните тестове не проверяваше нищо.
+
+- **Тестът за кавичка в споделен адрес към каталога (`#zapis=…`) не
+  стигаше до поправения ред.** `revealShared()` в `site/page-katalog.html`
+  излиза веднага (`if(idx<0)return;`), ако инвентарният номер от адреса не
+  съвпада с нито един запис — а точно такъв беше сценарият в шипнатия тест
+  (кавичка срещу `inv:1`). CSS.escape() на v2.4.27 никога не се изпълняваше:
+  revert-and-retest на самата поправка (връщане на `main.js`-стила
+  querySelector без escape) показа, че и осемте сценария на сайта минават
+  еднакво — със и без нея. Истинският, макар и рядък, път е повреден запис в
+  `katalog.json`, чийто `inv` вече съдържа кавичка, и връзка точно към него.
+  Сценарият вече праща `#zapis=` към запис, чийто `inv` действително съдържа
+  кавичка (`inv:'1"'`) — сега стига до реда, гърми без CSS.escape() и минава с
+  него. Самата поправка в `page-katalog.html` не се променя — вярна е.
+- Дребна несъответствие в CHANGELOG-а на v2.4.27: „35 нови теста… (18)… 23
+  мутации“ не съвпадаше с действителния брой тестове във файла (19) и с
+  commit съобщението (36, 25 мутации) — поправено на място.
+
+**EN:** A review of round sixteen's own fixes (v2.4.27). The production fixes
+are sound; one regression test verified nothing. `revealShared()` in
+`site/page-katalog.html` returns immediately when the shared `#zapis=` value
+matches no record — exactly the case the shipped test used (a lone quote
+against `inv:1`) — so the CSS.escape() fix it was meant to cover never ran;
+revert-and-retest of that fix showed all 8 site scenarios passing identically
+with or without it. The scenario now targets a record whose `inv` itself
+contains a quote, so it actually reaches — and fails without — the fix.
+
 ## v2.4.27
 
 **BG:** Шестнадесети кръг — **пълен тест на работата**, грешки, подобрения и
@@ -73,7 +103,7 @@ for full detail.
   отстъпва, за да се виждат повече раздели.
 
 *Тестове:* `test/e2e-workflows.test.js` (17) и `test/fixes-audit-v2427.test.js`
-(18) — 35 нови теста; 23 мутации, всичките уловени. Сайтът: 8 сценария.
+(19) — 36 нови теста; 25 мутации, всичките уловени. Сайтът: 8 сценария.
 
 **EN:** Sixteenth round — a full end-to-end workflow harness (real renderer on
 real handlers and real `main.js`, no API mocks; fifteen librarian workflows),
