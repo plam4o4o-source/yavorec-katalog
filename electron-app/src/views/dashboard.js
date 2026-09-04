@@ -30,7 +30,7 @@ async function renderDash() {
 
     <div class="kpis">
       ${kpi(DASH_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
-      ${kpi(DASH_ICONS.loans, r.loansOpen, 'Заети в момента', 'при ' + r.activeReaders + ' активни читатели')}
+      ${kpi(DASH_ICONS.loans, r.loansOpen, 'Заети в момента', 'при ' + pl(r.activeReaders, 'активен читател', 'активни читатели'))}
       ${kpi(DASH_ICONS.overdue, r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
       ${kpi(DASH_ICONS.upcoming, r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
       ${r.holdsReady || r.holdsWaiting

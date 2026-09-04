@@ -41,6 +41,12 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('suggestions:delete', (e, id) =>
-    run(() => { getDb().prepare('DELETE FROM suggestions WHERE id = ?').run(id); })
+    run(() => {
+      const db = getDb();
+      const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
+      if (!s) throw new Error('Предложението не е намерено.');
+      db.prepare('DELETE FROM suggestions WHERE id = ?').run(id);
+      logAudit('Изтрито предложение за покупка', s.title || ('№ ' + id));
+    })
   );
 };

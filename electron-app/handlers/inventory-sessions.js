@@ -3,7 +3,7 @@
 // main.js, hoisted) и getDb/run/logAudit.
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
-  const { parseRegisterNo, resolveScannedBook } = require('../security-utils');
+  const { parseRegisterNo, resolveScannedBook, isValidIsoDate } = require('../security-utils');
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -53,6 +53,11 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('inventorySessions:start', (e, s) =>
     run(() => {
+      /* Датата се проверява като при акта и партидата (одит v2.4.25). Дотук
+         изчистено поле пращаше '' — NOT NULL го приема — сесията се записваше без
+         дата, всяко сканиране пишеше inventory_checks.date = '' и не се броеше към
+         годишната норма, а протоколът печаташе „Днес,  г., комисия…“. */
+      if (!isValidIsoDate(s && s.date)) throw new Error('Датата на проверката липсва или е невалидна.');
       const db = getDb();
       // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
       const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = @department' : ''}`)

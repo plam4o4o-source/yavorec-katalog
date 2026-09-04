@@ -92,7 +92,7 @@ function startInventForm() {
     <form id="ivF" onsubmit="return false">
       <div class="grid g3">
         ${fld('Протокол №', 'no', { type: 'number', hint: 'празно = следващият свободен за годината' })}
-        ${fld('Дата', 'date', { val: today(), type: 'date' })}
+        ${fld('Дата', 'date', { val: today(), type: 'date', req: 1 })}
         ${fld('Заповед №', 'order_no', { hint: 'с която е назначена комисията' })}
       </div>
       <!-- Одит на документите v2.4.17: „Обхват“ беше свободен текст, предварително

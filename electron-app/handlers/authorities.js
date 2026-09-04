@@ -121,7 +121,7 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
       const stmt = db.prepare(`UPDATE books SET ${field} = ? WHERE ${field} = ?`);
       let changed = 0;
       db.transaction(() => { for (const v of list) changed += stmt.run(target, v).changes; }).immediate();
-      logAudit('Авторитетни данни', `${AUTHORITY_FIELDS[field]}: ${list.length} стойности слети в „${target}“ (${changed} документа)`);
+      logAudit('Авторитетни данни', `${AUTHORITY_FIELDS[field]}: ${list.length === 1 ? '1 стойност слята' : list.length + ' стойности слети'} в „${target}“ (${changed === 1 ? '1 документ' : changed + ' документа'})`);
       return { changed, merged: list.length };
     })
   );

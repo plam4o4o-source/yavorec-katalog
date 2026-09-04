@@ -19,14 +19,24 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       const db = getDb();
       const cur = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
       if (!cur) throw new Error('Служителят не е намерен.');
-      db.prepare('UPDATE employees SET name=?, active=? WHERE id=?').run(
-        name !== undefined && name !== null ? name.trim() : cur.name,
-        active !== undefined && active !== null ? (active ? 1 : 0) : cur.active,
-        id
-      );
+      const nextName = name !== undefined && name !== null ? name.trim() : cur.name;
+      if (!nextName) throw new Error('Името на служителя не може да е празно.');
+      const nextActive = active !== undefined && active !== null ? (active ? 1 : 0) : cur.active;
+      db.prepare('UPDATE employees SET name=?, active=? WHERE id=?').run(nextName, nextActive, id);
+      /* Следа (одит v2.4.25): служителят е самоличността зад audit_log.user —
+         преименуването и изтриването му трябва да личат, иначе „кой е бил Иван“ не
+         може да се възстанови. */
+      if (nextName !== cur.name) logAudit('Преименуван служител', '„' + cur.name + '“ → „' + nextName + '“');
+      if (nextActive !== cur.active) logAudit('Служител', '„' + nextName + '“ — ' + (nextActive ? 'активиран' : 'деактивиран'));
     })
   );
   ipcMain.handle('employees:delete', (e, id) =>
-    run(() => { getDb().prepare('DELETE FROM employees WHERE id = ?').run(id); })
+    run(() => {
+      const db = getDb();
+      const cur = db.prepare('SELECT name FROM employees WHERE id = ?').get(id);
+      if (!cur) throw new Error('Служителят не е намерен.');
+      db.prepare('DELETE FROM employees WHERE id = ?').run(id);
+      logAudit('Изтрит служител', '„' + cur.name + '“ — старите записи в следата остават с името му');
+    })
   );
 };

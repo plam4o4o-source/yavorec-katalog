@@ -111,7 +111,7 @@ async function importRun() {
       ${kpi('⏭️', r.skipped, 'Пропуснати', 'дубликати или редове с грешка')}
     </div>
     ${r.usedInv.length ? `<div class="note" style="margin-top:14px">
-      <b>${r.usedInv.length} записа получиха нов инвентарен номер</b>, защото в
+      <b>${r.usedInv.length === 1 ? '1 запис получи' : r.usedInv.length + ' записа получиха'} нов инвентарен номер</b>, защото в
       файла нямаше номер или той вече беше зает. Инвентарният номер трябва да е
       уникален — това е изискване на инвентарната книга.
       <div class="hint" style="margin-top:6px">${r.usedInv.slice(0, 12).map(u =>

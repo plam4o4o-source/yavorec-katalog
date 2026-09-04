@@ -73,8 +73,15 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
   ipcMain.handle('calendar:saveWorkDays', (e, days) =>
     run(() => {
       const list = (Array.isArray(days) ? days : []).map(n => parseInt(n, 10)).filter(n => n >= 0 && n <= 6);
+      /* Празен списък се ОТКАЗВА (одит v2.4.25). Дотук се записваше '' и workDaysSet()
+         падаше към „всички дни са работни“ (нарочно — „не блокирай всичко“), тоест
+         след като библиотекарят потвърди предупреждението „библиотеката ще излиза
+         затворена всеки ден“, програмата правеше точно обратното: срокове и
+         наказания брояха всеки ден, а екранът показваше седемте квадратчета пак
+         отметнати. Проверката е по СЪЩИЯ списък, който ще се запише. */
+      if (!list.length) throw new Error('Отбележете поне един работен ден — без работни дни срокове и наказания не могат да се смятат.');
       getDb().prepare('UPDATE settings SET work_days = ? WHERE id = 1').run(list.join(','));
-      logAudit('Календар', 'работни дни: ' + (list.length ? list.join(',') : '—'));
+      logAudit('Календар', 'работни дни: ' + list.join(','));
     })
   );
   ipcMain.handle('calendar:addClosed', (e, { date, reason }) =>
@@ -85,7 +92,11 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('calendar:removeClosed', (e, date) =>
-    run(() => { getDb().prepare('DELETE FROM calendar_closed WHERE date = ?').run(date); })
+    run(() => {
+      const info = getDb().prepare('DELETE FROM calendar_closed WHERE date = ?').run(date);
+      if (!info.changes) throw new Error('Няма затворен ден на ' + date + '.');
+      logAudit('Календар', 'премахнат затворен ден ' + date);
+    })
   );
 
   return { workDaysSet, isWorkDay, nextWorkDay, closedDaysBetween };

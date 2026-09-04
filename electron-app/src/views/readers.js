@@ -205,7 +205,13 @@ async function saveReader(id) {
   let savedId = id;
   if (id) { if (await call(window.api.readers.update(d), 'Читателят е обновен.') === null) return; }
   else { savedId = await call(window.api.readers.create(d), 'Читателят е добавен.'); if (savedId === null) return; }
-  closeModal(); await renderReaders();
+  closeModal();
+  /* „+ Нов читател“ от гишето (одит v2.4.25): дотук се пречертаваше винаги
+     списъкът с читатели — библиотекарят оставаше в таблицата с читатели, менюто
+     светеше на „Заемане и връщане“, а новият читател не беше избран за заемане.
+     От гишето — избира се направо; отвсякъде другаде — както досега. */
+  if (VIEW === 'circ' && typeof selectCircReader === 'function' && savedId) { selectCircReader(savedId); return; }
+  await renderReaders();
   if (savedId) flashRow(`#rBody tr[data-id="${savedId}"]`);
 }
 window.saveReader = saveReader;

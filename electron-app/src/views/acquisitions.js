@@ -227,7 +227,7 @@ async function printDonationDoc(id) {
       acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Стойност, лв.</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
-    <tr><td colspan="4"><b>ОБЩО ${acqCount(a.items)} документа</b></td>${
+    <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${
       acqHasMultiples(a.items) ? '<td></td>' : ''}<td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>` : ''}
     <div class="pmeta">Актът е съставен в три екземпляра — за счетоводството, за библиотеката и за дарителя.</div>
     ${ssig(['Дарител: …………………', 'Комисия: ' + acqSigNames(a), 'УТВЪРДИЛ: …………………'])}</div>`);
@@ -265,7 +265,7 @@ async function printAcqNoDocDoc(id) {
       acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Оценена стойност</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
-    <tr><td colspan="4"><b>ОБЩО ${acqCount(a.items)} документа</b></td>${
+    <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${
       acqHasMultiples(a.items) ? '<td></td>' : ''}<td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>`
     : '<div class="pmeta">Все още няма инвентирани документи по тази партида.</div>'}
     <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,

@@ -87,7 +87,22 @@ function pdpSetup(prefix, password) {
   return { db, ipcMain, ret, pii, key, password: pass };
 }
 
-module.exports = { APP_DIR, mkTmpDir, cleanupTmpDirs, fakeIpcMain, freshDb, runDep, catalogSetup, pdpSetup };
+/* Текущата версия на схемата, четена от main.js вместо преписана като число в
+   теста (одит v2.4.26). Двата по-стари теста, проверяващи че „позната версия
+   мигрира до текущата“, имаха буквалното число `12` вписано — CURRENT_SCHEMA_VERSION
+   вече е 13 (миграция 13), а тестовете гърмяха не защото поведението е сгрешено,
+   а защото сами бяха станали стар факт. Същият клас проблем, който всеки следващ
+   кръг ще срещне отново, освен ако проверката не следва константата, не число. */
+function currentSchemaVersion() {
+  const src = fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8');
+  const m = /const CURRENT_SCHEMA_VERSION = (\d+);/.exec(src);
+  if (!m) throw new Error('CURRENT_SCHEMA_VERSION не е намерена в main.js');
+  return parseInt(m[1], 10);
+}
+
+module.exports = {
+  APP_DIR, mkTmpDir, cleanupTmpDirs, fakeIpcMain, freshDb, runDep, catalogSetup, pdpSetup, currentSchemaVersion
+};
 
 /* jsdom харнес — целият renderer (src/index.html + всички views) в jsdom, с
    api-заместител, който отговаря по канали. Същият модел, който кръговете

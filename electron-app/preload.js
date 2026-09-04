@@ -293,7 +293,8 @@ contextBridge.exposeInMainWorld('api', {
     writeExclusionScript: invoke('security:writeExclusionScript')
   },
   audit: {
-    list: invoke('audit:list')
+    list: invoke('audit:list'),
+    export: invoke('audit:export')
   },
   searchHistory: {
     log: invoke('searchHistory:log'),
@@ -306,7 +307,8 @@ contextBridge.exposeInMainWorld('api', {
     exportCsv: invoke('dnevnik:exportCsv')
   },
   visits: {
-    add: invoke('visits:add')
+    add: invoke('visits:add'),
+    get: invoke('visits:get')
   },
   stats: {
     report: invoke('stats:report')

@@ -38,7 +38,7 @@ async function renderCirc() {
       beep(r.hold || r.daysLate ? 'err' : 'ok');
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
-        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> дни · обезщетение <b>${mny(r.fine)}</b>`
+        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> ${r.daysLate === 1 ? 'ден' : 'дни'} · обезщетение <b>${mny(r.fine)}</b>`
           : r.fine ? `<br>Дължимо обезщетение по това заемане: <b>${mny(r.fine)}</b>` : ''}</div>`);
       if (r.suspendedUntil) {
         log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">⛔ Наложено наказание: заемането за
@@ -53,7 +53,7 @@ async function renderCirc() {
            след продължение на просрочено заемане забавата спрямо новия падеж е 0, а
            начисленото от продължението си стои — екранът казваше „Приета обратно“ и
            не споменаваше дължимите 1.80 лв. */
-        toast(r.daysLate ? 'Върната със забава ' + r.daysLate + ' дни (' + mny(r.fine) + ')'
+        toast(r.daysLate ? 'Върната със забава ' + dni(r.daysLate) + ' (' + mny(r.fine) + ')'
           : r.fine ? 'Приета обратно: инв. № ' + r.inv_number + ' — дължимо обезщетение ' + mny(r.fine)
           : 'Приета обратно: инв. № ' + r.inv_number, (r.daysLate || r.fine) ? 'err' : 'ok');
       }
@@ -92,7 +92,7 @@ async function renderCirc() {
     const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
     const maxRenew = rule.extensions_count == null ? 2 : rule.extensions_count;
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
-      <div class="hint" style="margin-top:6px">Срок за заемане: ${rule.loan_days} дни${maxRenew ? ' · до ' + maxRenew + ' продължения' : ''}</div>
+      <div class="hint" style="margin-top:6px">Срок за заемане: ${dni(rule.loan_days)}${maxRenew ? ' · до ' + pl(maxRenew, 'продължение', 'продължения') : ''}</div>
       <div class="toolbar" style="margin:10px 0 0">
         <button class="btn sm" onclick="holdPrompt()">📌 Резервирай заета книга…</button>
       </div>
@@ -220,7 +220,7 @@ async function returnBook(id) {
   } else if (res.data && res.data.daysLate) {
     // v1.70.0: преди тук нямаше никакво съобщение за забава/глоба — само
     // сканираното връщане ("returnByCode") показваше тази информация.
-    toast('Върната със забава ' + res.data.daysLate + ' дни (' + mny(res.data.fine) + ').', 'err');
+    toast('Върната със забава ' + dni(res.data.daysLate) + ' (' + mny(res.data.fine) + ').', 'err');
   } else if (res.data && res.data.fine) {
     // Виж бележката при сканирането по-горе: начисленото при продължение остава
     // дължимо, макар спрямо новия падеж да няма забава.

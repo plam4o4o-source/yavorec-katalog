@@ -39,7 +39,7 @@ module.exports = function registerAvHandlers(ipcMain, deps) {
         const ins = db.prepare('INSERT INTO authorised_values (category, value, opac_label, sort) VALUES (?, ?, ?, ?)');
         list.forEach((v, i) => ins.run(category, v.value, v.opac_label, i));
       }).immediate();
-      logAudit('Номенклатури', AV_CATEGORIES[category] + ': ' + list.length + ' стойности');
+      logAudit('Номенклатури', AV_CATEGORIES[category] + ': ' + list.length + (list.length === 1 ? ' стойност' : ' стойности'));
       return list.length;
     })
   );

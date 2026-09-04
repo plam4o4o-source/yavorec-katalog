@@ -83,7 +83,9 @@ test('registerDeaccessionActsHandlers registers all six deaccessionActs: IPC cha
 test('deaccessionActs:findBook rejects an already-deaccessioned book (cannot deaccession twice)', async () => {
   const { db, ipcMain } = setup();
   const id = insertBook(db, { inv_number: 5, status: 'отчислен' });
-  db.prepare('UPDATE books SET barcode=? WHERE id=?').run('BC5', id);
+  // Отчислен С АКТ (одит v2.4.25): самият статус без акт/дата е внесен стар ред,
+  // който тепърва има нужда от акт — виж следващия тест.
+  db.prepare("UPDATE books SET barcode=?, deaccession_date='2025-01-01' WHERE id=?").run('BC5', id);
   const result = await ipcMain.invoke('deaccessionActs:findBook', 'BC5');
   assert.equal(result.ok, true);
   assert.equal(result.data, undefined, 'already-deaccessioned books should not be findable for a new act');

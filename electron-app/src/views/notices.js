@@ -14,7 +14,7 @@ async function openReminders() {
       <div class="remCard">
         <div class="remHead">
           <span class="remName">${esc(r.name)}</span>
-          <span class="remBadge">${r.n} просрочени</span>
+          <span class="remBadge">${r.n} ${r.n === 1 ? 'просрочен' : 'просрочени'}</span>
           <span class="badge ${r.level >= 3 ? 'warn' : ''}" title="Степента расте с давността на най-старото просрочие (праговете са в Настройки)">Напомняне № ${r.level}</span>
           ${r.lastNotice ? `<span class="hint" title="Последно регистрирано напомняне по това просрочие">последно: № ${r.lastNotice.level} · ${bg(String(r.lastNotice.ts).slice(0, 10))}</span>` : '<span class="hint">няма пращано досега</span>'}
           ${Number(r.fine) > 0 ? `<span class="hint">${mny(r.fine)}</span>` : ''}

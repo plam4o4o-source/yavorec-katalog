@@ -530,7 +530,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 12;
+const CURRENT_SCHEMA_VERSION = 13;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -680,6 +680,18 @@ const MIGRATIONS = [
       'suspend_per_day', 'suspend_max', 'remind2_days', 'remind3_days', 'anonymize_years']) {
       db.prepare(`UPDATE settings SET ${col} = NULL WHERE typeof(${col}) = 'text' AND trim(${col}) = ''`).run();
     }
+  } },
+  /* v13 (одит v2.4.26, преглед на поправките от v2.4.25) — същото изчистване като
+     v12, но за circulation_rules (правилата по категория), не за settings
+     (общите стойности). circRules:save преди v2.4.25 приемаше срока за заемане и
+     дните за продължение без никаква проверка на границата — заварен ред с 0 или
+     отрицателно число показваше грешен срок на гишето, докато handlers/loans.js
+     мълчаливо прилагаше 30 дни (`s.loan_days || 30`). NULL значи „общата
+     стойност“ навсякъде другаде в тази таблица — редовете тук се привеждат към
+     същия смисъл, вместо да останат заклещени с невъзможна за прилагане цифра. */
+  { version: 13, run: () => {
+    db.prepare("UPDATE circulation_rules SET loan_days = NULL WHERE loan_days IS NOT NULL AND loan_days <= 0").run();
+    db.prepare("UPDATE circulation_rules SET extension_days = NULL WHERE extension_days IS NOT NULL AND extension_days <= 0").run();
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от
@@ -1437,7 +1449,7 @@ require('./handlers/audit')(ipcMain, { getDb: () => db, run });
 require('./handlers/search-history')(ipcMain, { getDb: () => db, run, getCurrentUser: () => CURRENT_USER });
 
 /* ---------------- Посещения ---------------- */
-require('./handlers/visits')(ipcMain, { getDb: () => db, run });
+require('./handlers/visits')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Справки и статистика + Готови справки ----------------
    Извадени в handlers/stats.js (Фаза 4, стъпка 29 от разбиването на

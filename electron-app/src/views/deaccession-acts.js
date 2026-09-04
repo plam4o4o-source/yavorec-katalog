@@ -28,7 +28,10 @@ async function actForm() {
         ${fld('Дата', 'date', { val: today(), type: 'date', req: 1 })}
         ${fld('Заповед №', 'order_no', {})}
       </div>
-      ${fld('Причина за отчисляване', 'reason_code', { type: 'select', opts: PRICHINI.map(p => ({ v: p.k, t: 'т. ' + p.k + '. ' + p.t })) })}
+      ${/* req: чл. 30 изисква точно една причина за акт. Одит v2.4.25: без req
+            празният ред „—“ минаваше и подписаният акт печаташе „чл. 30, т. null“. */''}
+      ${fld('Причина за отчисляване', 'reason_code', { type: 'select', req: 1, emptyLabel: '— изберете —',
+        opts: PRICHINI.map(p => ({ v: p.k, t: 'т. ' + p.k + '. ' + p.t })) })}
       <div class="grid g2">
         ${fld('Начин на разпореждане', 'disposal', { type: 'select', opts: ['предадени за вторични суровини', 'продадени', 'предоставени безвъзмездно на друга библиотека', 'предоставени на организация в обществена полза', 'обменени с друга библиотека', 'унищожени'] })}
         ${fld('Приложен документ', 'attach', {})}
@@ -139,7 +142,7 @@ async function openAct(id) {
     ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
     <td class="num">${esc(l.year || '')}</td><td class="num">${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
     <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(a.items)}${
-      actHasMultiples(a.items) ? ` (${a.items.length} заглавия)` : ''}</td>
+      actHasMultiples(a.items) ? ` (${actTitles(a.items.length)})` : ''}</td>
     <td class="num">${mny(actValue(a.items))}</td></tr>
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
