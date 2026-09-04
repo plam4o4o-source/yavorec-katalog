@@ -48,6 +48,74 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Таг на изданието: $tag"
 
+      # Разделът "## vX.Y.Z" от CHANGELOG.md се извлича ВЕДНЪЖ, в файл, и се
+      # ползва на две места: при предварителното създаване на release-а и при
+      # опресняването на описанието накрая. Липсващ раздел не проваля нищо —
+      # файлът просто остава празен и стъпките по-долу го пропускат.
+      - name: Извлича раздела на изданието от CHANGELOG.md
+        shell: pwsh
+        run: |
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -Path $notes -Value '' -Encoding utf8
+          "RELEASE_NOTES_FILE=$notes" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (-not (Test-Path 'CHANGELOG.md')) { Write-Host 'Няма CHANGELOG.md.'; exit 0 }
+          $lines = Get-Content 'CHANGELOG.md'
+          $hit = $lines | Select-String -Pattern "^## $([regex]::Escape($env:RELEASE_TAG))(\s|$)"
+          if (-not $hit) { Write-Host "Няма раздел за $env:RELEASE_TAG в CHANGELOG.md."; exit 0 }
+          $startIdx = $hit[0].LineNumber
+          $endIdx = $lines.Length - 1
+          for ($i = $startIdx; $i -lt $lines.Length; $i++) {
+            if ($lines[$i] -match '^## ') { $endIdx = $i - 1; break }
+          }
+          $section = ($lines[$startIdx..$endIdx] -join "`n").Trim()
+          Set-Content -Path $notes -Value $section -Encoding utf8
+          Write-Host "Разделът за $env:RELEASE_TAG е $($section.Length) знака."
+
+      # Release-ът се създава ТУК, ПРЕДИ electron-builder — с точно една цел:
+      # electron-builder да го НАМЕРИ, а не да го създава. v2.4.26 (run #115)
+      # показа защо: publisher-ът качва .exe и .blockmap паралелно, всяка от
+      # двете задачи провери „release-ът съществува ли“ в един и същи миг, и
+      # двете видяха „не“ и двете го създадоха — GitHub пусна ДВА издадени
+      # release-а с един и същ таг (id 382736872 и 382736873), файловете се
+      # разпределиха между тях (.blockmap в единия, .exe и latest.yml в
+      # другия), описанието остана празно, а стъпката за описанието падна с
+      # „tag_name already_exists“. Auto-updater-ът чете latest.yml от
+      # „последния“ release — при два такива кой е „последният“ е въпрос на
+      # късмет. При вече съществуващ ЕДИН release нищо не се пипа (повторно
+      # пускане след частичен провал — electron-builder презаписва файловете
+      # в него). При повече от един — всички са продукт на надпреварата и по
+      # построение непълни: изтриват се и се създава един чист. Изтриването
+      # на release НЕ трие git тага; `--target` слага тага на строения commit.
+      - name: Подготвя release-а предварително (един, преди electron-builder)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $repo = $env:GITHUB_REPOSITORY
+          # Само първата страница (най-новите 100): строи се винаги най-новата
+          # версия, тоест и нейните евентуални дубликати са най-отгоре. Без
+          # jq-филтър — той би носил кавички и „\(“, чието прехвърляне от
+          # PowerShell към gh.exe е точно мястото за тиха грешка.
+          $json = gh api "repos/$repo/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $same = @((($json -join "`n") | ConvertFrom-Json) | Where-Object { $_.tag_name -eq $tag })
+          Write-Host "Release-и с таг ${tag}: $($same.Count)"
+          if ($same.Count -gt 1) {
+            foreach ($r in $same) {
+              Write-Host "Изтрива дублиран release id=$($r.id) (файлове: $($r.assets.Count))"
+              gh api -X DELETE "repos/$repo/releases/$($r.id)" | Out-Null
+              if ($LASTEXITCODE -ne 0) { exit 1 }
+            }
+            $same = @()
+          }
+          if ($same.Count -eq 1) { Write-Host 'Release-ът вече съществува — ще бъде допълнен.'; exit 0 }
+          # Празният файл с бележки също минава — описанието се допълва накрая.
+          gh release create $tag --repo $repo --title $tag.TrimStart('v') `
+            --target $env:GITHUB_SHA --notes-file $env:RELEASE_NOTES_FILE
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Създаден е release $tag — electron-builder ще качи файловете в него."
+
       # Цифровият подпис се включва сам, щом в хранилището бъдат добавени двете
       # секретни променливи (Settings → Secrets and variables → Actions):
       #   WINDOWS_CERT_BASE64   — .pfx файлът на сертификата, кодиран в base64
@@ -141,38 +209,17 @@ jobs:
           Get-Content $out
           gh release upload $env:RELEASE_TAG $out --clobber --repo $env:GITHUB_REPOSITORY
 
-      # Взима раздела "## vX.Y.Z" от CHANGELOG.md (ако съществува) и го
-      # записва като описание на вече публикуваното GitHub Release, вместо
-      # то да остава празно. Не проваля build-а, ако секция липсва.
-      - name: Попълва описанието на изданието от CHANGELOG.md
+      # Опреснява описанието от CHANGELOG.md и при повторно пускане върху вече
+      # съществуващ release (тогава предварителната стъпка не го е създала и
+      # не му е дала бележки). Разделът е извлечен по-горе; празен файл =
+      # няма какво да се пише. Работи през `gh release edit`, а не през суров
+      # REST PATCH — той гърмеше с „tag_name already_exists“ при дублирани
+      # release-и, което вече е невъзможно след предварителната стъпка.
+      - name: Опреснява описанието на изданието от CHANGELOG.md
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = $env:RELEASE_TAG
-          $changelogPath = 'CHANGELOG.md'
-          if (-not (Test-Path $changelogPath)) {
-            Write-Host 'Няма CHANGELOG.md — пропуска се.'
-            exit 0
-          }
-          $lines = Get-Content $changelogPath
-          $matches = $lines | Select-String -Pattern "^## $([regex]::Escape($tag))(\s|$)"
-          if (-not $matches) {
-            Write-Host "Няма раздел за $tag в CHANGELOG.md — пропуска се."
-            exit 0
-          }
-          $startIdx = $matches[0].LineNumber
-          $endIdx = $lines.Length - 1
-          for ($i = $startIdx; $i -lt $lines.Length; $i++) {
-            if ($lines[$i] -match '^## ') { $endIdx = $i - 1; break }
-          }
-          $section = ($lines[$startIdx..$endIdx] -join "`n").Trim()
-          if ([string]::IsNullOrWhiteSpace($section)) {
-            Write-Host 'Раздел без съдържание — пропуска се.'
-            exit 0
-          }
-          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
-          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
-          $bodyJson = @{ body = $section } | ConvertTo-Json
-          Invoke-RestMethod -Headers $headers -Method Patch -ContentType 'application/json' -Body $bodyJson -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($release.id)"
+          if ((Get-Item $env:RELEASE_NOTES_FILE).Length -eq 0) { Write-Host 'Няма раздел в CHANGELOG.md — пропуска се.'; exit 0 }
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file $env:RELEASE_NOTES_FILE
           Write-Host 'Описанието на изданието е обновено от CHANGELOG.md.'
