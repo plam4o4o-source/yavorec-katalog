@@ -37,7 +37,13 @@ const RENDERERS = {
   stats: renderStats, reports: renderReports, catalog: renderCatalog, labels: renderLabels, odit: renderOdit, setup: renderSetup
 };
 async function route() {
-  const h = (location.hash || '#dash').slice(1);
+  /* #раздел/подраздел (v2.4.27, A10): „#setup/lichni“ отваря Настройки и превърта
+     до секцията — таблото и картонът на читателя вече не оставят библиотекаря
+     най-отгоре на дълга страница. Подразделът стои в ROUTE_SUB за изгледа. */
+  const full = (location.hash || '#dash').slice(1);
+  const slash = full.indexOf('/');
+  const h = slash >= 0 ? full.slice(0, slash) : full;
+  ROUTE_SUB = slash >= 0 ? full.slice(slash + 1) : '';
   VIEW = TITLES[h] ? h : 'dash';
   const t = TITLES[VIEW];
   $('#vTitle').textContent = t[0];
@@ -54,6 +60,15 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 
+/* Предпазна мрежа за отхвърлени обещания (одит v2.4.27): грешка ПРЕДИ try-а на
+   async обработчик (напр. getDb().prepare преди try в catalog:gitPublishNow)
+   отхвърляше invoke-а, call() не я хващаше и бутонът „не правеше нищо“. Тук тя
+   поне стига до библиотекаря като известие. */
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e && e.reason && (e.reason.message || String(e.reason));
+  if (msg && typeof toast === 'function') toast('Неочаквана грешка: ' + msg, 'err');
+});
+
 /* ---------------- Старт ---------------- */
 initUserBadge();
 initAppCredit();
@@ -61,7 +76,17 @@ initSavedIndicator();
 initAutoUpdateUI();
 // При съвсем нова инсталация програмата отваря направо „Настройки“ — данните на
 // библиотеката трябва да се въведат веднъж, преди да има смисъл от останалите раздели.
-loadSettingsCache().then(s => {
+loadSettingsCache().then(async s => {
   if (needsSetup(s) && !location.hash) location.hash = '#setup';
-  route();
+  await route();
+  /* Кой работи в момента? (v2.4.27, A8) Значката оставаше „(изберете)“ и всяко
+     действие влизаше в одитната следа без име, докато някой не се сети да
+     щракне върху нея. Пита се веднъж при старт — само ако има активни служители
+     и никой не е избран; при първоначална настройка не пречи. */
+  try {
+    if (!needsSetup(s)) {
+      const [user, employees] = await Promise.all([call(window.api.app.getUser()), call(window.api.employees.list())]);
+      if (!user && Array.isArray(employees) && employees.some(e => e.active)) chooseEmployeeModal();
+    }
+  } catch (e) { /* без служители — без въпрос */ }
 });

@@ -104,7 +104,7 @@ test('абонаментите в preload.js слушат точно канал�
   /* Обратната посока на горното: onUpdateStatus/onAutoStatus не минават през
      invoke и няма кой да ги провери. Имената тук са тези, които main.js и
      handlers/backup.js подават на webContents.send. */
-  assert.deepEqual([...preload.listened].sort(), ['backup:autoStatusChanged', 'update:status']);
+  assert.deepEqual([...preload.listened].sort(), ['app:userChanged', 'backup:autoStatusChanged', 'update:status']);
 
   const fs = require('fs');
   const path = require('path');

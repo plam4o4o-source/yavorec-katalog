@@ -131,12 +131,15 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       `).get().n;
       const overduePeriodicals = countOverduePeriodicals == null ? 0 : countOverduePeriodicals();
       const isTodayOpen = isWorkDay(today());
+      /* Попълнен ли е дневникът за днес (v2.4.27, A9): формулярът, който
+         регионалната библиотека проверява, беше на четири стъпки от таблото. */
+      const dnevnikFilled = !!db.prepare('SELECT 1 FROM dnevnik_days WHERE date = ?').get(today());
       return {
         fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
         year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
         inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
         upcoming, holdsReady, holdsWaiting,
-        today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen, dueReminders, overduePeriodicals }
+        today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen, dueReminders, overduePeriodicals, dnevnikFilled }
       };
     })
   );

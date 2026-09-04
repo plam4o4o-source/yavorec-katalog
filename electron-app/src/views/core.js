@@ -347,7 +347,11 @@ function askText(title, opts) {
     };
     // Esc се обработва и от общия слушател по-горе (той само затваря прозореца);
     // тук е нужен собствен, за да се разреши и обещанието, вместо да увисне.
-    function onKey(e) { if (e.key === 'Escape') finish(null); }
+    /* stopPropagation (одит v2.4.27): общият слушател на Esc е в bubble фазата
+       и виждаше #veil2 вече като „.closing“ → падаше на #veil и затваряше и
+       формата отдолу (напр. картата „Обслужване по домовете“ с невписаните
+       редакции) от едно-единствено натискане. */
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); finish(null); } }
     document.addEventListener('keydown', onKey, true);
     box.querySelector('[data-ask="ok"]').addEventListener('click', () => finish(input.value));
     box.querySelector('[data-ask="cancel"]').addEventListener('click', () => finish(null));

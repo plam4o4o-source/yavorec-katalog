@@ -285,16 +285,27 @@ async function bookForm(id, presetAcqId, prefill) {
     call(window.api.categories.list()), call(window.api.acquisitions.list()), loadAuthSuggest(),
     call(window.api.av.options())
   ]);
-  const v = prefill || b || { register_date: today(), status: 'наличен', language: 'български', department: 'за възрастни', acquisition_id: presetAcqId || '' };
+  /* Следващият инвентарен номер се предлага наготово (v2.4.27, A1): дотук
+     полето беше празно и задължително, а програмата го знае („Следващ
+     инвентарен номер“ в Настройки) — ръчно преписване при всяка книга и печатна
+     грешка късаше поредността (чл. 16, ал. 2). Остава редактируемо. */
+  // Чете се НАЖИВО, не от SETTINGS_CACHE (преглед на кръга): books:create увеличава
+  // номера в базата, а снимката в паметта оставаше със стария и втората поред книга
+  // получаваше „Този инвентарен номер вече е зает“.
+  let nextInv = '';
+  if (!id && !prefill) { const fresh = await call(window.api.settings.get()); nextInv = (fresh && fresh.next_inv_number) || ''; }
+  const v = prefill || b || { inv_number: nextInv, register_date: today(), status: 'наличен', language: 'български',
+    department: 'за възрастни', acquisition_id: presetAcqId || '' };
   const AV = av || {};
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
+  const isCopy = !!(prefill && !prefill._carry);
   modal(id ? 'Инв. № ' + v.inv_number + ' — редакция'
-    : prefill ? 'Още един екземпляр от „' + (v.title || '') + '“'
+    : isCopy ? 'Още един екземпляр от „' + (v.title || '') + '“'
     : 'Нов документ във фонда', `
     <div class="note"><b>Чл. 16, ал. 1</b> — индивидуалната регистрация съдържа: дата на вписване, инвентарен номер, автор,
     заглавие, том, година, цена, номер и дата на вписване в КДБФ, сигнатура.</div>
-    ${prefill ? `<div class="note d">Това е <b>нов запис</b> със <b>свой инвентарен номер</b> — един инвентарен номер
+    ${isCopy ? `<div class="note d">Това е <b>нов запис</b> със <b>свой инвентарен номер</b> — един инвентарен номер
       отговаря на един екземпляр. Описанието е копирано от инв. № ${esc(String(prefill.copied_from ?? ''))};
       баркодът остава празен (етикетът се лепи на конкретния екземпляр) и се попълва от „Баркод етикети“.</div>` : ''}
     <form id="bookF" onsubmit="return false">
@@ -411,6 +422,8 @@ async function bookForm(id, presetAcqId, prefill) {
     `${id ? `<button class="btn l" onclick="bookCopyForm(${id})"
         title="Създава НОВ запис със следващия инвентарен номер и същото описание — един инвентарен номер отговаря на един екземпляр">+ Още екземпляр</button>` : ''}
      <button class="btn" onclick="closeModal()">Отказ</button>
+     ${!id ? `<button class="btn" onclick="saveBook(null, true)"
+        title="Записва и отваря нова форма със същата партида, дата на вписване, отдел, вид документ, издателство, място и език и следващия инвентарен номер">Запиши и нов</button>` : ''}
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
   const priceEl = $('#bookF [name=price]'), priceEurEl = $('#bookF [name=price_eur]');
@@ -588,7 +601,7 @@ async function sruLookup() {
 }
 window.sruLookup = sruLookup;
 
-async function saveBook(id) {
+async function saveBook(id, andNew) {
   // v1.70.0: обща проверка на ВСИЧКИ полета с req:1 (преди се проверяваха ръчно
   // само заглавие/инв. номер — датата на вписване и цената носеха req:1, но
   // никога не се проверяваха, ако останеха празни).
@@ -606,6 +619,20 @@ async function saveBook(id) {
   else { savedId = await call(window.api.books.create(d), 'Книгата е добавена.'); if (savedId === null) return; }
   closeModal(); await RENDERERS[VIEW]();
   if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
+  /* „Запиши и нов“ (v2.4.27, A2): каталогизирането на партида от 40 книги беше
+     „Отвори → + Инвентирай → попълни → Запиши → Отвори → …“. Общите за партидата
+     полета се пренасят; следващият инвентарен номер идва от опресненото
+     SETTINGS_CACHE (books:create го увеличава). */
+  if (andNew && !id) {
+    await loadSettingsCache();
+    const carry = {};
+    ['acquisition_id', 'register_date', 'department', 'publisher', 'city', 'language', 'category_id']
+      .forEach(k => { if (d[k] !== undefined && d[k] !== '') carry[k] = d[k]; });
+    await bookForm(null, carry.acquisition_id || null, Object.assign({
+      inv_number: (SETTINGS_CACHE && SETTINGS_CACHE.next_inv_number) || '', status: 'наличен', language: 'български',
+      department: 'за възрастни', register_date: today()
+    }, carry, { title: '', author: '', isbn: '', barcode: '', pages: '', subtitle: '', volume: '', year: '', _carry: true }));
+  }
 }
 window.saveBook = saveBook;
 /* Второто щракване НЕ бива да минава през същия безобиден въпрос. Главният процес

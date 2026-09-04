@@ -94,8 +94,11 @@ async function renderDash() {
           <div><span>Просрочие над 60 дни — преценете „липсваща“</span>
             <b>${r.today.longOverdue ? `<a href="#over">${r.today.longOverdue}</a>` : '0'}</b></div>
           ${r.today.suspendedNow ? `<div><span>Читатели с наказание в момента</span><b>${r.today.suspendedNow}</b></div>` : ''}
+          ${r.today.isTodayOpen !== false ? `<div><span>Дневник на библиотеката за днес</span>
+            <b>${r.today.dnevnikFilled ? '<span class="badge ok">попълнен</span>'
+              : `<a href="#dnevnik" onclick="event.preventDefault();dnevnikDayForm(today())" title="Отваря формуляра за днешния ден">не е попълнен</a>`}</b></div>` : ''}
           ${r.today.anonCandidates ? `<div><span>Стари заемания за анонимизиране</span>
-            <b><a href="#setup">${r.today.anonCandidates}</a></b></div>` : ''}
+            <b><a href="#setup/lichni">${r.today.anonCandidates}</a></b></div>` : ''}
           ${r.today.overduePeriodicals ? `<div><span>Периодични издания — закъснял/липсващ брой</span>
             <b><a href="#periodika">${r.today.overduePeriodicals}</a></b></div>` : ''}
         </div>
@@ -138,7 +141,8 @@ async function dashLookup(code) {
       <div class="hint">${esc([b.author, b.publisher, b.year].filter(Boolean).join(' · '))}</div>
       <div style="margin-top:8px">
         ${b.status === 'отчислен' ? '<span class="badge warn">отчислен</span>'
-          : open.length ? `<span class="badge warn">заета от ${esc(open[0].reader_name || '')} до ${bg(open[0].date_due)}</span>`
+          : open.length ? `<span class="badge warn">заета от ${esc(open[0].reader_name || '')} до ${bg(open[0].date_due)}</span>
+              <button class="btn sm" onclick="returnBook(${open[0].id})" title="Приема връщането на този документ">Приеми връщането</button>`
           : '<span class="badge ok">налична</span>'}
         <span class="hint" style="margin-left:8px">${esc(b.department || '')}${b.call_number ? ' · ' + esc(b.call_number) : ''}</span>
       </div></div>`;
@@ -147,7 +151,8 @@ async function dashLookup(code) {
     const open = (loans || []).filter(l => !l.date_in);
     box.innerHTML = `<div class="card scanHit">
       <div class="scanHit-head"><b>Читател</b> · карта ${esc(rd.card_no || '—')}
-        <button class="btn sm" style="float:right" onclick="go('circ')">Заемане / връщане</button></div>
+        <button class="btn sm" style="float:right" onclick="CIRC.readerId=${rd.id};CIRC.mode='out';go('circ')"
+          title="Отваря гишето с този читател вече избран">Заемане / връщане</button></div>
       <div class="scanHit-title">${esc(rd.name)}</div>
       <div class="hint">${esc(rd.category || '')}${rd.phone ? ' · ' + esc(rd.phone) : ''}</div>
       <div style="margin-top:8px">

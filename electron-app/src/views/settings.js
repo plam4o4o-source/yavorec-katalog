@@ -20,6 +20,41 @@ function fmtDateTime(ms) {
   return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() + ' '
     + d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
 }
+/* ---------------- Настройки (преустроени във v2.4.27) ----------------
+   Дотук: 20 карти една под друга (≈6 200 px), осем различни бутона „Запиши…“,
+   шест от картите в една обща форма, а останалите — със свои бутони; полета не
+   на мястото си („Следващ инвентарен номер“ под „Обслужване“, SRU под
+   „Библиотека“); нищо не води до конкретна карта. Сега:
+     • шест раздела с лява навигация (лепкава), търсене в настройките и
+       адрес #setup/<раздел> (виж route() в bootstrap.js);
+     • полетата на settings:update стоят в няколко блока [data-setup-form] —
+       saveSetup() ги събира заедно (setupFormData), за да може всеки раздел да
+       има собствен бутон „Запиши“, а обработчикът да получи всички именувани
+       параметри, както изисква better-sqlite3;
+     • рядко пипаните карти са свити (<details>) с едноредово обобщение;
+     • дългите обяснения са зад „Как работи“, за да е страницата прегледна.
+   Всички id-та, name-ове и onclick функции са същите — тестовете и мускулната
+   памет на библиотекаря не се пипат. */
+const SETUP_SECTIONS = [
+  ['biblioteka', 'Библиотека', 'данни за документите и печата'],
+  ['obsluzhvane', 'Обслужване', 'срокове, правила, календар, напомняния'],
+  ['fond', 'Фонд', 'инвентарни номера, видове, номенклатури, проверки'],
+  ['lichni', 'Лични данни', 'защита на ЕГН, анонимизиране'],
+  ['danni', 'Копия и мрежа', 'резервни копия, споделена база, ограничения'],
+  ['programa', 'Програма', 'външен вид, обновяване, помощ']
+];
+function setupSectionOpen(id, title, sub, chips) {
+  return `<section class="setupSec" id="setup-${id}" data-title="${esc(title)}">
+    <header class="setupHead"><div><h2>${esc(title)}</h2><p class="setupSub">${esc(sub)}</p></div>
+      <div class="setupChips" id="chips-${id}">${chips || ''}</div></header>`;
+}
+const setupHow = (html) => `<details class="setupHow"><summary>Как работи</summary><div class="note" style="margin:8px 0 0">${html}</div></details>`;
+const setupCard = (title, body, opts) => `<div class="card setupCard"${opts && opts.id ? ` id="${opts.id}"` : ''}><h3 style="margin-top:0">${title}</h3>${body}</div>`;
+const setupMore = (title, summary, body, opts) => `<details class="setupMore"${opts && opts.open ? ' open' : ''}${opts && opts.id ? ` id="${opts.id}"` : ''}>
+    <summary><span class="setupMoreTitle">${esc(title)}</span><span class="setupMoreSum">${summary || ''}</span></summary>
+    <div class="setupMoreBody">${body}</div></details>`;
+const setupSave = (label) => `<div class="toolbar setupSave"><button type="button" class="btn pri" onclick="saveSetup()">${label || 'Запиши настройките'}</button></div>`;
+
 async function renderSetup() {
   const [s, dbLoc, backups, employees, cats, limits] = await Promise.all([
     call(window.api.settings.get()), call(window.api.dbLocation.get()),
@@ -28,267 +63,73 @@ async function renderSetup() {
   ]);
   if (!s) return;
   window._EMPLOYEES_ALL = employees || [];
+  const activeEmp = (employees || []).filter(e => e.active).length;
+  // Отворените свити карти остават отворени и след пречертаване (преглед на кръга):
+  // „Запиши ограниченията“ и смяната на папката пречертават страницата.
+  const openMore = new Set([...document.querySelectorAll('#view .setupMore[open] .setupMoreTitle')].map(e => e.textContent));
+  const backupChip = backups && backups.length
+    ? `<span class="chip" id="chipBackup">копие: ${esc(fmtDateTime(backups[0].mtime).slice(0, 10))}</span>`
+    : '<span class="chip w" id="chipBackup">няма копия</span>';
   $('#view').innerHTML = `
     ${needsSetup(s) ? `<div class="note" style="border-left-color:var(--brass)">
-      <b>Първоначална настройка.</b> Попълнете данните на библиотеката по-долу и натиснете
+      <b>Първоначална настройка.</b> Попълнете данните на библиотеката в раздел „Библиотека“ и натиснете
       „Запиши настройките“. Те се използват автоматично навсякъде — в заглавията на актовете,
       протоколите и регистрите за печат, в баркод етикетите и читателските карти, и в лентата
       вляво. Променят се само тук и важат веднага за всички разпечатки.</div>` : ''}
-    <form id="stF" onsubmit="return false">
-    <div class="grid g2">
-      <div class="card"><h3 style="margin-top:0">Библиотека</h3>
-        ${fld('Организация', 'org', { val: s.org })}
-        ${fld('Наименование на библиотеката', 'lib_name', { val: s.lib_name })}
-        ${fld('Населено място', 'place', { val: s.place })}
-        <div class="grid g2">${fld('ЕИК / БУЛСТАТ', 'bulstat', { val: s.bulstat || '' })}${fld('Рег. № в Мин. на културата', 'reg_no', { val: s.reg_no || '' })}</div>
-        <div class="grid g2">${fld('Ръководител', 'director', { val: s.director || '' })}${fld('Длъжност', 'director_role', { val: s.director_role || '' })}</div>
-        ${fld('Библиотекар', 'librarian', { val: s.librarian || '' })}
-        ${fld('Адрес на сайта', 'cat_url', { val: s.cat_url || '' })}
-        ${fld('SRU сървър за въвеждане на записи', 'sru_endpoint', { val: s.sru_endpoint || '',
-          hint: 'по подразбиране: каталогът на Library of Congress (безплатен, без договор). ' +
-                'Ако библиотеката получи достъп до SRU на НБКМ/COBISS, адресът се сменя тук.' })}
-        <div class="field"><label>Лого на организацията</label>
-          <div class="logoBox">
-            ${s.logo ? `<img src="${esc(s.logo)}" alt="лого">`
-                     : '<div class="logoEmpty">няма<br>лого</div>'}
-            <div>
-              <div class="toolbar" style="margin:0">
-                <button type="button" class="btn" onclick="chooseLogo()">${s.logo ? 'Смени…' : 'Избери файл…'}</button>
-                ${s.logo ? '<button type="button" class="btn dgr" onclick="clearLogo()">Премахни</button>' : ''}
-              </div>
-              <div class="hint" style="margin-top:6px">PNG, JPG, GIF, WEBP или SVG, до 512 KB.
-              Влиза автоматично в заглавната част на всички документи за печат — актове, протоколи,
-              инвентарна книга, КДБФ, картони, напомнителни писма — и в читателските карти.</div>
-            </div>
+    <div class="setupWrap">
+    <nav class="setupNav" aria-label="Раздели на настройките">
+      <input id="setupSearch" type="search" placeholder="Търсене в настройките…" autocomplete="off"
+        oninput="setupFilter(this.value)" aria-label="Търсене в настройките">
+      ${SETUP_SECTIONS.map(([id, t, sub]) => `<a href="#setup/${id}" data-sec="${id}" onclick="event.preventDefault();setupGo('${id}')">
+        <span class="setupNavT">${esc(t)}</span><span class="setupNavS">${esc(sub)}</span></a>`).join('')}
+      <div class="hint setupNavHint" id="setupSearchHint"></div>
+    </nav>
+    <div class="setupBody">
+
+    ${setupSectionOpen('biblioteka', 'Библиотека', 'Организацията, хората и логото — така, както излизат върху всеки документ за печат.',
+      `<span class="chip">${activeEmp ? pl(activeEmp, 'активен служител', 'активни служители') : 'без служители'}</span>`)}
+    <form id="stF" data-setup-form onsubmit="return false">
+      <div class="grid g2">
+        <div class="card setupCard"><h3 style="margin-top:0">Библиотека</h3>
+          ${fld('Организация', 'org', { val: s.org, req: 1 })}
+          ${fld('Наименование на библиотеката', 'lib_name', { val: s.lib_name })}
+          ${fld('Населено място', 'place', { val: s.place })}
+          <div class="grid g2">${fld('ЕИК / БУЛСТАТ', 'bulstat', { val: s.bulstat || '' })}${fld('Рег. № в Мин. на културата', 'reg_no', { val: s.reg_no || '' })}</div>
+          <div class="grid g2">${fld('Ръководител', 'director', { val: s.director || '' })}${fld('Длъжност', 'director_role', { val: s.director_role || '' })}</div>
+          ${fld('Библиотекар', 'librarian', { val: s.librarian || '' })}
+          ${fld('Адрес на сайта', 'cat_url', { val: s.cat_url || '', hint: 'излиза върху читателските карти и в онлайн каталога' })}
+          <!-- Бутонът тук записва ЦЯЛАТА форма с настройки (всички блокове
+               [data-setup-form]), не само тази карта — едно и също действие,
+               достъпно от всеки раздел. -->
+          <div class="toolbar" style="margin-top:14px">
+            <button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button>
           </div>
         </div>
-        <!-- Копие на бутона от дъното на страницата (виж form id="stF" по-долу) —
-             картата „Библиотека“ стои най-отгоре, а формата е дълга; библиотекар,
-             който промени само името/адреса тук, не бива да скролва до края, за
-             да разбере, че въобще има бутон „Запиши“. Двата бутона записват едно
-             и също (цялата форма #stF, не само тази карта) — просто едно и също
-             действие, достъпно от две места. -->
-        <div class="toolbar" style="margin-top:14px">
-          <button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button>
+        <div>
+          <div class="card setupCard"><h3 style="margin-top:0">Лого на организацията</h3>
+            <div class="logoBox">
+              ${s.logo ? `<img src="${esc(s.logo)}" alt="лого">` : '<div class="logoEmpty">няма<br>лого</div>'}
+              <div>
+                <div class="toolbar" style="margin:0">
+                  <button type="button" class="btn" onclick="chooseLogo()">${s.logo ? 'Смени…' : 'Избери файл…'}</button>
+                  ${s.logo ? '<button type="button" class="btn dgr" onclick="clearLogo()">Премахни</button>' : ''}
+                </div>
+                <div class="hint" style="margin-top:6px">PNG, JPG, GIF, WEBP или SVG, до 512 KB. Влиза в заглавната част
+                на всички документи за печат и в читателските карти.</div>
+              </div>
+            </div>
+          </div>
+          <div class="card setupCard"><h3 style="margin-top:0">Постоянна комисия</h3>
+            ${fld('Член 1 (библиотекар)', 'committee1', { val: s.committee1 || '' })}
+            ${fld('Член 2', 'committee2', { val: s.committee2 || '' })}
+            ${fld('Член 3 (счетоводител)', 'committee3', { val: s.committee3 || '' })}
+            <div class="hint">Назначава се със заповед на ръководителя; библиотекар и счетоводител са задължителни (чл. 35, ал. 1).</div>
+          </div>
         </div>
       </div>
-      <div class="card"><h3 style="margin-top:0">Обслужване</h3>
-        <div class="note" style="margin-top:0">Стойностите тук са <b>общите по подразбиране</b>. Отделна категория
-        читатели (напр. деца или специалисти) може да има собствени срокове — вижте картата
-        „Правила по категория читатели“ по-долу.</div>
-        <div class="grid g2">
-          ${fld('Срок за заемане (дни)', 'loan_days', { val: s.loan_days, type: 'number' })}
-          ${fld('Максимум документи на читател', 'max_books', { val: s.max_books, type: 'number' })}
-          ${fld('Брой продължения', 'extensions_count', { val: s.extensions_count, type: 'number' })}
-          ${fld('Дни на продължение', 'extension_days', { val: s.extension_days, type: 'number' })}
-          ${fld('Обезщетение за забава (лв./ден)', 'fine_per_day', { val: s.fine_per_day, type: 'number', step: '0.01' })}
-          ${fld('Годишна такса (лв.)', 'annual_fee', { val: s.annual_fee, type: 'number', step: '0.01' })}
-        </div>
-        <div class="grid g2">
-          ${fld('Фонд на свободен достъп (%)', 'free_access_pct', { val: s.free_access_pct, type: 'number' })}
-          ${fld('Следващ инвентарен номер', 'next_inv_number', { val: s.next_inv_number, type: 'number' })}
-        </div>
-        <div class="grid g2">
-          ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
-            { val: s.suspend_per_day ?? 0, type: 'number', step: '0.5', hint: '0 = изключено. По-приложимо от глоба в стотинки.' })}
-          ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number',
-            hint: 'общо за читателя, не за всяко връщане. Празно или 0 = 90 дни по подразбиране; ' +
-                  'за изключване ползвайте полето вляво.' })}
-        </div>
-        <div class="grid g2">
-          ${fld('2-ро напомняне след (дни просрочие)', 'remind2_days', { val: s.remind2_days ?? 14, type: 'number' })}
-          ${fld('3-то напомняне след (дни просрочие)', 'remind3_days', { val: s.remind3_days ?? 30, type: 'number' })}
-        </div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Постоянна комисия</h3>
-      <div class="grid g3">
-        ${fld('Член 1 (библиотекар)', 'committee1', { val: s.committee1 || '' })}
-        ${fld('Член 2', 'committee2', { val: s.committee2 || '' })}
-        ${fld('Член 3 (счетоводител)', 'committee3', { val: s.committee3 || '' })}
-      </div>
-      <div class="hint">Комисията се назначава със заповед на ръководителя; участието на библиотекар и счетоводител е задължително (чл. 35, ал. 1).</div>
-    </div>
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Правила по категория читатели</h3>
-      <div class="note" style="margin-top:0">Празно поле = ползва се общата стойност от картата „Обслужване“.
-      Не е нужно да попълвате всички полета за всяка категория — само тези, които реално се различават
-      (напр. децата с по-кратък срок, специалистите — без наказание).</div>
-      <div id="circRulesBox">зареждане…</div>
-      <div class="toolbar" style="margin-top:8px"><button class="btn" onclick="addCircRule()">+ Правило за категория…</button></div>
-    </div>
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Календар на библиотеката</h3>
-      <div class="note" style="margin-top:0">Падеж, паднал се в затворен ден, се измества автоматично към
-      следващия работен ден. Затворените дни не се броят в наказанието за забава.</div>
-      <div id="calWorkDays">зареждане…</div>
-      <div class="toolbar" style="margin-top:10px"><button class="btn" onclick="saveWorkDays()">Запиши работните дни</button></div>
-      <h3 style="font-size:14px;margin:16px 0 8px">Затворени дни (официални празници, отпуск)</h3>
-      <div class="toolbar">
-        ${fld('Дата', 'calDate', { type: 'date', val: today() })}
-        ${fld('Причина', 'calReason', { val: '', hint: 'по желание' })}
-        <div class="field"><label>&nbsp;</label><button class="btn" onclick="addClosedDay()" style="width:100%">+ Добави</button></div>
-      </div>
-      <div id="calClosedBox">зареждане…</div>
-    </div>
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Лични данни (ЗЗЛД / GDPR)</h3>
-      <div class="note" style="margin-top:0">Върнати заемания, по-стари от зададения срок, могат да се
-      <b>анонимизират</b>: името на читателя изчезва от историята, а за статистиката остава само
-      „категория · година“ (напр. „дете до 14 г. · 2024“). Действието е <b>необратимо</b> и се
-      изпълнява само с бутона по-долу — никога автоматично. Съгласията на читателите вече се
-      записват с дата (вижда се във формата на всеки читател).</div>
-      <div class="grid g2">
-        ${fld('Анонимизиране на заемания, по-стари от (години)', 'anonymize_years',
-          { val: s.anonymize_years ?? 0, type: 'number', hint: '0 = изключено' })}
-        <div class="field"><label>&nbsp;</label>
-          <button type="button" class="btn" onclick="runAnonymize()" style="width:100%">Анонимизирай сега…</button></div>
-      </div>
-      <div class="hint" id="anonHint">зареждане…</div>
-    </div>
-    <div class="toolbar" style="margin-top:14px"><button type="button" class="btn pri" onclick="saveSetup()">Запиши настройките</button></div>
     </form>
-
-    <!-- Тази карта стои ИЗВЪН <form id="stF"> по две причини, и двете съществени:
-         1) loadPdpBox() вкарва в #pdpBox поле за парола; вложена <form> в друга <form>
-            се изхвърля мълчаливо от HTML парсера (по спецификация), заради което
-            бутонът „Отключи" по-рано не правеше нищо — formData() получаваше null.
-         2) Дори като <div>, поле вътре в #stF щеше да попадне в formData('#stF') на
-            saveSetup() и паролата щеше да пътува към settings:update без нужда.
-         Картата е самостоятелна — има си собствени бутони и не се пази с „Запиши
-         настройките". -->
-    <div class="card" style="margin-top:14px"><h3 style="margin-top:0">Защита на ЕГН / № лична карта</h3>
-      <div class="note" style="margin-top:0">ЕГН и номер на лична карта на читателите могат да се пазят
-      <b>криптирани</b> в самата база данни, с обща парола за всички компютри, които ползват тази база —
-      важи и за споделена мрежова база. Останалите данни на читателя (име, адрес, телефон, история на
-      заемания) не са засегнати и работят нормално без паролата. Паролата се въвежда веднъж на всеки
-      компютър, докато програмата работи. <b>Ако паролата бъде забравена, ЕГН/№ ЛК стават
-      невъзстановими</b> — както при криптирано резервно копие.</div>
-      <div id="pdpBox">зареждане…</div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Номенклатури</h3>
-      <div class="note" style="margin-top:0">Контролирани списъци за полетата с избор — така „худ. л-ра“ и
-      „художествена литература“ не се разпиляват като различни стойности. Вторият (незадължителен) надпис на
-      реда е <b>публичният</b> — той се показва в онлайн каталога вместо вътрешния (напр. вътрешно
-      „краеведски“, публично „Краезнание“). Записва се по един ред за стойност:
-      <code>стойност | публичен надпис</code>.</div>
-      <div id="avEditors">зареждане…</div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Шаблони за напомняния</h3>
-      <div class="note" style="margin-top:0">Текстовете за писмо, SMS и заглавие на напомнянията за
-      просрочени материали (раздел „Просрочени“) се редактират тук. Плейсхолдър във фигурни скоби,
-      напр. <code>{reader}</code>, се заменя автоматично при подготовката на всяко напомняне.
-      Оставете поле празно, за да ползвате текста по подразбиране.</div>
-      <div class="hint" id="noticePh" style="margin:6px 0 10px;line-height:1.7">зареждане на плейсхолдъри…</div>
-      <form id="noticesF" onsubmit="return false">
-        ${fld('Тема на писмото', 'notice_subject', { val: s.notice_subject || '', hint: 'използва се само за имейл' })}
-        ${fld('Текст на писмото', 'notice_body', { type: 'textarea', rows: 9, val: s.notice_body || '' })}
-        ${fld('Кратък текст за SMS', 'notice_sms', { type: 'textarea', rows: 2, val: s.notice_sms || '' })}
-      </form>
-      <div class="toolbar">
-        <button class="btn pri" onclick="saveNotices()">Запиши шаблоните</button>
-        <button class="btn" onclick="resetNoticeTemplates()">Възстанови по подразбиране</button>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Антивирусна защита</h3>
-      <div class="note" style="margin-top:0">Докато инсталаторът е без закупен цифров подпис, Windows
-      Defender и други антивирусни може да спират инсталирането или да заключват файловете на
-      програмата — базата данни, резервните копия, папката на каталога. Това е <b>фалшива
-      тревога</b> заради липсващия подпис, не признак за зловреден код.</div>
-      <div class="toolbar">
-        <button class="btn pri" onclick="avScript()">Скрипт за Defender…</button>
-        <button class="btn" onclick="avCopyDirs()">Копирай папките (за AVG и др.)</button>
-        <button class="btn" onclick="avHelp()">Какво да направя?</button>
-      </div>
-      <div class="hint" style="margin-top:8px">Скриптът добавя папките на програмата в изключенията
-      на Windows Defender и я разрешава през „Защита от рансъмуер“. Записва се като файл, който се
-      изпълнява <b>веднъж, като администратор</b> (десен бутон → „Изпълни като администратор“).</div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Въвеждане на данни от друга система</h3>
-      <div class="note" style="margin-top:0">Ако библиотеката е водила фонда в друга програма
-      (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се въвеждат оттам, вместо да се
-      преписват на ръка. Четат се <b>CSV</b>, <b>TXT</b>, <b>TSV</b> и <b>XLSX</b>; кирилицата в
-      стари файлове (Windows-1251) се разпознава сама.</div>
-      <div class="toolbar"><button class="btn pri" onclick="importChoose()">Избери файл за въвеждане…</button></div>
-      <div class="hint" style="margin-top:8px">След избора се показва как са разпознати колоните и
-      първите редове от файла — съответствието се проверява и поправя, преди нещо да се запише.
-      <b>Направете резервно копие преди голямо въвеждане.</b></div>
-    </div>
-
-    ${categoriesCardHtml(cats)}
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Ограничения на записите</h3>
-      <div class="note" style="margin-top:0">Горна граница за броя записи в програмата. <b>0 означава без
-      ограничение.</b> Проверява се само при добавяне на нов запис — вече въведените данни остават
-      достъпни и редактируеми дори ако лимитът бъде намален по-късно.</div>
-      <form id="limF" onsubmit="return false"><div class="grid g2">
-        ${fld('Лимит на документите във фонда', 'limit_books', { val: limits ? limits.limitBooks : 0, type: 'number',
-          hint: limits ? 'в момента: ' + limits.books.toLocaleString('bg-BG') : '' })}
-        ${fld('Лимит на читателите', 'limit_readers', { val: limits ? limits.limitReaders : 0, type: 'number',
-          hint: limits ? 'в момента: ' + limits.readers.toLocaleString('bg-BG') : '' })}
-      </div></form>
-      ${limits && (limits.limitBooks > 0 || limits.limitReaders > 0) ? `
-        <div style="margin-top:6px">
-          ${limits.limitBooks > 0 ? limitBarHtml('Документи', limits.books, limits.limitBooks) : ''}
-          ${limits.limitReaders > 0 ? limitBarHtml('Читатели', limits.readers, limits.limitReaders) : ''}
-        </div>` : ''}
-      <div class="toolbar"><button class="btn pri" onclick="saveLimits()">Запиши ограниченията</button></div>
-    </div>
-
-    <!-- Проверка на данните (v2.4.21). Двете проверки са за неща, които базата не
-         може да гарантира сама: правилото „един инвентарен номер = един екземпляр“
-         не е изразимо като ограничение върху вече съществуваща база, а UNIQUE върху
-         баркода беше нарочно пропуснат при миграция v4, за да не гръмне върху база с
-         вече съществуващи дубликати. Каналът books:findDuplicateBarcodes стоеше от
-         тогава без нито един екран, който да го вика — коментарът при него обещаваше
-         „отделен слой“, който така и не се появи. -->
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Проверка на данните</h3>
-      <div class="note" style="margin-top:0">Търси два вида несъответствия, които програмата не може да поправи
-      сама. Нищо не се променя без ваше изрично действие, и нито едно от поправянията не променя броя
-      документи или стойността на фонда.</div>
-      <div class="toolbar"><button class="btn" onclick="runDataChecks()">Провери сега</button></div>
-      <div id="dataChecks"></div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Външен вид — цветова тема</h3>
-      <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        ${THEMES.map(t => `<button type="button" onclick="setTheme('${t.id}')"
-          style="width:112px;border:2px solid ${s.theme === t.id ? 'var(--ink)' : 'var(--rule2)'};border-radius:4px;padding:0;overflow:hidden;cursor:pointer;background:none;text-align:left">
-          <span style="display:block;height:36px;background:${t.spine}"></span>
-          <span style="display:block;height:15px;background:${t.brass}"></span>
-          <span style="display:block;padding:6px 8px;font-size:11px;background:${t.paper};color:#1B1813">${esc(t.name)}${s.theme === t.id ? ' ✓' : ''}</span>
-        </button>`).join('')}
-      </div>
-      <label class="chk" style="margin-top:12px"><input type="checkbox" ${s.scan_sound == null || +s.scan_sound ? 'checked' : ''}
-        onchange="setScanSound(this.checked)"><span>Звуков сигнал при сканиране в „Заемане и връщане“ —
-        кратък висок тон при успех, двоен нисък при отказ/забава/заделена книга. Очите са върху книгата,
-        не върху екрана — звукът се забелязва.</span></label>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Работа в мрежа (няколко компютъра)</h3>
-      <div class="note" style="margin-top:0">За да работят няколко работни компютъра с една и съща база данни, посочете
-      папка на <b>споделен мрежов диск</b> (напр. картографиран диск <code>Z:\\</code> или път от вида
-      <code>\\\\СЪРВЪР\\споделена-папка</code>) — всички програми, сочещи към тази папка, ще виждат едни и същи данни.</div>
-      <div class="note w"><b>Важно за надеждността:</b> SQLite (форматът на базата данни) официално <b>не е препоръчан</b>
-      за едновременен запис от няколко компютъра върху мрежов диск (SMB) — заключването на файлове по мрежата не винаги
-      работи коректно и в редки случаи може да доведе до повредена база. Препоръки: работете един по един, когато е
-      възможно; правете редовно резервно копие на файла <code>library.db</code>; ако забележите грешки „database is
-      locked“ или повредени данни — върнете последното добро резервно копие. За библиотека с интензивна едновременна
-      работа от много станции е по-безопасно решение истинска клиент-сървър база данни, което е извън обхвата на тази версия.</div>
-      <div class="hint">Текуща папка: <b style="font-family:var(--mono)">${esc(dbLoc ? dbLoc.folder : '')}</b>
-      ${dbLoc && dbLoc.isDefault ? ' (по подразбиране, локална)' : ' (персонализирана)'}</div>
-      <div class="toolbar">
-        <button class="btn pri" onclick="chooseDbLocation()">Избери мрежова/друга папка…</button>
-        ${dbLoc && !dbLoc.isDefault ? '<button class="btn" onclick="resetDbLocation()">Върни към локалната по подразбиране</button>' : ''}
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Служители</h3>
-      <div class="note" style="margin-top:0">Списъкът е общ за всички компютри, свързани към тази база данни. Изборът
-      „кой служител работи в момента“ (долу вляво в лентата) е локален за всеки компютър и записва избраното име в
-      одитната следа при всяко действие.</div>
+    ${setupCard('Служители', `
+      ${setupHow('Списъкът е общ за всички компютри, свързани към тази база данни. Изборът „кой служител работи в момента“ (долу вляво в лентата) е локален за всеки компютър и записва избраното име в одитната следа при всяко действие.')}
       <div class="toolbar"><button class="btn pri" onclick="employeeForm()">+ Нов служител</button></div>
       ${employees && employees.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
         <th>Име</th><th>Състояние</th><th></th></tr></thead><tbody>
@@ -299,18 +140,121 @@ async function renderSetup() {
             <button class="btn sm" onclick="toggleEmployeeActive(${e.id},${e.active})">${e.active ? 'Деактивирай' : 'Активирай'}</button>
             <button class="btn sm dgr" onclick="deleteEmployee(${e.id})">Изтрий</button>
           </td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="hint">Все още няма добавени служители.</div>'}
-    </div>
+        </tbody></table></div>` : '<div class="hint">Все още няма добавени служители — без тях одитната следа не знае кой е работил.</div>'}`)}
+    </section>
 
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Резервно копие</h3>
-      <div class="note" style="margin-top:0">Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се
-      записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави
-      <b>автоматично резервно копие веднъж на ден</b> (при първото стартиране за деня) в подпапка <code>backups</code>
-      до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата,
-      или за пренасяне на данните на друг компютър със същата програма.</div>
-      <!-- Състоянието на автоматичното копие: криптирано ли е и ако не — защо.
-           До v2.2.0 предупреждението се вписваше само в одитната следа, където
-           библиотекарят на практика никога не поглежда. -->
+    ${setupSectionOpen('obsluzhvane', 'Обслужване', 'Общите правила за заемане; отделна категория читатели може да има свои — по-долу.',
+      `<span class="chip">срок ${dni(s.loan_days || 30)}</span><span class="chip">до ${s.max_books || '∞'} документа</span>`)}
+    <div data-setup-form>
+      <div class="card setupCard"><h3 style="margin-top:0">Обслужване</h3>
+        <div class="grid g2">
+          ${fld('Срок за заемане (дни)', 'loan_days', { val: s.loan_days, type: 'number', min: 1 })}
+          ${fld('Максимум документи на читател', 'max_books', { val: s.max_books, type: 'number', min: 0, hint: '0 = без ограничение' })}
+          ${fld('Брой продължения', 'extensions_count', { val: s.extensions_count, type: 'number', min: 0, hint: 'празно = 2 · 0 = без ограничение' })}
+          ${fld('Дни на продължение', 'extension_days', { val: s.extension_days, type: 'number', min: 1 })}
+          ${fld('Обезщетение за забава (лв./ден)', 'fine_per_day', { val: s.fine_per_day, type: 'number', step: '0.01', min: 0 })}
+          ${fld('Годишна такса (лв.)', 'annual_fee', { val: s.annual_fee, type: 'number', step: '0.01', min: 0 })}
+        </div>
+        <div class="grid g2">
+          ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
+            { val: s.suspend_per_day ?? 0, type: 'number', step: '0.5', min: 0, hint: '0 = изключено. По-приложимо от глоба в стотинки.' })}
+          ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number', min: 0,
+            hint: 'общо за читателя, не за всяко връщане. Празно или 0 = 90 дни по подразбиране.' })}
+        </div>
+        <div class="grid g2">
+          ${fld('2-ро напомняне след (дни просрочие)', 'remind2_days', { val: s.remind2_days ?? 14, type: 'number', min: 0 })}
+          ${fld('3-то напомняне след (дни просрочие)', 'remind3_days', { val: s.remind3_days ?? 30, type: 'number', min: 0 })}
+        </div>
+        ${setupSave()}
+      </div>
+    </div>
+    ${setupCard('Правила по категория читатели', `
+      ${setupHow('Празно поле = ползва се общата стойност отгоре. Не е нужно да попълвате всички полета за всяка категория — само тези, които реално се различават (напр. децата с по-кратък срок, специалистите — без наказание).')}
+      <div id="circRulesBox">зареждане…</div>
+      <div class="toolbar" style="margin-top:8px"><button class="btn" onclick="addCircRule()">+ Правило за категория…</button></div>`)}
+    ${setupCard('Календар на библиотеката', `
+      ${setupHow('Падеж, паднал се в затворен ден, се измества автоматично към следващия работен ден. Затворените дни не се броят в наказанието за забава.')}
+      <div id="calWorkDays">зареждане…</div>
+      <div class="toolbar" style="margin-top:10px"><button class="btn" onclick="saveWorkDays()">Запиши работните дни</button></div>
+      <h4 class="setupH4">Затворени дни (официални празници, отпуск)</h4>
+      <div class="toolbar">
+        ${fld('Дата', 'calDate', { type: 'date', val: today() })}
+        ${fld('Причина', 'calReason', { val: '', hint: 'по желание' })}
+        <div class="field"><label>&nbsp;</label><button class="btn" onclick="addClosedDay()" style="width:100%">+ Добави</button></div>
+      </div>
+      <div id="calClosedBox">зареждане…</div>`)}
+    ${setupMore('Шаблони за напомняния', 'писмо, SMS и тема — по подразбиране или свои', `
+      ${setupHow('Текстовете за писмо, SMS и заглавие на напомнянията за просрочени материали (раздел „Просрочени“) се редактират тук. Плейсхолдър във фигурни скоби, напр. <code>{reader}</code>, се заменя автоматично при подготовката на всяко напомняне. Оставете поле празно, за да ползвате текста по подразбиране.')}
+      <div class="hint" id="noticePh" style="margin:6px 0 10px;line-height:1.7">зареждане на плейсхолдъри…</div>
+      <form id="noticesF" onsubmit="return false">
+        ${fld('Тема на писмото', 'notice_subject', { val: s.notice_subject || '', hint: 'използва се само за имейл' })}
+        ${fld('Текст на писмото', 'notice_body', { type: 'textarea', rows: 9, val: s.notice_body || '' })}
+        ${fld('Кратък текст за SMS', 'notice_sms', { type: 'textarea', rows: 2, val: s.notice_sms || '' })}
+      </form>
+      <div class="toolbar">
+        <button class="btn pri" onclick="saveNotices()">Запиши шаблоните</button>
+        <button class="btn" onclick="resetNoticeTemplates()">Възстанови по подразбиране</button>
+      </div>`)}
+    </section>
+
+    ${setupSectionOpen('fond', 'Фонд', 'Инвентарни номера, видове документи, контролирани списъци и проверка на данните.',
+      `<span class="chip">следващ инв. № ${esc(String(s.next_inv_number ?? '—'))}</span>`)}
+    <div data-setup-form>
+      <div class="card setupCard"><h3 style="margin-top:0">Инвентарна книга</h3>
+        <div class="grid g2">
+          ${fld('Следващ инвентарен номер', 'next_inv_number', { val: s.next_inv_number, type: 'number', min: 1,
+            hint: 'предлага се при всеки нов документ и се увеличава сам' })}
+          ${fld('Фонд на свободен достъп (%)', 'free_access_pct', { val: s.free_access_pct, type: 'number', min: 0,
+            hint: 'определя допустимите естествени загуби при инвентаризация (чл. 41)' })}
+        </div>
+        ${setupSave()}
+      </div>
+    </div>
+    ${categoriesCardHtml(cats)}
+    ${setupMore('Номенклатури', 'контролирани списъци за полетата с избор', `
+      ${setupHow('Контролирани списъци за полетата с избор — така „худ. л-ра“ и „художествена литература“ не се разпиляват като различни стойности. Вторият (незадължителен) надпис на реда е <b>публичният</b> — той се показва в онлайн каталога вместо вътрешния (напр. вътрешно „краеведски“, публично „Краезнание“). Записва се по един ред за стойност: <code>стойност | публичен надпис</code>.')}
+      <div id="avEditors">зареждане…</div>`)}
+    ${setupCard('Проверка на данните', `
+      ${setupHow('Търси несъответствия, които програмата не може да поправи сама: няколко екземпляра под един инвентарен номер, бройка 0, документ „отчислен“ без акт, един баркод на няколко документа. Нищо не се променя без ваше изрично действие, и нито едно от поправянията не променя броя документи или стойността на фонда.')}
+      <div class="toolbar"><button class="btn" onclick="runDataChecks()">Провери сега</button></div>
+      <div id="dataChecks"></div>`)}
+    ${setupMore('Въвеждане на данни от друга система', 'CSV, TXT, TSV, XLSX — от АБ, iLib или Excel', `
+      ${setupHow('Ако библиотеката е водила фонда в друга програма (<b>АБ</b>, <b>iLib</b>) или в таблица на Excel, записите се въвеждат оттам, вместо да се преписват на ръка. Четат се <b>CSV</b>, <b>TXT</b>, <b>TSV</b> и <b>XLSX</b>; кирилицата в стари файлове (Windows-1251) се разпознава сама. След избора се показва как са разпознати колоните и първите редове — съответствието се проверява и поправя, преди нещо да се запише. <b>Направете резервно копие преди голямо въвеждане.</b>')}
+      <div class="toolbar"><button class="btn pri" onclick="importChoose()">Избери файл за въвеждане…</button></div>`)}
+    <div data-setup-form>
+      ${setupMore('SRU сървър за въвеждане на записи', esc(s.sru_endpoint || 'Library of Congress (по подразбиране)'), `
+        ${fld('Адрес на SRU сървъра', 'sru_endpoint', { val: s.sru_endpoint || '',
+          hint: 'по подразбиране: каталогът на Library of Congress (безплатен, без договор). Ако библиотеката получи достъп до SRU на НБКМ/COBISS, адресът се сменя тук.' })}
+        ${setupSave()}`)}
+    </div>
+    </section>
+
+    ${setupSectionOpen('lichni', 'Лични данни', 'ЗЗЛД / GDPR: защита на ЕГН и № ЛК, анонимизиране на стара история.',
+      `<span class="chip" id="chipPdp">защита: …</span>`)}
+    <!-- Картата стои ИЗВЪН [data-setup-form] по две причини: loadPdpBox() вкарва
+         поле за парола, което не бива да пътува към settings:update; и вложена
+         <form> в друга <form> се изхвърля от HTML парсера. -->
+    ${setupCard('Защита на ЕГН / № лична карта', `
+      ${setupHow('ЕГН и номер на лична карта на читателите могат да се пазят <b>криптирани</b> в самата база данни, с обща парола за всички компютри, които ползват тази база — важи и за споделена мрежова база. Останалите данни на читателя (име, адрес, телефон, история на заемания) не са засегнати и работят нормално без паролата. Паролата се въвежда веднъж на всеки компютър, докато програмата работи. <b>Ако паролата бъде забравена, ЕГН/№ ЛК стават невъзстановими</b> — както при криптирано резервно копие.')}
+      <div id="pdpBox">зареждане…</div>`)}
+    <div data-setup-form>
+      <div class="card setupCard"><h3 style="margin-top:0">Анонимизиране (ЗЗЛД / GDPR)</h3>
+        ${setupHow('Върнати заемания, по-стари от зададения срок, могат да се <b>анонимизират</b>: името на читателя изчезва от историята, а за статистиката остава само „категория · година“ (напр. „дете до 14 г. · 2024“). Обезличават се и записите в одитната следа и старите търсения. Действието е <b>необратимо</b> и се изпълнява само с бутона — никога автоматично. Съгласията на читателите се записват с дата (във формата на всеки читател).')}
+        <div class="grid g2">
+          ${fld('Анонимизиране на заемания, по-стари от (години)', 'anonymize_years',
+            { val: s.anonymize_years ?? 0, type: 'number', min: 0, hint: '0 = изключено · запишете, преди да анонимизирате' })}
+          <div class="field"><label>&nbsp;</label>
+            <button type="button" class="btn" onclick="runAnonymize()" style="width:100%">Анонимизирай сега…</button></div>
+        </div>
+        <div class="hint" id="anonHint">зареждане…</div>
+        ${setupSave()}
+      </div>
+    </div>
+    </section>
+
+    ${setupSectionOpen('danni', 'Копия и мрежа', 'Резервни копия, споделена база за няколко компютъра, ограничения.', backupChip)}
+    ${setupCard('Резервно копие', `
+      ${setupHow('Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави <b>автоматично резервно копие веднъж на ден</b> (при първото стартиране за деня) в подпапка <code>backups</code> до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата, или за пренасяне на данните на друг компютър със същата програма.')}
       <div id="autoBkBox"></div>
       <div class="toolbar">
         <button class="btn pri" onclick="backupNowForm()">Направи резервно копие сега…</button>
@@ -323,14 +267,55 @@ async function renderSetup() {
           <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}
               ${b.encrypted ? '<span class="badge" title="Защитено с парола">🔒 криптирано</span>' : ''}</td>
           <td><button class="btn sm" onclick="restoreBackupFromList('${jsq(b.path)}')">Възстанови</button></td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}
-    </div>
+        </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}`)}
+    ${setupMore('Работа в мрежа (няколко компютъра)', esc(dbLoc && !dbLoc.isDefault ? (dbLoc.folder || 'персонализирана папка') : 'локална папка по подразбиране'), `
+      ${setupHow('За да работят няколко работни компютъра с една и съща база данни, посочете папка на <b>споделен мрежов диск</b> (напр. картографиран диск <code>Z:\\</code> или път от вида <code>\\\\СЪРВЪР\\споделена-папка</code>) — всички програми, сочещи към тази папка, ще виждат едни и същи данни.<br><br><b>Важно за надеждността:</b> SQLite (форматът на базата данни) официално <b>не е препоръчан</b> за едновременен запис от няколко компютъра върху мрежов диск (SMB) — заключването на файлове по мрежата не винаги работи коректно и в редки случаи може да доведе до повредена база. Препоръки: работете един по един, когато е възможно; правете редовно резервно копие на файла <code>library.db</code>; ако забележите грешки „database is locked“ или повредени данни — върнете последното добро резервно копие.')}
+      <div class="hint">Текуща папка: <b style="font-family:var(--mono)">${esc(dbLoc ? dbLoc.folder : '')}</b>
+      ${dbLoc && dbLoc.isDefault ? ' (по подразбиране, локална)' : ' (персонализирана)'}</div>
+      <div class="toolbar">
+        <button class="btn pri" onclick="chooseDbLocation()">Избери мрежова/друга папка…</button>
+        ${dbLoc && !dbLoc.isDefault ? '<button class="btn" onclick="resetDbLocation()">Върни към локалната по подразбиране</button>' : ''}
+      </div>`)}
+    ${setupMore('Ограничения на записите', limits && (limits.limitBooks > 0 || limits.limitReaders > 0)
+        ? `документи: ${limits.limitBooks || '∞'} · читатели: ${limits.limitReaders || '∞'}` : 'без ограничение', `
+      ${setupHow('Горна граница за броя записи в програмата. <b>0 означава без ограничение.</b> Проверява се само при добавяне на нов запис — вече въведените данни остават достъпни и редактируеми дори ако лимитът бъде намален по-късно.')}
+      <form id="limF" onsubmit="return false"><div class="grid g2">
+        ${fld('Лимит на документите във фонда', 'limit_books', { val: limits ? limits.limitBooks : 0, type: 'number', min: 0,
+          hint: limits ? 'в момента: ' + limits.books.toLocaleString('bg-BG') : '' })}
+        ${fld('Лимит на читателите', 'limit_readers', { val: limits ? limits.limitReaders : 0, type: 'number', min: 0,
+          hint: limits ? 'в момента: ' + limits.readers.toLocaleString('bg-BG') : '' })}
+      </div></form>
+      ${limits && (limits.limitBooks > 0 || limits.limitReaders > 0) ? `
+        <div style="margin-top:6px">
+          ${limits.limitBooks > 0 ? limitBarHtml('Документи', limits.books, limits.limitBooks) : ''}
+          ${limits.limitReaders > 0 ? limitBarHtml('Читатели', limits.readers, limits.limitReaders) : ''}
+        </div>` : ''}
+      <div class="toolbar"><button class="btn pri" onclick="saveLimits()">Запиши ограниченията</button></div>`)}
+    ${setupMore('Антивирусна защита', 'изключения за Windows Defender — веднъж, при инсталиране', `
+      ${setupHow('Докато инсталаторът е без закупен цифров подпис, Windows Defender и други антивирусни може да спират инсталирането или да заключват файловете на програмата — базата данни, резервните копия, папката на каталога. Това е <b>фалшива тревога</b> заради липсващия подпис, не признак за зловреден код. Скриптът добавя папките на програмата в изключенията на Windows Defender и я разрешава през „Защита от рансъмуер“. Записва се като файл, който се изпълнява <b>веднъж, като администратор</b> (десен бутон → „Изпълни като администратор“).')}
+      <div class="toolbar">
+        <button class="btn pri" onclick="avScript()">Скрипт за Defender…</button>
+        <button class="btn" onclick="avCopyDirs()">Копирай папките (за AVG и др.)</button>
+        <button class="btn" onclick="avHelp()">Какво да направя?</button>
+      </div>`)}
+    </section>
 
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Обновяване</h3>
-      ${updateStatusHtml()}
-    </div>
-
-    <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Помощ и обратна връзка</h3>
+    ${setupSectionOpen('programa', 'Програма', 'Външен вид, обновяване и връзка с разработчика.',
+      `<span class="chip">v${esc(String((APP_CREDIT_TEXT.match(/v([\d.]+)/) || [])[1] || ''))}</span>`)}
+    ${setupCard('Външен вид', `
+      <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
+      <div class="themeRow">
+        ${THEMES.map(t => `<button type="button" class="themeSw${s.theme === t.id ? ' on' : ''}" onclick="setTheme('${t.id}')" title="${esc(t.name)}">
+          <span class="themeSwSpine" style="background:${t.spine}"></span>
+          <span class="themeSwBrass" style="background:${t.brass}"></span>
+          <span class="themeSwName" style="background:${t.paper}">${esc(t.name)}${s.theme === t.id ? ' ✓' : ''}</span>
+        </button>`).join('')}
+      </div>
+      <label class="chk" style="margin-top:12px"><input type="checkbox" ${s.scan_sound == null || +s.scan_sound ? 'checked' : ''}
+        onchange="setScanSound(this.checked)"><span>Звуков сигнал при сканиране в „Заемане и връщане“ —
+        кратък висок тон при успех, двоен нисък при отказ/забава/заделена книга.</span></label>`)}
+    ${setupCard('Обновяване', updateStatusHtml())}
+    ${setupCard('Помощ и обратна връзка', `
       <div class="note" style="margin-top:0">Програмата се ползва от читалищни, общински и училищни библиотеки в
       цялата страна — съобщение за забелязана грешка помага на всички.
       <b>Не прилагайте файла на базата данни или лични данни на читатели</b> към съобщението — опишете само
@@ -342,9 +327,15 @@ async function renderSetup() {
       <div class="toolbar">
         <button type="button" class="btn pri" onclick="reportBug()">Съобщи за грешка…</button>
         <button type="button" class="btn" onclick="copyDevEmail()">Копирай имейла</button>
-      </div>
-    </div>
-    <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>`;
+      </div>`)}
+    <div class="hint" style="margin-top:20px;font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div>
+    </section>
+
+    </div></div>`;
+  if (openMore.size) document.querySelectorAll('#view .setupMore').forEach(d => {
+    const t = d.querySelector('.setupMoreTitle'); if (t && openMore.has(t.textContent)) d.open = true;
+  });
+  setupInitNav();
   loadNoticePlaceholders();
   loadAvEditors();
   loadAnonHint();
@@ -517,6 +508,11 @@ async function loadPdpBox() {
   const el = $('#pdpBox'); if (!el) return;
   const s = await call(window.api.pdp.status());
   if (!s) { el.textContent = ''; return; }
+  const chip = $('#chipPdp');
+  if (chip) {
+    chip.textContent = !s.configured ? 'защита: не е зададена' : s.unlocked ? 'защита: отключена' : 'защита: заключена';
+    chip.className = 'chip' + (!s.configured ? ' w' : s.unlocked ? ' ok' : '');
+  }
   if (!s.configured) {
     el.innerHTML = `<div class="toolbar" style="margin:0">
       <button type="button" class="btn pri" onclick="pdpSetupForm()">Задай парола за защита…</button></div>`;
@@ -859,21 +855,104 @@ async function saveLimits() {
   renderSetup();
 }
 window.saveLimits = saveLimits;
+/* Всички полета на settings:update, събрани от всички блокове [data-setup-form]
+   (v2.4.27): обработчикът изисква ВСИЧКИ именувани параметри наведнъж, а
+   полетата вече стоят в различни раздели, всеки със свой бутон „Запиши“. */
+function setupFormData() {
+  const out = {};
+  document.querySelectorAll('#view [data-setup-form]').forEach(block => {
+    block.querySelectorAll('input,select,textarea').forEach(el => {
+      if (!el.name) return;
+      out[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+  });
+  return out;
+}
 async function saveSetup() {
-  const d = formData('#stF'); d.id = 1;
-  await call(window.api.settings.update(d), 'Настройките са записани.');
+  const d = setupFormData(); d.id = 1;
+  if (!String(d.org || '').trim() && !String(d.lib_name || '').trim()) {
+    return toast('Въведете организацията или наименованието на библиотеката — те излизат върху всеки документ.', 'err');
+  }
+  /* Позицията на превъртане се пази (v2.4.27): страницата се пречертава след
+     запис, а библиотекарят е в раздел по средата ѝ. */
+  const main = $('#main'); const y = main ? main.scrollTop : 0;
+  if (await call(window.api.settings.update(d), 'Настройките са записани.') === null) return;
   await loadSettingsCache();
   // Пречертава текущия изглед, за да влязат новите данни веднага навсякъде, където
   // се показват — без да се излиза и влиза наново в раздела.
-  if (RENDERERS[VIEW]) RENDERERS[VIEW]();
+  if (RENDERERS[VIEW]) await RENDERERS[VIEW]();
+  if (main && VIEW === 'setup') main.scrollTop = y;
 }
 window.saveSetup = saveSetup;
+
+/* ---------------- Навигация вътре в Настройки (v2.4.27) ---------------- */
+function setupGo(id) {
+  const el = document.getElementById('setup-' + id);
+  if (!el) return;
+  // replaceState не задейства hashchange (иначе route() би пречертал всичко).
+  if (location.hash !== '#setup/' + id) { try { history.replaceState(null, '', '#setup/' + id); } catch (e) { /* jsdom */ } }
+  if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  setupMarkActive(id);
+}
+window.setupGo = setupGo;
+let SETUP_ACTIVE = '';
+function setupMarkActive(id) {
+  SETUP_ACTIVE = id;
+  document.querySelectorAll('.setupNav a[data-sec]').forEach(a => a.classList.toggle('on', a.dataset.sec === id));
+}
+let SETUP_OBSERVER = null;
+function setupInitNav() {
+  if (SETUP_OBSERVER) { SETUP_OBSERVER.disconnect(); SETUP_OBSERVER = null; }
+  const secs = [...document.querySelectorAll('.setupSec')];
+  if (!secs.length) return;
+  // Активният раздел следва превъртането (IntersectionObserver липсва в jsdom).
+  if (typeof IntersectionObserver === 'function') {
+    const main = $('#main');
+    SETUP_OBSERVER = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible.length) setupMarkActive(visible[0].target.id.replace(/^setup-/, ''));
+    }, { root: main || null, threshold: [0, 0.25, 0.5, 1], rootMargin: '0px 0px -65% 0px' });
+    secs.forEach(sec => SETUP_OBSERVER.observe(sec));
+  }
+  // Без адрес: разделът, в който библиотекарят беше преди пречертаването (запис,
+  // смяна на тема), иначе първият.
+  const known = (id) => !!(id && document.getElementById('setup-' + id));
+  const sub = known(ROUTE_SUB) ? ROUTE_SUB : known(SETUP_ACTIVE) ? SETUP_ACTIVE : secs[0].id.replace(/^setup-/, '');
+  setupMarkActive(sub);
+  if (ROUTE_SUB && sub === ROUTE_SUB) {
+    // Веднъж — само при идване по адрес. Иначе всяко пречертаване (запис, смяна на
+    // тема, събитие от обновяването) връщаше страницата на посочения раздел.
+    ROUTE_SUB = '';
+    setTimeout(() => setupGo(sub), 0);
+  }
+}
+/* Търсене в настройките: скрива картите, чийто текст не съдържа търсеното,
+   отваря свитите, в които има съвпадение, и крие празните раздели. */
+function setupFilter(q) {
+  q = String(q || '').trim().toLowerCase();
+  let shown = 0, total = 0;
+  document.querySelectorAll('.setupSec').forEach(sec => {
+    let secShown = 0;
+    sec.querySelectorAll('.setupCard, .setupMore').forEach(card => {
+      total++;
+      const hit = !q || card.textContent.toLowerCase().includes(q);
+      card.hidden = !hit;
+      if (hit) { secShown++; shown++; }
+      if (q && hit && card.tagName === 'DETAILS') card.open = true;
+    });
+    const head = sec.querySelector('.setupHead');
+    if (head) head.hidden = !!q && !secShown;
+  });
+  const hint = $('#setupSearchHint');
+  if (hint) hint.textContent = q ? (shown ? pl(shown, 'съвпадение', 'съвпадения') + ' от ' + total : 'няма съвпадение — опитайте друга дума') : '';
+}
+window.setupFilter = setupFilter;
 async function loadNoticePlaceholders() {
   const d = await call(window.api.settings.noticeDefaults());
   const el = $('#noticePh');
   if (!el) return;
   if (!d) { el.textContent = ''; return; }
-  el.innerHTML = 'Налични: ' + d.placeholders.map(([k, t]) => `<code>{${k}}</code> — ${esc(t)}`).join(' &nbsp;·&nbsp; ');
+  el.innerHTML = 'Налични: ' + (d.placeholders || []).map(([k, t]) => `<code>{${k}}</code> — ${esc(t)}`).join(' &nbsp;·&nbsp; ');
 }
 async function saveNotices() {
   const d = formData('#noticesF');

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -861,6 +861,18 @@ function createWindow() {
   win.once('ready-to-show', showOnce);
   setTimeout(showOnce, 5000).unref?.();
   win.setMenuBarVisibility(false);
+  /* Скритото меню НЕ маха ускорителите му (одит v2.4.27): Ctrl+R / Ctrl+Shift+R
+     презареждаха renderer-а и изтриваха отворената форма или сесията за
+     инвентаризация без дума, Ctrl+Shift+I отваряше DevTools с пълен достъп до
+     window.api, F11 — цял екран. Menu.setApplicationMenu(null) ги премахва;
+     Ctrl+C/V/X в полетата продължават да работят от системата. */
+  if (Menu && typeof Menu.setApplicationMenu === 'function' && typeof Menu.buildFromTemplate === 'function') {
+    // Мащабът (Ctrl+= / Ctrl+- / Ctrl+0) остава — библиотекар с по-слабо зрение го
+    // ползва; менюто е скрито (setMenuBarVisibility), ускорителите работят.
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: 'Изглед', submenu: [{ role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }] }
+    ]));
+  }
   // Сигурност (Фаза 3): приложението никога легитимно не отваря нов прозорец
   // и не навигира извън заредения src/index.html (вътрешното "рутиране" по
   // изгледи е само смяна на location.hash, което не задейства тези събития —
@@ -976,7 +988,10 @@ app.whenReady().then(() => {
   // Одит v2.3.1 №25: „заделена" резервация нямаше никакъв механизъм за
   // изтичане — веднъж на старт е достатъчно (срокът е в цели дни, виж
   // HOLD_EXPIRE_DAYS в handlers/holds.js), периодичен таймер е излишен.
-  expireStaleHolds();
+  /* Изтичането на резервации е удобство, не условие за старт (одит v2.4.27):
+     по мрежов дял SQLITE_BUSY оттук падаше в общия .catch и показваше „Базата
+     данни не можа да бъде отворена“ при напълно здрава база. */
+  try { expireStaleHolds(); } catch (e) { console.error('Изтекли резервации при старт:', e.message); }
   startAutoPushTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
@@ -1058,7 +1073,7 @@ app.whenReady().then(() => {
             + 'след като я отвори, за да не запише данни по стария си начин.')
         + '\n\nКакво да направите:\n'
         + '• Обновете InvLib на ТОЗИ компютър до версията, която ползват останалите работни места '
-        + '(„Помощ“ → „Провери за обновяване“ на обновен компютър показва коя е тя).\n'
+        + '(„Настройки“ → „Обновяване“ → „Провери сега“ на обновен компютър показва коя е тя).\n'
         + '• НЕ възстановявайте резервно копие и НЕ преименувайте library.db — това би изтрило '
         + 'работата, въведена с по-новата версия.'
         + (err.isNetwork
@@ -1100,7 +1115,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopAutoPushTimer();
-  flushCatalogWrite(); // не губи последната промяна, ако насроченият (debounced) запис още не е станал
+  // Само ако наистина има насрочен (debounced) запис (одит v2.4.27) — иначе всяко
+  // затваряне пренаписваше многомегабайтния каталог в (мрежовата) папка и
+  // произвеждаше git commit без промяна във фонда.
+  if (catalogWriteDebouncer.pending()) flushCatalogWrite();
   if (db) db.close();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -1176,7 +1194,18 @@ ipcMain.handle('app:getUser', () => run(() => CURRENT_USER));
 /* ---------------- Служители ----------------
    Извадени в handlers/employees.js (Фаза 4, стъпка 6 от разбиването на
    монолита main.js на модули по домейн). */
-require('./handlers/employees')(ipcMain, { getDb: () => db, run, logAudit });
+require('./handlers/employees')(ipcMain, {
+  getDb: () => db, run, logAudit,
+  syncCurrentUser: (name) => {
+    if (name === undefined) return CURRENT_USER;
+    CURRENT_USER = (name || '').trim();
+    updateConfig((cfg) => { cfg.lastUserName = CURRENT_USER; });
+    // Значката в прозореца се обновява при следващото ѝ прочитане; тук се праща и
+    // изрично, ако прозорецът е жив.
+    try { const w = BrowserWindow.getAllWindows()[0]; if (w && !w.isDestroyed()) w.webContents.send('app:userChanged', CURRENT_USER); } catch (e) { /* без прозорец */ }
+    return CURRENT_USER;
+  }
+});
 ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
 // Отваря папката с дневниците на грешки (logs/) в системния файлов мениджър —
 // удобно, за да прикачи librarianят файловете при заявка за поддръжка.

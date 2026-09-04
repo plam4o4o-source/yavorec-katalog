@@ -688,7 +688,11 @@ function revealShared(){
   for(var i=0;i<R.length;i++)if(String(R[i].inv)===target){idx=i;break;}
   if(idx<0)return;
   while(P<=idx&&P<R.length)page();
-  var el=document.querySelector('#katR .kat-item[data-inv="'+target+'"]');
+  // CSS.escape (v2.4.27): стойността идва от адреса (#zapis=…) и кавичка в нея
+  // хвърляше от querySelector, което падаше в общия catch и заменяше живия
+  // каталог с трите демонстрационни записа.
+  var safeTarget=(window.CSS&&CSS.escape)?CSS.escape(target):String(target).replace(/["\\]/g,'\\$&');
+  var el=document.querySelector('#katR .kat-item[data-inv="'+safeTarget+'"]');
   if(el){
     el.classList.add('kat-open','kat-item-in');
     el.setAttribute('aria-expanded','true');
