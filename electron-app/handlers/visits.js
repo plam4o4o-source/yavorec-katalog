@@ -17,7 +17,8 @@ module.exports = function registerVisitsHandlers(ipcMain, deps) {
   ipcMain.handle('visits:add', (e, { date, count, replace }) =>
     run(() => {
       if (!isValidIsoDate(date)) throw new Error('Датата на посещенията липсва или е невалидна.');
-      const n = parseInt(count, 10);
+      // v2.4.29: parseInt('2.5') = 2 и parseInt('3abc') = 3 минаваха проверката мълчаливо.
+      const n = /^\s*\d+\s*$/.test(String(count ?? '')) ? parseInt(count, 10) : NaN;
       if (!Number.isInteger(n) || n < 0 || String(count).trim() === '') {
         throw new Error('Броят посещения трябва да е цяло число, 0 или повече.');
       }

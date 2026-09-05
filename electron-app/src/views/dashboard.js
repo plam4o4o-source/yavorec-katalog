@@ -40,33 +40,12 @@ async function renderDash() {
         : ''}
     </div>
 
-    <div class="grid g3" style="margin-top:16px">
-      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
-        ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
-        ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Читател</th><th>Документ</th><th>Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
-        ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
-        <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
-        <td class="num warn">${l.daysLate ?? ''}</td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
-      </div>
-      <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
-        <div class="statRows">
-          <div><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
-          <div><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
-          <div><span>Заемания</span><b>${r.loansYear}</b></div>
-          <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
-        </div>
-        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
-          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
-        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
-        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
-      </div>
-    </div>
-
-    <div class="grid g3" style="margin-top:16px">
-      <div class="card"><h3 style="margin-top:0">Бързи действия</h3>
+    <!-- v2.4.29: подредба на таблото — бързите действия са лента под показателите
+         (дотук колона от шест бутона, която правеше долния ред двойно по-висок и
+         оставяше „Предстоящи връщания“ и „За днес“ наполовина празни); списъкът с
+         работа за деня стои до просрочените, а годината — до предстоящите. -->
+    <div style="margin-top:16px">
+      <div class="card dashActions"><h3 style="margin-top:0">Бързи действия</h3>
         <div class="quickGrid">
           <button class="quickBtn" onclick="bookForm()"><span>${DASH_ICONS.plus}</span>Нов документ</button>
           <button class="quickBtn" onclick="go('circ')"><span>${NAV_ICONS.circ}</span>Заемане / връщане</button>
@@ -76,14 +55,19 @@ async function renderDash() {
           <button class="quickBtn" onclick="go('labels')"><span>${NAV_ICONS.labels}</span>Етикети</button>
         </div>
       </div>
-      <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
-        <div style="font-size:13px">
-          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
-          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
-          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
-        </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
+        ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
+        ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+        <th>Читател</th><th>Документ</th><th class="nowrap">Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
+        ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
+        <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
+        <td class="num warn">${l.daysLate ?? ''}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
       </div>
-      <div class="card"><h3 style="margin-top:0">📋 За днес${r.today.isTodayOpen === false ? ' <span class="badge warn">затворен ден</span>' : ''}</h3>
+      <div class="card"><h3 style="margin-top:0">За днес${r.today.isTodayOpen === false ? ' <span class="badge warn">затворен ден</span>' : ''}</h3>
         <div class="statRows">
           <div><span>Връщания до 3 дни — напомнете <b>преди</b> срока</span>
             <b>${r.upcoming.length ? `<a href="#circ">${r.upcoming.length}</a>` : '0'}</b></div>
@@ -103,6 +87,29 @@ async function renderDash() {
             <b><a href="#periodika">${r.today.overduePeriodicals}</a></b></div>` : ''}
         </div>
         <div class="hint" style="margin-top:8px">Пререгистрацията е дължима една година след последното записване.</div>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
+        <div style="font-size:13px">
+          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
+          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
+          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
+        </div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
+        <div class="statRows">
+          <div><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
+          <div><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
+          <div><span>Заемания</span><b>${r.loansYear}</b></div>
+          <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
+        </div>
+        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
+        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
+        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
       </div>
     </div>
 
@@ -131,10 +138,15 @@ async function dashLookup(code) {
   ]);
   const b = book.ok ? book.data : null;
   const rd = reader.ok ? reader.data : null;
+  /* Код, който е и инв. № на документ, и № на читателска карта (v2.4.29): дотук
+     мълчаливо се показваше само документът. Двете се показват, за да избере
+     библиотекарят; полето остава на фокус за следващото сканиране. */
+  const both = b && rd ? `<div class="note w" style="margin-bottom:8px">Кодът <b>${esc(code)}</b> съвпада и с документ, и с читателска карта — по-долу са и двете.</div>` : '';
+  box.innerHTML = both;
   if (b) {
     const loans = await call(window.api.loans.byBook(b.id));
     const open = (loans || []).filter(l => !l.date_in);
-    box.innerHTML = `<div class="card scanHit">
+    box.innerHTML += `<div class="card scanHit">
       <div class="scanHit-head"><b>Документ</b> · инв. № ${b.inv_number ?? '—'}
         <button class="btn sm" style="float:right" onclick="bookForm(${b.id})">Отвори карта</button></div>
       <div class="scanHit-title">${esc(b.title)}</div>
@@ -146,10 +158,11 @@ async function dashLookup(code) {
           : '<span class="badge ok">налична</span>'}
         <span class="hint" style="margin-left:8px">${esc(b.department || '')}${b.call_number ? ' · ' + esc(b.call_number) : ''}</span>
       </div></div>`;
-  } else if (rd) {
+  }
+  if (rd) {
     const loans = await call(window.api.loans.byReader(rd.id));
     const open = (loans || []).filter(l => !l.date_in);
-    box.innerHTML = `<div class="card scanHit">
+    box.innerHTML += `<div class="card scanHit"${b ? ' style="margin-top:8px"' : ''}>
       <div class="scanHit-head"><b>Читател</b> · карта ${esc(rd.card_no || '—')}
         <button class="btn sm" style="float:right" onclick="CIRC.readerId=${rd.id};CIRC.mode='out';go('circ')"
           title="Отваря гишето с този читател вече избран">Заемане / връщане</button></div>
@@ -160,7 +173,9 @@ async function dashLookup(code) {
           : `<span class="badge ok">активен</span>`}
         <span class="hint" style="margin-left:8px">заети в момента: <b>${open.length}</b></span>
       </div></div>`;
-  } else if (!book.ok || !reader.ok) {
+  }
+  if (b || rd) return;
+  if (!book.ok || !reader.ok) {
     /* Одит v2.4.24: сканирането вече ОТКАЗВА при двусмислен код (баркод на един
        документ, инвентарен номер на друг — виж resolveScannedBook). Дотук отказът
        се сливаше с „няма такъв“ и библиотекарят четеше, че етикетът, който държи в

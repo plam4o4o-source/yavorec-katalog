@@ -201,7 +201,7 @@ async function personView(id) {
       </div>
     </div>
     ${linksPanelHtml('персона', id, links || [])}`,
-    `<button class="btn" onclick="closeModal()">Затвори</button>
+    `<button class="btn" onclick="closeModal();linksRefreshListIfChanged()">Затвори</button>
      <button class="btn" onclick="closeModal();personForm(${id})">Редакция</button>
      <button class="btn dgr" onclick="personDelete(${id})">Изтрий</button>`);
 }

@@ -122,9 +122,20 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
 
   /* prev — досегашният ред от базата (при редакция): status_date се обновява само
      когато статусът реално се променя, а не при всяко записване на формата. */
+  /* Одит v2.4.29: better-sqlite3 подава всяко JS число като REAL, а SQLite го
+     записва в TEXT колона като „2002.0“ — година „2002.0“, страници „250.0“.
+     Формата праща низове, но вносът от стар каталог, мобилният път и бъдещи
+     обаждания не са длъжни; текстовите полета се привеждат към низ тук, веднъж. */
+  const BOOK_TEXT_FIELDS = new Set(['inv_number', 'category_id', 'acquisition_id', 'price'].reduce(
+    (set, f) => { set.delete(f); return set; }, new Set(BOOK_FIELDS)));
   function bookPayload(b, prev) {
     const out = {};
-    BOOK_FIELDS.forEach(f => { out[f] = b[f] === undefined || b[f] === '' ? null : b[f]; });
+    BOOK_FIELDS.forEach(f => {
+      let v = b[f] === undefined || b[f] === '' ? null : b[f];
+      if (v != null && BOOK_TEXT_FIELDS.has(f) && typeof v === 'number') v = String(v);
+      if (f === 'barcode' && v != null) v = String(v).trim() || null; // „BC-1 “ ≠ „BC-1“ за четеца
+      out[f] = v;
+    });
     if (out.inv_number != null) out.inv_number = parseInt(out.inv_number, 10);
     if (out.category_id != null) out.category_id = parseInt(out.category_id, 10);
     if (out.acquisition_id != null) out.acquisition_id = parseInt(out.acquisition_id, 10);
@@ -227,6 +238,40 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     return n;
   }
 
+  /* Одит v2.4.29: един баркод = един екземпляр. Дублиран баркод се приемаше
+     мълчаливо при запис и редакция, а после resolveScannedBook() (security-utils.js)
+     отказва ВСЯКО сканиране на този етикет на гишето, в акт и при инвентаризация —
+     дефект, който се появява седмици по-късно и далеч от причината. Проверката е
+     в транзакцията, срещу другите редове. books:findDuplicateBarcodes остава за
+     старите данни. */
+  function assertUniqueBarcode(db, barcode, invNumber, selfId) {
+    const code = barcode == null ? '' : String(barcode).trim();
+    const self = selfId || -1;
+    if (code) {
+      const other = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(code, self);
+      if (other) {
+        throw new Error('Баркод ' + code + ' вече е на инв. № ' + (other.inv_number ?? other.id)
+          + ' — един баркод се лепи само на един екземпляр. Дайте на този документ друг етикет '
+          + '(„Баркод етикети“) или оставете полето празно.');
+      }
+      /* Числов баркод, равен на ЧУЖД инвентарен номер, също прави сканирането
+         двусмислено (resolveScannedBook отказва и двата документа). */
+      if (/^\d{1,9}$/.test(code)) {
+        const byInv = db.prepare('SELECT id, inv_number FROM books WHERE inv_number = ? AND id != ? LIMIT 1').get(parseInt(code, 10), self);
+        if (byInv) {
+          throw new Error('Баркод ' + code + ' съвпада с инвентарния номер на друг документ (инв. № ' + byInv.inv_number
+            + ') — при сканиране програмата няма как да различи двата. Дайте на този документ друг етикет.');
+        }
+      }
+    }
+    if (invNumber != null) {
+      const byCode = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(String(invNumber), self);
+      if (byCode) {
+        throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
+          + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');
+      }
+    }
+  }
   ipcMain.handle('books:create', (e, book) =>
     run(() => {
       const db = getDb();
@@ -234,6 +279,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const tx = db.transaction((b) => {
         const payload = bookPayload(b);
         assertValidStatus(payload.status);
+        assertUniqueBarcode(db, payload.barcode, payload.inv_number, null);
         const info = db.prepare(`
           INSERT INTO books (${BOOK_FIELDS.join(',')}, register_date)
           VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')}, @register_date)
@@ -260,8 +306,10 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const db = getDb();
       const tx = db.transaction((b) => {
         const prev = db.prepare('SELECT * FROM books WHERE id = ?').get(b.id);
+        if (!prev) throw new Error('Документът не е намерен — вероятно е изтрит от друго работно място.');
         const payload = bookPayload(b, prev);
         assertValidStatus(payload.status);
+        assertUniqueBarcode(db, payload.barcode, payload.inv_number, b.id);
         db.prepare(`
           UPDATE books SET ${BOOK_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id
         `).run(Object.assign({ id: b.id }, payload));
@@ -336,6 +384,16 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           + 'документи остават в инвентарната книга отбелязани, а не заличени. Изтриването би променило и '
           + 'наличността в КДБФ за минали, вече отчетени години.');
       }
+      /* Аналитични описания „от книга“ (v2.4.29): analytics.book_id е ON DELETE SET
+         NULL — статията оставаше без източник, без предупреждение; същият дефект,
+         който periodicals:delete отказва от v2.4.24. Проверката е ПРЕДИ второто
+         натискане, за да не изяде потвърждението. */
+      const anl = db.prepare('SELECT COUNT(*) AS n FROM analytics WHERE book_id = ?').get(id).n;
+      if (anl > 0) {
+        throw new Error('Към документа има ' + anl + (anl === 1 ? ' аналитично описание' : ' аналитични описания')
+          + ' (раздел „Аналитично описание“) и той не може да бъде изтрит — източникът им ще изчезне. '
+          + 'Първо пренасочете или изтрийте статиите.');
+      }
       const past = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ?').get(id).n;
       if (past > 0 && !askedTwice(pendingBookDelete, id)) {
         throw new Error('Документът има ' + past + ' записа в историята на заеманията и изтриването би заличило и тях '
@@ -344,8 +402,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           + 'документът ще бъде изтрит заедно с '
           + (past === 1 ? 'единствения запис' : 'всичките ' + past + ' записа') + ' в историята.');
       }
+      // Краеведските връзки към документа също се чистят, иначе „Персоналии“ броят „(изтрит запис)“.
       const b = db.prepare('SELECT inv_number, title FROM books WHERE id = ?').get(id);
-      db.prepare('DELETE FROM books WHERE id = ?').run(id);
+      db.transaction(() => {
+        db.prepare('DELETE FROM books WHERE id = ?').run(id);
+        db.prepare("DELETE FROM links WHERE to_kind = 'книга' AND to_id = ?").run(id);
+      })();
       if (past > 0) {
         logAudit('Изтрит документ с история', 'инв. № ' + ((b && b.inv_number) ?? '—') + ' — ' + ((b && b.title) || '') +
           ' (заедно с ' + past + ' записа в историята на заеманията)');

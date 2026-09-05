@@ -477,7 +477,8 @@ async function loadAnonHint() {
   const parts = [
     r.count ? `${r.count} ${r.count === 1 ? 'върнато заемане' : 'върнати заемания'}` : '',
     r.auditCount ? `${r.auditCount} ${r.auditCount === 1 ? 'запис' : 'записа'} в одитната следа` : '',
-    r.searchCount ? `${r.searchCount} ${r.searchCount === 1 ? 'старо търсене' : 'стари търсения'}` : ''
+    r.searchCount ? `${r.searchCount} ${r.searchCount === 1 ? 'старо търсене' : 'стари търсения'}` : '',
+    r.otherCount ? `${r.otherCount} ${r.otherCount === 1 ? 'запис' : 'записа'} в резервации, предложения, МЗС, напомняния и посещения` : ''
   ].filter(Boolean);
   el.textContent = !r.years
     ? 'Анонимизирането е изключено (0 години).'
@@ -489,16 +490,19 @@ async function runAnonymize() {
   const r = await call(window.api.gdpr.candidates());
   if (!r) return;
   if (!r.years) return toast('Първо задайте срок в години (и запишете настройките).', 'err');
-  const total = (r.count || 0) + (r.auditCount || 0) + (r.searchCount || 0);
+  const total = (r.count || 0) + (r.auditCount || 0) + (r.searchCount || 0) + (r.otherCount || 0);
   if (!total) return toast('Няма нищо за анонимизиране.', 'ok');
-  const c = r.count || 0, a = r.auditCount || 0, q = r.searchCount || 0;
+  const c = r.count || 0, a = r.auditCount || 0, q = r.searchCount || 0, o = r.otherCount || 0;
   if (!confirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${c === 1 ? '1 върнато заемане губи' : c + ' върнати заемания губят'} връзката с имената ` +
     `(остава само „категория · година“), ${a === 1 ? '1 запис в одитната следа се обезличава' : a + ' записа в одитната следа се обезличават'} и ` +
-    `${q === 1 ? '1 старо търсене се изтрива' : q + ' стари търсения се изтриват'}. Да продължа?`)) return;
+    `${q === 1 ? '1 старо търсене се изтрива' : q + ' стари търсения се изтриват'}` +
+    (o ? ` и ${o === 1 ? '1 запис' : o + ' записа'} в резервации, предложения, МЗС, напомняния и посещения по домовете ${o === 1 ? 'губи' : 'губят'} името` : '') +
+    `. Да продължа?`)) return;
   const res = await call(window.api.gdpr.anonymize());
   if (!res) return;
   toast((res.anonymized === 1 ? 'Анонимизирано 1 заемане' : 'Анонимизирани ' + res.anonymized + ' заемания')
-    + ', ' + (res.auditCleared === 1 ? 'обезличен 1 запис' : 'обезличени ' + res.auditCleared + ' записа') + ' в следата.', 'ok');
+    + ', ' + (res.auditCleared === 1 ? 'обезличен 1 запис' : 'обезличени ' + res.auditCleared + ' записа') + ' в следата'
+    + (res.otherCleared ? ', ' + (res.otherCleared === 1 ? '1 друг запис' : res.otherCleared + ' други записа') : '') + '.', 'ok');
   markSaved();
   loadAnonHint();
 }

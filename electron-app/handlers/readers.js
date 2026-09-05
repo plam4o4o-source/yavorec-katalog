@@ -54,6 +54,16 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
      стотици килобайта, пренесени през IPC и изхвърлени веднага, при всеки
      натиснат клавиш. Екранът „Читатели“ нарочно не подава limit: там търсенето
      трябва да върне всички съвпадения, защото списъкът се странира отсам. */
+  /* v2.4.29: списъкът показва и колко документа държи читателят в момента и
+     дали има просрочие — дотук се разбираше само с отваряне на гишето за всеки.
+     Двата брояча са корелирани подзаявки по idx_loans_reader — при 3 000 читатели
+     и 100 000 заемания са милисекунди. */
+  const READER_LIST_SELECT = `
+    SELECT r.*,
+      (SELECT COUNT(*) FROM loans l WHERE l.reader_id = r.id AND l.date_in IS NULL) AS open_loans,
+      (SELECT COUNT(*) FROM loans l WHERE l.reader_id = r.id AND l.date_in IS NULL
+         AND l.date_due IS NOT NULL AND l.date_due < date('now')) AS overdue_loans
+    FROM readers r`;
   ipcMain.handle('readers:list', (e, query, limit) =>
     run(() => {
       const db = getDb();
@@ -64,13 +74,13 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         // карта остават LIKE — цифри, без проблем с регистъра, а "съдържа навсякъде"
         // помага при търсене по част от номера.
         return maskReaderRows(db.prepare(`
-          SELECT * FROM readers
-          WHERE id IN (SELECT rowid FROM readers_fts WHERE readers_fts MATCH ?)
-             OR phone LIKE ? OR card_no LIKE ?
-          ORDER BY name${cap}
+          ${READER_LIST_SELECT}
+          WHERE r.id IN (SELECT rowid FROM readers_fts WHERE readers_fts MATCH ?)
+             OR r.phone LIKE ? OR r.card_no LIKE ?
+          ORDER BY r.name${cap}
         `).all(ftsQuery(query), q, q));
       }
-      return maskReaderRows(db.prepare('SELECT * FROM readers ORDER BY name' + cap).all());
+      return maskReaderRows(db.prepare(READER_LIST_SELECT + ' ORDER BY r.name' + cap).all());
     })
   );
   ipcMain.handle('readers:get', (e, id) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id))));

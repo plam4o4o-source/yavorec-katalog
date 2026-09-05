@@ -37,6 +37,14 @@ function auditDiffHtml(diffJson) {
    действие в 09:30 се четеше „06:30“, а действие в 00:40 на 4 януари — „22:40“ на
    3 януари, тоест В ДРУГ ДЕН, в документа, който съществува, за да възстанови
    какво се е случило и кога. */
+/* Датата и часът на два реда в таблицата (v2.4.29) — „4.09.2026 г., 21:03:07 ч.“
+   се пренасяше на три реда в тясната първа колона. */
+function auditTsCell(ts) {
+  const t = auditTs(ts);
+  const m = /^(.*?),\s*(.*)$/.exec(t);
+  // Разделителят остава в текста (копиране, четци на екрана), но не се вижда.
+  return m ? esc(m[1]) + '<span class="sep">, </span><span class="hint">' + esc(m[2]) + '</span>' : esc(t);
+}
 function auditTs(ts) {
   const raw = String(ts || '');
   if (!raw) return '—';
@@ -47,7 +55,7 @@ function auditTs(ts) {
   return isNaN(d) ? raw : d.toLocaleString('bg-BG');
 }
 function auditRowsHtml(rows) {
-  return rows.length ? rows.map(a => `<tr><td class="num">${auditTs(a.ts)}</td><td>${esc(a.user || '—')}</td>
+  return rows.length ? rows.map(a => `<tr><td class="num ts">${auditTsCell(a.ts)}</td><td>${esc(a.user || '—')}</td>
     <td><span class="badge">${esc(a.action)}</span></td><td style="font-size:12.5px">${esc(a.detail)}${auditDiffHtml(a.diff)}</td></tr>`).join('')
     : `<tr><td colspan="4" class="empty">Няма записи.</td></tr>`;
 }
@@ -82,12 +90,12 @@ async function renderOdit() {
     <div class="note">Одитната следа записва автоматично кой служител какво е извършил. Задайте името си долу
     вляво в страничния панел, за да се отбелязва коректно.</div>
     <div class="toolbar">
-      <input id="oditSearch" placeholder="Търсене по служител, действие, подробност…" value="${esc(ODIT_Q)}">
+      <input id="oditSearch" type="search" style="flex:1;max-width:420px" placeholder="Търсене по служител, действие, подробност…" value="${esc(ODIT_Q)}">
       <span style="flex:1"></span>
       <span class="hint" id="oditCount">${esc(auditCountText(rows.length))}</span>
       <button class="btn sm" onclick="exportAuditCSV()">CSV</button>
     </div>
-    <div class="wrap"><table class="ledger"><thead><tr><th>Дата/час</th><th>Служител</th><th>Действие</th><th>Подробност</th></tr></thead>
+    <div class="wrap"><table class="ledger oditTable"><thead><tr><th>Дата/час</th><th>Служител</th><th>Действие</th><th>Подробност</th></tr></thead>
     <tbody id="oditBody">${auditRowsHtml(rows)}</tbody></table></div>`;
   $('#oditSearch').addEventListener('input', debounce(e => { ODIT_Q = e.target.value; refreshAudit(); }, 300));
 }

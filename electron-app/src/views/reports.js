@@ -85,7 +85,7 @@ function reportBodyHtml(r) {
   }
   if (r.id === 'fund_breakdown') {
     return `
-      <div class="kpis" style="margin-bottom:16px">${kpi('📚', r.fundCount.toLocaleString('bg-BG'), 'Фонд към 31.12.' + r.year + ' г.', mny(r.fundValue))}</div>
+      <div class="kpis" style="margin-bottom:16px">${kpi(KPI_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Фонд към 31.12.' + r.year + ' г.', mny(r.fundValue))}</div>
       <div class="grid g3">
         <div class="card"><h3 style="margin-top:0">По отдели</h3>${reportPairTable(r.byDepartment)}</div>
         <div class="card"><h3 style="margin-top:0">По категории</h3>${reportPairTable(r.byCategory)}</div>
@@ -95,10 +95,10 @@ function reportBodyHtml(r) {
   if (r.id === 'readers_by_category') {
     return `
       <div class="kpis" style="margin-bottom:16px">
-        ${kpi('👥', r.total.toLocaleString('bg-BG'), 'Активни читатели',
+        ${kpi(KPI_ICONS.readers, r.total.toLocaleString('bg-BG'), 'Активни читатели',
           'регистрирани до 31.12.' + r.year + ' г. · състоянието е към днешна дата'
           + (r.undated ? ' · от тях ' + r.undated + ' без вписана дата на регистрация' : ''))}
-        ${kpi('🆕', r.newThisYear.toLocaleString('bg-BG'), 'Новорегистрирани през ' + r.year + ' г.')}
+        ${kpi(KPI_ICONS.newReader, r.newThisYear.toLocaleString('bg-BG'), 'Новорегистрирани през ' + r.year + ' г.')}
       </div>
       <div class="card"><h3 style="margin-top:0">По категория</h3>${reportPairTable(r.byCategory)}</div>`;
   }
@@ -113,7 +113,7 @@ function reportBodyHtml(r) {
   }
   if (r.id === 'mzs_annual') {
     return `
-      <div class="kpis" style="margin-bottom:16px">${kpi('🤝', r.total.toLocaleString('bg-BG'), 'Заявки за ' + r.year + ' г.')}</div>
+      <div class="kpis" style="margin-bottom:16px">${kpi(KPI_ICONS.mzs, r.total.toLocaleString('bg-BG'), 'Заявки за ' + r.year + ' г.')}</div>
       <div class="grid g2">
         <div class="card"><h3 style="margin-top:0">По посока</h3>${reportPairTable(r.byDirection)}</div>
         <div class="card"><h3 style="margin-top:0">По състояние</h3>${reportPairTable(r.byStatus)}</div>
@@ -122,9 +122,9 @@ function reportBodyHtml(r) {
   if (r.id === 'fees_income') {
     return `
       <div class="kpis" style="margin-bottom:16px">
-        ${kpi('💰', mny(r.chargedValue), 'Начислено през ' + r.year + ' г.',
+        ${kpi(KPI_ICONS.money, mny(r.chargedValue), 'Начислено през ' + r.year + ' г.',
           r.chargedTotal + (r.chargedTotal === 1 ? ' начисление' : ' начисления'))}
-        ${kpi('✅', mny(r.paidValue), 'Събрано през ' + r.year + ' г.',
+        ${kpi(KPI_ICONS.check, mny(r.paidValue), 'Събрано през ' + r.year + ' г.',
           r.paidCount + (r.paidCount === 1 ? ' плащане' : ' плащания'))}
       </div>
       <div class="card"><h3 style="margin-top:0">Начислено по вид</h3>${reportPairTable(r.charged, true)}</div>`;

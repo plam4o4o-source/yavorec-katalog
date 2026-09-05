@@ -240,7 +240,8 @@ test('5. продължение на просрочено заемане от �
   await h.go('over');
   assert.match(h.viewText(), new RegExp('Общо дължимо обезщетение: ' + E.mny(fine).replace(/[.\/]/g, '\\$&')));
   const row = h.$('#ovBody tr');
-  assert.match(h.text(row), new RegExp('Иван Читателов 101 Под игото ' + E.bgDate(due).replace(/\./g, '\\.') + ' ' + late + ' ' + E.mny(fine).replace(/[.\/]/g, '\\$&')));
+  // v2.4.29: сумата в клетката е „X лв.“ над „Y €“ (mnyCell), без наклонена черта.
+  assert.match(h.text(row), new RegExp('Иван Читателов 101 Под игото ' + E.bgDate(due).replace(/\./g, '\\.') + ' ' + late + ' ' + E.mny(fine).replace(' / ', ' ').replace(/[.\/]/g, '\\$&')));
   const n = h.toasts.length;
   await h.clickButton('Продължи', '#ovBody');
   const ts = h.toastsSince(n);
@@ -547,7 +548,8 @@ test('9. инвентаризация: започване, сканиране, �
   assert.match(p, /Заети от читатели към деня на проверката: 1/);
   assert.match(p, /203 Речник В 40\.00 лв\..*ОБЩО 1 документ 40\.00 лв\./);
   h.window.ppClose();
-  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*справочен фонд 3 1.*1 Мария Иванова.*приключена пълна/);
+  // v2.4.29: колоната „Обхват“ показва и ограничението по отдел („отдел „справочен““).
+  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*справочен фонд отдел „справочен“ 3 1.*1 Мария Иванова.*приключена пълна/);
   await returnByScan('202');
   noRendererErrors();
 });

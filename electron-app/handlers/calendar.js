@@ -12,6 +12,8 @@
 // дни не брои затворените дни като забава. Затова, за разлика от
 // autoBackupIfNeeded (връщано само за app.whenReady()), тук връщаните
 // функции остават в активна употреба от друг, все още неизваден домейн.
+const { isValidIsoDate } = require('../security-utils');
+
 module.exports = function registerCalendarHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -87,6 +89,8 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
   ipcMain.handle('calendar:addClosed', (e, { date, reason }) =>
     run(() => {
       if (!date) throw new Error('Изберете дата.');
+      // v2.4.29: „2026-5-1“ или „2026-02-30“ влизаха в списъка, но никога не съвпадаха с работен ден.
+      if (!isValidIsoDate(date)) throw new Error('Датата (' + date + ') е невалидна — очаква се ГГГГ-ММ-ДД.');
       getDb().prepare('INSERT OR REPLACE INTO calendar_closed (date, reason) VALUES (?, ?)').run(date, reason || null);
       logAudit('Календар', 'затворен ден: ' + date + (reason ? ' — ' + reason : ''));
     })

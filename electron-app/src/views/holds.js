@@ -38,11 +38,13 @@ async function holdPrompt(readerId) {
   modal('Нова резервация', `
     <div class="note">Резервацията ще се запише на <b>${esc(reader.name)}</b>${reader.card_no ? ' · карта ' + esc(reader.card_no) : ''}.</div>
     <form id="holdF" onsubmit="return false">
-      ${fld('Заета книга', 'code', { val: '', hint: 'баркод или инв. №', req: 1 })}
+      ${fld('Заета книга', 'code', { val: '', hint: 'баркод или инв. №', req: 1, onkey: `if(event.key==='Enter'){event.preventDefault();saveHold(${reader.id})}` })}
     </form>`,
     `<button class="btn l" onclick="holdChangeReader()">Друг читател…</button>
      <button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveHold(${reader.id})">Резервирай</button>`);
+  // Баркод четецът праща кода + Enter (v2.4.29) — полето е на фокус и Enter записва.
+  setTimeout(() => { const f = $('#holdF [name=code]'); if (f) f.focus(); }, 0);
 }
 window.holdPrompt = holdPrompt;
 async function holdChangeReader() { closeModal(); await holdPrompt(null); }

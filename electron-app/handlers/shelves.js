@@ -43,7 +43,11 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
     run(() => {
       const n = String(name || '').trim();
       if (!n) throw new Error('Името на витрината е задължително.');
-      getDb().prepare('UPDATE catalog_shelves SET name = ? WHERE id = ?').run(n, id);
+      const db = getDb();
+      const cur = db.prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(id);
+      if (!cur) throw new Error('Витрината не е намерена — вероятно е изтрита от друго работно място.');
+      db.prepare('UPDATE catalog_shelves SET name = ? WHERE id = ?').run(n, id);
+      if (cur.name !== n) logAudit('Витрина в каталога', 'преименувана „' + cur.name + '“ → „' + n + '“');
       scheduleCatalogWrite();
     })
   );

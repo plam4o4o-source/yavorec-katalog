@@ -80,9 +80,9 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       // 2019 г., излизаше начело в отчета за 2026 г. Филтрира се по годината на
       // заемане, както всичко останало в тази справка.
       const topLoans = db.prepare(`
-        SELECT b.title, COUNT(*) AS n FROM loans l JOIN books b ON b.id = l.book_id
+        SELECT b.title, COALESCE(b.author, '') AS author, COUNT(*) AS n FROM loans l JOIN books b ON b.id = l.book_id
         WHERE substr(l.date_out,1,4) = ?
-        GROUP BY l.book_id ORDER BY n DESC LIMIT 10
+        GROUP BY b.title, COALESCE(b.author, '') ORDER BY n DESC, b.title LIMIT 10
       `).all(y);
       /* „Събрани обезщетения“ (така пише в интерфейса) сумираше loans.fine —
          НАЧИСЛЕНИ глоби, и то по годината на ЗАЕМАНЕ: глоба за книга, заета през
@@ -152,6 +152,13 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       const finesOpen = String(y) === String(new Date().getFullYear())
         ? db.prepare('SELECT COALESCE(SUM(fine), 0) AS val FROM loans WHERE date_in IS NULL').get().val
         : 0;
+      /* Одит v2.4.29: „Спазване на сроковете“ броеше само ВЪРНАТИТЕ — библиотека с
+         десетки книги, просрочени от месеци, четеше „100 % в срок“, докато „Просрочени“
+         на таблото ги брои. Просрочените в момента са КЪМ ДНЕС (както finesOpen), затова
+         се връщат само за текущата година, и се показват отделно от процента. */
+      const openOverdue = String(y) === String(new Date().getFullYear())
+        ? db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n
+        : 0;
       const fundByCategory = db.prepare(`
         SELECT COALESCE(c.name,'—') AS k,
                COALESCE(SUM(COALESCE(i.quantity, 1)),0) AS n
@@ -186,7 +193,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
            date_out) означаваше точно това. */
         returnedOnTime: returnedYear.filter(l => l.date_due && l.date_in <= l.date_due).length,
         returnedLate: returnedYear.filter(l => l.date_due && l.date_in > l.date_due).length,
-        finesCollected, finesCharged, finesOpen,
+        finesCollected, finesCharged, finesOpen, openOverdue,
         fundByLanguage: byGroup(fund, 'language'),
         fundByDepartment: byGroup(fund, 'department'),
         fundByCategory,

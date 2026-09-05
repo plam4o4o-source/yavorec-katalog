@@ -32,7 +32,13 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('housebound:remove', (e, readerId) =>
-    run(() => { getDb().prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId); })
+    run(() => {
+      const db = getDb();
+      const del = db.prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId);
+      if (!del.changes) throw new Error('Читателят няма график за обслужване по домовете.');
+      const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(readerId);
+      logAudit('Обслужване по домовете', 'спрян график за ' + (r ? r.name : readerId));
+    })
   );
   ipcMain.handle('housebound:addVisit', (e, { reader_id, date, note }) =>
     run(() => {

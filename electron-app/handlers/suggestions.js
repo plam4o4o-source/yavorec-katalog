@@ -34,10 +34,11 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
+      const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
+      if (!s) throw new Error('Предложението вече не съществува — вероятно е изтрито от друго работно място.');
       db.prepare('UPDATE suggestions SET status = ?, acquisition_id = ? WHERE id = ?')
         .run(status, status === 'получено' ? (acquisition_id || null) : null, id);
-      const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
-      logAudit('Предложение за покупка', (s ? s.title : id) + ' → ' + status);
+      logAudit('Предложение за покупка', s.title + ' → ' + status);
     })
   );
   ipcMain.handle('suggestions:delete', (e, id) =>

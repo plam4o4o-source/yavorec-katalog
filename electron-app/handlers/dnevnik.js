@@ -17,7 +17,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   // require, а не от deps, защото main.js подава csvCell само на модулите, които
   // са го поискали при извеждането си; тук е нужна веднага — всички останали CSV
   // пътища в програмата минават именно през нея.
-  const { csvCell } = require('../security-utils');
+  const { csvCell, isValidIsoDate } = require('../security-utils');
 
   const DNEVNIK_A_FIELDS = [
     'a_hours', 'a_age_u14', 'a_age_15_18', 'a_age_19_28', 'a_age_o28',
@@ -159,8 +159,15 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const cols = DNEVNIK_FIELDS.filter(f => d[f] !== undefined);
       const hasNote = d.note !== undefined;
       if (!cols.length && !hasNote) throw new Error('Няма какво да се запише за този ден.');
+      if (!isValidIsoDate(d.date)) throw new Error('Датата на деня липсва или е невалидна.');
       const payload = { date: d.date };
-      cols.forEach(f => { payload[f] = parseInt(d[f], 10) || 0; });
+      /* Одит v2.4.29: „-5“ влизаше в клетката и оттам в месечните и годишните сборове
+         без възражение. Формулярът брои хора и документи — само цели числа, 0 или повече. */
+      cols.forEach(f => {
+        const n = parseInt(d[f], 10) || 0;
+        if (n < 0) throw new Error('„' + (DNEVNIK_LABELS[f] || f) + '“ не може да бъде отрицателно число (' + d[f] + ').');
+        payload[f] = n;
+      });
       if (hasNote) payload.note = d.note || null;
       const names = cols.concat(hasNote ? ['note'] : []);
       db.prepare(`
@@ -192,16 +199,44 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
      стойност), по съдържание — само при съвпадение. Липсваха точно „8“ и „6“:
      езикознание 81 и приложните науки 65-68 не влизаха никъде. */
   const DNEVNIK_UDK_PREFIXES = [
-    ['793', 'b_cat_793'], ['799', 'b_cat_793'], ['91', 'b_cat_91'], ['80', 'b_cat_80'],
+    ['793', 'b_cat_793'], ['794', 'b_cat_793'], ['795', 'b_cat_793'], ['796', 'b_cat_793'],
+    ['797', 'b_cat_793'], ['798', 'b_cat_793'], ['799', 'b_cat_793'], // 793/799 — спортни игри и спорт
+    ['91', 'b_cat_91'], ['80', 'b_cat_80'],
     ['81', 'b_cat_80'], // езикознание — заедно с 80, както е в самия формуляр
     ['82', 'b_cat_82'], ['61', 'b_cat_61'], ['62', 'b_cat_62'], ['63', 'b_cat_63'],
     ['64', 'b_cat_62'], ['69', 'b_cat_62'], ['0', 'b_cat_0'], ['1', 'b_cat_1'], ['2', 'b_cat_2'],
     ['3', 'b_cat_3'], ['5', 'b_cat_5'],
     ['6', 'b_cat_62'], // 65-68 — управление, химични и други производства: приложни науки
     ['7', 'b_cat_7'],
-    ['8', 'b_cat_82'], // остатъкът от клас 8 е художествена литература
+    ['8', 'b_cat_82'], // остатъкът от клас 8 — литературознание (художествената е по-долу)
     ['9', 'b_cat_9']
   ];
+  /* Одит v2.4.29: ВСЯКА художествена литература попадаше в „82/89 Литературознание“ —
+     префиксът „82“ хваща и романа (821.163.2-31), и поезията (82-1), и детската
+     (82-93), а колоните „Художествена литература“ и „Детска художествена л-ра“ на
+     формуляра никога не се предлагаха. В обществената библиотека това е по-голямата
+     част от заеманията. Формулярът (Раздел Б) отделя художествената от науката за
+     литературата, затова тук се гледа не само класът, а и определителят за форма:
+       • 82…-N (‑1 поезия, ‑2 драма, ‑3 проза, ‑31 роман, ‑32 разкази, ‑4 есета,
+         ‑6 писма) и 821.xxx без определител (литература на даден народ) —
+         художествена; ‑93 (за деца и юноши) — детска художествена;
+       • сигнатурата „Д“ (детски отдел) — детска художествена; „Д.09“ / „Д 09“ —
+         детска отраслова, както са надписани колоните на формуляра;
+       • 82.0…, 82(091), 821.xxx.09, 82-95 (критика) — литературознание, както досега. */
+  function dnevnikFictionColumn(udk) {
+    const u = udk.replace(/\s+/g, '');
+    if (/^Д/i.test(u)) return /^Д[. ]?09/i.test(u) ? 'b_cat_child_nf' : 'b_cat_child_f';
+    if (!/^8/.test(u)) return null;
+    const hist = /\(091\)/.test(u);
+    if (/^8[01]/.test(u)) return null;          // 80/81 езикознание — по таблицата с префиксите
+    if (/-93/.test(u)) return 'b_cat_child_f';
+    if (hist || /^8\d*(\.\d+)*\.0\d*/.test(u) || /-95/.test(u)) return 'b_cat_82';
+    /* Определител за форма (‑1/‑2/‑3/‑31…) или литература на даден народ — и по
+       новата таблица (821.163.2), и по старата (886.7 българска, 820 английска,
+       882 руска…), която стои в много стари бази. */
+    if (/^8\d[\d.]*-\d/.test(u) || /^8[2-9]\d/.test(u)) return 'b_cat_fiction';
+    return 'b_cat_82';
+  }
   const DNEVNIK_AGE_MAP = {
     'дете до 14 г.': 'a_age_u14', 'ученик': 'a_age_15_18', 'студент': 'a_age_19_28'
   };
@@ -226,8 +261,9 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
            и се връща на изгледа, за да каже на библиотекаря колко реда трябва да
            допълни ръчно, вместо трите „Всичко“ да се разминават необяснимо. */
         const udk = String(ev.book_udk || '').trim();
-        const hit = udk ? DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p)) : null;
-        if (hit) add(hit[1]); else unclassified++;
+        const fiction = udk ? dnevnikFictionColumn(udk) : null;
+        const hit = !fiction && udk ? DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p)) : null;
+        if (fiction) add(fiction); else if (hit) add(hit[1]); else unclassified++;
         // Раздел А — всеки читател се брои веднъж на ден, по категорията му към момента.
         const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
         if (!seenReaders.has(rk)) {

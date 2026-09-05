@@ -205,13 +205,14 @@ async function openShelf(id) {
       toast('Добавена: инв. № ' + res.data.inv_number + ' — ' + res.data.title, 'ok');
       markSaved();
       openShelf(id);
+      loadShelvesBox(); // броячът на витрината в списъка зад прозореца (v2.4.29)
     });
   }
 }
 window.openShelf = openShelf;
 async function removeFromShelf(shelfId, bookId) {
   const ok = await call(window.api.shelves.removeBook({ shelfId, bookId }), 'Махната от витрината.');
-  if (ok !== null) openShelf(shelfId);
+  if (ok !== null) { openShelf(shelfId); loadShelvesBox(); }
 }
 window.removeFromShelf = removeFromShelf;
 /* Групово добавяне от отметките в „Книги" */
@@ -320,14 +321,12 @@ async function saveGhSettings() {
 }
 window.saveGhSettings = saveGhSettings;
 async function exportCatalog() {
-  const res = await window.api.catalog.export();
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Каталогът е записан в ' + res.data, 'ok');
+  const path = await call(window.api.catalog.export());
+  if (path) toast('Каталогът е записан в ' + path, 'ok');
 }
 window.exportCatalog = exportCatalog;
 async function exportCatalogCsv() {
-  const res = await window.api.catalog.exportCsv();
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Таблицата е записана в ' + res.data, 'ok');
+  const path = await call(window.api.catalog.exportCsv());
+  if (path) toast('Таблицата е записана в ' + path, 'ok');
 }
 window.exportCatalogCsv = exportCatalogCsv;

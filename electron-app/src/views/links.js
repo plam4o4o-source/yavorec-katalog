@@ -59,10 +59,20 @@ async function lnkDel(id) {
 window.lnkDel = lnkDel;
 async function refreshLinks(fromKind, fromId) {
   window._LINK_CTX = { kind: fromKind, id: fromId };
+  LINKS_CHANGED = true;
   const links = await call(window.api.links.list({ fromKind, fromId }));
   const box = $('#linkList');
   if (box) box.innerHTML = linkListHtml(links || []);
 }
+/* Одит v2.4.29: „Свържи“/„Махни“ в картона + „Затвори“ оставяха стария брой
+   „свързани материала“ в списъка на Персоналии/Летопис до повторно влизане. */
+let LINKS_CHANGED = false;
+function linksRefreshListIfChanged() {
+  if (!LINKS_CHANGED) return;
+  LINKS_CHANGED = false;
+  if (RENDERERS[VIEW]) RENDERERS[VIEW]();
+}
+window.linksRefreshListIfChanged = linksRefreshListIfChanged;
 
 async function localPhotoChoose(table, id) {
   const res = await window.api.localPhoto.choose({ table, id });
