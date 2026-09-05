@@ -19,26 +19,58 @@
    чл. 26 и не бива да зависи от това какво се вижда на екрана. */
 const INVBOOK_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE;
-async function renderInvBook() {
-  const rows = await call(window.api.invBook.list());
-  if (!rows) return;
+/* v2.4.31 (производителност): порциите идват от БАЗАТА (invBook:list с
+   { q, offset, limit } → { rows, total, summary }), не от пълния списък в
+   паметта — при 15 000 документа пълният регистър е 5,5 МБ и ~100 ms в SQLite
+   при всяко отваряне на раздела, а на екрана стоят 300 реда. Ако обработчикът
+   върне масив (стар обработчик, тестов заместител), изгледът работи както
+   досега — целият списък в паметта, търсене и „Покажи още“ без IPC. */
+let INVBOOK_WINDOWED = false;
+let INVBOOK_TOTAL = 0;
+let INVBOOK_SUMMARY = null;
+let INVBOOK_REQ = 0; // пореден номер на ПЪЛНОТО зареждане — закъснял отговор на старо търсене не се рисува
+let INVBOOK_GEN = 0; // поколение на списъка в паметта — „Покажи още“ долепя само към същия списък
+/* Показателите над таблицата от пълен списък в паметта (старият път). */
+function invBookSummaryOf(rows) {
   const active = rows.filter(r => r.status !== 'отчислен');
-  const deacc = rows.length - active.length;
   /* Броят и стойността са по ЕКЗЕМПЛЯРИ, както в КДБФ и в Таблото — иначе
      „Налични: N · стойност" под инвентарната книга противоречи на същите две
      числа на другите два екрана. Самата таблица си остава по редове: един ред =
      един инвентарен номер, точно както е в Приложение № 4. */
   const qtyOf = (r) => (r.quantity == null ? 1 : Number(r.quantity) || 0);
-  const activeCopies = active.reduce((s, r) => s + qtyOf(r), 0);
-  const value = active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0);
-  const checked = rows.filter(r => (r.checks || []).length).length;
+  return {
+    rows: rows.length, activeRows: active.length,
+    activeCopies: active.reduce((s, r) => s + qtyOf(r), 0),
+    value: active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0),
+    deacc: rows.length - active.length,
+    checked: rows.filter(r => (r.checks || []).length).length
+  };
+}
+async function invBookFetch(offset, limit) {
+  const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset, limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000) }));
+  if (!res) return null;
+  if (Array.isArray(res)) { INVBOOK_WINDOWED = false; return { all: res }; }
+  INVBOOK_WINDOWED = true;
+  return res;
+}
+async function renderInvBook() {
+  ++INVBOOK_REQ; // пълният рендер не се отказва при по-нова заявка (виж renderBooks)
+  const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT);
+  if (!res) return;
+  INVBOOK_GEN++;
+  const rows = res.all || res.rows;
+  const sum = res.all ? invBookSummaryOf(res.all) : res.summary;
+  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+  INVBOOK_SUMMARY = sum;
+  const activeCopies = sum.activeCopies, value = sum.value, deacc = sum.deacc, checked = sum.checked;
+  const active = { length: sum.activeRows == null ? sum.rows - sum.deacc : sum.activeRows };
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
     Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>
 
     <div class="kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="kpi-ico">${KPI_ICONS.fund}</div><div class="kpi-body">
-        <div class="kpi-num">${rows.length.toLocaleString('bg-BG')}</div>
+        <div class="kpi-num">${sum.rows.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Вписани общо</div>
         <div class="kpi-extra">от началото на книгата</div></div></div>
       <div class="kpi ok"><div class="kpi-ico">${KPI_ICONS.check}</div><div class="kpi-body">
@@ -52,7 +84,7 @@ async function renderInvBook() {
       <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">${KPI_ICONS.deacc}</div><div class="kpi-body">
         <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Отчислени</div>
-        <div class="kpi-extra">${rows.length ? Math.round(deacc / rows.length * 100) : 0}% от вписаните</div></div></div>
+        <div class="kpi-extra">${sum.rows ? Math.round(deacc / sum.rows * 100) : 0}% от вписаните</div></div></div>
       <div class="kpi"><div class="kpi-ico">${KPI_ICONS.search}</div><div class="kpi-body">
         <div class="kpi-num">${checked.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">С отбелязана проверка</div>
@@ -77,9 +109,33 @@ async function renderInvBook() {
   $('#ibSearch').addEventListener('input', debounce(e => {
     INVBOOK_QUERY = e.target.value;
     INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE; // ново търсене — пак от първата страница
-    paintInvBookRows();
+    if (INVBOOK_WINDOWED) invBookReload(); else paintInvBookRows();
   }, 300));
 }
+/* Прозоречен режим: ново търсене — първата порция наново от базата; „Покажи още“ —
+   следващата порция, долепена към вече заредените. */
+async function invBookReload() {
+  const req = ++INVBOOK_REQ;
+  const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT);
+  if (!res || req !== INVBOOK_REQ) return;
+  window._INVBOOK_ROWS = res.all || res.rows;
+  INVBOOK_GEN++;
+  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+  paintInvBookRows();
+}
+window.invBookReload = invBookReload;
+async function invBookMore() {
+  if (!INVBOOK_WINDOWED) { INVBOOK_RENDER_LIMIT += INVBOOK_PAGE_SIZE; paintInvBookRows(true); return; }
+  const gen = INVBOOK_GEN;
+  const loaded = (window._INVBOOK_ROWS || []).length;
+  const res = await invBookFetch(loaded, INVBOOK_PAGE_SIZE);
+  if (!res || gen !== INVBOOK_GEN) return; // междувременно търсене е подменило списъка
+  window._INVBOOK_ROWS = (window._INVBOOK_ROWS || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+  INVBOOK_RENDER_LIMIT = window._INVBOOK_ROWS.length;
+  paintInvBookRows(true);
+}
+window.invBookMore = invBookMore;
 let INVBOOK_QUERY = '';
 function invBookRowsHtml(rows) {
   if (!rows.length) return `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`;
@@ -141,18 +197,25 @@ function invBookMatches() {
    филтриране остават пълен рендер — там наборът от редове е друг. */
 let INVBOOK_PAINTED = 0;
 function paintInvBookRows(append) {
-  const rows = invBookMatches();
+  /* В прозоречен режим window._INVBOOK_ROWS са само заредените порции (вече
+     филтрирани от базата), а общият брой идва отделно; в стария — целият списък,
+     филтриран тук. */
+  const rows = INVBOOK_WINDOWED ? (window._INVBOOK_ROWS || []) : invBookMatches();
+  const total = INVBOOK_WINDOWED ? INVBOOK_TOTAL : rows.length;
   INVBOOK_PAINTED = paintRowWindow({
-    body: '#ibBody', bar: '#ibMore', rows, limit: INVBOOK_RENDER_LIMIT,
+    body: '#ibBody', bar: '#ibMore', rows, limit: INVBOOK_WINDOWED ? rows.length : INVBOOK_RENDER_LIMIT,
     painted: append ? INVBOOK_PAINTED : 0,
     rowsHtml: invBookRowsHtml,
     emptyHtml: INVBOOK_QUERY.trim()
       ? `<tr><td colspan="11" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
       : `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`,
-    moreHtml: (more, total) => more > 0
-      ? `<button class="btn" onclick="INVBOOK_RENDER_LIMIT+=${INVBOOK_PAGE_SIZE};paintInvBookRows(true)">Покажи още (${more} от общо ${total})</button>`
-      : (total > INVBOOK_PAGE_SIZE
-        ? `<span class="hint">Показани са всички ${total} реда. Печатът винаги съдържа цялата книга.</span>` : '')
+    moreHtml: (moreShown, shownTotal) => {
+      const more = INVBOOK_WINDOWED ? total - rows.length : moreShown;
+      return more > 0
+        ? `<button class="btn" onclick="invBookMore()">Покажи още (${more} от общо ${total})</button>`
+        : (total > INVBOOK_PAGE_SIZE
+          ? `<span class="hint">Показани са всички ${total} реда. Печатът винаги съдържа цялата книга.</span>` : '');
+    }
   });
 }
 window.paintInvBookRows = paintInvBookRows;
@@ -161,11 +224,13 @@ window.paintInvBookRows = paintInvBookRows;
 function invBookFilter(q) {
   INVBOOK_QUERY = q == null ? '' : String(q);
   INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE;
+  if (INVBOOK_WINDOWED) return invBookReload();
   paintInvBookRows();
 }
 window.invBookFilter = invBookFilter;
-function printInvBookDoc() {
-  const rows = window._INVBOOK_ROWS || [];
+async function printInvBookDoc() {
+  // Разпечатката е ЦЯЛАТА книга — в прозоречен режим се тегли пълният списък.
+  const rows = INVBOOK_WINDOWED ? (await call(window.api.invBook.list()) || []) : (window._INVBOOK_ROWS || []);
   /* Разпечатката е меродавният документ по чл. 26 и се прошнурова и заверява с
      подпис — тя трябва да казва сама какво съдържа. Дотук в главата ѝ стоеше
      единствено „записи: N", където N са РЕДОВЕТЕ, отчислените включително: числото

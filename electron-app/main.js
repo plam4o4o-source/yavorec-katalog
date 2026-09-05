@@ -1518,7 +1518,21 @@ function publicBookFields(b, opacMap) {
 function buildCatalogPayload() {
   /* НЕ NULL-безопасно, и това е нарочно — виж бележката при catalog:status в
      handlers/catalog.js: документ с непознат статус не се публикува навън. */
-  const books = db.prepare(`${BOOK_SELECT} WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен' ORDER BY b.title`).all();
+  /* v2.4.31 (производителност): BOOK_SELECT тегли `b.*` (38 колони, 20 МБ при
+     15 000 книги) и брои отворените заемания с корелирана подзаявка на ред;
+     каталогът ползва 18 полета (publicBookFields) и „налична“ — един агрегат по
+     idx_loans_open върши същото. Измерено: 547 ms → ~150 ms на запис на каталога,
+     който се пуска след всяка промяна във фонда и на всеки 5 минути. */
+  const books = db.prepare(`
+    SELECT b.inv_number, b.author, b.title, b.subtitle, b.city, b.publisher, b.year, b.language,
+           b.udk, b.call_number, b.department, b.keywords, b.annotation, b.cover_url, b.status, b.register_date,
+           c.name AS category_name,
+           COALESCE(i.quantity, 0) - COALESCE(o.n, 0) AS available
+    FROM books b
+    LEFT JOIN categories c ON c.id = b.category_id
+    LEFT JOIN inventory i ON i.book_id = b.id
+    LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM loans WHERE date_in IS NULL GROUP BY book_id) o ON o.book_id = b.id
+    WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен' ORDER BY b.title`).all();
   const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
   const opacMap = {};
   for (const r of db.prepare(`SELECT category, value, opac_label FROM authorised_values WHERE opac_label IS NOT NULL AND TRIM(opac_label) <> ''`).all()) {

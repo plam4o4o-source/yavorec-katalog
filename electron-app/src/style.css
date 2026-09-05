@@ -796,7 +796,9 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
    Слага се от route() в bootstrap.js — само при истинска навигация, НЕ при
    вътрешните пререндирания след запис (те не минават през route()). */
 @keyframes viewIn{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
-#view.viewIn{animation:viewIn .18s ease-out}
+/* v2.4.31: анимацията се пуска от route() през Web Animations (без принудителна
+   подредба на старото съдържание); класът стои като белег за „истинска смяна на раздел“. */
+#view.viewIn{animation:none}
 
 /* ---------- Открояване на записания ред (v1.69.0) ----------
    flashRow() в core.js — след запис редът светва в зелено и избледнява.

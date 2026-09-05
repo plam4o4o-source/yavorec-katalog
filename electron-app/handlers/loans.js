@@ -110,7 +110,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       if (onlyOpen) return db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL ORDER BY l.date_due`).all();
-      return db.prepare(`${LOAN_SELECT} ORDER BY l.date_out DESC`).all();
+      return db.prepare(`${LOAN_SELECT} ORDER BY +l.date_out DESC`).all(); // + : пълният списък се сортира по-бързо без idx_loans_date_out
     })
   );
   /* Дните забава и обезщетението се смятат ТУК, със същата функция, с която се
