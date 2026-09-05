@@ -46,8 +46,9 @@ function invBookSummaryOf(rows) {
     checked: rows.filter(r => (r.checks || []).length).length
   };
 }
-async function invBookFetch(offset, limit) {
-  const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset, limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000) }));
+async function invBookFetch(offset, limit, withSummary) {
+  const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset,
+    limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000), summary: !!withSummary }));
   if (!res) return null;
   if (Array.isArray(res)) { INVBOOK_WINDOWED = false; return { all: res }; }
   INVBOOK_WINDOWED = true;
@@ -55,7 +56,7 @@ async function invBookFetch(offset, limit) {
 }
 async function renderInvBook() {
   ++INVBOOK_REQ; // пълният рендер не се отказва при по-нова заявка (виж renderBooks)
-  const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT);
+  const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT, true);
   if (!res) return;
   INVBOOK_GEN++;
   const rows = res.all || res.rows;
@@ -113,7 +114,11 @@ async function renderInvBook() {
   }, 300));
 }
 /* Прозоречен режим: ново търсене — първата порция наново от базата; „Покажи още“ —
-   следващата порция, долепена към вече заредените. */
+   следващата порция, долепена към вече заредените.
+   Показателите над таблицата НЕ се искат тук (проверка при прегледа): те са по
+   ЦЕЛИЯ регистър, без търсенето (виж бележката в handlers/inv-book.js) — не се
+   менят с всяко търсене, но при offset 0 сървърът иначе пак плащаше двете сборни
+   заявки при всяка пауза при писане (debounce 300 ms), само за да ги изхвърли тук. */
 async function invBookReload() {
   const req = ++INVBOOK_REQ;
   const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT);
@@ -124,16 +129,24 @@ async function invBookReload() {
   paintInvBookRows();
 }
 window.invBookReload = invBookReload;
+let INVBOOK_MORE_PENDING = false;
 async function invBookMore() {
   if (!INVBOOK_WINDOWED) { INVBOOK_RENDER_LIMIT += INVBOOK_PAGE_SIZE; paintInvBookRows(true); return; }
-  const gen = INVBOOK_GEN;
-  const loaded = (window._INVBOOK_ROWS || []).length;
-  const res = await invBookFetch(loaded, INVBOOK_PAGE_SIZE);
-  if (!res || gen !== INVBOOK_GEN) return; // междувременно търсене е подменило списъка
-  window._INVBOOK_ROWS = (window._INVBOOK_ROWS || []).concat(res.all ? res.all.slice(loaded) : res.rows);
-  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
-  INVBOOK_RENDER_LIMIT = window._INVBOOK_ROWS.length;
-  paintInvBookRows(true);
+  // Предпазител срещу двоен клик — виж идентичната бележка при booksMore() в books.js.
+  if (INVBOOK_MORE_PENDING) return;
+  INVBOOK_MORE_PENDING = true;
+  try {
+    const gen = INVBOOK_GEN;
+    const loaded = (window._INVBOOK_ROWS || []).length;
+    const res = await invBookFetch(loaded, INVBOOK_PAGE_SIZE);
+    if (!res || gen !== INVBOOK_GEN) return; // междувременно търсене е подменило списъка
+    window._INVBOOK_ROWS = (window._INVBOOK_ROWS || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+    INVBOOK_RENDER_LIMIT = window._INVBOOK_ROWS.length;
+    paintInvBookRows(true);
+  } finally {
+    INVBOOK_MORE_PENDING = false;
+  }
 }
 window.invBookMore = invBookMore;
 let INVBOOK_QUERY = '';

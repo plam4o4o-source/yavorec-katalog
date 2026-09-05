@@ -55,15 +55,23 @@ async function readersFetch(offset, limit) {
   READERS_WINDOWED = true; READERS_TOTAL = res.total || 0;
   return res;
 }
+let READERS_MORE_PENDING = false;
 async function readersMore() {
   if (!READERS_WINDOWED) { READERS_RENDER_LIMIT += READERS_PAGE_SIZE; renderReadersBody(true); return; }
-  const gen = READERS_GEN;
-  const loaded = (window._READERS_LIST || []).length;
-  const res = await readersFetch(loaded, READERS_PAGE_SIZE);
-  if (!res || gen !== READERS_GEN) return; // междувременно търсене/филтър е подменил списъка
-  window._READERS_LIST = (window._READERS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
-  READERS_RENDER_LIMIT = Math.max(READERS_RENDER_LIMIT, window._READERS_LIST.length);
-  renderReadersBody(true);
+  // Предпазител срещу двоен клик — виж идентичната бележка при booksMore() в books.js.
+  if (READERS_MORE_PENDING) return;
+  READERS_MORE_PENDING = true;
+  try {
+    const gen = READERS_GEN;
+    const loaded = (window._READERS_LIST || []).length;
+    const res = await readersFetch(loaded, READERS_PAGE_SIZE);
+    if (!res || gen !== READERS_GEN) return; // междувременно търсене/филтър е подменил списъка
+    window._READERS_LIST = (window._READERS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    READERS_RENDER_LIMIT = Math.max(READERS_RENDER_LIMIT, window._READERS_LIST.length);
+    renderReadersBody(true);
+  } finally {
+    READERS_MORE_PENDING = false;
+  }
 }
 window.readersMore = readersMore;
 function readersFilterChanged() {

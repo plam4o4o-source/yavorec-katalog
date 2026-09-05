@@ -121,6 +121,13 @@ test('invBook:list с page: порции по инв. №, търсене, пр�
   near(w.summary.value, active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0), 'стойност');
   assert.equal(w.summary.deacc, full.length - active.length);
   assert.equal(w.summary.checked, full.filter(r => (r.checks || []).length).length);
+  /* Проверка при прегледа: „Покажи още“ (invBookMore()) чете само rows/total и
+     никога summary — двете сборни заявки по ЦЕЛИЯ регистър не бива да се плащат
+     за порция след първата, иначе всяко „Покажи още“ при 15 000 документа плаща
+     пак сборовете за резултат, който изгледът изхвърля. */
+  const more = await ok('invBook:list', { offset: 40, limit: 40 });
+  assert.equal(more.summary, undefined, 'следваща порция (offset > 0) не смята показателите наново');
+  assert.equal(more.rows.length, 40);
   // Търсене както invBookMatches(): инв. №, автор, заглавие, сигнатура
   const t = 'вазов';
   const exp = full.filter(r => String(r.inv_number ?? '').includes(t) || (r.author || '').toLowerCase().includes(t) || (r.title || '').toLowerCase().includes(t) || (r.call_number || '').toLowerCase().includes(t));
@@ -133,6 +140,23 @@ test('invBook:list с page: порции по инв. №, търсене, пр�
   assert.equal(lower.total, exp.length, '„вазов“ намира „Вазов, Иван“');
   const byTitle = await ok('invBook:list', { q: 'под игото', offset: 0, limit: 1000 });
   assert.ok(byTitle.total > 0 && byTitle.rows.every(r => /Под игото/.test(r.title)), 'търсене по заглавие с малки букви');
+});
+
+test('invBook:list с page: подредбата има разделител по b.id, както books:list/readers:list', () => {
+  /* Проверка при прегледа: inv_number е UNIQUE, но nullable — документ без
+     присвоен номер е валидно състояние, и повече от един такъв дава равни редове
+     по подредбата. Без стабилен разделител LIMIT/OFFSET не гарантира устойчиви
+     страници: запис между офсет 0 и следващото „Покажи още“ може да размести
+     равните редове и да изгуби или удвои документ в самата Инвентарна книга —
+     точно затова books:list (BOOK_ORDERS) и readers:list вече слагат `, id`.
+     Самата надпревара зависи от плана на SQLite за равни редове, който единичен
+     тест с непроменена база обичайно възпроизвежда стабилно и между двете
+     запитвания (проверено: без разделителя тестът не гърми) — затова тук се
+     проверява самият SQL текст, не поведението. */
+  const src = fs.readFileSync(path.join(APP_DIR, 'handlers', 'inv-book.js'), 'utf8');
+  const m = /ORDER BY b\.inv_number(, b\.id)? LIMIT \? OFFSET \?/.exec(src);
+  assert.ok(m, 'намерена е подредбата на прозоречната заявка');
+  assert.ok(m[1], 'подредбата на страниците (LIMIT/OFFSET) има разделител по b.id: ' + m[0]);
 });
 
 test('readers:list с page: порции, общ брой, филтри по категория и състояние, броячи на заетите', async () => {
@@ -350,6 +374,20 @@ test('Книги (прозоречен режим): първата порция,
   assert.equal(calls().at(-1).offset, 300, 'втората порция се иска от базата с offset 300');
   assert.equal(doc.querySelector('#bBody tr').getAttribute('data-probe'), 'жив', 'вече показаните редове не се пресъздават');
   assert.match(doc.querySelector('#bMore').textContent, /300 от общо 900/);
+  /* Проверка при прегледа: двоен клик върху „Покажи още“, преди първата порция да
+     се върне, пращаше ДВЕ заявки с ЕДИН И СЪЩ offset (loaded се чете преди await-а,
+     без предпазител) — резултатът беше 300 дублирани реда и цяла следваща порция,
+     изтеглена никога. Двата паралелни извиквания тук симулират точно това. */
+  const beforeCalls = calls().length;
+  await Promise.all([window.booksMore(), window.booksMore()]);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 900, 'двоен клик не бива да дублира или да прескача редове');
+  assert.equal(calls().length, beforeCalls + 1, 'вторият, застъпващ се клик не пуска втора заявка');
+  const ids900 = [...doc.querySelectorAll('#bBody tr')].map(tr => tr.getAttribute('data-id'));
+  assert.equal(new Set(ids900).size, 900, 'без дублирани редове след двойния клик');
+  assert.equal(doc.querySelector('#bMore').textContent.trim(), '', 'няма повече — целият резултат е зареден');
+  // Връща състоянието към първата порция, преди да продължи тестът със следващите стъпки.
+  window.eval("BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();"); await settle();
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
   // Филтър по отдел → нова заявка с dept, броячът е по базата
   window.eval("BOOKS_FILTER_DEPT = 'детски'; booksFilterChanged();"); await settle();
   assert.equal(calls().at(-1).dept, 'детски');

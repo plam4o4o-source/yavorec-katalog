@@ -54,16 +54,29 @@ async function booksFetch(offset, limit) {
   return res;
 }
 function booksSetList(rows) { window._BOOKS_LIST = rows; BOOKS_GEN++; }
+let BOOKS_MORE_PENDING = false;
 async function booksMore() {
   if (!BOOKS_WINDOWED) { BOOKS_RENDER_LIMIT += BOOKS_PAGE_SIZE; renderBooksBody(true); return; }
-  const gen = BOOKS_GEN;
-  const loaded = (window._BOOKS_LIST || []).length;
-  const res = await booksFetch(loaded, BOOKS_PAGE_SIZE);
-  // Междувременно търсене/филтър е подменил списъка — тази порция е от стария резултат.
-  if (!res || gen !== BOOKS_GEN) return;
-  window._BOOKS_LIST = (window._BOOKS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
-  BOOKS_RENDER_LIMIT = Math.max(BOOKS_RENDER_LIMIT, window._BOOKS_LIST.length);
-  renderBooksBody(true);
+  /* Проверка при прегледа (v2.4.31): `loaded` се четеше преди await-а, без предпазител
+     срещу повторно влизане — двоен клик върху „Покажи още“, преди първата порция да
+     се върне, изпращаше ДВЕ заявки с ЕДИН И СЪЩ offset. И двете минаваха проверката
+     за поколение (gen не се сменя от самия booksMore) и се долепяха последователно:
+     резултатът беше 300 дублирани реда и ЦЯЛА следваща порция, изтеглена никога —
+     библиотекар, стигнал до края на списъка, вярваше, че е видял всичко. */
+  if (BOOKS_MORE_PENDING) return;
+  BOOKS_MORE_PENDING = true;
+  try {
+    const gen = BOOKS_GEN;
+    const loaded = (window._BOOKS_LIST || []).length;
+    const res = await booksFetch(loaded, BOOKS_PAGE_SIZE);
+    // Междувременно търсене/филтър е подменил списъка — тази порция е от стария резултат.
+    if (!res || gen !== BOOKS_GEN) return;
+    window._BOOKS_LIST = (window._BOOKS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    BOOKS_RENDER_LIMIT = Math.max(BOOKS_RENDER_LIMIT, window._BOOKS_LIST.length);
+    renderBooksBody(true);
+  } finally {
+    BOOKS_MORE_PENDING = false;
+  }
 }
 window.booksMore = booksMore;
 function searchListDatalist(id, values) {

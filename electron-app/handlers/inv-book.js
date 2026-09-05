@@ -72,8 +72,15 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
     }
     const limit = Math.min(Math.max(parseInt(page.limit, 10) || 300, 1), 2000);
     const offset = Math.max(parseInt(page.offset, 10) || 0, 0);
+    /* `, b.id` (проверка при прегледа): inv_number е nullable (UNIQUE, не NOT NULL) —
+       документ без присвоен номер е валидно състояние, и повече от един такъв дава
+       равни редове по подредбата. Без стабилен разделител на равенството LIMIT/OFFSET
+       не гарантира устойчиви страници: запис между офсет 0 и следващото „Покажи още“
+       може да размести равните редове и да изгуби или удвои документ в самата
+       Инвентарна книга. books:list (BOOK_ORDERS) и readers:list вече слагат същия
+       разделител на подредбата — тук липсваше. */
     const rows = db.prepare(`${INV_BOOK_SELECT} ${where}
-      ORDER BY b.inv_number LIMIT ? OFFSET ?`).all(...params, limit, offset);
+      ORDER BY b.inv_number, b.id LIMIT ? OFFSET ?`).all(...params, limit, offset);
     if (rows.length) {
       const ids = rows.map(r => r.id);
       const checks = db.prepare(`SELECT book_id, date FROM inventory_checks WHERE book_id IN (${ids.map(() => '?').join(',')}) ORDER BY date`).all(...ids);
@@ -82,14 +89,26 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
       rows.forEach(r => { r.checks = byBook[r.id] || []; });
     }
     const total = db.prepare(`SELECT COUNT(*) AS n FROM books b ${where}`).get(...params).n;
-    // Показателите над таблицата — по целия регистър (без търсенето), както бяха в изгледа.
-    const s = db.prepare(`
-      SELECT COUNT(*) AS rows,
-             COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS activeCopies,
-             COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(b.price, 0) * COALESCE(i.quantity, 1) ELSE 0 END), 0) AS value,
-             COALESCE(SUM(CASE WHEN b.status = 'отчислен' THEN 1 ELSE 0 END), 0) AS deacc
-      FROM books b LEFT JOIN inventory i ON i.book_id = b.id`).get();
-    s.checked = db.prepare('SELECT COUNT(DISTINCT book_id) AS n FROM inventory_checks').get().n;
+    /* Показателите над таблицата — по целия регистър (без търсенето), както бяха в
+       изгледа. Смятат се по подразбиране само при offset 0 (проверка при прегледа):
+       renderInvBook() ги ползва за първия рендер, но invBookMore() („Покажи още“)
+       чете само rows/total и никога summary — при 15 000 документа всяко „Покажи
+       още“ иначе плащаше пак двете сборни заявки по ЦЕЛИЯ регистър за резултат,
+       който се изхвърля, точно обратното на смисъла на този кръг. `page.summary
+       === false` (проверка при прегледа) маха ги изрично и при offset 0 —
+       invBookReload() (търсене, debounce 300 ms) също не ги ползва: показателите
+       не зависят от търсенето, а сървърът иначе ги пресмяташе наново при всяка
+       пауза при писане. */
+    let s;
+    if (!offset && page.summary !== false) {
+      s = db.prepare(`
+        SELECT COUNT(*) AS rows,
+               COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS activeCopies,
+               COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(b.price, 0) * COALESCE(i.quantity, 1) ELSE 0 END), 0) AS value,
+               COALESCE(SUM(CASE WHEN b.status = 'отчислен' THEN 1 ELSE 0 END), 0) AS deacc
+        FROM books b LEFT JOIN inventory i ON i.book_id = b.id`).get();
+      s.checked = db.prepare('SELECT COUNT(DISTINCT book_id) AS n FROM inventory_checks').get().n;
+    }
     return { rows, total, offset, limit, summary: s };
   }
 };

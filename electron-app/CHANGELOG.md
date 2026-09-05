@@ -11,6 +11,64 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.32
+
+**BG:** Преглед на поправките от двадесетия кръг (v2.4.31). Оптимизациите са
+верни по идея; намерени и поправени три реални пропуска.
+
+- **Двоен клик върху „Покажи още“ трайно пропускаше реални редове.**
+  В прозоречен режим (Книги/Инвентарна книга/Читатели) `loaded` (колко реда
+  вече са заредени) се четеше преди изчакването на IPC отговора, без
+  предпазител срещу повторно влизане — два бързи клика пращаха ДВЕ заявки
+  с ЕДИН И СЪЩ offset. Долепянето на двата отговора даваше блок дублирани
+  редове и цяла следваща порция, изтеглена никога: доказано с repro —
+  библиотекар, стигнал до „края“ на списък от 900 документа, всъщност
+  виждаше 300 повторени и 300 никога недостигнати. Поправено с предпазител
+  срещу повторно влизане (задача в движение → следващият клик просто не
+  прави нищо) и в трите изгледа.
+- **invBook:list (прозоречен режим) нямаше разделител `b.id` в подредбата.**
+  `books:list`/`readers:list` вече добавиха такъв в същия кръг — точно защото
+  инвентарният номер е nullable (UNIQUE, не NOT NULL) и няколко документа без
+  присвоен номер дават равни редове по подредбата, а LIMIT/OFFSET без стабилен
+  разделител не гарантира устойчиви страници между отделни запитвания. Само
+  Инвентарната книга — законово значим регистър — остана без него.
+- **Показателите над Инвентарната книга се смятаха наново без нужда.**
+  Две сборни заявки по ЦЕЛИЯ регистър се плащаха при всяко „Покажи още“
+  (резултатът никога не се четеше от повикващия код) и при всяка пауза при
+  писане в търсенето (показателите не зависят от търсенето и вече бяха на
+  екрана от първия рендер) — точно обратното на смисъла на кръга. Сега се
+  смятат само при първото зареждане.
+
+Проверено и НЕ прието за дефект на този кръг: `assertUniqueBarcode()` (SQL,
+v2.4.31) не разпознава числово баркод с водещо/крайно разстояние (напр.
+„ 007“) като съвпадащ с чужд инв. № — по-тесен от случая, поправен в v2.4.30,
+защото приложението самò винаги подрязва баркода при запис (`bookPayload()`);
+достижимо е само през ред, писан извън програмата, а такъв ред вече е
+несканируем по друга причина, независимо от тази проверка. Оставено без
+поправка този кръг.
+
+Всичко — доказано с revert-and-retest (връщане на реда преди поправката кара
+съответния тест да гръмне) и с нови/поправени проверки в
+`test/perf-v2431.test.js`. Само поправки в кода и тестовете — без нова
+функционалност. Пълната поредица: 1279 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария. code-review (high) след поправките: без
+находки отвъд предложение за общ спомагателен код (не е приложено — риск без
+полза точно преди издание).
+
+**EN:** A review of round twenty's own fixes (v2.4.31). The optimizations were
+sound in intent; three real gaps found and fixed. A double-click on "Show
+more" in windowed Books/Inventory-book/Readers could permanently skip real
+rows (two concurrent requests fetched the same offset, duplicating one block
+and never fetching the next) — fixed with a re-entrancy guard in all three
+views. `invBook:list`'s windowed pagination lacked the `b.id` order
+tie-breaker that `books:list`/`readers:list` already gained this same round —
+`inv_number` is nullable, so several undocumented-number rows tie, and
+untied LIMIT/OFFSET pages are not guaranteed stable. The inventory-book
+summary aggregates were recomputed on every "Show more" click and every
+search debounce even though neither caller reads the result — now computed
+only on first load. All three fixed and covered by revert-and-retest
+regression tests. Code-only round: 1279 tests passing, 0 failing.
+
 ## v2.4.31
 
 **BG:** Двадесети кръг — задълбочен анализ и оптимизация на бързодействието.
