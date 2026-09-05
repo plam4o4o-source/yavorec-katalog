@@ -31,7 +31,7 @@ function readersRowsHtml(shown) {
     : `<tr><td colspan="7" class="empty">Няма намерени читатели.</td></tr>`;
 }
 function readersMoreHtml(more, total) {
-  return more > 0 ? `<button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReadersBody(true)">Покажи още (${more} от общо ${total})</button>` : '';
+  return more > 0 ? `<button class="btn" onclick="readersMore()">Покажи още (${more} от общо ${total})</button>` : '';
 }
 /* „Покажи още“ разширява прозореца на вече изтегления window._READERS_LIST,
    без нова обиколка по IPC — виж същия коментар при renderBooksBody() в books.js.
@@ -39,12 +39,54 @@ function readersMoreHtml(more, total) {
    вместо да презаписва целия <tbody> — същият квадратичен модел като в „Книги“,
    тук при 3 000 читатели. Търсене/филтър остават пълен рендер. */
 let READERS_PAINTED = 0;
+/* v2.4.31 (производителност): порциите идват от базата — readers:list(query, null,
+   { offset, limit, cat, status }) → { rows, total }; филтрите по категория и
+   състояние също. При масив от обработчика (стар обработчик, тестов заместител)
+   изгледът работи както досега — целият списък в паметта. */
+let READERS_WINDOWED = false;
+let READERS_TOTAL = 0;
+let READERS_REQ = 0; // пореден номер на пълното зареждане (търсене)
+let READERS_GEN = 0; // поколение на списъка — „Покажи още“ долепя само към същия списък
+async function readersFetch(offset, limit) {
+  const res = await call(window.api.readers.list(READERS_QUERY, null,
+    { offset, limit: Math.min(limit || READERS_PAGE_SIZE, 2000), cat: READERS_FILTER_CAT || '', status: READERS_FILTER_STATUS || '' }));
+  if (!res) return null;
+  if (Array.isArray(res)) { READERS_WINDOWED = false; return { all: res }; }
+  READERS_WINDOWED = true; READERS_TOTAL = res.total || 0;
+  return res;
+}
+let READERS_MORE_PENDING = false;
+async function readersMore() {
+  if (!READERS_WINDOWED) { READERS_RENDER_LIMIT += READERS_PAGE_SIZE; renderReadersBody(true); return; }
+  // Предпазител срещу двоен клик — виж идентичната бележка при booksMore() в books.js.
+  if (READERS_MORE_PENDING) return;
+  READERS_MORE_PENDING = true;
+  try {
+    const gen = READERS_GEN;
+    const loaded = (window._READERS_LIST || []).length;
+    const res = await readersFetch(loaded, READERS_PAGE_SIZE);
+    if (!res || gen !== READERS_GEN) return; // междувременно търсене/филтър е подменил списъка
+    window._READERS_LIST = (window._READERS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    READERS_RENDER_LIMIT = Math.max(READERS_RENDER_LIMIT, window._READERS_LIST.length);
+    renderReadersBody(true);
+  } finally {
+    READERS_MORE_PENDING = false;
+  }
+}
+window.readersMore = readersMore;
+function readersFilterChanged() {
+  READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
+  if (READERS_WINDOWED) return refreshReadersList();
+  renderReadersBody();
+}
+window.readersFilterChanged = readersFilterChanged;
 function renderReadersBody(append) {
-  const readers = (window._READERS_LIST || []).filter(readersFilterMatch);
+  const readers = READERS_WINDOWED ? (window._READERS_LIST || []) : (window._READERS_LIST || []).filter(readersFilterMatch);
   READERS_PAINTED = paintRowWindow({
-    body: '#rBody', bar: '#rMore', rows: readers, limit: READERS_RENDER_LIMIT,
+    body: '#rBody', bar: '#rMore', rows: readers, limit: READERS_WINDOWED ? readers.length : READERS_RENDER_LIMIT,
     painted: append ? READERS_PAINTED : 0,
-    rowsHtml: readersRowsHtml, moreHtml: readersMoreHtml
+    rowsHtml: readersRowsHtml,
+    moreHtml: READERS_WINDOWED ? () => readersMoreHtml(READERS_TOTAL - readers.length, READERS_TOTAL) : readersMoreHtml
   });
 }
 window.renderReadersBody = renderReadersBody;
@@ -54,29 +96,35 @@ window.renderReadersBody = renderReadersBody;
    полето: при пауза над 300 ms по време на писане фокусът изчезваше и следващите
    знаци отиваха в нищото (виж същия модел в inv-book.js). */
 async function refreshReadersList() {
-  const readers = await call(window.api.readers.list(READERS_QUERY));
-  if (!readers) return;
-  window._READERS_LIST = readers;
+  const req = ++READERS_REQ;
+  const res = await readersFetch(0, READERS_RENDER_LIMIT);
+  if (!res || req !== READERS_REQ) return;
+  window._READERS_LIST = res.all || res.rows;
+  READERS_GEN++;
   renderReadersBody();
 }
 window.refreshReadersList = refreshReadersList;
 async function renderReaders() {
-  const [readers, searchSuggest] = await Promise.all([
-    call(window.api.readers.list(READERS_QUERY)), call(window.api.searchHistory.suggest('readers'))
+  ++READERS_REQ; // пълният рендер не се отказва при по-нова заявка (виж renderBooks)
+  const [res, searchSuggest] = await Promise.all([
+    readersFetch(0, READERS_RENDER_LIMIT), call(window.api.searchHistory.suggest('readers'))
   ]);
-  if (!readers) return;
+  if (!res) return;
+  const readers = res.all || res.rows;
   window._READERS_LIST = readers;
-  const filtered = readers.filter(readersFilterMatch);
-  const shown = filtered.slice(0, READERS_RENDER_LIMIT);
-  const more = filtered.length - shown.length;
+  READERS_GEN++;
+  const filtered = READERS_WINDOWED ? readers : readers.filter(readersFilterMatch);
+  const shown = READERS_WINDOWED ? readers : filtered.slice(0, READERS_RENDER_LIMIT);
+  const total = READERS_WINDOWED ? READERS_TOTAL : filtered.length;
+  const more = total - shown.length;
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="rSearch" list="dl_searchReaders" placeholder="Търсене по име, телефон или № карта…" value="${esc(READERS_QUERY)}">
-      <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;READERS_RENDER_LIMIT=READERS_PAGE_SIZE;renderReadersBody()" title="Филтър по категория">
+      <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;readersFilterChanged()" title="Филтър по категория">
         <option value="">— всички категории —</option>
         ${KATEG.map(k => `<option value="${esc(k)}" ${READERS_FILTER_CAT === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
       </select>
-      <select id="rStatusFilter" onchange="READERS_FILTER_STATUS=this.value;READERS_RENDER_LIMIT=READERS_PAGE_SIZE;renderReadersBody()" title="Филтър по състояние">
+      <select id="rStatusFilter" onchange="READERS_FILTER_STATUS=this.value;readersFilterChanged()" title="Филтър по състояние">
         <option value="">— всички —</option>
         <option value="активен" ${READERS_FILTER_STATUS === 'активен' ? 'selected' : ''}>активен</option>
         <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
@@ -88,7 +136,7 @@ async function renderReaders() {
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
+    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, total)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
   // Таблицата е изчертана направо в #view — броячът трябва да съответства, за да
   // може следващото „Покажи още“ само да ДОБАВИ порция (виж renderReadersBody).

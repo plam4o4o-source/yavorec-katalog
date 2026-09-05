@@ -626,6 +626,14 @@ CREATE INDEX IF NOT EXISTS idx_readers_name   ON readers(name);
 CREATE INDEX IF NOT EXISTS idx_loans_reader   ON loans(reader_id);
 CREATE INDEX IF NOT EXISTS idx_loans_book     ON loans(book_id);
 CREATE INDEX IF NOT EXISTS idx_loans_open     ON loans(date_in);
+-- v2.4.31 (производителност): годишните справки и таблото броят заеманията по
+-- година на заемане — с индекс и BETWEEN вместо substr(date_out,1,4) пълното
+-- сканиране на 100 000 реда става търсене по интервал (измерено 27 ms → под 1 ms).
+CREATE INDEX IF NOT EXISTS idx_loans_date_out ON loans(date_out);
+-- Отворените заемания на читател (гише, списък с читатели, лимит на документи).
+CREATE INDEX IF NOT EXISTS idx_loans_reader_open ON loans(reader_id, date_in);
+-- Постъпилите през годината (табло, справки, КДБФ) — по дата на вписване.
+CREATE INDEX IF NOT EXISTS idx_books_register_date ON books(register_date);
 
 -- Начални категории — по образец на „Вид документ“ от inventar-biblioteka.html
 INSERT OR IGNORE INTO categories (name) VALUES

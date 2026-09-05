@@ -20,16 +20,28 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          БИБЛИОТЕЧНИ ДОКУМЕНТИ, не заглавия — виж дългата бележка при QTY в
          handlers/kdbf.js. COALESCE(...,1): ред без запис в inventory (стара или
          внесена база) е поне един документ. */
-      const fund = db.prepare(`
-        SELECT b.*, COALESCE(i.quantity, 1) AS qty FROM books b
-        LEFT JOIN inventory i ON i.book_id = b.id
-        WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
-      `).all(end, end);
-      const acquired = db.prepare(`
-        SELECT b.*, COALESCE(i.quantity, 1) AS qty FROM books b
-        LEFT JOIN inventory i ON i.book_id = b.id
-        WHERE substr(b.register_date,1,4) = ?
-      `).all(y);
+      /* v2.4.31 (производителност): дотук фондът се теглеше като 15 000 реда `b.*`
+         (измерено 182 ms), само за да бъдат събрани в JavaScript. Същите сборове —
+         брой, стойност и разбивки по език/отдел — се смятат от SQLite за ~25 ms.
+         Формулите са същите: COALESCE(quantity, 1) е един документ при липсващ
+         ред в inventory, изрична нула си остава нула. */
+      const FUND_WHERE = '+b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)';
+      const fundAgg = db.prepare(`
+        SELECT COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n,
+               COALESCE(SUM(COALESCE(b.price, 0) * COALESCE(i.quantity, 1)), 0) AS v
+        FROM books b LEFT JOIN inventory i ON i.book_id = b.id WHERE ${FUND_WHERE}
+      `).get(end, end);
+      const fundGroups = (field) => db.prepare(`
+        SELECT COALESCE(NULLIF(b.${field}, ''), '—') AS k, COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n
+        FROM books b LEFT JOIN inventory i ON i.book_id = b.id WHERE ${FUND_WHERE}
+        GROUP BY k ORDER BY n DESC, k
+      `).all(end, end).map(r => [r.k, r.n]);
+      const acquiredAgg = db.prepare(`
+        SELECT COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n,
+               COALESCE(SUM(COALESCE(b.price, 0) * COALESCE(i.quantity, 1)), 0) AS v
+        FROM books b LEFT JOIN inventory i ON i.book_id = b.id
+        WHERE b.register_date BETWEEN ? AND ?
+      `).get(y + '-01-01', end);
       // Снимката в самия акт, не живото inventory — виж бележката в handlers/kdbf.js.
       const deaccessioned = db.prepare(`
         SELECT i.*, COALESCE(i.quantity, 1) AS qty FROM deaccession_items i
@@ -46,7 +58,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       const qtyOf = (r) => (r.qty == null ? 1 : Number(r.qty) || 0);
       const copies = (rows) => rows.reduce((s, r) => s + qtyOf(r), 0);
       const valueCopies = (rows) => rows.reduce((s, r) => s + (Number(r.price) || 0) * qtyOf(r), 0);
-      const loansYear = db.prepare(`SELECT * FROM loans WHERE substr(date_out,1,4) = ?`).all(y);
+      // BETWEEN вместо substr(…,1,4) — ползва idx_loans_date_out (v2.4.31).
+      const loansYearCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_out BETWEEN ? AND ?').get(y + '-01-01', end).n;
       /* Върнатите ПРЕЗ тази година — независимо кога са заети (виж returnedOnTime).
          `deaccession_act_id IS NULL` е задължително: актът за отчисляване затваря
          откритите заемания на отчислената книга с датата на акта
@@ -54,36 +67,38 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          обаче НЕ са връщания — книгата никога не се е върнала, отписана е тъкмо
          защото е изгубена. Без филтъра всяко такова заемане влиза в
          `returnedLate` и сваля показателя „спазени срокове“ без причина. */
-      const returnedYear = db.prepare(`
-        SELECT * FROM loans
-        WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ? AND deaccession_act_id IS NULL
-      `).all(y);
+      /* Едно минаване по върнатите през годината (idx_loans_open): в срок / със
+         забава / начислени обезщетения. finesCharged брои и затворените от акт
+         (както досега — сумата им е начислена при затварянето). */
+      const returned = db.prepare(`
+        SELECT SUM(CASE WHEN deaccession_act_id IS NULL AND date_due IS NOT NULL AND date_in <= date_due THEN 1 ELSE 0 END) AS onTime,
+               SUM(CASE WHEN deaccession_act_id IS NULL AND date_due IS NOT NULL AND date_in > date_due THEN 1 ELSE 0 END) AS late,
+               COALESCE(SUM(fine), 0) AS finesCharged
+        FROM loans WHERE date_in BETWEEN ? AND ?
+      `).get(y + '-01-01', end);
       /* Служебният запис на GDPR се вписва с ДНЕШНА дата на регистрация и без
          него годишните броячи го включват в „нови читатели“ — виж бележката при
          ANON_READER_NAME в security-utils.js. */
-      const readersYear = db.prepare(`
-        SELECT * FROM readers WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?)
+      const readersYearCount = db.prepare(`
+        SELECT COUNT(*) AS n FROM readers WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?)
           AND name != ?
-      `).all(y, y, ANON_READER_NAME);
+      `).get(y, y, ANON_READER_NAME).n;
       const visitsYear = db.prepare(`SELECT COALESCE(SUM(count),0) AS n FROM visits WHERE substr(date,1,4) = ?`).get(y).n;
       /* Разбивките („Фонд по езици“, „по отдели“) също броят екземпляри, за да
          се събират до fundCount — иначе лентите щяха да сочат едно, а показателят
          над тях — друго. Редовете, които нямат `qty` (напр. читатели), се броят по
          едно, както преди. */
-      const byGroup = (rows, field) => {
-        const m = {};
-        rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + qtyOf(r); });
-        return Object.entries(m).sort((a, b) => b[1] - a[1]);
-      };
       // „Най-търсени документи“ стои в справка за отчетен период 01.01–31.12, а
       // дотук се броеше за ЦЯЛАТА история на базата — заглавие, търсено само през
       // 2019 г., излизаше начело в отчета за 2026 г. Филтрира се по годината на
       // заемане, както всичко останало в тази справка.
+      // Първо по екземпляр (цяло число, idx_loans_date_out), после по заглавие — по-евтино от групиране по текст върху всички заемания.
       const topLoans = db.prepare(`
-        SELECT b.title, COALESCE(b.author, '') AS author, COUNT(*) AS n FROM loans l JOIN books b ON b.id = l.book_id
-        WHERE substr(l.date_out,1,4) = ?
+        SELECT b.title, COALESCE(b.author, '') AS author, SUM(l.n) AS n
+        FROM (SELECT book_id, COUNT(*) AS n FROM loans WHERE date_out BETWEEN ? AND ? GROUP BY book_id) l
+        JOIN books b ON b.id = l.book_id
         GROUP BY b.title, COALESCE(b.author, '') ORDER BY n DESC, b.title LIMIT 10
-      `).all(y);
+      `).all(y + '-01-01', end);
       /* „Събрани обезщетения“ (така пише в интерфейса) сумираше loans.fine —
          НАЧИСЛЕНИ глоби, и то по годината на ЗАЕМАНЕ: глоба за книга, заета през
          декември и върната през февруари, влизаше в миналата година, а пари, които
@@ -138,10 +153,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         outstanding.set(l.reader_id, q);
       }
       finesCollected = Math.round(finesCollected * 100) / 100;
-      const finesCharged = db.prepare(`
-        SELECT COALESCE(SUM(fine), 0) AS val FROM loans
-        WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?
-      `).get(y).val;
+      const finesCharged = returned.finesCharged;
       /* Начислено по ОЩЕ НЕВЪРНАТИ заемания (v2.4.24). От този кръг loans:extend
          начислява при продължение на просрочено заемане, тоест сумата стои върху
          отворен ред, а finesCharged по построение брои затворените (годината се
@@ -165,16 +177,16 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         FROM books b
         LEFT JOIN categories c ON c.id=b.category_id
         LEFT JOIN inventory i ON i.book_id = b.id
-        WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
         GROUP BY k ORDER BY n DESC
       `).all(end, end).map(r => [r.k, r.n]);
       return {
         year: y,
-        fundCount: copies(fund), fundValue: valueCopies(fund),
-        acquiredCount: copies(acquired), acquiredValue: valueCopies(acquired),
+        fundCount: fundAgg.n, fundValue: fundAgg.v,
+        acquiredCount: acquiredAgg.n, acquiredValue: acquiredAgg.v,
         deaccessionedCount: copies(deaccessioned), deaccessionedValue: valueCopies(deaccessioned),
-        loansCount: loansYear.length,
-        readersCount: readersYear.length,
+        loansCount: loansYearCount,
+        readersCount: readersYearCount,
         /* Посещенията са показател по БДС ISO 2789 и се вписват в „Статистика →
            Посещения“. Дотук стоеше `visitsYear || loansYear.length` — при невписани
            посещения отчетът тихо показваше БРОЯ ЗАЕМАНИЯ на тяхно място. Числото не
@@ -191,11 +203,11 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
            година: показателят за миналата вече е отпечатан в годишния отчет и не
            бива да се променя със задна дата. Дотогава `loansYear` (филтриран по
            date_out) означаваше точно това. */
-        returnedOnTime: returnedYear.filter(l => l.date_due && l.date_in <= l.date_due).length,
-        returnedLate: returnedYear.filter(l => l.date_due && l.date_in > l.date_due).length,
+        returnedOnTime: returned.onTime || 0,
+        returnedLate: returned.late || 0,
         finesCollected, finesCharged, finesOpen, openOverdue,
-        fundByLanguage: byGroup(fund, 'language'),
-        fundByDepartment: byGroup(fund, 'department'),
+        fundByLanguage: fundGroups('language'),
+        fundByDepartment: fundGroups('department'),
         fundByCategory,
         topLoans
       };
@@ -234,32 +246,30 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         const end = y + '-12-31';
         // Същото броене по екземпляри като в stats:report — двете справки показват
         // едно и също число за фонда и не бива да се разминават.
-        const fund = db.prepare(`
-          SELECT b.*, COALESCE(i.quantity, 1) AS qty FROM books b
-          LEFT JOIN inventory i ON i.book_id = b.id
-          WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
-        `).all(end, end);
-        // Същото правило като в stats:report по-горе — иначе двете справки за
-        // един и същи фонд дават различни числа при изрично нулеви бройки.
-        const qtyOf = (r) => (r.qty == null ? 1 : Number(r.qty) || 0);
-        const byGroup = (rows, field) => {
-          const m = {};
-          rows.forEach(r => { const k = r[field] || '—'; m[k] = (m[k] || 0) + qtyOf(r); });
-          return Object.entries(m).sort((a, b) => b[1] - a[1]);
-        };
+        // v2.4.31: сборовете в SQL (виж stats:report) — без 15 000 реда `b.*` в паметта.
+        const FUND_WHERE = '+b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)';
+        const agg = db.prepare(`
+          SELECT COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n,
+                 COALESCE(SUM(COALESCE(b.price, 0) * COALESCE(i.quantity, 1)), 0) AS v
+          FROM books b LEFT JOIN inventory i ON i.book_id = b.id WHERE ${FUND_WHERE}
+        `).get(end, end);
+        const byGroup = (field) => db.prepare(`
+          SELECT COALESCE(NULLIF(b.${field}, ''), '—') AS k, COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n
+          FROM books b LEFT JOIN inventory i ON i.book_id = b.id WHERE ${FUND_WHERE}
+          GROUP BY k ORDER BY n DESC, k
+        `).all(end, end).map(r => [r.k, r.n]);
         const byCategory = db.prepare(`
           SELECT COALESCE(c.name,'—') AS k, COALESCE(SUM(COALESCE(i.quantity, 1)),0) AS n
           FROM books b
           LEFT JOIN categories c ON c.id=b.category_id
           LEFT JOIN inventory i ON i.book_id = b.id
-          WHERE b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+          WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
           GROUP BY k ORDER BY n DESC
         `).all(end, end).map(r => [r.k, r.n]);
         return {
           id, year: y,
-          fundCount: fund.reduce((s, r) => s + qtyOf(r), 0),
-          fundValue: fund.reduce((s, r) => s + (Number(r.price) || 0) * qtyOf(r), 0),
-          byDepartment: byGroup(fund, 'department'), byLanguage: byGroup(fund, 'language'), byCategory
+          fundCount: agg.n, fundValue: agg.v,
+          byDepartment: byGroup('department'), byLanguage: byGroup('language'), byCategory
         };
       }
       if (id === 'readers_by_category') {

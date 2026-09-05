@@ -160,23 +160,55 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   // sort: 'title' (по подразбиране), 'cn' (по сигнатура — cn_sort нарежда „Ч-9" преди
   // „Ч-84", виж cnSortKey) или 'inv' (по инвентарен номер). Изборът е от фиксиран
   // списък тук, никога суров SQL от интерфейса.
-  const BOOK_ORDERS = { title: 'b.title', cn: "b.cn_sort IS NULL, b.cn_sort, b.title", inv: 'b.inv_number' };
-  ipcMain.handle('books:list', (e, query, sort) =>
+  // `, b.id` накрая (v2.4.31): порциите с LIMIT/OFFSET изискват устойчив ред и при равни заглавия.
+  const BOOK_ORDERS = { title: 'b.title, b.id', cn: "b.cn_sort IS NULL, b.cn_sort, b.title, b.id", inv: 'b.inv_number, b.id' };
+  /* Условието за търсене, общо за пълния списък и за прозореца (v2.4.31). Връща
+     { where, params } — празно търсене = без условие.
+     Заглавие/подзаглавие/автор минават през FTS5 (unicode61) — сгъва регистъра
+     и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
+     таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
+     потребителите очакват "съдържа навсякъде", а не само префикс. */
+  function booksSearchWhere(query) {
+    if (!query || !query.trim()) return { where: '', params: [] };
+    const q = `%${query.trim()}%`;
+    return {
+      where: `(b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
+             OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?)`,
+      params: [ftsQuery(query), q, q, q]
+    };
+  }
+  /* books:list(query, sort) — пълният резултат като масив (както досега: етикети,
+     износи, старите изгледи).
+     books:list(query, sort, page) — ПРОЗОРЕЦ (v2.4.31, производителност): при
+     15 000 документа пълният списък е 5,5 МБ и ~150 ms в SQLite при ВСЯКО отваряне
+     на „Книги“ и всяко търсене, а на екрана стоят 300 реда. page = { offset, limit,
+     dept, cat } връща { rows, total, depts } — само порцията, общия брой за брояча
+     и отделите, срещани в резултата (за падащия филтър). page.idsOnly връща
+     { ids } — всички идентификатори на резултата за „Избери всички“. */
+  ipcMain.handle('books:list', (e, query, sort, page) =>
     run(() => {
       const db = getDb();
       const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
-      if (query && query.trim()) {
-        const q = `%${query.trim()}%`;
-        // Заглавие/подзаглавие/автор минават през FTS5 (unicode61) — сгъва регистъра
-        // и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
-        // таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
-        // потребителите очакват "съдържа навсякъде", а не само префикс.
-        return db.prepare(`${BOOK_LIST_SELECT}
-          WHERE b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
-             OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?
-          ORDER BY ${order}`).all(ftsQuery(query), q, q, q);
+      const { where, params } = booksSearchWhere(query);
+      if (!page || typeof page !== 'object') {
+        return db.prepare(`${BOOK_LIST_SELECT} ${where ? 'WHERE ' + where : ''} ORDER BY ${order}`).all(...params);
       }
-      return db.prepare(`${BOOK_LIST_SELECT} ORDER BY ${order}`).all();
+      const conds = where ? [where] : [];
+      const p = [...params];
+      if (page.dept) { conds.push('COALESCE(b.department, \'\') = ?'); p.push(String(page.dept)); }
+      if (page.cat != null && page.cat !== '') { conds.push('b.category_id = ?'); p.push(parseInt(page.cat, 10)); }
+      const W = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+      if (page.idsOnly) {
+        return { ids: db.prepare(`SELECT b.id FROM books b ${W}`).pluck().all(...p) };
+      }
+      const limit = Math.min(Math.max(parseInt(page.limit, 10) || 300, 1), 2000);
+      const offset = Math.max(parseInt(page.offset, 10) || 0, 0);
+      const rows = db.prepare(`${BOOK_LIST_SELECT} ${W} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...p, limit, offset);
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM books b ${W}`).get(...p).n;
+      // Отделите в резултата от търсенето (без филтъра по отдел — иначе менюто се свива до избрания).
+      const depts = db.prepare(`SELECT DISTINCT b.department FROM books b ${where ? 'WHERE ' + where : ''}
+        ORDER BY b.department`).pluck().all(...params).filter(Boolean);
+      return { rows, total, depts, offset, limit };
     })
   );
   ipcMain.handle('books:get', (e, id) => run(() => getDb().prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id)));
@@ -269,8 +301,14 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
          „007“ отговаря на сканиране на инв. № 7 (CAST('007' AS INTEGER) = 7), а
          точното текстово сравнение по-долу би пропуснало точно този случай —
          проверката би минала тук, а по-късно скенерът пак би отказал. */
-      const withBarcode = db.prepare("SELECT id, inv_number, barcode FROM books WHERE barcode IS NOT NULL AND barcode != '' AND id != ?").all(self);
-      const byCode = withBarcode.find(r => /^\d{1,9}$/.test(String(r.barcode).trim()) && parseInt(r.barcode, 10) === invNumber);
+      /* v2.4.31 (производителност): дотук се четяха ВСИЧКИ баркодове (15 000 реда,
+         16 ms при всеки запис на книга) и се сравняваха в JavaScript. Числово равен
+         баркод е или точно същият низ (idx_books_barcode), или същото число с
+         водещи нули („007“) — само баркодовете, започващи с „0“, минават през
+         CAST; GLOB '0*' пак ползва индекса. Резултатът е същият. */
+      const byCode = db.prepare(`SELECT id, inv_number, barcode FROM books
+        WHERE id != ? AND (barcode = ? OR (barcode GLOB '0*' AND barcode NOT GLOB '*[^0-9]*' AND length(barcode) <= 9 AND CAST(barcode AS INTEGER) = ?))
+        LIMIT 1`).get(self, String(invNumber), invNumber);
       if (byCode) {
         throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
           + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');

@@ -72,8 +72,12 @@ async function renderCirc() {
       call(window.api.readers.get(CIRC.readerId)), call(window.api.account.get(CIRC.readerId))
     ]);
     if (!r) { CIRC.readerId = null; return renderCirc(); }
-    const rule = await call(window.api.circRules.effective(r.category)) || s;
-    const myLoans = await call(window.api.loans.byReader(CIRC.readerId)) || [];
+    // v2.4.31: трите четения са независими — успоредно, не едно след друго (три обиколки по IPC → една).
+    const [rule0, myLoans0, holdsAll] = await Promise.all([
+      call(window.api.circRules.effective(r.category)), call(window.api.loans.byReader(CIRC.readerId)), call(window.api.holds.list())
+    ]);
+    const rule = rule0 || s;
+    const myLoans = myLoans0 || [];
     const openMine = myLoans.filter(l => !l.date_in);
     circReader = r; circOpen = openMine.length; circMax = rule.max_books || 0;
     col1 = `<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><div style="flex:1">
@@ -89,7 +93,7 @@ async function renderCirc() {
         <button class="btn sm" style="margin-left:8px" onclick="clearSuspension(${r.id})">Снеми</button></div>` : ''}
       ${acc && acc.balance > 0 ? `<div class="hint">💰 Дължи по сметка: <b style="color:var(--red)">${mny(acc.balance)}</b></div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
-    const myHolds = (await call(window.api.holds.list()) || []).filter(h => h.reader_id === CIRC.readerId);
+    const myHolds = (holdsAll || []).filter(h => h.reader_id === CIRC.readerId);
     const maxRenew = rule.extensions_count == null ? 2 : rule.extensions_count;
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
       <div class="hint" style="margin-top:6px">Срок за заемане: ${dni(rule.loan_days)}${maxRenew ? ' · до ' + pl(maxRenew, 'продължение', 'продължения') : ''}</div>

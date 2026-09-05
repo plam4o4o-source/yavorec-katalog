@@ -54,7 +54,20 @@ async function route() {
   // без route(), затова не мигат. Класът се сваля и слага наново, за да се
   // рестартира анимацията и при повторно влизане в същия раздел.
   const v = $('#view');
-  if (v) { v.classList.remove('viewIn'); void v.offsetWidth; v.classList.add('viewIn'); }
+  /* v2.4.31 (производителност): рестартът на анимацията ставаше с принудително
+     преизчисление на подредбата (`void v.offsetWidth`) върху СТАРОТО съдържание —
+     при таблица от 300 реда (5 000 възела) това са ~90 ms на всяко превключване
+     на раздел, преди новият изобщо да е поискан от базата. Класът остава (стилът
+     и тестовете разчитат на него), а рестартът минава през Web Animations —
+     cancel() на текущата анимация не изисква подредба. */
+  if (v) {
+    if (v.getAnimations) v.getAnimations().forEach(a => a.cancel());
+    v.classList.add('viewIn');
+    const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (typeof v.animate === 'function' && !reduced) {
+      v.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' });
+    }
+  }
   await RENDERERS[VIEW]();
 }
 

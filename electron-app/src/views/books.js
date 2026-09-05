@@ -29,6 +29,56 @@ function booksFilterMatch(b) {
    по същия установен модел като публичния каталог (site/page-katalog.html: R/P/page()). */
 const BOOKS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE;
+/* v2.4.31 (производителност): порциите идват от БАЗАТА — books:list(query, sort,
+   { offset, limit, dept, cat }) връща { rows, total, depts }. При 15 000 документа
+   пълният списък беше 5,5 МБ и ~150 ms в SQLite при всяко отваряне на „Книги“ и
+   всяко търсене (измерено), а на екрана стоят 300 реда. Филтрите по отдел и
+   категория също се прилагат в базата. Ако обработчикът върне масив (стар
+   обработчик, тестов заместител), изгледът работи както досега — целият списък
+   в паметта, филтри и „Покажи още“ без IPC. */
+let BOOKS_WINDOWED = false;
+let BOOKS_TOTAL = 0;
+let BOOKS_DEPTS = [];
+let BOOKS_REQ = 0; // пореден номер на ПЪЛНОТО зареждане — закъснял отговор на старо търсене не се рисува
+let BOOKS_GEN = 0; // поколение на списъка в паметта — „Покажи още“ долепя само към същия списък
+/* limit: при пълен рендер — досегашният прозорец (BOOKS_RENDER_LIMIT), за да не се
+   свива разгърнат списък след запис/изтриване; при „Покажи още“ — една порция. */
+async function booksFetch(offset, limit) {
+  const res = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT,
+    { offset, limit: Math.min(limit || BOOKS_PAGE_SIZE, 2000), dept: BOOKS_FILTER_DEPT || '', cat: BOOKS_FILTER_CAT || '' }));
+  if (!res) return null;
+  if (Array.isArray(res)) { BOOKS_WINDOWED = false; return { all: res }; }
+  BOOKS_WINDOWED = true;
+  BOOKS_TOTAL = res.total || 0;
+  BOOKS_DEPTS = res.depts || [];
+  return res;
+}
+function booksSetList(rows) { window._BOOKS_LIST = rows; BOOKS_GEN++; }
+let BOOKS_MORE_PENDING = false;
+async function booksMore() {
+  if (!BOOKS_WINDOWED) { BOOKS_RENDER_LIMIT += BOOKS_PAGE_SIZE; renderBooksBody(true); return; }
+  /* Проверка при прегледа (v2.4.31): `loaded` се четеше преди await-а, без предпазител
+     срещу повторно влизане — двоен клик върху „Покажи още“, преди първата порция да
+     се върне, изпращаше ДВЕ заявки с ЕДИН И СЪЩ offset. И двете минаваха проверката
+     за поколение (gen не се сменя от самия booksMore) и се долепяха последователно:
+     резултатът беше 300 дублирани реда и ЦЯЛА следваща порция, изтеглена никога —
+     библиотекар, стигнал до края на списъка, вярваше, че е видял всичко. */
+  if (BOOKS_MORE_PENDING) return;
+  BOOKS_MORE_PENDING = true;
+  try {
+    const gen = BOOKS_GEN;
+    const loaded = (window._BOOKS_LIST || []).length;
+    const res = await booksFetch(loaded, BOOKS_PAGE_SIZE);
+    // Междувременно търсене/филтър е подменил списъка — тази порция е от стария резултат.
+    if (!res || gen !== BOOKS_GEN) return;
+    window._BOOKS_LIST = (window._BOOKS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    BOOKS_RENDER_LIMIT = Math.max(BOOKS_RENDER_LIMIT, window._BOOKS_LIST.length);
+    renderBooksBody(true);
+  } finally {
+    BOOKS_MORE_PENDING = false;
+  }
+}
+window.booksMore = booksMore;
 function searchListDatalist(id, values) {
   return `<datalist id="${id}">${(values || []).map(v => `<option value="${esc(v)}"></option>`).join('')}</datalist>`;
 }
@@ -54,7 +104,7 @@ function booksRowsHtml(shown) {
 function booksMoreHtml(more, total) {
   // append=true → renderBooksBody ДОБАВЯ следващата порция, вместо да презаписва
   // и вече изчертаните редове (виж paintRowWindow в core.js).
-  return more > 0 ? `<button class="btn" onclick="BOOKS_RENDER_LIMIT+=${BOOKS_PAGE_SIZE};renderBooksBody(true)">Покажи още (${more} от общо ${total})</button>` : '';
+  return more > 0 ? `<button class="btn" onclick="booksMore()">Покажи още (${more} от общо ${total})</button>` : '';
 }
 /* „Покажи още“ само разширява прозореца на вече изтеглените от сървъра книги
    (window._BOOKS_LIST) — БЕЗ нова обиколка по IPC. По-рано всяко натискане на
@@ -89,17 +139,20 @@ let BOOKS_PAINTED = 0;
 function booksFilterChanged() {
   BOOKS_SELECTED.clear();
   BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE;
+  if (BOOKS_WINDOWED) return refreshBooksList(); // филтрите са в базата
   renderBooksBody();
   updateBulkBar();
   syncChkAll();
 }
 window.booksFilterChanged = booksFilterChanged;
 function renderBooksBody(append) {
-  const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
+  // Прозоречен режим: заредените порции са вече филтрирани от базата, общият брой е отделен.
+  const books = BOOKS_WINDOWED ? (window._BOOKS_LIST || []) : (window._BOOKS_LIST || []).filter(booksFilterMatch);
   BOOKS_PAINTED = paintRowWindow({
-    body: '#bBody', bar: '#bMore', rows: books, limit: BOOKS_RENDER_LIMIT,
+    body: '#bBody', bar: '#bMore', rows: books, limit: BOOKS_WINDOWED ? books.length : BOOKS_RENDER_LIMIT,
     painted: append ? BOOKS_PAINTED : 0,
-    rowsHtml: booksRowsHtml, moreHtml: booksMoreHtml
+    rowsHtml: booksRowsHtml,
+    moreHtml: BOOKS_WINDOWED ? () => booksMoreHtml(BOOKS_TOTAL - books.length, BOOKS_TOTAL) : booksMoreHtml
   });
   syncChkAll();
 }
@@ -111,6 +164,13 @@ window.renderBooksBody = renderBooksBody;
 function syncChkAll() {
   const chkAll = $('#chkAll');
   if (!chkAll) return;
+  if (BOOKS_WINDOWED) {
+    // Изборът се изчиства при всяко ново търсене/филтър, тоест винаги е подмножество на резултата.
+    const sel = BOOKS_SELECTED.size;
+    chkAll.checked = BOOKS_TOTAL > 0 && sel >= BOOKS_TOTAL;
+    chkAll.indeterminate = sel > 0 && sel < BOOKS_TOTAL;
+    return;
+  }
   const books = (window._BOOKS_LIST || []).filter(booksFilterMatch);
   const sel = books.filter(b => BOOKS_SELECTED.has(b.id)).length;
   chkAll.checked = books.length > 0 && sel === books.length;
@@ -123,33 +183,45 @@ window.syncChkAll = syncChkAll;
    #view заедно със самото поле: при писане „Иван Вазов“ с пауза над 300 ms
    фокусът изчезваше и следващите знаци отиваха в нищото. */
 async function refreshBooksList() {
-  const books = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT));
-  if (!books) return;
-  window._BOOKS_LIST = books;
-  const visibleIds = new Set(books.map(b => b.id));
-  for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
+  const req = ++BOOKS_REQ;
+  const res = await booksFetch(0, BOOKS_RENDER_LIMIT);
+  if (!res || req !== BOOKS_REQ) return;
+  const books = res.all || res.rows;
+  booksSetList(books);
+  if (!BOOKS_WINDOWED) {
+    const visibleIds = new Set(books.map(b => b.id));
+    for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
+  }
   renderBooksBody();
   updateBulkBar();
 }
 window.refreshBooksList = refreshBooksList;
 async function renderBooks() {
-  const [books, cats, searchSuggest] = await Promise.all([
-    call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT)), call(window.api.categories.list()),
+  /* Пълният рендер не се отказва при по-нова заявка (тестовете и hashchange
+     викат route() два пъти подред и чакат първия) — само търсенето (refreshBooksList)
+     и „Покажи още“ пазят реда на отговорите. */
+  ++BOOKS_REQ;
+  const [res, cats, searchSuggest] = await Promise.all([
+    booksFetch(0, BOOKS_RENDER_LIMIT), call(window.api.categories.list()),
     call(window.api.searchHistory.suggest('books'))
   ]);
-  if (!books) return;
+  if (!res) return;
+  const books = res.all || res.rows;
   window._CATS = cats || [];
-  window._BOOKS_LIST = books;
-  const visibleIds = new Set(books.map(b => b.id));
-  for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
+  booksSetList(books);
+  if (!BOOKS_WINDOWED) {
+    const visibleIds = new Set(books.map(b => b.id));
+    for (const id of [...BOOKS_SELECTED]) if (!visibleIds.has(id)) BOOKS_SELECTED.delete(id);
+  }
   const n = BOOKS_SELECTED.size;
-  const filtered = books.filter(booksFilterMatch);
-  const shown = filtered.slice(0, BOOKS_RENDER_LIMIT);
-  const more = filtered.length - shown.length;
-  // Отделите за филтъра идват от вече заредения резултат (реално ползвани стойности),
-  // обединени с фиксираните OTDELI — така филтърът винаги показва само отдели, които
-  // реално имат поне един документ в текущия резултат от търсенето.
-  const deptSeen = [...new Set(books.map(b => b.department).filter(Boolean))];
+  const filtered = BOOKS_WINDOWED ? books : books.filter(booksFilterMatch);
+  const shown = BOOKS_WINDOWED ? books : filtered.slice(0, BOOKS_RENDER_LIMIT);
+  const total = BOOKS_WINDOWED ? BOOKS_TOTAL : filtered.length;
+  const more = total - shown.length;
+  // Отделите за филтъра идват от резултата (реално ползвани стойности), обединени
+  // с фиксираните OTDELI — така филтърът винаги показва само отдели, които реално
+  // имат поне един документ в текущия резултат от търсенето.
+  const deptSeen = BOOKS_WINDOWED ? BOOKS_DEPTS : [...new Set(books.map(b => b.department).filter(Boolean))];
   const deptOpts = [...new Set([...OTDELI, ...deptSeen])];
   $('#view').innerHTML = `
     <div class="note">Редакцията на вече вписан документ става от раздел <b>„Инвентарна книга“</b> —
@@ -178,11 +250,11 @@ async function renderBooks() {
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
-        ${filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
+        ${!BOOKS_WINDOWED && filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
         <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:90px"></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, filtered.length)}</div>
+    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, total)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
   // Таблицата е изчертана направо в #view — броячът трябва да знае колко реда
@@ -198,13 +270,20 @@ function toggleBookSel(id, checked) {
   updateBulkBar();
 }
 window.toggleBookSel = toggleBookSel;
-function toggleBookSelAll(checked) {
+async function toggleBookSelAll(checked) {
   // "Избери всички" означава всички книги от текущия резултат от търсенето И филтъра —
   // не само редовете, заредени в момента в таблицата (при windowed рендер може да е само
-  // част от тях), затова минаваме по window._BOOKS_LIST (филтрирано с booksFilterMatch),
-  // а не по DOM чек-боксовете. Селекцията не сменя кои книги съществуват, затова е
-  // достатъчен renderBooksBody() (без ново IPC).
-  const ids = (window._BOOKS_LIST || []).filter(booksFilterMatch).map(b => b.id);
+  // част от тях). В прозоречен режим идентификаторите на целия резултат се взимат от
+  // базата (books:list с idsOnly — само числа, не редове); в стария — от списъка в паметта.
+  let ids;
+  if (BOOKS_WINDOWED) {
+    if (!checked) { BOOKS_SELECTED.clear(); renderBooksBody(); updateBulkBar(); return; }
+    const r = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT,
+      { idsOnly: true, dept: BOOKS_FILTER_DEPT || '', cat: BOOKS_FILTER_CAT || '' }));
+    ids = (r && r.ids) || [];
+  } else {
+    ids = (window._BOOKS_LIST || []).filter(booksFilterMatch).map(b => b.id);
+  }
   if (checked) ids.forEach(id => BOOKS_SELECTED.add(id));
   else ids.forEach(id => BOOKS_SELECTED.delete(id));
   renderBooksBody();
@@ -662,6 +741,6 @@ async function confirmDangerousDelete(key, plainQuestion, send, okMsg, after) {
 window.confirmDangerousDelete = confirmDangerousDelete;
 async function deleteBook(id) {
   await confirmDangerousDelete('book:' + id, 'Да изтрия ли тази книга?',
-    () => window.api.books.delete(id), 'Книгата е изтрита.', () => RENDERERS[VIEW]());
+    () => window.api.books.delete(id), 'Книгата е изтрита.', () => { BOOKS_SELECTED.delete(id); return RENDERERS[VIEW](); });
 }
 window.deleteBook = deleteBook;
