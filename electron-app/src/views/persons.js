@@ -207,7 +207,7 @@ async function personView(id) {
 }
 window.personView = personView;
 async function personDelete(id) {
-  if (!confirm('Изтриване на персоналията и всичките ѝ връзки?')) return;
+  if (!await askConfirm('Изтриване на персоналията и всичките ѝ връзки?')) return;
   await call(window.api.persons.delete(id), 'Персоналията е изтрита.');
   closeModal(); renderPersons();
 }

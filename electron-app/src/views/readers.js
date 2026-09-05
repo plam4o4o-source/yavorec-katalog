@@ -234,10 +234,10 @@ async function readerForm(id) {
 }
 /* „Сметка“ от формата за редакция (v2.4.29): прозорецът се ЗАМЕСТВА и незаписаните
    промени изчезваха без въпрос. Пита само ако наистина има промени. */
-function readerFormToAccount(id) {
+async function readerFormToAccount(id) {
   const f = $('#readerF');
   const dirty = f && f.dataset.snapshot && f.dataset.snapshot !== JSON.stringify(formData('#readerF'));
-  if (dirty && !confirm('Има незаписани промени в картата на читателя. Да ги изоставя ли и да отворя сметката?')) return;
+  if (dirty && !await askConfirm('Има незаписани промени в картата на читателя. Да ги изоставя ли и да отворя сметката?', { kind: 'warn', title: 'Незаписани промени', okLabel: 'Изостави промените' })) return;
   accountModal(id);
 }
 window.readerFormToAccount = readerFormToAccount;
@@ -249,7 +249,7 @@ function toggleGuarantorFields(category) {
 window.toggleGuarantorFields = toggleGuarantorFields;
 async function clearSuspension(id) {
   if (!id) return;
-  if (!confirm('Снемане на наказанието „преустановено заемане“ за този читател?')) return;
+  if (!await askConfirm('Снемане на наказанието „преустановено заемане“ за този читател?', { kind: 'ask', okLabel: 'Снеми' })) return;
   const ok = await call(window.api.readers.clearSuspension(id), 'Наказанието е снето.');
   if (ok !== null) { closeModal(); if (VIEW === 'circ') renderCirc(); else renderReaders(); }
 }

@@ -11,6 +11,154 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.34
+
+**BG:** Преглед на поправките от двадесет и втория кръг (v2.4.33). Самият
+askConfirm() е верен и добре покрит; един тестов пропуск и една грешна икона.
+
+- **Тестът за собствения слой на въпросите не проверяваше Esc, само бутона
+  „Отказ“.** `askConfirm()` спира разпространението на Esc (`e.stopPropagation()`),
+  за да не позволи общия слушател отдолу (bubble фаза) да затвори и формата
+  на втория слой, точно както беше поправено за `askText()` в одит v2.4.27
+  — но revert-and-retest показа, че премахването на `stopPropagation()`
+  минава през целия `test/messages-v2433.test.js` без НИТО един провал.
+  Самият код е верен (доказано с repro: без него Esc върху въпроса затваря и
+  формата „Правило“ отдолу, губейки незаписаното); добавен е тест, който
+  наистина гърми без него.
+- **Анонимизирането на лични данни (Настройки → Лични данни) показваше
+  иконата на изтриване вместо триъгълника за необратимо действие.**
+  `askConfirm()` отгатва вида по текста, ако `kind` липсва —
+  `del = /изтри/i.test(text)`. Текстът на `runAnonymize()` започва с
+  „НЕОБРАТИМО“, но по-надолу споменава „N стари търсения се изтриват“
+  (страничен детайл, не самото действие) — думата „изтри“ съвпада първа и
+  печели над „необратим“. Бутонът и фокусът излизаха верни (изтриване и
+  необратимо действие делят един и същ червен стил), но иконата — не.
+  Другите повиквания с несигурен текст (`authorities.js`, `readers.js`) вече
+  подават изричен `kind` по същата причина; сега и това го прави.
+
+Проверено и НЕ прието за дефект на този кръг: същата догадка по текст дава
+„необратимо действие“ (триъгълник, червен бутон, фокус на „Отказ“) и на три
+по-леки, обратими действия — премахване на логото, спиране на автоматичния
+запис на каталога, изключване от обслужване по домовете (текстът му дори
+изрично казва „Историята… се пази“). За разлика от анонимизирането, нито
+едно от трите не носи собствен, недвусмислен сигнал за какво точно е
+предвидено (нито дума „необратимо“ в самия текст) — преценка на тона, не
+доказан дефект; оставено без промяна.
+
+Всичко доказано с revert-and-retest в двете посоки и нови проверки в
+`test/messages-v2433.test.js`. Само поправки в кода и тестовете — без нова
+функционалност. Пълната поредица: 1289 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария.
+
+**EN:** A review of round twenty-two's own fixes (v2.4.33). `askConfirm()`
+itself is sound and well covered; one test gap and one wrong icon. The
+capture-phase `Esc` handler's `stopPropagation()` — which stops the confirm
+dialog's Escape key from also closing an underlying form-in-progress, the
+same fix already made for `askText()` in round sixteen — turned out to have
+no regression test: removing it passed the entire test suite. The production
+code is correct (proven by a direct repro); a test that actually fails
+without it has been added. Separately, the GDPR-anonymization confirmation
+showed the delete-trash icon instead of the intended irreversible-action
+triangle, because its message mentions "old searches are deleted" as an
+incidental detail and the auto-detection regex matched that before the
+message's own leading "НЕОБРАТИМО" — fixed with an explicit `kind: 'danger'`,
+matching the pattern already used at other uncertain-text call sites.
+Code-only round: 1289 tests passing, 0 failing.
+
+## v2.4.33
+
+**BG:** Двадесет и втори кръг — графично подобрение на съобщенията: известията
+(toast), въпросите за потвърждение, празните състояния и предупредителните
+бележки. Снимано в истински Chromium върху база с 15 000 документа преди и
+след.
+
+Какво беше не наред:
+- **Въпросите за потвърждение минаваха през родния `confirm()` на Electron** —
+  системен прозорец с чужд външен вид, бутони „OK“ / „Cancel“ на английски в
+  българска програма, без икона, без разлика между „Да изтрия ли тази книга?“
+  и „Начисли годишна такса?“, а дългите текстове („РЕДАКЦИЯ НА ЗАПИС В
+  ИНВЕНТАРНАТА КНИГА…“, „ПЕЧАТ НА 14 750 ЕТИКЕТА…“) се четяха като едно сиво
+  каре. 34 такива въпроса в 21 екрана.
+- **Известията бяха плътни цветни плочи** — тъмносиня, зелена, червена — с
+  текстови знаци за икони („✓“, „ℹ“), които се рисуват с различен шрифт и
+  тежест на всяка машина. Три натрупани грешки бяха три червени плочи върху
+  таблото; нямаше вид „предупреждение“ — всичко, което не е успех, беше грешка.
+- **Празното състояние** („Няма заявки.“) ползваше емоджи „📄“ с grayscale-
+  филтър — цветен системен глиф, различен на всяка машина и мътен от филтъра;
+  **предупредителната бележка** (`.note.w`) се различаваше от обикновената само
+  по оттенъка на канта.
+
+Какво е направено:
+- **`askConfirm(text, opts)` в `core.js`** — прозорец на самата програма:
+  икона в кръгче и цвят по вида на действието (изтриване — червено с кошче;
+  друго необратимо — червено с триъгълник; внимание — кехлибарено; въпрос —
+  основният цвят на темата), заглавие, текстът с неговите редове, „Отказ“ и
+  бутон с ИМЕТО на действието („Изтрий“, „Изтрий окончателно“, „Анулирай
+  акта“, „Изостави промените“, „Печатай въпреки това“, „Начисли“, „Към
+  редакцията“…). Видът се извежда от текста (изтри-/необратим-/анулира-/
+  рестартира…), ако не е подаден изрично; първият ред, отделен с празен ред,
+  става заглавие и главните букви се свалят („НЕОБРАТИМО“ → „Необратимо“).
+  При необратимо действие фокусът е на „Отказ“ — Enter не изтрива по инерция;
+  при обикновен въпрос — на потвърждаващия бутон. Esc е отказ. Собствен слой
+  (`#veilC`, над двата слоя прозорци и над прегледа преди печат): въпросът от
+  бутон вътре във форма (карта на читател → сметка, правило за категория в
+  Настройки) не изтрива формата и при „Отказ“ попълненото остава; фокусът се
+  връща на бутона, задал въпроса. Всичките 34 повиквания са прехвърлени
+  (`if (!await askConfirm(…)) return;`); `confirmManyLabels()` /
+  `printLabelSheet()` / `invBookEdit()` / `readerFormToAccount()` станаха
+  async, а печатните бутони връщат обещанието, за да може да се изчака.
+  Подменен (не-native) `confirm()` — както правят всички тестове на екранния
+  слой и `e2e-app.js` — отговаря вместо прозореца, затова 22 тестови файла
+  работят непроменени.
+- **Известия:** светла картичка в цвета на хартията с цветен кант отляво,
+  икона в кръгче, лек оттенък на фона и лентичка-брояч — всичко в един цвят
+  по вида (`--tc`), така че четирите вида са една и съща кутийка. Иконите са
+  SVG с `currentColor` и `data-kind`. Нов вид **`toast(msg, 'warn')`**
+  (кехлибарено, 6 s, горе в центъра като грешките, `role=status`). Местата,
+  времената, броячът „×N“, спирането при посочване и бутонът × са както бяха.
+- **Празно състояние:** отворена книга като SVG през `mask` (в `currentColor`)
+  вместо емоджи. **Предупредителна бележка** `.note.w`: кехлибарен кант и знак
+  (триъгълник) — не само цвят. Нов цвят `--amber` в `:root` (5,6:1 върху
+  `--paper2`, еднакъв във всичките 7 теми).
+
+Проверки: нов `test/messages-v2433.test.js` (8 теста): четирите вида
+известия, местата и ролите им, SVG иконата; `askConfirm` — делегиране към
+подменен `confirm()`, прозорецът с вид/заглавие/бутони/фокус, Esc, извеждане
+на заглавието от първия ред и изричните opts, собственият слой върху две
+отворени форми и връщането на фокуса, z-index между слоевете; проверка по
+изходния код, че нито един екран не вика родния `confirm()` и че всяко
+`askConfirm()` е с `await`; `printLabelSheet()` връща обещание и `false` при
+отказ. `views-ui.test.js`: проверката на иконата е за SVG/`data-kind`.
+Мутационна проверка: 25 мутации (warn долу вдясно, без собствен живот, без
+`data-kind`, `role=alert`, иконата на грешката; подмененият `confirm`
+пренебрегнат, изтриването не е отделен вид, изричният kind пренебрегнат,
+Enter изтрива по инерция, Esc не е отказ, главните букви остават, редът-
+заглавие се повтаря, въпросът в слоя на формата, фокусът не се връща,
+съдържанието остава, слоят под втория, зелен бутон при изтриване, бутон без
+име, заглавие без вид, печатът не изчаква, родният `confirm` върнат в МЗС,
+`askConfirm` без `await`, warn в червено, бележка без знак, икона без
+`aria-hidden`) — всички уловени; 1 равностойна контрола минава. Пълната
+поредица: 1287 успешни, 0 неуспешни.
+
+**EN:** Round twenty-two — a visual pass over the app's messages. Confirmation
+questions went through Electron's native `confirm()`: a foreign-looking system
+box with English "OK / Cancel" buttons in a Bulgarian app, no icon, and no
+distinction between deleting a book and charging a fee. Toasts were solid
+colour slabs with glyph "icons" that rendered differently per machine, and
+there was no warning kind. Now: `askConfirm(text, opts)` — an in-app dialog
+with an icon and colour per kind (delete / irreversible / warning / question),
+a title (derived from an uppercase first line when present), the message with
+its line breaks, "Отказ" and a button named after the action; focus lands on
+Cancel for destructive actions, Esc cancels, it lives on its own layer above
+both modal layers so a question asked from inside a form never destroys that
+form, and focus returns to the triggering button. All 34 call sites converted
+to `await askConfirm(…)`; a non-native (stubbed) `confirm()` still answers,
+so the existing 22 test files pass unchanged. Toasts are now light cards with
+a colour rail, tinted icon circle and progress bar driven by one `--tc`
+variable, SVG icons, and a new `warn` kind; empty states use an SVG mask
+instead of an emoji; warning notes get an amber rail and a triangle. 8 new
+tests, 25 mutations all caught, full suite 1287 passing.
+
 ## v2.4.32
 
 **BG:** Преглед на поправките от двадесетия кръг (v2.4.31). Оптимизациите са

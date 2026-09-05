@@ -270,7 +270,7 @@ async function saveAnalytic(id) {
 }
 window.saveAnalytic = saveAnalytic;
 async function analyticDelete(id) {
-  if (!confirm('Изтриване на това аналитично описание?')) return;
+  if (!await askConfirm('Изтриване на това аналитично описание?')) return;
   await call(window.api.analytics.delete(id), 'Описанието е изтрито.');
   renderAnalytics();
 }

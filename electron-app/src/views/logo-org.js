@@ -9,7 +9,7 @@ async function chooseLogo() {
 }
 window.chooseLogo = chooseLogo;
 async function clearLogo() {
-  if (!confirm('Премахване на логото от документите и картите?')) return;
+  if (!await askConfirm('Премахване на логото от документите и картите?', { okLabel: 'Премахни' })) return;
   await call(window.api.settings.clearLogo(), 'Логото е премахнато.');
   await loadSettingsCache();
   if (RENDERERS[VIEW]) RENDERERS[VIEW]();
@@ -32,13 +32,13 @@ async function printLabelsRange() {
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet({ rows, card: lblCard }, 'fund');
+  return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsRange = printLabelsRange;
 async function printLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet({ rows, card: lblCard }, 'fund');
+  return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsAll = printLabelsAll;
 async function printSignatureLabelsRange() {
@@ -46,20 +46,20 @@ async function printSignatureLabelsRange() {
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
   const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
-  printLabelSheet({ rows, card: sigLblCard }, 'sig');
+  return printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
 async function printSignatureLabelsAll() {
   const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  printLabelSheet({ rows, card: sigLblCard }, 'sig');
+  return printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsAll = printSignatureLabelsAll;
 async function printCardsAll() {
   const readers = await call(window.api.readers.list(''));
   const rows = (readers || []).filter(r => r.status !== 'прекратен');
   if (!rows.length) return toast('Няма активни читатели.', 'err');
-  printLabelSheet({ rows, card: readerCardHtml }, 'card');
+  return printLabelSheet({ rows, card: readerCardHtml }, 'card');
 }
 window.printCardsAll = printCardsAll;
 /* Карта само за ЕДИН читател (v1.71.0) — бутон „Карта“ на реда в списъка
@@ -68,7 +68,7 @@ window.printCardsAll = printCardsAll;
 async function printCardOne(id) {
   const r = await call(window.api.readers.get(id));
   if (!r) return;
-  printLabelSheet(readerCardHtml(r), 'card');
+  return printLabelSheet(readerCardHtml(r), 'card');
 }
 window.printCardOne = printCardOne;
 /* Колко реда се побират на картона. Одит v2.4.16: срязването беше зашитото 14 и

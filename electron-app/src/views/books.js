@@ -725,8 +725,8 @@ async function confirmDangerousDelete(key, plainQuestion, send, okMsg, after) {
   const pending = PENDING_DELETE.get(key);
   if (pending) {
     PENDING_DELETE.delete(key);
-    if (!confirm('НЕОБРАТИМО\n\n' + pending + '\n\nНаистина ли да продължа?')) return;
-  } else if (!confirm(plainQuestion)) {
+    if (!await askConfirm('НЕОБРАТИМО\n\n' + pending + '\n\nНаистина ли да продължа?', { kind: 'delete', title: 'Необратимо изтриване', okLabel: 'Изтрий окончателно' })) return;
+  } else if (!await askConfirm(plainQuestion)) {
     return;
   }
   const res = await send();

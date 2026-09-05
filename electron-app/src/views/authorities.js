@@ -79,8 +79,8 @@ async function authMerge(i) {
   const all = [...box.querySelectorAll(`input[name=ag${i}sel]`)].map(x => x.value);
   const from = all.filter(v => v !== target.value);
   if (!from.length) return toast('Няма какво да се слее.', 'err');
-  if (!confirm(`Сливане на ${from.length} стойности в „${target.value}“?\n\n` +
-    from.map(v => '• ' + v).join('\n') + '\n\nПромяната засяга всички документи с тези стойности.')) return;
+  if (!await askConfirm(`Сливане на ${from.length} стойности в „${target.value}“\n\n` +
+    from.map(v => '• ' + v).join('\n') + '\n\nПромяната засяга всички документи с тези стойности.', { kind: 'warn', okLabel: 'Слей' })) return;
   const r = await call(window.api.authorities.merge({ field: AUTH_FIELD, from, to: target.value }),
     null);
   if (!r) return;

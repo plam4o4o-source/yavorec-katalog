@@ -178,15 +178,15 @@ function invBookRowsHtml(rows) {
    отваряне на формата се иска изрично потвърждение. Списъкът „Книги“ вече
    няма бутон „Редакция“ на ред — там остават търсене/филтри/групова
    редакция/нов документ. */
-function invBookEdit(id) {
+async function invBookEdit(id) {
   const r = (window._INVBOOK_ROWS || []).find(x => x.id === id) || {};
   const what = [r.author, r.title].filter(Boolean).join('. ') || 'този запис';
-  if (!confirm('РЕДАКЦИЯ НА ЗАПИС В ИНВЕНТАРНАТА КНИГА\n\n'
+  if (!await askConfirm('РЕДАКЦИЯ НА ЗАПИС В ИНВЕНТАРНАТА КНИГА\n\n'
     + '„' + what + '“ (инв. № ' + (r.inv_number ?? '—') + ')\n\n'
     + 'Инвентарната книга е официалният регистър на библиотечния фонд по '
     + 'Наредба № 3 — тя се съхранява безсрочно и промените в записа важат '
     + 'веднага навсякъде в програмата и в онлайн каталога.\n\n'
-    + 'Да продължа ли към редакция?')) return;
+    + 'Да продължа ли към редакция?', { kind: 'ask', okLabel: 'Към редакцията' })) return;
   bookForm(id);
 }
 window.invBookEdit = invBookEdit;

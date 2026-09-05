@@ -101,7 +101,7 @@ async function openMzs(id) {
 }
 window.openMzs = openMzs;
 async function delMzs(id) {
-  if (!confirm('Изтриване на заявката?')) return;
+  if (!await askConfirm('Изтриване на заявката?')) return;
   // Одит v2.4.16: резултатът не се проверяваше — при провал излизаха ДВЕ
   // съобщения („database is locked“ и „Изтрито.“), а редът си оставаше в
   // регистъра. Всички съседни изтривания го правят правилно.

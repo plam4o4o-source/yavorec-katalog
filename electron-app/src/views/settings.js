@@ -493,11 +493,11 @@ async function runAnonymize() {
   const total = (r.count || 0) + (r.auditCount || 0) + (r.searchCount || 0) + (r.otherCount || 0);
   if (!total) return toast('Няма нищо за анонимизиране.', 'ok');
   const c = r.count || 0, a = r.auditCount || 0, q = r.searchCount || 0, o = r.otherCount || 0;
-  if (!confirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${c === 1 ? '1 върнато заемане губи' : c + ' върнати заемания губят'} връзката с имената ` +
+  if (!await askConfirm(`НЕОБРАТИМО, отпреди ${bg(r.cutoff)}: ${c === 1 ? '1 върнато заемане губи' : c + ' върнати заемания губят'} връзката с имената ` +
     `(остава само „категория · година“), ${a === 1 ? '1 запис в одитната следа се обезличава' : a + ' записа в одитната следа се обезличават'} и ` +
     `${q === 1 ? '1 старо търсене се изтрива' : q + ' стари търсения се изтриват'}` +
     (o ? ` и ${o === 1 ? '1 запис' : o + ' записа'} в резервации, предложения, МЗС, напомняния и посещения по домовете ${o === 1 ? 'губи' : 'губят'} името` : '') +
-    `. Да продължа?`)) return;
+    `. Да продължа?`, { kind: 'danger', title: 'Анонимизиране на лични данни', okLabel: 'Анонимизирай' })) return;
   const res = await call(window.api.gdpr.anonymize());
   if (!res) return;
   toast((res.anonymized === 1 ? 'Анонимизирано 1 заемане' : 'Анонимизирани ' + res.anonymized + ' заемания')
@@ -661,7 +661,7 @@ async function saveCircRule() {
 }
 window.saveCircRule = saveCircRule;
 async function deleteCircRule(category) {
-  if (!confirm('Изтриване на правилото за „' + category + '“? Категорията ще започне да ползва общите стойности.')) return;
+  if (!await askConfirm('Изтриване на правилото за „' + category + '“? Категорията ще започне да ползва общите стойности.')) return;
   const ok = await call(window.api.circRules.delete(category), 'Изтрито.');
   if (ok !== null) { closeModal2(); loadCircRulesBox(); }
 }
@@ -730,7 +730,7 @@ async function toggleEmployeeActive(id, active) {
 }
 window.toggleEmployeeActive = toggleEmployeeActive;
 async function deleteEmployee(id) {
-  if (!confirm('Изтриване на служителя? Записите в одитната следа с неговото име остават непроменени.')) return;
+  if (!await askConfirm('Изтриване на служителя? Записите в одитната следа с неговото име остават непроменени.')) return;
   await call(window.api.employees.delete(id), 'Служителят е изтрит.');
   renderSetup();
 }
@@ -797,28 +797,29 @@ const RESTORE_WARN = 'Възстановяването ще замени тек�
   '„before-restore-…“ в папката с копията). Ако защитата на личните данни е включена и отключена, ' +
   'това копие се криптира с ТЕКУЩАТА ѝ парола — запишете си я, ако базата, която възстановявате, ' +
   'е с друга парола или без парола. Продължавате ли?';
+const RESTORE_OPTS = { kind: 'danger', title: 'Възстановяване от резервно копие', okLabel: 'Възстанови' };
 async function restoreBackupFromList(path) {
-  if (!confirm(RESTORE_WARN)) return;
+  if (!await askConfirm(RESTORE_WARN, RESTORE_OPTS)) return;
   const res = await window.api.backup.restoreFromList({ path });
   if (!res.ok) return toast(res.error, 'err');
   if (res.data && res.data.needsPassword) askBackupPassword(res.data.path, true);
 }
 window.restoreBackupFromList = restoreBackupFromList;
 async function restoreBackupBrowse() {
-  if (!confirm('Ще изберете файл с резервно копие (.db или .invbak) от компютъра/USB/мрежов диск. ' + RESTORE_WARN)) return;
+  if (!await askConfirm('Ще изберете файл с резервно копие (.db или .invbak) от компютъра/USB/мрежов диск. ' + RESTORE_WARN, RESTORE_OPTS)) return;
   const res = await window.api.backup.restoreBrowse();
   if (!res.ok) return toast(res.error, 'err');
   if (res.data && res.data.needsPassword) askBackupPassword(res.data.path, false);
 }
 window.restoreBackupBrowse = restoreBackupBrowse;
 async function chooseDbLocation() {
-  if (!confirm('Програмата ще копира текущата база данни в новата папка и ще се рестартира. Продължавате ли?')) return;
+  if (!await askConfirm('Програмата ще копира текущата база данни в новата папка и ще се рестартира. Продължавате ли?', { kind: 'warn', title: 'Място на базата данни', okLabel: 'Продължи' })) return;
   const res = await window.api.dbLocation.choose();
   if (!res.ok) return toast(res.error, 'err');
 }
 window.chooseDbLocation = chooseDbLocation;
 async function resetDbLocation() {
-  if (!confirm('Връщане към локалната база данни по подразбиране (тази на мрежовия диск остава непроменена)? Програмата ще се рестартира.')) return;
+  if (!await askConfirm('Връщане към локалната база данни по подразбиране (тази на мрежовия диск остава непроменена)? Програмата ще се рестартира.', { kind: 'warn', title: 'Място на базата данни', okLabel: 'Върни локалната база' })) return;
   await window.api.dbLocation.resetDefault();
 }
 window.resetDbLocation = resetDbLocation;
@@ -965,7 +966,7 @@ async function saveNotices() {
 }
 window.saveNotices = saveNotices;
 async function resetNoticeTemplates() {
-  if (!confirm('Връщане на трите шаблона към текста по подразбиране?')) return;
+  if (!await askConfirm('Връщане на трите шаблона към текста по подразбиране?', { okLabel: 'Върни по подразбиране' })) return;
   const d = await call(window.api.settings.noticeDefaults());
   if (!d) return;
   $('[name=notice_subject]').value = '';
@@ -1089,22 +1090,22 @@ async function runDataChecks() {
 }
 window.runDataChecks = runDataChecks;
 async function clearOrphanDeaccession(id) {
-  if (!confirm('ВРЪЩАНЕ ВЪВ ФОНДА\n\n'
+  if (!await askConfirm('ВРЪЩАНЕ ВЪВ ФОНДА\n\n'
     + 'Документът е отбелязан „отчислен“, но за него няма акт за отчисляване. Състоянието му ще стане '
     + '„наличен“ и той ще влиза еднакво във всички сборове на фонда.\n\n'
     + 'Ако документът наистина е отчислен, откажете и съставете акт от „Отчисляване“ — така отписването '
-    + 'ще личи и в КДБФ, и в годишния отчет.')) return;
+    + 'ще личи и в КДБФ, и в годишния отчет.', { okLabel: 'Върни във фонда' })) return;
   const res = await call(window.api.books.clearOrphanDeaccession(id), 'Документът е върнат във фонда.');
   if (res === null) return;
   runDataChecks();
 }
 window.clearOrphanDeaccession = clearOrphanDeaccession;
 async function splitBookCopies(id) {
-  if (!confirm('РАЗДЕЛЯНЕ НА ЕКЗЕМПЛЯРИ\n\n'
+  if (!await askConfirm('РАЗДЕЛЯНЕ НА ЕКЗЕМПЛЯРИ\n\n'
     + 'Записът ще бъде разделен на отделни записи — по един за всеки екземпляр, всеки със свой '
     + 'инвентарен номер, както изисква инвентарната книга.\n\n'
     + 'Броят документи и стойността на фонда НЕ се променят. Новите записи получават празен баркод '
-    + '(етикетът се лепи на конкретния екземпляр).\n\nДа продължа ли?')) return;
+    + '(етикетът се лепи на конкретния екземпляр).\n\nДа продължа ли?', { okLabel: 'Раздели' })) return;
   const res = await call(window.api.books.splitCopies(id));
   if (res === null) return;
   markSaved();

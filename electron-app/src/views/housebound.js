@@ -45,7 +45,7 @@ async function addHouseboundVisit(readerId) {
 }
 window.addHouseboundVisit = addHouseboundVisit;
 async function removeHousebound(readerId) {
-  if (!confirm('Изключване на читателя от обслужване по домовете? Историята на посещенията се пази.')) return;
+  if (!await askConfirm('Изключване на читателя от обслужване по домовете? Историята на посещенията се пази.', { okLabel: 'Изключи' })) return;
   const ok = await call(window.api.housebound.remove(readerId), 'Изключен от списъка.');
   if (ok !== null) closeModal();
 }

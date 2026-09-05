@@ -41,7 +41,7 @@ async function deleteCategory(id) {
     ? '\n\nВНИМАНИЕ: ' + n + (n === 1 ? ' документ ще остане' : ' документа ще останат')
       + ' без попълнен вид. Това не може да бъде върнато автоматично — видът трябва да се въведе наново.'
     : '';
-  if (!confirm('Да изтрия ли тази категория?' + warn)) return;
+  if (!await askConfirm('Да изтрия ли тази категория?' + warn)) return;
   await call(window.api.categories.delete(id), 'Категорията е изтрита.');
   renderSetup();
 }

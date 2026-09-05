@@ -78,8 +78,24 @@ window.cardActivate = cardActivate;
    погледът при работа с форма) и стоят 10 сек; успехите — долу вдясно, 3.5 сек.
    При посочване с мишката броячът спира (и лентичката, и изчезването). Повторно
    еднакво съобщение не трупа втора кутийка — само вдига брояч „×N“ и рестартира
-   времето. Всяко съобщение има бутон × за незабавно затваряне. */
-const TOAST_MS = { ok: 3500, err: 10000, def: 4500 };
+   времето. Всяко съобщение има бутон × за незабавно затваряне.
+
+   v2.4.33 (графично): вместо плътни цветни плочи (тъмна/зелена/червена) —
+   светла картичка в цвета на хартията с цветен кант отляво, икона в кръгче и
+   лентичка-брояч в същия цвят. Видът се носи от една CSS променлива (--tc),
+   така че четирите вида (ok / err / warn / информация) са една и съща кутийка
+   с различен цвят. Иконите са SVG с currentColor, а не текстови знаци — „✓“ и
+   „ℹ“ се рисуваха с различни шрифтове и тежест на различни машини. Нов вид
+   'warn' (предупреждение, кехлибарено, 6 сек, горе в центъра като грешките):
+   за неща, които не са грешка, но библиотекарят трябва да забележи. */
+const TOAST_MS = { ok: 3500, err: 10000, warn: 6000, def: 4500 };
+const TOAST_ICON = {
+  ok: '<path d="M4.5 12.5l4.8 4.8L19.5 7"/>',
+  err: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  warn: '<path d="M12 4L2.8 20h18.4L12 4z"/><path d="M12 10v4.5M12 17.4v.01"/>',
+  def: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.01"/>'
+};
+const svgIcon = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths}</svg>`;
 const TOAST_LIVE = new Map(); // ключ тип|текст → запис на живо съобщение
 function toast(msg, type) {
   msg = String(msg ?? '');
@@ -97,15 +113,15 @@ function toast(msg, type) {
     if (p) { p.style.animation = 'none'; void p.offsetWidth; p.style.animation = ''; }
     return;
   }
-  const box = (type === 'err' && $('#toastsTop')) || $('#toasts');
+  const box = ((type === 'err' || type === 'warn') && $('#toastsTop')) || $('#toasts');
   if (!box) return;
   const total = TOAST_MS[type] || TOAST_MS.def;
   const el = document.createElement('div');
   el.className = 'toast ' + (type || '');
   el.setAttribute('role', type === 'err' ? 'alert' : 'status');
   el.style.setProperty('--tdur', total + 'ms');
-  const ico = type === 'err' ? '✕' : type === 'ok' ? '✓' : 'ℹ';
-  el.innerHTML = `<span class="tico">${ico}</span><div class="tmsg"></div>` +
+  const ico = svgIcon(TOAST_ICON[type] || TOAST_ICON.def);
+  el.innerHTML = `<span class="tico" data-kind="${type || 'info'}">${ico}</span><div class="tmsg"></div>` +
     `<span class="tcount" style="display:none"></span>` +
     `<button class="tx" title="Затвори" aria-label="Затвори">&times;</button><i class="tprog"></i>`;
   el.querySelector('.tmsg').textContent = msg;
@@ -368,6 +384,111 @@ function askText(title, opts) {
   });
 }
 window.askText = askText;
+
+/* ---------------- askConfirm: заместител на window.confirm() (v2.4.33) ----------------
+   Дотук всеки въпрос „Да изтрия ли…?“ минаваше през родния confirm() на
+   Electron: системен прозорец с чужд външен вид, бутони „OK“ / „Cancel“ на
+   английски, без икона, без отличаване на необратимото от обикновения въпрос
+   и с текст, който се чете като едно сиво каре. Тук въпросът е прозорец на
+   самата програма (същите #veil/#modal като всички други): икона и цвят по
+   вида на действието, заглавие, текстът с неговите редове, бутон „Отказ“ и
+   бутон с ИМЕТО на действието („Изтрий“, „Продължи“, „Да“) — червен при
+   необратимо действие, основен при обикновен въпрос.
+
+   Видът се извежда от текста, ако не е подаден изрично (opts.kind):
+     'delete' — изтриване (червен бутон „Изтрий“; фокусът е на „Отказ“);
+     'danger' — друго необратимо действие (червен „Продължи“; фокус на „Отказ“);
+     'warn'   — обратимо, но тежко/изненадващо (кехлибарено; фокус на „Отказ“);
+     'ask'    — обикновен въпрос (основен бутон „Да“; фокусът е на него).
+   Първият ред на текста, отделен с празен ред, става заглавие (както вече
+   се пишеха „НЕОБРАТИМО“, „РЕДАКЦИЯ НА ЗАПИС В ИНВЕНТАРНАТА КНИГА“ — главните
+   букви се свалят до нормално изписване). opts: { title, okLabel,
+   cancelLabel, kind }.
+
+   Връща Promise<boolean> — както confirm(), но асинхронно; разрешава се при
+   всеки изход (бутон, Esc), за да не увисне извикващият код. Има СОБСТВЕН
+   слой (#veilC/#modalC, над двата слоя прозорци и над прегледа преди печат):
+   въпросът се задава и от бутон във форма на първия слой (картата на читател,
+   сметката), и от форма на втория (правило за категория в Настройки) — ако
+   ползваше modal/modal2, щеше да изтрие точно формата, от която е зададен,
+   и при „Отказ“ библиотекарят би загубил попълненото. Фокусът се връща на
+   елемента, който е бил активен преди въпроса (бутона, който го е задал).
+
+   Автоматизация и тестове: ако confirm() е подменен с обикновена функция
+   (не е [native code] — така правят всички тестове на екранния слой и
+   e2e-app.js, които отговарят програмно и записват зададения въпрос),
+   въпросът се предава на нея и прозорецът не се отваря. */
+const CFM_ICON = {
+  delete: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  danger: '<path d="M12 4L2.8 20h18.4L12 4z"/><path d="M12 10v4.5M12 17.4v.01"/>',
+  warn: '<path d="M12 4L2.8 20h18.4L12 4z"/><path d="M12 10v4.5M12 17.4v.01"/>',
+  ask: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1 .9-1 1.7M12 16.6v.01"/>'
+};
+const CFM_LABEL = { delete: 'Изтрий', danger: 'Продължи', warn: 'Продължи', ask: 'Да' };
+const CFM_TITLE = { delete: 'Изтриване', danger: 'Необратимо действие', warn: 'Внимание', ask: 'Потвърждение' };
+function cfmParse(text, opts) {
+  let title = opts.title, body = text;
+  const m = /^([^\n]{3,90})\n\n([\s\S]+)$/.exec(text);
+  if (m) {
+    const line = m[1].trim();
+    const letters = line.replace(/[^\p{L}]/gu, '');
+    // Заглавие с главни букви → нормално изписване („НЕОБРАТИМО“ → „Необратимо“).
+    if (!title) title = letters && letters === letters.toUpperCase() ? line.charAt(0) + line.slice(1).toLowerCase() : line;
+    body = m[2]; // редът-заглавие не се повтаря в текста, дори заглавието да е подадено изрично
+  }
+  const del = /изтри/i.test(text);
+  const danger = del || /необратим|анулира|премахван|изключван|спиране|рестартира|изоставя|снемане|замени текущите/i.test(text);
+  const kind = CFM_ICON[opts.kind] ? opts.kind : (del ? 'delete' : danger ? 'danger' : 'ask');
+  return { kind, title: title || CFM_TITLE[kind], body: body.trim(),
+    okLabel: opts.okLabel || CFM_LABEL[kind], cancelLabel: opts.cancelLabel || 'Отказ' };
+}
+let CFM_CLOSE_T = null;
+function askConfirm(text, opts) {
+  opts = opts || {};
+  text = String(text ?? '');
+  const c = window.confirm;
+  if (typeof c === 'function' && !/\[native code\]/.test(Function.prototype.toString.call(c))) {
+    return Promise.resolve(!!c(text));
+  }
+  const p = cfmParse(text, opts);
+  const veil = $('#veilC'), box = $('#modalC');
+  if (!veil || !box) return Promise.resolve(!!(c && c(text)));
+  clearTimeout(CFM_CLOSE_T);
+  veil.classList.remove('closing');
+  box.className = 'modal cfm ' + p.kind;
+  box.innerHTML =
+    `<div class="body" role="alertdialog" aria-modal="true" aria-labelledby="cfmTitle" aria-describedby="cfmMsg">
+       <span class="cfmIco" aria-hidden="true">${svgIcon(CFM_ICON[p.kind])}</span>
+       <div class="cfmText"><h2 class="cfmTitle" id="cfmTitle"></h2><div class="cfmMsg" id="cfmMsg"></div></div>
+     </div>
+     <footer>
+       <button class="btn" data-ask="cancel">${esc(p.cancelLabel)}</button>
+       <button class="btn ${p.kind === 'delete' || p.kind === 'danger' ? 'dgr' : 'pri'}" data-ask="ok">${esc(p.okLabel)}</button>
+     </footer>`;
+  box.querySelector('.cfmTitle').textContent = p.title;
+  box.querySelector('.cfmMsg').textContent = p.body;
+  veil.classList.add('on');
+  const prev = document.activeElement;
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('keydown', onKey, true);
+      veil.classList.add('closing');
+      CFM_CLOSE_T = setTimeout(() => { veil.classList.remove('on', 'closing'); box.innerHTML = ''; }, 140);
+      if (prev && prev.isConnected && typeof prev.focus === 'function') prev.focus();
+      resolve(val);
+    };
+    function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } }
+    document.addEventListener('keydown', onKey, true);
+    box.querySelector('[data-ask="ok"]').addEventListener('click', () => finish(true));
+    box.querySelector('[data-ask="cancel"]').addEventListener('click', () => finish(false));
+    // При необратимо действие Enter не бива да го извърши по инерция — фокусът е на „Отказ“.
+    box.querySelector(p.kind === 'ask' ? '[data-ask="ok"]' : '[data-ask="cancel"]').focus();
+  });
+}
+window.askConfirm = askConfirm;
 
 function formData(sel) {
   const out = {};
@@ -883,12 +1004,12 @@ function labelsPerSheet(w, h, gap, marg, cols) {
   const rows = Math.max(1, Math.floor((A4_H_MM - 2 * marg + gap) / (h + gap)));
   return Math.max(1, cols * rows);
 }
-function confirmManyLabels(n, kind, perSheet) {
+async function confirmManyLabels(n, kind, perSheet) {
   const what = (LABEL_DOC_NAME[kind] || 'Етикети').toLowerCase();
   // При ролка perSheet е 1 — тогава „листа A4" е безсмислица и числото подвежда.
   const roll = perSheet <= 1;
   const sheets = Math.ceil(n / perSheet);
-  return confirm(
+  return askConfirm(
     'ПЕЧАТ НА ' + n + ' ЕТИКЕТА (' + what + ')\n\n'
     + (roll ? 'Печатът е на ролка — това са ' + n + ' етикета един след друг.\n\n'
             : 'Това са около ' + sheets + ' листа A4 при сегашния формат.\n\n')
@@ -898,7 +1019,7 @@ function confirmManyLabels(n, kind, perSheet) {
       ? 'По-добре е картите да се печатат на партиди — напр. само новозаписаните читатели.\n\n'
       : 'По-добре е етикетите да се печатат на партиди през полетата „От инвентарен №“ и '
         + '„До инвентарен №“ — по няколкостотин наведнъж.\n\n')
-    + 'Да продължа ли въпреки това?');
+    + 'Да продължа ли въпреки това?', { kind: 'warn', title: 'Печат на ' + n + ' етикета', okLabel: 'Печатай въпреки това' });
 }
 /* Първият параметър приема ДВА вида (v2.3.1):
      • готов HTML низ — както досега (диапазони, единична карта, всички
@@ -919,7 +1040,7 @@ function confirmManyLabels(n, kind, perSheet) {
    при извикващия, всеки от петте печатни бутона трябва да преповтори тази
    сметка и следващият праг ще се промени на пет места вместо на едно. Тук
    промяната е една: броят идва от rows.length, вместо да се брои в готовия низ. */
-function printLabelSheet(cards, kind) {
+async function printLabelSheet(cards, kind) {
   const s = SETTINGS_CACHE || {};
   const { w, h } = labelSize(kind);
   const docName = (LABEL_DOC_NAME[kind] || 'Етикети') + ' — ' + bg(today());
@@ -932,7 +1053,7 @@ function printLabelSheet(cards, kind) {
     const perSheet = s.lbl_mode === 'roll'
       ? 1 // ролка: един етикет на страница
       : labelsPerSheet(w, h, gap, marg, fitLabelCols(Math.max(1, Math.min(8, +s.lbl_cols || 3)), w, gap, marg));
-    if (!confirmManyLabels(n, kind, perSheet)) return false;
+    if (!await confirmManyLabels(n, kind, perSheet)) return false;
   }
   if (s.lbl_mode === 'roll') {
     // Един етикет на страница с точния размер на ролката. „Поле на листа“ важи

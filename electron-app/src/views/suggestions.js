@@ -97,7 +97,7 @@ async function confirmReceive(id) {
 }
 window.confirmReceive = confirmReceive;
 async function deleteSuggestion(id) {
-  if (!confirm('Изтриване на предложението?')) return;
+  if (!await askConfirm('Изтриване на предложението?')) return;
   const ok = await call(window.api.suggestions.delete(id), 'Изтрито.');
   if (ok !== null) renderSuggestions();
 }
@@ -110,7 +110,7 @@ async function notifySuggestionReceived(id) {
   if (!s || !s.reader_id) return;
   const reader = await call(window.api.readers.get(s.reader_id));
   if (!reader || !reader.email) return;
-  if (!confirm('Да отворя ли писмо до ' + reader.name + ' за пристигналата книга „' + s.title + '“?')) return;
+  if (!await askConfirm('Да отворя ли писмо до ' + reader.name + ' за пристигналата книга „' + s.title + '“?', { okLabel: 'Отвори писмо' })) return;
   const subject = 'Пристигна предложената от Вас книга';
   const body = 'Здравейте, ' + reader.name + ',\n\nКнигата „' + (s.author ? s.author + '. ' : '') + s.title +
     '“, която предложихте, вече е налична в библиотеката.\n\nПоздрави!';
