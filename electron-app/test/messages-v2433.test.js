@@ -180,6 +180,56 @@ test('askConfirm: собствен слой над отворените форм
   assert.ok(z('.veilC') > z('.veil2') && z('.veilC') > 80 && z('.veilC') < 100, 'z-index на слоя на въпросите: ' + z('.veilC'));
 });
 
+test('askConfirm: Esc затваря само въпроса, не и формата отдолу (стоп на разпространението)', async () => {
+  /* Проверка при прегледа: onKey слуша Esc в CAPTURE фазата (document, true) —
+     общият слушател за Esc (виж askText, одит v2.4.27) е в BUBBLE фазата и,
+     без e.stopPropagation() тук, продължава да вижда #veil2 отворен СЛЕД като
+     askConfirm() вече е затворил себе си, и затваря и „Правило“ отдолу. Тестът
+     по-горе за собствения слой проверява само затваряне с бутон „Отказ“ —
+     revert-and-retest показа, че премахването на stopPropagation() не чупи
+     НИТО ЕДИН съществуващ тест: същият пропуск, поправен веднъж за askText. */
+  const dom = domWithDialog(); await settle();
+  const { window } = dom, d = window.document;
+  window.modal('Карта на читател', '<form id="readerF"><input name="name" value="Иванов"></form>');
+  window.modal2('Правило', '<form id="ruleF"><input name="days" value="30"><button type="button" id="delRule">Изтрий</button></form>');
+  d.getElementById('delRule').focus();
+  const p = window.askConfirm('Изтриване на правилото?'); await tick();
+  assert.ok(d.querySelector('#veil2').classList.contains('on'), 'предпоставка: вторият слой е отворен');
+  d.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(await p, false, 'Esc отказва въпроса');
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(d.querySelector('#veilC').classList.contains('on'), false, 'въпросът е затворен');
+  assert.ok(d.querySelector('#veil2').classList.contains('on'), 'вторият слой остава отворен след Esc на въпроса');
+  assert.ok(d.querySelector('#ruleF'), 'формата „Правило“ не е изтрита от Esc-а на въпроса');
+  assert.equal(d.querySelector('#ruleF input').value, '30', 'незаписаната стойност в нея се пази');
+});
+
+test('askConfirm: анонимизирането на лични данни (settings.js) подава изричен kind, не оставя иконата на регекса', async () => {
+  /* Проверка при прегледа: cfmParse() отгатва вида по текста, ако opts.kind
+     липсва — `del = /изтри/i.test(text)`. Текстът на runAnonymize() в
+     settings.js започва с „НЕОБРАТИМО“, но по-надолу споменава „N стари
+     търсения се изтриват“ (страничен детайл, не самото действие) — думата
+     „изтри“ съвпада и без изричен kind иконата щеше да е кошче за боклук
+     вместо триъгълник с удивителна, макар бутонът/фокусът да излизат верни
+     (delete и danger делят един и същ червен стил и фокус на „Отказ“ —
+     затова разликата е само в иконата, но остава грешна). Другите повиквания
+     с несигурен текст (authorities.js, readers.js) вече подават изричен kind
+     по същата причина — този тест заковава settings.js да прави същото. */
+  const src = fs.readFileSync(path.join(VIEWS, 'settings.js'), 'utf8');
+  const call = /askConfirm\(`НЕОБРАТИМО[\s\S]*?\{[^}]*\}\)\)/.exec(src);
+  assert.ok(call, 'намерено е повикването на askConfirm() в runAnonymize()');
+  assert.match(call[0], /kind:\s*'danger'/, 'изричен kind — текстът споменава „изтри“ като страничен детайл, не като действието');
+  // И самото поведение: подаденият kind надделява над регекса.
+  const dom = domWithDialog(); await settle();
+  const { window } = dom, d = window.document;
+  const text = 'НЕОБРАТИМО, отпреди 01.01.2020 г.: 3 стари търсения се изтриват. Да продължа?';
+  window.askConfirm(text, { kind: 'danger', title: 'Анонимизиране на лични данни', okLabel: 'Анонимизирай' });
+  await tick();
+  assert.ok(d.querySelector('#modalC').classList.contains('danger'), 'изричният kind печели над „изтри“ в текста');
+  assert.ok(!d.querySelector('#modalC').classList.contains('delete'));
+  d.querySelector('#modalC [data-ask="cancel"]').click();
+});
+
 test('нито един екран не вика родния confirm(); печатът на етикети изчаква въпроса', async () => {
   for (const f of fs.readdirSync(VIEWS)) {
     const src = fs.readFileSync(path.join(VIEWS, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');

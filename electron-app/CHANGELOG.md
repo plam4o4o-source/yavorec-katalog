@@ -11,6 +11,60 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.34
+
+**BG:** Преглед на поправките от двадесет и втория кръг (v2.4.33). Самият
+askConfirm() е верен и добре покрит; един тестов пропуск и една грешна икона.
+
+- **Тестът за собствения слой на въпросите не проверяваше Esc, само бутона
+  „Отказ“.** `askConfirm()` спира разпространението на Esc (`e.stopPropagation()`),
+  за да не позволи общия слушател отдолу (bubble фаза) да затвори и формата
+  на втория слой, точно както беше поправено за `askText()` в одит v2.4.27
+  — но revert-and-retest показа, че премахването на `stopPropagation()`
+  минава през целия `test/messages-v2433.test.js` без НИТО един провал.
+  Самият код е верен (доказано с repro: без него Esc върху въпроса затваря и
+  формата „Правило“ отдолу, губейки незаписаното); добавен е тест, който
+  наистина гърми без него.
+- **Анонимизирането на лични данни (Настройки → Лични данни) показваше
+  иконата на изтриване вместо триъгълника за необратимо действие.**
+  `askConfirm()` отгатва вида по текста, ако `kind` липсва —
+  `del = /изтри/i.test(text)`. Текстът на `runAnonymize()` започва с
+  „НЕОБРАТИМО“, но по-надолу споменава „N стари търсения се изтриват“
+  (страничен детайл, не самото действие) — думата „изтри“ съвпада първа и
+  печели над „необратим“. Бутонът и фокусът излизаха верни (изтриване и
+  необратимо действие делят един и същ червен стил), но иконата — не.
+  Другите повиквания с несигурен текст (`authorities.js`, `readers.js`) вече
+  подават изричен `kind` по същата причина; сега и това го прави.
+
+Проверено и НЕ прието за дефект на този кръг: същата догадка по текст дава
+„необратимо действие“ (триъгълник, червен бутон, фокус на „Отказ“) и на три
+по-леки, обратими действия — премахване на логото, спиране на автоматичния
+запис на каталога, изключване от обслужване по домовете (текстът му дори
+изрично казва „Историята… се пази“). За разлика от анонимизирането, нито
+едно от трите не носи собствен, недвусмислен сигнал за какво точно е
+предвидено (нито дума „необратимо“ в самия текст) — преценка на тона, не
+доказан дефект; оставено без промяна.
+
+Всичко доказано с revert-and-retest в двете посоки и нови проверки в
+`test/messages-v2433.test.js`. Само поправки в кода и тестовете — без нова
+функционалност. Пълната поредица: 1289 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария.
+
+**EN:** A review of round twenty-two's own fixes (v2.4.33). `askConfirm()`
+itself is sound and well covered; one test gap and one wrong icon. The
+capture-phase `Esc` handler's `stopPropagation()` — which stops the confirm
+dialog's Escape key from also closing an underlying form-in-progress, the
+same fix already made for `askText()` in round sixteen — turned out to have
+no regression test: removing it passed the entire test suite. The production
+code is correct (proven by a direct repro); a test that actually fails
+without it has been added. Separately, the GDPR-anonymization confirmation
+showed the delete-trash icon instead of the intended irreversible-action
+triangle, because its message mentions "old searches are deleted" as an
+incidental detail and the auto-detection regex matched that before the
+message's own leading "НЕОБРАТИМО" — fixed with an explicit `kind: 'danger'`,
+matching the pattern already used at other uncertain-text call sites.
+Code-only round: 1289 tests passing, 0 failing.
+
 ## v2.4.33
 
 **BG:** Двадесет и втори кръг — графично подобрение на съобщенията: известията
