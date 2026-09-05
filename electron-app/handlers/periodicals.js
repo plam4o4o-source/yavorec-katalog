@@ -4,8 +4,22 @@
 // там (Koha: serials — prediction pattern, силно облекчен за мащаба на една
 // читалищна библиотека: само следващата очаквана дата, без пълен календар от
 // предвидени броеве и без рекламации).
+const { isValidIsoDate } = require('../security-utils');
+
 module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
+
+  /* Одит v2.4.29: създаването нормализираше празните полета до NULL, а редакцията
+     подаваше формата сурова — издание с периодичност „—“ (freq = NULL) не можеше
+     да се редактира изобщо: селектът праща '', тригерът за номенклатурата го отказва
+     („Непозната стойност за periodicals.freq“) дори при поправка само на заглавието.
+     Един и същ вид запис по двата пътя. */
+  function periodicalPayload(p) {
+    const title = String(p.title || '').trim();
+    if (!title) throw new Error('Заглавието на изданието е задължително.');
+    const nz = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+    return { title, freq: nz(p.freq), publisher: nz(p.publisher), issn: nz(p.issn), department: nz(p.department), note: nz(p.note) };
+  }
 
   // Периодичност → SQLite модификатор на date(), за да се пресметне следващият
   // очакван брой от датата на последния постъпил. Стойностите съвпадат с
@@ -93,21 +107,24 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('periodicals:create', (e, p) =>
     run(() => {
+      const row = periodicalPayload(p);
       const info = getDb().prepare(`
         INSERT INTO periodicals (title, freq, publisher, issn, department, note)
         VALUES (@title, @freq, @publisher, @issn, @department, @note)
-      `).run({ title: p.title, freq: p.freq || null, publisher: p.publisher || null, issn: p.issn || null, department: p.department || null, note: p.note || null });
-      logAudit('Ново периодично издание', p.title);
+      `).run(row);
+      logAudit('Ново периодично издание', row.title);
       return info.lastInsertRowid;
     })
   );
   ipcMain.handle('periodicals:update', (e, p) =>
     run(() => {
-      getDb().prepare(`
+      const row = periodicalPayload(p);
+      const upd = getDb().prepare(`
         UPDATE periodicals SET title=@title, freq=@freq, publisher=@publisher, issn=@issn, department=@department, note=@note
         WHERE id=@id
-      `).run(p);
-      logAudit('Редакция на периодично издание', p.title);
+      `).run({ ...row, id: p.id });
+      if (!upd.changes) throw new Error('Изданието не е намерено — вероятно е изтрито от друго работно място.');
+      logAudit('Редакция на периодично издание', row.title);
     })
   );
   ipcMain.handle('periodicals:delete', (e, id) =>
@@ -130,22 +147,47 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       }
       const p0 = db.prepare('SELECT title FROM periodicals WHERE id = ?').get(id);
       if (!p0) throw new Error('Изданието не е намерено.');
-      db.prepare('DELETE FROM periodicals WHERE id = ?').run(id);
+      db.transaction(() => {
+        db.prepare('DELETE FROM periodicals WHERE id = ?').run(id);
+        // Краеведските връзки към изданието (v2.4.29) — иначе „Персоналии“/„Летопис“
+        // показват „(изтрит запис)“ и броят мъртви връзки.
+        db.prepare("DELETE FROM links WHERE (from_kind = 'периодика' AND from_id = ?) OR (to_kind = 'периодика' AND to_id = ?)").run(id, id);
+      })();
       logAudit('Изтрито периодично издание', p0.title);
     })
   );
   ipcMain.handle('periodicalIssues:add', (e, issue) =>
     run(() => {
-      const info = getDb().prepare(`
+      /* Одит v2.4.29: без проверки „2026-02-30“ влизаше както е — а прогнозата за
+         следващия брой взима MAX(date), date() на невалидна дата е NULL и
+         предупреждението „закъснял брой“ угасваше мълчаливо за това издание;
+         празен № на брой и цена „abc“ (NaN → NULL) също минаваха. */
+      const db = getDb();
+      const issueNo = String(issue.issue_no || '').trim();
+      if (!issueNo) throw new Error('Номерът на броя е задължителен.');
+      const date = issue.date || today();
+      if (!isValidIsoDate(date)) throw new Error('Датата на броя (' + issue.date + ') е невалидна.');
+      const price = issue.price == null || String(issue.price).trim() === '' ? 0 : Number(String(issue.price).replace(',', '.'));
+      if (!Number.isFinite(price) || price < 0) throw new Error('Цената на броя трябва да е число (лв.).');
+      const per = db.prepare('SELECT title FROM periodicals WHERE id = ?').get(issue.periodical_id);
+      if (!per) throw new Error('Изданието не е намерено.');
+      const info = db.prepare(`
         INSERT INTO periodical_issues (periodical_id, issue_no, date, price, note)
         VALUES (@periodical_id, @issue_no, @date, @price, @note)
-      `).run({ periodical_id: issue.periodical_id, issue_no: issue.issue_no, date: issue.date || today(), price: issue.price ? parseFloat(issue.price) : 0, note: issue.note || null });
-      logAudit('Постъпил брой', 'бр. ' + issue.issue_no);
+      `).run({ periodical_id: issue.periodical_id, issue_no: issueNo, date, price, note: issue.note || null });
+      logAudit('Постъпил брой', per.title + ' — бр. ' + issueNo);
       return info.lastInsertRowid;
     })
   );
   ipcMain.handle('periodicalIssues:delete', (e, id) =>
-    run(() => getDb().prepare('DELETE FROM periodical_issues WHERE id = ?').run(id))
+    run(() => {
+      const db = getDb();
+      const row = db.prepare(`SELECT i.issue_no, i.date, p.title FROM periodical_issues i
+        LEFT JOIN periodicals p ON p.id = i.periodical_id WHERE i.id = ?`).get(id);
+      if (!row) throw new Error('Броят вече не съществува — вероятно е изтрит от друго работно място.');
+      db.prepare('DELETE FROM periodical_issues WHERE id = ?').run(id);
+      logAudit('Изтрит брой', (row.title || '') + ' — бр. ' + row.issue_no + ' от ' + row.date);
+    })
   );
 
   return { countOverduePeriodicals };

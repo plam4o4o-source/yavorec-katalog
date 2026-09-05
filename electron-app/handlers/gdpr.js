@@ -43,6 +43,42 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
   const AUDIT_NAME_WHERE = `substr(ts, 1, 10) < ? AND action IN ${NAME_ACTIONS}
       AND COALESCE(detail, '') != '[анонимизирано по GDPR]'`;
 
+  /* Одит v2.4.29: читателят оставаше свързан с документи и по ДРУГИ пътища,
+     които анонимизирането не пипаше — резервациите (кой коя книга е чакал),
+     предложенията за покупка (име на заявителя), заявителят в регистъра на МЗС,
+     дневникът на изпратените напомняния и посещенията по домовете. Всичко това
+     стоеше в базата и в резервните копия, а броячът казваше „няма нищо“.
+     Същите условия се броят тук и се прилагат в gdpr:anonymize — по един ред
+     на таблица, за да не се разминат. Параметри: @cutoff и @anon (id на служебния
+     запис; -1, докато такъв още няма). */
+  const ANON_MARK = '[анонимизиран читател]';
+  /* Напомняне, зад което още стои НЕЗАВЪРШЕНО просрочено заемане, не е стар
+     запис: то е състоянието „писмото по чл. 43 е изпратено“ за таблото
+     (handlers/dashboard.js) и за степента на следващото напомняне
+     (handlers/notices.js). Такова се пази, докато книгата не се върне. */
+  const NOTICE_NOT_LIVE = `NOT EXISTS (SELECT 1 FROM loans l WHERE l.reader_id = notice_log.reader_id
+       AND l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due <= substr(notice_log.ts, 1, 10))`;
+  const OTHER_COUNTS = [
+    `SELECT COUNT(*) AS n FROM holds WHERE status IN ('изпълнена', 'отказана')
+       AND substr(COALESCE(resolved_at, placed_at), 1, 10) < @cutoff AND reader_id != @anon`,
+    `SELECT COUNT(*) AS n FROM suggestions WHERE date < @cutoff
+       AND (reader_id IS NOT NULL OR (reader_name IS NOT NULL AND reader_name != '${ANON_MARK}'))`,
+    `SELECT COUNT(*) AS n FROM mzs_requests WHERE date < @cutoff
+       AND requester IS NOT NULL AND requester != '${ANON_MARK}'`,
+    `SELECT COUNT(*) AS n FROM notice_log WHERE substr(ts, 1, 10) < @cutoff AND ${NOTICE_NOT_LIVE}`,
+    `SELECT COUNT(*) AS n FROM housebound_visits WHERE date < @cutoff AND reader_id != @anon`
+  ];
+  const OTHER_UPDATES = [
+    `UPDATE holds SET reader_id = @anon WHERE status IN ('изпълнена', 'отказана')
+       AND substr(COALESCE(resolved_at, placed_at), 1, 10) < @cutoff AND reader_id != @anon`,
+    `UPDATE suggestions SET reader_id = NULL, reader_name = CASE WHEN reader_name IS NULL THEN NULL ELSE '${ANON_MARK}' END
+       WHERE date < @cutoff AND (reader_id IS NOT NULL OR (reader_name IS NOT NULL AND reader_name != '${ANON_MARK}'))`,
+    `UPDATE mzs_requests SET requester = '${ANON_MARK}'
+       WHERE date < @cutoff AND requester IS NOT NULL AND requester != '${ANON_MARK}'`,
+    `DELETE FROM notice_log WHERE substr(ts, 1, 10) < @cutoff AND ${NOTICE_NOT_LIVE}`,
+    `UPDATE housebound_visits SET reader_id = @anon WHERE date < @cutoff AND reader_id != @anon`
+  ];
+
   ipcMain.handle('gdpr:candidates', () =>
     run(() => {
       const db = getDb();
@@ -57,7 +93,8 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       const auditCount = db.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE ${AUDIT_MONEY_WHERE}`).get(cutoff).n
         + db.prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE ${AUDIT_NAME_WHERE}`).get(cutoff).n;
       const searchCount = db.prepare('SELECT COUNT(*) AS n FROM search_history WHERE substr(ts, 1, 10) < ?').get(cutoff).n;
-      return { years, count, auditCount, searchCount, cutoff };
+      const otherCount = OTHER_COUNTS.reduce((sum, sql) => sum + db.prepare(sql).get({ cutoff, anon: anonId ? anonId.id : -1 }).n, 0);
+      return { years, count, auditCount, searchCount, otherCount, cutoff };
     })
   );
   ipcMain.handle('gdpr:anonymize', () =>
@@ -118,10 +155,12 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            стойност след срока, затова старите редове отпадат. */
         const searchCleared = db.prepare('DELETE FROM search_history WHERE substr(ts, 1, 10) < ?')
           .run(cutoff).changes;
+        // Резервации, предложения, МЗС, напомняния, посещения по домовете (v2.4.29).
+        const otherCleared = OTHER_UPDATES.reduce((sum, sql) => sum + db.prepare(sql).run({ cutoff, anon: anonId }).changes, 0);
 
-        return { n, auditCleared, searchCleared };
+        return { n, auditCleared, searchCleared, otherCleared };
       });
-      const { n, auditCleared, searchCleared } = tx.immediate();
+      const { n, auditCleared, searchCleared, otherCleared } = tx.immediate();
       // Съгласуване в единствено число (одит v2.4.24) — този ред отива в следата,
       // която проверяващият чете.
       logAudit('Анонимизиране',
@@ -130,8 +169,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         + (auditCleared ? '; ' + (auditCleared === 1 ? '1 запис в одитната следа е обезличен'
             : auditCleared + ' записа в одитната следа са обезличени') : '')
         + (searchCleared ? '; ' + (searchCleared === 1 ? '1 старо търсене е изтрито'
-            : searchCleared + ' стари търсения са изтрити') : ''));
-      return { anonymized: n, auditCleared, searchCleared, cutoff };
+            : searchCleared + ' стари търсения са изтрити') : '')
+        + (otherCleared ? '; ' + (otherCleared === 1 ? '1 запис в резервации, предложения, МЗС, напомняния и посещения е обезличен'
+            : otherCleared + ' записа в резервации, предложения, МЗС, напомняния и посещения са обезличени') : ''));
+      return { anonymized: n, auditCleared, searchCleared, otherCleared, cutoff };
     })
   );
 };

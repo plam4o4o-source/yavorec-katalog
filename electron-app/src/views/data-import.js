@@ -107,8 +107,8 @@ async function importRun() {
   markSaved();
   modal('Въвеждането приключи', `
     <div class="kpis">
-      ${kpi('✅', r.added, 'Въведени документа', 'добавени във фонда', 'ok')}
-      ${kpi('⏭️', r.skipped, 'Пропуснати', 'дубликати или редове с грешка')}
+      ${kpi(KPI_ICONS.check, r.added, 'Въведени документа', 'добавени във фонда', 'ok')}
+      ${kpi(KPI_ICONS.skip, r.skipped, 'Пропуснати', 'дубликати или редове с грешка')}
     </div>
     ${r.usedInv.length ? `<div class="note" style="margin-top:14px">
       <b>${r.usedInv.length === 1 ? '1 запис получи' : r.usedInv.length + ' записа получиха'} нов инвентарен номер</b>, защото в
@@ -129,6 +129,10 @@ async function importRun() {
       ${r.statusToNote ? `<div style="margin-top:6px">${r.statusToNote}
         ${r.statusToNote === 1 ? 'ред носеше непознато състояние' : 'реда носеха непознато състояние'} —
         въведени са като „наличен“, а оригиналният текст е добавен към забележката.</div>` : ''}
+    </div>` : ''}
+    ${(r.warnings || []).length ? `<div class="note w" style="margin-top:12px">
+      <b>Предупреждения: ${r.warnings.length}</b>
+      <div class="hint" style="margin-top:6px">${r.warnings.slice(0, 15).map(w => esc(w)).join('<br>')}${r.warnings.length > 15 ? '<br>…' : ''}</div>
     </div>` : ''}
     ${r.errors.length ? `<div class="note" style="border-left-color:var(--red);margin-top:12px">
       <b style="color:var(--red)">Редове с грешка: ${r.errors.length}</b>

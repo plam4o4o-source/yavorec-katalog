@@ -131,11 +131,14 @@ test('books:list връща документите подредени по за�
 });
 
 test('books:findDuplicateBarcodes открива групи документи със същия ненулев баркод, без да пипа реда сам (одит #21)', async () => {
-  const { ipcMain } = booksSetup();
+  const { db, ipcMain } = booksSetup();
   assert.ok(ipcMain.has('books:findDuplicateBarcodes'), 'каналът трябва да е регистриран');
 
   const dupA1 = (await ipcMain.invoke('books:create', { title: 'Копие А', barcode: 'BC-1', inv_number: 10 })).data;
-  const dupA2 = (await ipcMain.invoke('books:create', { title: 'Копие Б', barcode: 'BC-1', inv_number: 20 })).data;
+  /* v2.4.29: books:create вече отказва дублиран баркод — сценарият тук е СТАРА
+     база, в която дубликатът вече съществува, затова се вписва направо в таблицата. */
+  const dupA2 = (await ipcMain.invoke('books:create', { title: 'Копие Б', barcode: 'BC-1-tmp', inv_number: 20 })).data;
+  db.prepare("UPDATE books SET barcode = 'BC-1' WHERE id = ?").run(dupA2);
   await ipcMain.invoke('books:create', { title: 'Уникален баркод', barcode: 'BC-2', inv_number: 30 });
   await ipcMain.invoke('books:create', { title: 'Без баркод', inv_number: 40 }); // barcode остава NULL
 

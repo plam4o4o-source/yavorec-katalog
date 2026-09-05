@@ -49,6 +49,9 @@ const pl = (n, one, many) => n + ' ' + (Number(n) === 1 ? one : many);
 const dni = (n) => pl(n, 'ден', 'дни');
 const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
+/* Същата сума за КЛЕТКА в таблица (v2.4.29): левовете над евровете, без пренасяне —
+   „3.00 лв. / 1.53 €“ се чупеше на четири реда в инвентарната книга и в „Просрочени“. */
+const mnyCell = (n) => `<span class="money" title="${bgn(n)} лв. / ${eur(n)} €">${bgn(n)} лв.<small>${eur(n)} €</small></span>`;
 /* Огледало на csvCell() от security-utils.js за изнасянията, които се сглобяват
    в екранния слой. Excel и LibreOffice изпълняват като ФОРМУЛА всяка клетка,
    започваща с =, +, - или @; водещият апостроф ги неутрализира. Двете
@@ -375,9 +378,13 @@ function formData(sel) {
   return out;
 }
 
+/* Затворен файлов диалог („Отказ“ в прозореца на Windows) не е грешка — handler-ите
+   го връщат като FILE_DIALOG_CANCELLED, а тук се преглъща без червено известие
+   (одит v2.4.29: четири места го показваха като „Отказано от потребителя.“). */
+const FILE_DIALOG_CANCELLED = 'Отказано от потребителя.';
 async function call(promise, okMsg) {
   const res = await promise;
-  if (!res.ok) { toast(res.error || 'Възникна грешка.', 'err'); return null; }
+  if (!res.ok) { if (res.error !== FILE_DIALOG_CANCELLED) toast(res.error || 'Възникна грешка.', 'err'); return null; }
   if (okMsg) { toast(okMsg, 'ok'); markSaved(); }
   return res.data;
 }
@@ -425,7 +432,7 @@ function fld(label, name, opts) {
   // firstMissingRequired() по-долу за защо самият required не стига).
   return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
-      ${opts.min != null ? 'min="' + esc(String(opts.min)) + '"' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}
+      ${opts.min != null ? 'min="' + esc(String(opts.min)) + '"' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''} ${opts.onkey ? `onkeydown="${opts.onkey}"` : ''}
       ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''} value="${esc(val)}"></div>`;
 }
 

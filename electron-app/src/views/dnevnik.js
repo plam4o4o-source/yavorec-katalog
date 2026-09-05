@@ -139,6 +139,11 @@ async function dnevnikSaveCell(el) {
   const r = window._DNEVNIK;
   const row = r && r.days.find(d => d.date === date);
   const val = (field === 'a_hours' || field === 'b_hours') ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
+  /* v2.4.29: отрицателно число не се записва — клетката се връща на старата стойност. */
+  if (val < 0) {
+    el.value = row ? (row[field] || 0) : 0;
+    return toast('Дневникът брои хора и документи — въведете цяло число, 0 или повече.', 'err');
+  }
   /* Одит v2.4.25: дотук `if (!row) return;` — тих отказ без IPC, без известие и
      без мигване, а клетката продължаваше да показва числото. Снимката в паметта е
      само оптимизация за „без промяна — не пипай базата“; когато редът го няма в
@@ -146,6 +151,7 @@ async function dnevnikSaveCell(el) {
      dnevnikDayForm, който презаписваше снимката с ДРУГ месец — поправено там — но
      записът на официален формуляр не бива да зависи от състоянието на кеш.) */
   if (row && (row[field] || 0) === val) return; // без промяна — не пипай базата
+  const before = row ? (row[field] || 0) : 0;
   if (row) row[field] = val;
   /* Изпраща се САМО променената колона. Дотук тук се пращаше целият ред, сглобен
      от снимката в паметта на този компютър — тоест редакцията на една клетка
@@ -153,7 +159,12 @@ async function dnevnikSaveCell(el) {
      при зареждането на екрана, и триеше вписаното междувременно от другото
      работно място. */
   const res = await window.api.dnevnik.saveDay({ date, [field]: val });
-  if (!res.ok) return toast(res.error, 'err');
+  if (!res.ok) {
+    // Записът не е минал — нито снимката в паметта, нито клетката бива да твърдят обратното.
+    if (row) row[field] = before;
+    el.value = (field === 'a_hours' || field === 'b_hours') ? hhmm(before) : before;
+    return toast(res.error, 'err');
+  }
   markSaved();
   el.classList.add('saved');
   setTimeout(() => el.classList.remove('saved'), 700);
@@ -331,8 +342,7 @@ function printDnevnikDoc() {
 }
 window.printDnevnikDoc = printDnevnikDoc;
 async function exportDnevnikCsv() {
-  const res = await window.api.dnevnik.exportCsv({ year: DNEVNIK_YEAR, month: DNEVNIK_MONTH });
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Изведено в ' + res.data, 'ok');
+  const path = await call(window.api.dnevnik.exportCsv({ year: DNEVNIK_YEAR, month: DNEVNIK_MONTH }));
+  if (path) toast('Изведено в ' + path, 'ok');
 }
 window.exportDnevnikCsv = exportDnevnikCsv;

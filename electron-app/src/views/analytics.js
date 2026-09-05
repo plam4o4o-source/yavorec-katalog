@@ -87,8 +87,8 @@ window.paintAnalyticsRows = paintAnalyticsRows;
 function analyticsListHtml(rows) {
   const total = rows.length, local = rows.filter(r => r.is_local).length;
   return `<div class="kpis">
-      ${kpi('📰', total, 'Описани статии', ANL_YEAR ? 'за ' + ANL_YEAR + ' г.' : 'общо в базата')}
-      ${kpi('🏡', local, 'Краеведски', 'за селото и района')}
+      ${kpi(KPI_ICONS.article, total, 'Описани статии', ANL_YEAR ? 'за ' + ANL_YEAR + ' г.' : 'общо в базата')}
+      ${kpi(KPI_ICONS.local, local, 'Краеведски', 'за селото и района')}
     </div>
 
     ${rows.length ? `<div class="wrap"><table class="ledger"><thead><tr>
@@ -230,14 +230,26 @@ async function analyticForm(id) {
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveAnalytic(${id || 'null'})">Запиши</button>`);
   // Списъкът с книги се пълни при писане, за да не се зареждат хиляди записи наведнъж.
+  /* Одит v2.4.29: изборът от <datalist> слага в полето ЦЕЛИЯ етикет („инв. № 101 ·
+     Автор. Заглавие“), а търсенето с този низ не намира нищо (LIKE по заглавие и
+     автор) — book_id се изпразваше и „Книга от фонда“ никога не свързваше книга;
+     при редакция едно докосване на полето късаше записаната връзка. Етикетите от
+     последните търсения се помнят с id-то си, а самото търсене праща на базата
+     инвентарния номер, когато полето започва с „инв. №“. */
   const bp = $('#anlF [name=book_pick]');
+  const known = new Map(); // ключ на етикет → id
+  if (v.book_id && bookPickLabel(v)) known.set(bookPickKey(bookPickLabel(v)), v.book_id);
   if (bp) bp.addEventListener('input', async () => {
     const q = bp.value.trim();
     const hidden = $('#anlF [name=book_id]');
     if (q.length < 2) { hidden.value = ''; return; }
-    const found = await call(window.api.links.search({ kind: 'книга', q }));
+    if (known.has(bookPickKey(q))) { hidden.value = known.get(bookPickKey(q)); return; }
+    const m = /^инв\.\s*№\s*(\d+)/i.exec(q);
+    const found = await call(window.api.links.search({ kind: 'книга', q: m ? m[1] : q }));
+    if (bp.value.trim() !== q) return; // междувременно е писано още — този отговор е стар
     const dl = $('#dl_anlBooks');
-    dl.innerHTML = (found || []).map(f => `<option value="${esc(f.label)}"></option>`).join('');
+    if (dl) dl.innerHTML = (found || []).map(f => `<option value="${esc(f.label)}"></option>`).join('');
+    (found || []).forEach(f => known.set(bookPickKey(f.label), f.id));
     const exact = (found || []).find(f => bookPickKey(f.label) === bookPickKey(q));
     hidden.value = exact ? exact.id : '';
   });

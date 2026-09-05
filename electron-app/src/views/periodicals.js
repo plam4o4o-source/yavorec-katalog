@@ -67,7 +67,7 @@ async function openPeriodical(id) {
     <div class="hint" style="margin-bottom:10px">${esc(p.freq || '')} · ${esc(p.publisher || '')}${p.issn ? ' · ISSN ' + esc(p.issn) : ''}</div>
     <fieldset><legend>Нов постъпил брой</legend>
       <form id="issueF" onsubmit="return false" class="grid g3">
-        ${fld('Номер на брой', 'issue_no', { req: 1 })}
+        ${fld('Номер на брой', 'issue_no', { req: 1, onkey: `if(event.key==='Enter'){event.preventDefault();addIssue(${id})}` })}
         ${fld('Дата на постъпване', 'date', { val: today(), type: 'date' })}
         ${fld('Цена (лв.)', 'price', { type: 'number', step: '0.01' })}
       </form>
@@ -80,14 +80,21 @@ async function openPeriodical(id) {
       </tbody></table></div>` : '<div class="hint">Все още няма вписани броеве.</div>'}`,
     `<button class="btn dgr" onclick="delPeriodical(${id})">Изтрий изданието</button>
      <button class="btn" onclick="closeModal();periodicalForm(${id})">Редактирай</button>
-     <button class="btn pri" onclick="closeModal()">Затвори</button>`);
+     <button class="btn pri" onclick="closeModal();periodikaRefreshIfShown()">Затвори</button>`);
+  setTimeout(() => { const f = $('#issueF [name=issue_no]'); if (f) f.focus(); }, 0);
 }
 window.openPeriodical = openPeriodical;
+/* Одит v2.4.29: след „Добави брой“/„×“ списъкът зад кардекса показваше старите
+   „Броеве“ и „Следващ очакван брой“ до повторно влизане в раздела. */
+function periodikaRefreshIfShown() { if (VIEW === 'periodika') renderPeriodika(); }
+window.periodikaRefreshIfShown = periodikaRefreshIfShown;
 async function addIssue(periodicalId) {
   const d = formData('#issueF');
   if (!d.issue_no) return toast('Въведете номер на брой.', 'err');
   d.periodical_id = periodicalId;
-  await call(window.api.periodicalIssues.add(d));
+  // Затваря се/пречертава се само при успех; отказът (невалидна дата, цена) остава във формата.
+  const ok = await call(window.api.periodicalIssues.add(d), 'Брой ' + d.issue_no + ' е вписан в кардекса.');
+  if (ok === null) return;
   markSaved();
   openPeriodical(periodicalId);
 }

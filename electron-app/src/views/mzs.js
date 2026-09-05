@@ -27,7 +27,7 @@ async function mzsForm(m) {
     <form id="mzsF" onsubmit="return false">
       <div class="grid g3">
         ${fld('№', 'no', { val: v.no, req: 1 })}
-        ${fld('Дата', 'date', { val: v.date, type: 'date' })}
+        ${fld('Дата', 'date', { val: v.date, type: 'date', req: 1 })}
         ${fld('Посока', 'direction', { type: 'select', opts: ['изходящо', 'входящо'], val: v.direction })}
       </div>
       ${fld('Библиотека партньор', 'partner', { val: v.partner || '', req: 1 })}

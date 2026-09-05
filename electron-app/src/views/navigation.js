@@ -47,6 +47,19 @@ const NAV_ICONS = {
   odit: navIco('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M8.5 11h5"/>'),
   setup: navIco('<path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M2 15h4M10 8h4M18 17h4"/>')
 };
+/* Икони за показателите (.kpi) в останалите раздели — същият щрихов стил като
+   менюто и таблото (v2.4.29: дотук там стояха емоджита 📗✅📕🔍📚👥🔄🚪, които
+   Windows рисува цветно и различно от всичко останало на екрана). */
+const KPI_ICONS = {
+  fund: NAV_ICONS.books, readers: NAV_ICONS.readers, loans: NAV_ICONS.circ, mzs: NAV_ICONS.mzs,
+  article: NAV_ICONS.analytics, search: NAV_ICONS.odit, deacc: NAV_ICONS.acts,
+  check: navIco('<circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5.5-6.5"/>'),
+  skip: navIco('<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>'),
+  visits: navIco('<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M2 21h20"/><path d="M12 12h.01"/><path d="M16 8h4v13"/>'),
+  local: navIco('<path d="m3 11 9-8 9 8"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>'),
+  newReader: navIco('<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20a6.5 6.5 0 0 1 13 0"/><path d="M19 8v6M16 11h6"/>'),
+  money: navIco('<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2.5 0 0 0-2.5-1.5c-1.5 0-2.5.8-2.5 2 0 2.7 5 1.3 5 4 0 1.2-1 2-2.5 2a2.6 2.6 0 0 1-2.6-1.6"/><path d="M12 6.5V8M12 16v1.5"/>')
+};
 const TITLES = {
   dash: ['Табло', 'обобщение на състоянието'],
   books: ['Библиотечен фонд', 'каталогизация и издирване'],

@@ -2,7 +2,7 @@
 // (Фаза 4, стъпка 27). Зависи само от getDb, run, logAudit, yearOf.
 module.exports = function registerMzsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, yearOf } = deps;
-  const { parseRegisterNo } = require('../security-utils');
+  const { parseRegisterNo, isValidIsoDate } = require('../security-utils');
 
   ipcMain.handle('mzs:list', () => run(() => getDb().prepare('SELECT * FROM mzs_requests ORDER BY date DESC, no DESC').all()));
   ipcMain.handle('mzs:nextNo', (e, year) =>
@@ -12,10 +12,20 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       return (row.m || 0) + 1;
     })
   );
+  /* Одит v2.4.29: заявка без дата минаваше (year се вземаше от днес, разпечатката
+     показваше „Дата на вписване:  г.“), а после нямаше как да се поправи —
+     mzs:update пази старата стойност при празно поле. Невалидни дати („2026-13-45“)
+     също влизаха. Проверява се като при актовете, партидите и заеманията. */
+  function assertMzsDates(date, due) {
+    if (!isValidIsoDate(date)) throw new Error('Датата на заявката липсва или е невалидна.');
+    if (due != null && due !== '' && !isValidIsoDate(due)) throw new Error('Срокът за връщане (' + due + ') е невалиден.');
+    if (due && due < date) throw new Error('Срокът за връщане (' + due + ') е преди датата на заявката (' + date + ').');
+  }
   ipcMain.handle('mzs:create', (e, m) =>
     run(() => {
       const db = getDb();
       const no = parseRegisterNo(m.no, '№ на заявката');
+      assertMzsDates(m.date, m.due_date);
       const year = yearOf(m.date);
       /* Същото като при актовете за отчисляване и партидите на постъпленията:
          номерът се предлага с MAX(no)+1 при отваряне на формата, схемата няма
@@ -57,6 +67,21 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       const given = (v) => v !== undefined && v !== null && v !== '';
       const no = given(m.no) ? parseRegisterNo(m.no, '№ на заявката') : cur.no;
       const date = given(m.date) ? m.date : cur.date;
+      /* Проверява се само подаденото: частично извикване (само статус) на стар ред
+         с празна дата минава, а формата, която праща всичко, се проверява изцяло.
+         Извикване, което пипа САМО due_date (проверка при прегледа), не бива да
+         преповтаря assertMzsDates(cur.date, …) — тя щеше да отхвърли валиден нов
+         срок заради невалидна СТАРА дата на заявка, останала от преди тази
+         проверка да съществува (реални бази отпреди v2.4.29), макар потребителят
+         изобщо да не я пипа в това извикване. Проверява се само подаденото поле;
+         редът спрямо старата дата се сравнява само ако тя самата е валидна. */
+      if (given(m.date)) assertMzsDates(m.date, m.due_date !== undefined ? m.due_date : cur.due_date);
+      else if (m.due_date !== undefined && m.due_date !== '' && m.due_date !== null) {
+        if (!isValidIsoDate(m.due_date)) throw new Error('Срокът за връщане (' + m.due_date + ') е невалиден.');
+        if (isValidIsoDate(cur.date) && m.due_date < cur.date) {
+          throw new Error('Срокът за връщане (' + m.due_date + ') е преди датата на заявката (' + cur.date + ').');
+        }
+      }
       const year = yearOf(date);
       const tx = db.transaction(() => {
         if (db.prepare('SELECT 1 FROM mzs_requests WHERE year = ? AND no = ? AND id <> ?').get(year, no, m.id)) {
@@ -87,5 +112,15 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       logAudit('Редакция на МЗС заявка', '№ ' + no + ' — ' + (given(m.title) ? m.title : cur.title));
     })
   );
-  ipcMain.handle('mzs:delete', (e, id) => run(() => getDb().prepare('DELETE FROM mzs_requests WHERE id = ?').run(id)));
+  /* Регистър с номера (v2.4.29): изтриването се вписва в следата, както при
+     партидите (v2.4.24), и не мълчи при несъществуващ ред. */
+  ipcMain.handle('mzs:delete', (e, id) =>
+    run(() => {
+      const db = getDb();
+      const cur = db.prepare('SELECT no, year, title, direction FROM mzs_requests WHERE id = ?').get(id);
+      if (!cur) throw new Error('Заявката вече не съществува — вероятно е изтрита от друго работно място.');
+      db.prepare('DELETE FROM mzs_requests WHERE id = ?').run(id);
+      logAudit('Изтрита МЗС заявка', '№ ' + cur.no + '/' + cur.year + ' — ' + cur.title + ' (' + cur.direction + ')');
+    })
+  );
 };

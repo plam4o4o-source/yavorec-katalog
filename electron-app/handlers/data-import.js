@@ -188,6 +188,15 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [] };
       const cell = (row, field) => cols[field] == null ? '' : String(row[cols[field]] ?? '').trim();
 
+      /* Одит v2.4.29: лимитът от „Настройки“ → „Ограничения“ (checkRecordLimit в
+         handlers/books.js) важеше за „+ Нова книга“, но не и за вноса — 4 000 реда
+         влизаха при лимит 2 000 и после НИКОЙ нов документ не можеше да се добави.
+         Свободните места се смятат веднъж, преди транзакцията; редовете над тях
+         се пропускат с изрично предупреждение, а не мълчаливо. */
+      const limitRow = db.prepare('SELECT limit_books FROM settings WHERE id = 1').get() || {};
+      const limitBooks = parseInt(limitRow.limit_books, 10) || 0;
+      let free = limitBooks > 0 ? Math.max(0, limitBooks - db.prepare('SELECT COUNT(*) AS n FROM books').get().n) : Infinity;
+      let overLimit = 0;
       const tx = db.transaction(() => {
         let nextInv = (db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {}).next_inv_number || 1;
         IMPORT_CACHE.body.forEach((row, i) => {
@@ -225,6 +234,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               if (!inv && isbnKey && existingIsbn.has(isbnKey)) { report.skipped++; return; }
               if (!inv && !isbnKey && existingTitles.has(titleKey(title, author))) { report.skipped++; return; }
             }
+            if (free <= 0) { overLimit++; report.skipped++; return; } // след дубликатите: те не заемат място
             existingTitles.add(titleKey(title, author));
             // Зает или липсващ инвентарен номер: дава се следващият свободен, за да
             // не се губи записът и да не се чупи уникалността в инвентарната книга.
@@ -341,6 +351,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
             if (inv >= nextInv) nextInv = inv + 1;
             report.added++;
+            free--;
           } catch (err) {
             // Грешката на един ред не бива да проваля целия внос — събира се и се
             // показва накрая, а останалите редове продължават.
@@ -351,6 +362,11 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(nextInv);
       });
       tx.immediate();
+      if (overLimit) {
+        report.warnings.push(`${overLimit} ${overLimit === 1 ? 'ред не беше въведен' : 'реда не бяха въведени'}: достигнат е зададеният лимит от `
+          + `${limitBooks} документи във фонда („Настройки“ → „Ограничения“). Увеличете или премахнете лимита и повторете вноса `
+          + 'с отметка „Пропускай вече съществуващите“ — въведените редове ще бъдат пропуснати.');
+      }
       logAudit('Въвеждане на данни', `${report.added} документа от ${path.basename(IMPORT_CACHE.path)}` +
         (report.skipped ? `, пропуснати ${report.skipped}` : ''));
       return { ok: true, data: report };

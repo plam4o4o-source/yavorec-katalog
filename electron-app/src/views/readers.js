@@ -16,16 +16,19 @@ function readersFilterMatch(r) {
 }
 function readersRowsHtml(shown) {
   return shown.length ? shown.map(r => `
-    <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span title="Има бележка при заемане">📌</span>' : ''}</td>
+    <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span class="badge w" title="${esc(r.alert_note)}">бележка</span>' : ''}</td>
       <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
-      <td><button class="btn sm pri" onclick="CIRC.readerId=${r.id};CIRC.mode='out';location.hash='#circ'" title="Отваря гишето с този читател">Заемане</button>
+      <td class="num">${r.open_loans == null ? '' : `<span class="loansCnt ${r.overdue_loans ? 'warn' : ''}" title="${r.overdue_loans
+        ? pl(r.overdue_loans, 'просрочен документ', 'просрочени документа') + ' от ' + r.open_loans + ' заети'
+        : (r.open_loans ? pl(r.open_loans, 'зает документ', 'заети документа') : 'няма заети документи')}">${r.open_loans}${r.overdue_loans ? ' !' : ''}</span>`}</td>
+      <td class="actsCell"><div class="rowActs"><button class="btn sm pri" onclick="CIRC.readerId=${r.id};CIRC.mode='out';location.hash='#circ'" title="Отваря гишето с този читател">Заемане</button>
           <button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
           <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
           <button class="btn sm" onclick="printCardOne(${r.id})" title="Печат на читателската карта само на този читател">Карта</button>
           <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
-          <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></td></tr>`).join('')
-    : `<tr><td colspan="6" class="empty">Няма намерени читатели.</td></tr>`;
+          <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></div></td></tr>`).join('')
+    : `<tr><td colspan="7" class="empty">Няма намерени читатели.</td></tr>`;
 }
 function readersMoreHtml(more, total) {
   return more > 0 ? `<button class="btn" onclick="READERS_RENDER_LIMIT+=${READERS_PAGE_SIZE};renderReadersBody(true)">Покажи още (${more} от общо ${total})</button>` : '';
@@ -81,8 +84,8 @@ async function renderReaders() {
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
       <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
-    <div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th style="width:345px"></th></tr></thead>
+    <div class="wrap"><table class="ledger readersTable">
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, filtered.length)}</div>
@@ -94,9 +97,8 @@ async function renderReaders() {
   $('#rSearch').addEventListener('change', e => logSearchHistory('readers', e.target.value));
 }
 async function exportReadersCsv() {
-  const res = await window.api.readers.exportCsv();
-  if (!res.ok) return toast(res.error, 'err');
-  toast('Списъкът с читателите е записан в ' + res.data, 'ok');
+  const path = await call(window.api.readers.exportCsv());
+  if (path) toast('Списъкът с читателите е записан в ' + path, 'ok');
 }
 window.exportReadersCsv = exportReadersCsv;
 const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
@@ -174,10 +176,23 @@ async function readerForm(id) {
     </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     ${id ? `<button class="btn" onclick="accountModal(${id})">Сметка</button>` : ''}
+     ${id ? `<button class="btn" onclick="readerFormToAccount(${id})">Сметка</button>` : ''}
      <button class="btn pri" onclick="saveReader(${id || 'null'})">Запиши</button>`);
-  if (id) $('#readerF').dataset.id = id;
+  if (id) {
+    const f = $('#readerF');
+    f.dataset.id = id;
+    f.dataset.snapshot = JSON.stringify(formData('#readerF'));
+  }
 }
+/* „Сметка“ от формата за редакция (v2.4.29): прозорецът се ЗАМЕСТВА и незаписаните
+   промени изчезваха без въпрос. Пита само ако наистина има промени. */
+function readerFormToAccount(id) {
+  const f = $('#readerF');
+  const dirty = f && f.dataset.snapshot && f.dataset.snapshot !== JSON.stringify(formData('#readerF'));
+  if (dirty && !confirm('Има незаписани промени в картата на читателя. Да ги изоставя ли и да отворя сметката?')) return;
+  accountModal(id);
+}
+window.readerFormToAccount = readerFormToAccount;
 window.readerForm = readerForm;
 function toggleGuarantorFields(category) {
   const fs = $('#guarantorFs');
@@ -212,6 +227,9 @@ async function saveReader(id) {
      светеше на „Заемане и връщане“, а новият читател не беше избран за заемане.
      От гишето — избира се направо; отвсякъде другаде — както досега. */
   if (VIEW === 'circ' && typeof selectCircReader === 'function' && savedId) { selectCircReader(savedId); return; }
+  /* v2.4.29: от Таблото („Нов читател“) или от друг раздел се пречертава ТОЗИ
+     раздел — дотук под заглавие „Табло“ оставаше списъкът с читатели. */
+  if (VIEW !== 'readers') { if (RENDERERS[VIEW]) await RENDERERS[VIEW](); return; }
   await renderReaders();
   if (savedId) flashRow(`#rBody tr[data-id="${savedId}"]`);
 }

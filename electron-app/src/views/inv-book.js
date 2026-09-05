@@ -37,11 +37,11 @@ async function renderInvBook() {
     Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>
 
     <div class="kpis" style="margin-bottom:16px">
-      <div class="kpi"><div class="kpi-ico">📗</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.fund}</div><div class="kpi-body">
         <div class="kpi-num">${rows.length.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Вписани общо</div>
         <div class="kpi-extra">от началото на книгата</div></div></div>
-      <div class="kpi ok"><div class="kpi-ico">✅</div><div class="kpi-body">
+      <div class="kpi ok"><div class="kpi-ico">${KPI_ICONS.check}</div><div class="kpi-body">
         <div class="kpi-num">${activeCopies.toLocaleString('bg-BG')}</div>
         ${/* „Неотчислени“, не „Налични“ — в сбора влизат и документите със
               състояние „липсващ“ и „за реставрация“ (същото броене като stockAt()
@@ -49,11 +49,11 @@ async function renderInvBook() {
         <div class="kpi-lbl">Неотчислени</div><div class="kpi-extra">${mny(value)}${
           activeCopies > active.length ? ' · ' + active.length.toLocaleString('bg-BG') + ' инв. номера' : ''
         }</div></div></div>
-      <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">📕</div><div class="kpi-body">
+      <div class="kpi ${deacc ? 'warn' : ''}"><div class="kpi-ico">${KPI_ICONS.deacc}</div><div class="kpi-body">
         <div class="kpi-num">${deacc.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Отчислени</div>
         <div class="kpi-extra">${rows.length ? Math.round(deacc / rows.length * 100) : 0}% от вписаните</div></div></div>
-      <div class="kpi"><div class="kpi-ico">🔍</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.search}</div><div class="kpi-body">
         <div class="kpi-num">${checked.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">С отбелязана проверка</div>
         <div class="kpi-extra">чл. 40 – 41</div></div></div>
@@ -66,8 +66,8 @@ async function renderInvBook() {
       <button class="btn" onclick="printInvBookDoc()">Печат на инвентарната книга / PDF</button>
     </div>
     <div class="wrap"><table class="ledger ibTable">
-      <thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
-        <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th style="width:90px"></th></tr></thead>
+      <thead><tr><th class="nowrap">Дата</th><th class="nowrap">Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
+        <th>№ / дата<br>в КДБФ</th><th>Сигнатура</th><th>№ / дата<br>на акт</th><th>Състояние</th><th style="width:90px"></th></tr></thead>
       <tbody id="ibBody"></tbody>
     </table></div>
     <div class="toolbar" id="ibMore" style="justify-content:center"></div>`;
@@ -90,7 +90,7 @@ function invBookRowsHtml(rows) {
       <td class="num"><b>${r.inv_number ?? ''}</b></td>
       <td style="font-size:11px">${(r.checks || []).map(c => `<span class="badge ok" style="font-size:10px">${bg(c)}</span>`).join(' ')}</td>
       <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
-      <td class="num">${esc(r.year || '')}</td><td class="num">${mny(r.price)}</td>
+      <td class="num">${esc(r.year || '')}</td><td class="num">${mnyCell(r.price)}</td>
       <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
       <td class="num">${esc(r.call_number || '')}</td>
       <td class="num" style="font-size:11px">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>

@@ -259,7 +259,9 @@ test('Просрочени: изгледът НЕ смята дни и обез�
   const window = await openView(dom, 'over');
   const cells = window.document.querySelectorAll('#ovBody tr')[0].cells;
   assert.equal(cells[4].textContent.trim(), '17');
-  assert.equal(cells[5].textContent.trim(), mny(window, 3.4));
+  // v2.4.29: сумата е в клетка „лв. над €“ (mnyCell) — целият текст в title, без „/“ в потока.
+  assert.equal(cells[5].querySelector('.money').title, mny(window, 3.4));
+  assert.equal(cells[5].textContent.trim(), mny(window, 3.4).replace(' / ', ''));
 });
 
 /* ================= 1б) „Аналитично описание“ ================= */

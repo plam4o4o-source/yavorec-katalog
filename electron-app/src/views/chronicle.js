@@ -200,7 +200,7 @@ async function chronicleView(id) {
       </div>
     </div>
     ${linksPanelHtml('летопис', id, links || [])}`,
-    `<button class="btn" onclick="closeModal()">Затвори</button>
+    `<button class="btn" onclick="closeModal();linksRefreshListIfChanged()">Затвори</button>
      <button class="btn" onclick="closeModal();chronicleForm(${id})">Редакция</button>
      <button class="btn dgr" onclick="chronicleDelete(${id})">Изтрий</button>`);
 }

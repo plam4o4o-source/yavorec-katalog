@@ -30,16 +30,16 @@ async function renderStats() {
     </div>
 
     <div class="kpis" style="margin-bottom:16px">
-      <div class="kpi"><div class="kpi-ico">📚</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.fund}</div><div class="kpi-body">
         <div class="kpi-num">${r.fundCount.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Библиотечен фонд</div><div class="kpi-extra">${mny(r.fundValue)}</div></div></div>
-      <div class="kpi"><div class="kpi-ico">👥</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.readers}</div><div class="kpi-body">
         <div class="kpi-num">${r.readersCount.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Регистрирани читатели</div><div class="kpi-extra">през ${y} г.</div></div></div>
-      <div class="kpi"><div class="kpi-ico">🔄</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.loans}</div><div class="kpi-body">
         <div class="kpi-num">${r.loansCount.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Заемания</div><div class="kpi-extra">през ${y} г.</div></div></div>
-      <div class="kpi"><div class="kpi-ico">🚪</div><div class="kpi-body">
+      <div class="kpi"><div class="kpi-ico">${KPI_ICONS.visits}</div><div class="kpi-body">
         <div class="kpi-num">${r.visits.toLocaleString('bg-BG')}</div>
         <div class="kpi-lbl">Посещения</div><div class="kpi-extra">${r.visitsRecorded
           ? 'БДС ISO 2789'
@@ -79,18 +79,20 @@ async function renderStats() {
             <div><span>Върнати със забава</span><b style="color:var(--red)">${r.returnedLate}</b></div>
             <div><span>Начислени обезщетения</span><b>${mny(r.finesCharged || 0)}</b></div>
             <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
+            ${r.openOverdue ? `<div><span>Просрочени в момента (към днес, незавършени)</span><b style="color:var(--red)"><a href="#over">${r.openOverdue}</a></b></div>` : ''}
             ${r.finesOpen ? `<div><span>Начислени по незавършени заемания (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
           </div>
           <div class="hint" style="margin-top:8px">Броят се връщанията <b>през</b> отчетната
           година, независимо кога е заета книгата. „Начислени“ е сумата, начислена при
           връщането; „събрани“ — реално платеното от читателя на касата.</div>`
-        : '<span class="hint">Няма върнати документи през периода.</span>'}
+        : `<span class="hint">Няма върнати документи през периода.</span>${r.openOverdue
+          ? `<div class="statRows" style="margin-top:10px"><div><span>Просрочени в момента (към днес)</span><b style="color:var(--red)"><a href="#over">${r.openOverdue}</a></b></div></div>` : ''}`}
       </div>
 
       <div class="card"><h3 style="margin-top:0">Най-търсени документи</h3>
         ${r.topLoans.length ? r.topLoans.map((t, i) => `<div class="rankRow">
           <span class="rankNo">${i + 1}</span>
-          <span class="rankTitle" title="${esc(t.title)}">${esc(t.title)}</span>
+          <span class="rankTitle" title="${esc(t.title)}${t.author ? ' — ' + esc(t.author) : ''}">${esc(t.title)}${t.author ? ` <span class="hint">· ${esc(t.author)}</span>` : ''}</span>
           <span class="rankVal">${t.n}</span></div>`).join('')
         : '<span class="hint">няма данни</span>'}
       </div>

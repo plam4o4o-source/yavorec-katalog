@@ -80,8 +80,8 @@ async function renderCirc() {
       <b style="font-size:17px">${esc(r.name)}</b>
       <div class="hint">Карта ${esc(r.card_no || '—')} · ${esc(r.category || '')} ·
         <span id="circCount">заети: ${circOpen}${circMax ? ' / ' + circMax : ''}</span></div></div>
-      <button class="btn sm" onclick="accountModal(${r.id})" title="Читателска сметка">💰</button>
-      <button class="btn sm" onclick="houseboundModal(${r.id})" title="Обслужване по домовете — график и посещения">🏠</button>
+      <button class="btn sm" onclick="accountModal(${r.id})" title="Читателска сметка">Сметка</button>
+      <button class="btn sm" onclick="houseboundModal(${r.id})" title="Обслужване по домовете — график и посещения">По домовете</button>
       <button class="btn sm" onclick="CIRC.readerId=null;renderCirc()">Смени</button></div>
       ${r.alert_note ? `<div class="note w" style="border-left-color:#c9a84c;background:rgba(201,168,76,.12)">📌 <b>${esc(r.alert_note)}</b></div>` : ''}
       ${r.guarantor_name ? `<div class="hint">👪 Родител/настойник: <b>${esc(r.guarantor_name)}</b>${r.guarantor_phone ? ' · тел. ' + esc(r.guarantor_phone) : ''}</div>` : ''}
@@ -94,7 +94,7 @@ async function renderCirc() {
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
       <div class="hint" style="margin-top:6px">Срок за заемане: ${dni(rule.loan_days)}${maxRenew ? ' · до ' + pl(maxRenew, 'продължение', 'продължения') : ''}</div>
       <div class="toolbar" style="margin:10px 0 0">
-        <button class="btn sm" onclick="holdPrompt()">📌 Резервирай заета книга…</button>
+        <button class="btn sm" onclick="holdPrompt()">Резервирай заета книга…</button>
       </div>
       <div id="outLog" style="margin-top:12px"></div>`;
     if (myHolds.length) {
@@ -122,13 +122,18 @@ async function renderCirc() {
   } else {
     col1 = `<input id="pScan" class="scan" placeholder="Сканирай читателска карта или въведи име…" autocomplete="off">
       <div id="pSug" style="margin-top:10px"></div>`;
-    col2 = `<div class="hint">Първо изберете читател.</div>`;
+    col2 = `<div class="hint">Първо изберете читател — сканирайте картата или напишете част от името.</div>
+      <div class="hint" style="margin-top:6px">След това сканирайте документите един след друг; всяко заемане се записва веднага.</div>`;
+    /* v2.4.29: най-често отваряният екран стоеше празен под двете карти. „Днес на
+       гишето“ показва какво е свършено през деня (от одитната следа — без нов канал). */
+    table = `<div class="card circToday" id="circToday" style="margin-top:16px"><h3 style="margin-top:0">Днес на гишето</h3><div class="hint">Зарежда се…</div></div>`;
   }
 
   $('#view').innerHTML = tabs + `<div class="grid g2">
     <div class="card"><h3 style="margin-top:0">1 · Читател</h3>${col1}</div>
     <div class="card"><h3 style="margin-top:0">2 · Документи</h3>${col2}</div>
   </div>${table}`;
+  if (!CIRC.readerId) circTodayPanel();
 
   const ps = $('#pScan');
   if (ps) {
@@ -247,3 +252,37 @@ async function logLocaluse() {
   if (ok !== null) toast('📖 Отбелязано ползване в читалнята за днес.', 'ok');
 }
 window.logLocaluse = logLocaluse;
+
+/* „Днес на гишето“ (v2.4.29): броят заемания и връщания за деня и последните
+   операции — от одитната следа (последните 500 реда), в местно време. */
+async function circTodayPanel() {
+  const box = $('#circToday'); if (!box) return;
+  const rows = await call(window.api.audit.list('')) || [];
+  const pad = (n) => String(n).padStart(2, '0');
+  const localDate = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  // Следата пази UTC („YYYY-MM-DD HH:MM:SS“); „днес“ е местният ден, не today() (UTC).
+  const t = localDate(new Date());
+  const local = (ts) => {
+    const raw = String(ts || '');
+    const d = new Date(/[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
+    if (isNaN(d)) return null;
+    return { date: localDate(d), time: pad(d.getHours()) + ':' + pad(d.getMinutes()) };
+  };
+  const ops = rows.map(r => ({ ...r, at: local(r.ts) }))
+    .filter(r => r.at && r.at.date === t && (r.action === 'Заемане' || r.action === 'Връщане'));
+  if (!$('#circToday')) return; // междувременно е избран читател
+  const out = ops.filter(r => r.action === 'Заемане').length, back = ops.length - out;
+  box.innerHTML = `<h3 style="margin-top:0">Днес на гишето</h3>
+    <div class="setupChips" style="margin-bottom:${ops.length ? 10 : 0}px">
+      <span class="chip ${out ? 'ok' : ''}">${pl(out, 'заемане', 'заемания')}</span>
+      <span class="chip ${back ? 'ok' : ''}">${pl(back, 'връщане', 'връщания')}</span>
+      ${rows.length >= 500 ? '<span class="chip" title="Одитната следа се чете до 500 реда назад">последните 500 записа</span>' : ''}
+    </div>
+    ${ops.length ? `<div class="circOps">${ops.slice(0, 8).map(r => `<div class="circOp">
+        <span class="num">${r.at.time}</span>
+        <span class="badge ${r.action === 'Заемане' ? 'ok' : ''}">${r.action === 'Заемане' ? 'заемане' : 'връщане'}</span>
+        <span class="circOpText">${esc(r.detail || '')}</span>
+        <span class="hint">${esc(r.user || '')}</span></div>`).join('')}</div>`
+      : '<div class="hint">Още няма заемания или връщания днес.</div>'}`;
+}
+window.circTodayPanel = circTodayPanel;

@@ -24,7 +24,7 @@ function overRowsHtml(rows) {
   return rows.length ? rows.map(l => {
     const days = Number(l.daysLate) || 0;
     return `<tr><td>${esc(l.reader_name)}</td><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
-        <td class="num">${bg(l.date_due)}</td><td class="num warn">${days}</td><td class="num">${mny(Number(l.fine) || 0)}</td>
+        <td class="num nowrap">${bg(l.date_due)}</td><td class="num warn">${days}</td><td class="num">${mnyCell(Number(l.fine) || 0)}</td>
         <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
             <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button></td></tr>`;
   }).join('') : `<tr><td colspan="7" class="empty">Няма просрочени заемания.</td></tr>`;
