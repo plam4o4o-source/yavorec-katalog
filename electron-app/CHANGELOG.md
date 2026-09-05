@@ -11,6 +11,63 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.30
+
+**BG:** Преглед на поправките от осемнадесетия кръг (v2.4.29). Намерени и
+поправени два пропуска в новите проверки — самите проверки бяха верни по идея,
+но не покриваха всичко, което твърдяха.
+
+- **Баркод „007“ срещу инвентарен № 7 се приемаше при запис.** Новата
+  `assertUniqueBarcode()` в `handlers/books.js` вече отказваше баркод, равен
+  на ЧУЖД инвентарен номер (в едната посока — с числово сравнение,
+  `parseInt`), но обратната проверка (инвентарен номер, равен на ЧУЖД баркод)
+  сравняваше низовете буквално (`barcode = '7'`) — баркод „007“ не съвпада с
+  „7“ като текст, макар `resolveScannedBook()` (гишето) да ги приема за
+  ЕДИН И СЪЩ проблем при сканиране (`CAST('007' AS INTEGER) = 7`). Запис,
+  който трябваше да бъде отказан, минаваше — и седмици по-късно сканирането
+  на етикета отказваше със същата двусмислена грешка, която проверката беше
+  писана да предотврати при самия запис. И двете посоки вече сравняват
+  числово, както четецът на гишето.
+- **Поправка само на срока за връщане в МЗС отказваше заради СТАРАТА, непипната
+  дата на заявката.** `mzs:update`, повикан само с `due_date` (без `date`),
+  преповтаряше пълната проверка `assertMzsDates(cur.date, due_date)` върху
+  съществуващата дата на реда — а тя можеше да е невалидна на база, заведена
+  преди самата тази проверка да съществува (v2.4.29 добави проверката за първи
+  път; по-старите записи не са минавали през нея). Библиотекар, който само
+  удължава срока на стара заявка, получаваше „Датата на заявката липсва или е
+  невалидна“ за поле, което изобщо не пипа. Сега се проверява само подаденото
+  ново поле; редът спрямо старата дата се сравнява само ако тя самата е
+  валидна.
+
+И двата пропуска — доказани с revert-and-retest (връщане на реда преди
+поправката кара новия регресионен тест да гръмне точно с грешката отгоре), с
+нови проверки в `test/fixes-audit-v2429.test.js`.
+
+Проверено още при прегледа и НЕ е сметнато за дефект на този кръг (пред-
+съществуващо поведение извън обхвата на v2.4.29's собствени твърдения):
+масовият внос (`handlers/data-import.js`) не минава през новата
+`assertUniqueBarcode()` — дублиран баркод в самия внасян файл не се отказва.
+Това е отделен, по-стар път (не е пипан от v2.4.29) — оставено за бъдещ кръг.
+
+Само поправки в кода и тестовете — без нова функционалност. Пълната поредица:
+1262 успешни, 0 неуспешни (UTC и Europe/Sofia). code-review (high): без нови
+находки след поправките (отбелязана и оставена като приемлива: пълно сканиране
+на редовете с баркод в `assertUniqueBarcode()` вместо индексирана заявка —
+незначително при мащаба на една читалищна библиотека).
+
+**EN:** A review of round eighteen's own fixes (v2.4.29). Two real gaps found
+and fixed in the new checks — the checks were sound in intent but didn't cover
+everything they claimed to. `assertUniqueBarcode()` compared a book's
+inventory number against other books' barcodes as exact text, missing a
+zero-padded barcode (e.g. `"007"` vs. inventory number `7`) that
+`resolveScannedBook()` at the circulation desk already treats as the same
+ambiguity (`CAST('007' AS INTEGER) = 7`) — a save that should have been
+refused went through, only to fail at the scanner weeks later. `mzs:update`
+called with only `due_date` re-validated the record's untouched, possibly
+invalid legacy `date` field (pre-dating this round's own validation), blocking
+a legitimate due-date-only edit. Both fixed and covered by revert-and-retest
+regression tests. Code-only round: 1262 tests passing, 0 failing.
+
 ## v2.4.29
 
 **BG:** Осемнадесети кръг — пълен тест на работата на програмата през

@@ -265,7 +265,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       }
     }
     if (invNumber != null) {
-      const byCode = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(String(invNumber), self);
+      /* Съвпадението е ЧИСЛОВО (както при resolveScannedBook), не текстово: баркод
+         „007“ отговаря на сканиране на инв. № 7 (CAST('007' AS INTEGER) = 7), а
+         точното текстово сравнение по-долу би пропуснало точно този случай —
+         проверката би минала тук, а по-късно скенерът пак би отказал. */
+      const withBarcode = db.prepare("SELECT id, inv_number, barcode FROM books WHERE barcode IS NOT NULL AND barcode != '' AND id != ?").all(self);
+      const byCode = withBarcode.find(r => /^\d{1,9}$/.test(String(r.barcode).trim()) && parseInt(r.barcode, 10) === invNumber);
       if (byCode) {
         throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
           + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');

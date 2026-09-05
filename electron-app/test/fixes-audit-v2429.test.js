@@ -208,6 +208,14 @@ test('books:create/update отказват баркод, който вече с�
   assert.match(await fail('books:create', { inv_number: String(invSeq++), title: 'Х', category_id: 1, barcode: String(invA) }), /съвпада с инвентарния номер/);
   const c = await book({ barcode: '777777' });
   assert.match(await fail('books:create', { inv_number: '777777', title: 'Х', category_id: 1 }), /съвпада с баркода/);
+  /* Съвпадението е ЧИСЛОВО, не текстово (проверка при прегледа): баркод „007“ и
+     инв. № 7 се СЧИТАТ за същия проблем от четеца (CAST('007' AS INTEGER) = 7,
+     виж resolveScannedBook в security-utils.js) — текстово сравнение „007“ ≠ „7“
+     би пропуснало точно този случай при запис, а по-късно сканирането пак би
+     отказало. */
+  await book({ barcode: '007' });
+  assert.match(await fail('books:create', { inv_number: '7', title: 'Y', category_id: 1 }), /съвпада с баркода/,
+    'баркод „007“ и инв. № 7 са същият проблем за четеца, не само точно еднаквите низове');
   await ok('books:update', Object.assign({}, q('SELECT * FROM books WHERE id = ?', c), { barcode: ' BC-2429-T ' }));
   assert.equal(q('SELECT barcode FROM books WHERE id = ?', c).barcode, 'BC-2429-T', 'баркодът се записва без интервали');
 });
@@ -257,6 +265,16 @@ test('mzs:create/update проверяват датата и срока; mzs:del
   db.prepare("UPDATE mzs_requests SET date = '' WHERE id = ?").run(id);
   await ok('mzs:update', { id, status: 'върнато' });
   assert.match(await fail('mzs:update', { id, date: 'abc' }), /Датата на заявката/);
+  /* Проверка при прегледа: стар ред с НЕПРАЗНА, но невалидна дата (реалистично за
+     база отпреди v2.4.29, когато mzs:create/update изобщо не проверяваше нищо) —
+     промяна САМО на due_date не бива да отхвърля заявката заради старата дата,
+     която потребителят изобщо не пипа в това извикване. */
+  db.prepare("UPDATE mzs_requests SET date = 'стара-невалидна-дата' WHERE id = ?").run(id);
+  await ok('mzs:update', { id, due_date: '2026-05-01' });
+  assert.equal(q('SELECT due_date FROM mzs_requests WHERE id = ?', id).due_date, '2026-05-01',
+    'due_date-само не преповтаря проверката на непипнатата стара дата');
+  assert.match(await fail('mzs:update', { id, due_date: 'abc' }), /Срокът за връщане/, 'самият нов срок все пак се проверява');
+  db.prepare("UPDATE mzs_requests SET date = '2026-03-01' WHERE id = ?").run(id); // връща валидна дата за реда, преди да продължи тестът
   await ok('mzs:update', { id, date: '2026-03-02' });
   assert.match(await fail('mzs:delete', 999999), /вече не съществува/);
   await ok('mzs:delete', id);

@@ -68,9 +68,20 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       const no = given(m.no) ? parseRegisterNo(m.no, '№ на заявката') : cur.no;
       const date = given(m.date) ? m.date : cur.date;
       /* Проверява се само подаденото: частично извикване (само статус) на стар ред
-         с празна дата минава, а формата, която праща всичко, се проверява изцяло. */
+         с празна дата минава, а формата, която праща всичко, се проверява изцяло.
+         Извикване, което пипа САМО due_date (проверка при прегледа), не бива да
+         преповтаря assertMzsDates(cur.date, …) — тя щеше да отхвърли валиден нов
+         срок заради невалидна СТАРА дата на заявка, останала от преди тази
+         проверка да съществува (реални бази отпреди v2.4.29), макар потребителят
+         изобщо да не я пипа в това извикване. Проверява се само подаденото поле;
+         редът спрямо старата дата се сравнява само ако тя самата е валидна. */
       if (given(m.date)) assertMzsDates(m.date, m.due_date !== undefined ? m.due_date : cur.due_date);
-      else if (m.due_date !== undefined && m.due_date !== '' && m.due_date !== null) assertMzsDates(cur.date || m.due_date, m.due_date);
+      else if (m.due_date !== undefined && m.due_date !== '' && m.due_date !== null) {
+        if (!isValidIsoDate(m.due_date)) throw new Error('Срокът за връщане (' + m.due_date + ') е невалиден.');
+        if (isValidIsoDate(cur.date) && m.due_date < cur.date) {
+          throw new Error('Срокът за връщане (' + m.due_date + ') е преди датата на заявката (' + cur.date + ').');
+        }
+      }
       const year = yearOf(date);
       const tx = db.transaction(() => {
         if (db.prepare('SELECT 1 FROM mzs_requests WHERE year = ? AND no = ? AND id <> ?').get(year, no, m.id)) {
