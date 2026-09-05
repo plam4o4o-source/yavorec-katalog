@@ -170,7 +170,7 @@ async function renameShelf(id, current) {
 }
 window.renameShelf = renameShelf;
 async function deleteShelf(id) {
-  if (!confirm('Изтриване на витрината? Книгите в нея остават непокътнати във фонда — маха се само списъкът от сайта.')) return;
+  if (!await askConfirm('Изтриване на витрината? Книгите в нея остават непокътнати във фонда — маха се само списъкът от сайта.')) return;
   const ok = await call(window.api.shelves.delete(id), 'Витрината е изтрита.');
   if (ok !== null) loadShelvesBox();
 }
@@ -294,7 +294,7 @@ async function catalogChooseFolder() {
 }
 window.catalogChooseFolder = catalogChooseFolder;
 async function catalogDisconnect() {
-  if (!confirm('Спиране на автоматичния запис на katalog.json?')) return;
+  if (!await askConfirm('Спиране на автоматичния запис на katalog.json?', { okLabel: 'Спри записа' })) return;
   await call(window.api.catalog.disconnectFolder(), 'Изключено.');
   renderCatalog();
 }

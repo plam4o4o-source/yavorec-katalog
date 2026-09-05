@@ -69,7 +69,7 @@ function ordBg(n) {
   return n + (d === 1 ? '-ви' : d === 2 ? '-ри' : (d === 7 || d === 8) ? '-ми' : '-ти');
 }
 async function cancelHold(id) {
-  if (!confirm('Отказ от резервацията?')) return;
+  if (!await askConfirm('Отказ от резервацията?', { kind: 'danger', title: 'Резервация', okLabel: 'Откажи резервацията', cancelLabel: 'Назад' })) return;
   const res = await window.api.holds.cancel(id);
   if (!res.ok) return toast(res.error, 'err');
   /* Отмяната на ЗАДЕЛЕНА резервация повиква следващия по опашката (holds:cancel).

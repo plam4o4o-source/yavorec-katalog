@@ -274,7 +274,7 @@ async function printAcqNoDocDoc(id) {
 }
 window.printAcqNoDocDoc = printAcqNoDocDoc;
 async function delAcq(id) {
-  if (!confirm('Изтриване на партидата?')) return;
+  if (!await askConfirm('Изтриване на партидата?')) return;
   const res = await window.api.acquisitions.delete(id);
   if (!res.ok) return toast(res.error, 'err');
   closeModal(); renderAcq(); toast('Партидата е изтрита.', 'ok'); markSaved();

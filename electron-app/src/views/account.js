@@ -47,7 +47,7 @@ async function accountModal(readerId) {
 window.accountModal = accountModal;
 async function chargeAnnualFee(readerId, fee) {
   if (!fee) return;
-  if (!confirm('Начисли годишна такса ' + mny(fee) + '?')) return;
+  if (!await askConfirm('Начисли годишна такса ' + mny(fee) + '?', { okLabel: 'Начисли' })) return;
   const id = await call(window.api.account.charge({ reader_id: readerId, type: 'годишна такса', amount: fee, date: today() }), 'Начислено.');
   if (id != null) { markSaved(); accountModal(readerId); }
 }
@@ -92,7 +92,7 @@ async function savePayment(readerId) {
 }
 window.savePayment = savePayment;
 async function deleteAccountLine(readerId, id) {
-  if (!confirm('Изтриване на записа от сметката?')) return;
+  if (!await askConfirm('Изтриване на записа от сметката?')) return;
   const ok = await call(window.api.account.deleteLine(id), 'Изтрито.');
   if (ok !== null) { markSaved(); accountModal(readerId); }
 }

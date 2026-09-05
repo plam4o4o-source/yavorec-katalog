@@ -16,6 +16,9 @@
   --brass:#8F6D1D; --brassL:#C9A84C; --brassD:#6E5314;
   --red:#A32B22; --redL:#F0DEDA;
   --green:#3E6B4A; --greenL:#DFE9E0;
+  /* Кехлибарено за предупреждения (v2.4.33: toast 'warn', askConfirm 'warn', .note.w
+     иконата). Еднакво във всички теми — хартията е светла навсякъде; 5.6:1 върху --paper2. */
+  --amber:#8A5A0B; --amberL:#F3E6C8;
   --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
   --mono:'Consolas','Courier New',monospace;
   --serif:Georgia,'Times New Roman',serif;
@@ -423,7 +426,15 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .diffList{margin-top:4px; padding-left:8px; border-left:2px solid var(--rule2); font-size:11.5px; color:var(--ink2)}
 .diffList div{padding:1px 0}
 .empty{padding:36px 30px; text-align:center; color:var(--ink3)}
-.empty::before{content:'📄'; display:block; font-size:26px; opacity:.55; margin-bottom:6px; filter:grayscale(.4)}
+/* v2.4.33: иконата е SVG през mask (в currentColor), не емоджи — „📄“ се рисуваше
+   с цветния шрифт на системата, различно на всяка машина, и grayscale-филтърът
+   го правеше мътен. Отворена книга с празни страници — „тук няма записи“. */
+.empty::before{
+  content:''; display:block; width:34px; height:34px; margin:0 auto 8px; opacity:.5;
+  background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 6.5C10.5 5 8 4.5 3 4.8v13.4c5-.3 7.5.2 9 1.6 1.5-1.4 4-1.9 9-1.6V4.8c-5-.3-7.5.2-9 1.7z'/%3E%3Cpath d='M12 6.5v13.3'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 6.5C10.5 5 8 4.5 3 4.8v13.4c5-.3 7.5.2 9 1.6 1.5-1.4 4-1.9 9-1.6V4.8c-5-.3-7.5.2-9 1.7z'/%3E%3Cpath d='M12 6.5v13.3'/%3E%3C/svg%3E") center/contain no-repeat;
+}
 
 /* ---------- Modal ---------- */
 .veil{
@@ -490,6 +501,8 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 }
 /* Вторият слой прозорци стои над първия */
 .veil2{z-index:60; background:rgba(27,24,19,.35)}
+/* Слоят на въпросите (askConfirm) — над прозорците (50/60) и над прегледа преди печат (80), под съобщенията (100) */
+.veilC{z-index:90; background:rgba(27,24,19,.4)}
 .veil2 .modal{max-width:820px}
 
 /* ---------- Бележки и полски подсказки (.note, .hint) — v1.70.0 ----------
@@ -505,9 +518,18 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 /* Предупредителен вариант (.note.w) — вече ползван на много места чрез
    ad hoc inline style="border-left-color:..."; сега има собствен стил. */
 .note.w{
-  border-left-color:var(--brass);
-  background:color-mix(in srgb, var(--brass) 12%, var(--paper3));
+  border-left-color:var(--amber);
+  background:color-mix(in srgb, var(--amber) 10%, var(--paper3));
   color:var(--ink);
+  position:relative; padding-left:38px;
+}
+/* v2.4.33: предупредителната бележка носи и знак (триъгълник), не само цвят —
+   иначе се различаваше от обикновената само по оттенъка на канта. */
+.note.w::before{
+  content:''; position:absolute; left:12px; top:9px; width:17px; height:17px;
+  background:var(--amber);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4L2.8 20h18.4L12 4z'/%3E%3Cpath d='M12 10v4.5M12 17.4v.01'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4L2.8 20h18.4L12 4z'/%3E%3Cpath d='M12 10v4.5M12 17.4v.01'/%3E%3C/svg%3E") center/contain no-repeat;
 }
 .hint{display:block; font-size:12px; color:var(--ink3); margin-top:3px; line-height:1.4}
 
@@ -737,9 +759,18 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 
 /* ---------- Toasts (v1.69.0: по-големи, с икона, брояч на време и бутон ×) ----------
    Два контейнера: #toasts (долу вдясно — успехи и неутрални съобщения) и
-   #toastsTop (горе в центъра — ГРЕШКИ, там където е погледът на библиотекаря).
-   Всички движения са само transform/opacity (GPU) — не пипат layout и не могат
-   да засекат интерфейса дори при 15 000 реда таблица отдолу. */
+   #toastsTop (горе в центъра — ГРЕШКИ и ПРЕДУПРЕЖДЕНИЯ, там където е погледът
+   на библиотекаря). Всички движения са само transform/opacity (GPU) — не пипат
+   layout и не могат да засекат интерфейса дори при 15 000 реда таблица отдолу.
+
+   v2.4.33 (графично): светла картичка в цвета на хартията вместо плътна цветна
+   плоча — цветът на вида (--tc) е в канта отляво, в кръгчето с иконата, в
+   лентичката-брояч и в лек оттенък на фона. Четирите вида са една и съща
+   кутийка: .ok зелено, .err червено, .warn кехлибарено, без клас — основният
+   цвят на темата. Текстът е в --ink върху --paper2 (както навсякъде другаде),
+   така че съобщението изглежда като част от програмата, а не като чужд
+   прозорец върху нея; при натрупани грешки три светли картички с червен кант
+   се четат по-добре от три червени плочи. */
 #toasts{position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:480px}
 #toastsTop{
   position:fixed; top:78px; left:50%; transform:translateX(-50%);
@@ -756,41 +787,76 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
   to{opacity:1; transform:none}
 }
 .toast{
-  position:relative; display:flex; align-items:center; gap:12px;
-  background:var(--spine2); color:#F4EFDF; padding:14px 16px; border-radius:8px;
-  font-size:15px; line-height:1.4; box-shadow:0 10px 30px -8px rgba(0,0,0,.5);
-  border-left:4px solid var(--brassL); animation:toastIn .28s cubic-bezier(.2,.8,.3,1);
-  overflow:hidden; min-width:260px;
+  --tc:var(--brass);
+  position:relative; display:flex; align-items:flex-start; gap:12px;
+  background:color-mix(in srgb, var(--tc) 5%, var(--paper2)); color:var(--ink);
+  padding:12px 12px 13px 14px; border-radius:10px;
+  font-size:14.5px; line-height:1.45;
+  border:1px solid color-mix(in srgb, var(--tc) 22%, var(--rule)); border-left:4px solid var(--tc);
+  box-shadow:0 1px 2px rgba(27,24,19,.08), 0 16px 40px -12px rgba(27,24,19,.38);
+  animation:toastIn .28s cubic-bezier(.2,.8,.3,1);
+  overflow:hidden; min-width:280px; max-width:100%;
 }
 #toastsTop .toast{animation-name:toastInTop}
-.toast.ok{background:var(--green); border-left-color:#B9D8C2}
-.toast.err{background:var(--red); border-left-color:#F0C4BF; font-weight:600}
+.toast.ok{--tc:var(--green)}
+.toast.err{--tc:var(--red)}
+.toast.warn{--tc:var(--amber)}
+.toast.err .tmsg{font-weight:600}
 /* Излизане: плъзгане надолу + избледняване (класът .out се слага от toast() в core.js) */
 .toast.out{opacity:0; transform:translateY(10px); transition:opacity .25s ease-in, transform .25s ease-in}
 .toast .tico{
-  flex:0 0 26px; width:26px; height:26px; border-radius:50%;
+  flex:0 0 28px; width:28px; height:28px; border-radius:50%; margin-top:1px;
   display:flex; align-items:center; justify-content:center;
-  background:rgba(255,255,255,.18); font-size:15px; font-weight:700;
+  background:color-mix(in srgb, var(--tc) 15%, var(--paper2)); color:var(--tc);
 }
-.toast .tmsg{flex:1; min-width:0}
+.toast .tico svg{width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round}
+.toast .tmsg{flex:1; min-width:0; padding-top:4px; overflow-wrap:anywhere}
 .toast .tcount{
-  flex:0 0 auto; font-size:12px; font-weight:700; background:rgba(255,255,255,.22);
+  flex:0 0 auto; margin-top:5px; font-size:12px; font-weight:700;
+  background:color-mix(in srgb, var(--tc) 15%, var(--paper2)); color:var(--tc);
   padding:1px 8px; border-radius:9px;
 }
 .toast .tx{
-  flex:0 0 auto; background:none; border:none; color:inherit; opacity:.75;
-  font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; border-radius:4px;
+  flex:0 0 auto; background:none; border:none; color:var(--ink3); margin-top:1px;
+  font-size:18px; line-height:1; cursor:pointer; padding:3px 6px; border-radius:5px;
+  transition:background .12s, color .12s;
 }
-.toast .tx:hover{opacity:1; background:rgba(255,255,255,.15)}
+.toast .tx:hover{color:var(--ink); background:color-mix(in srgb, var(--tc) 12%, var(--paper2))}
 /* Лентичка-брояч в долния ръб: скъсява се за времето на живота на съобщението;
    при посочване с мишката спира (заедно с изчезването — виж core.js). */
 @keyframes tprogShrink{from{transform:scaleX(1)} to{transform:scaleX(0)}}
 .toast .tprog{
   position:absolute; left:0; bottom:0; height:3px; width:100%;
-  background:rgba(255,255,255,.45); transform-origin:left;
+  background:var(--tc); opacity:.38; transform-origin:left;
   animation:tprogShrink var(--tdur,3500ms) linear forwards;
 }
 .toast:hover .tprog{animation-play-state:paused}
+
+/* ---------- Прозорец-въпрос (askConfirm, v2.4.33) ----------
+   Заместител на родния confirm(): същият #modal, само по-тесен и без лента-
+   заглавие — икона в кръгче отляво, заглавие и текст отдясно, бутоните долу.
+   Цветът (--cc) идва от вида: изтриване/необратимо — червено, внимание —
+   кехлибарено, въпрос — основният цвят на темата; същият цвят е и в горния
+   кант на прозореца. */
+.modal.cfm{--cc:var(--brass); max-width:540px; border-top-color:var(--cc); margin-top:12vh}
+.modal.cfm.delete, .modal.cfm.danger{--cc:var(--red)}
+.modal.cfm.warn{--cc:var(--amber)}
+.modal.cfm .body{display:flex; gap:18px; align-items:flex-start; padding:24px 26px 8px; max-height:none}
+.cfmIco{
+  flex:0 0 48px; width:48px; height:48px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:color-mix(in srgb, var(--cc) 14%, var(--paper2)); color:var(--cc);
+}
+.cfmIco svg{width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+.cfmText{flex:1; min-width:0}
+.cfmTitle{font-family:var(--serif); font-size:19px; font-weight:600; margin:6px 0 8px; color:var(--ink); text-wrap:balance}
+.cfmMsg{font-size:14px; color:var(--ink2); line-height:1.55; white-space:pre-line; overflow-wrap:anywhere}
+.modal.cfm footer{border-top:none; padding:14px 26px 22px}
+.modal.cfm footer .btn{min-width:96px; padding:8px 16px}
+@media (max-height: 800px){
+  .modal.cfm .body{padding:20px 22px 6px}
+  .modal.cfm footer{padding:12px 22px 18px}
+}
 
 /* ---------- Преход при смяна на раздел (v1.69.0) ----------
    Слага се от route() в bootstrap.js — само при истинска навигация, НЕ при

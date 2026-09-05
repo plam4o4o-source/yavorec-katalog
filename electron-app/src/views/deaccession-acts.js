@@ -188,7 +188,7 @@ async function printActDoc(id) {
 }
 window.printActDoc = printActDoc;
 async function revokeAct(id) {
-  if (!confirm('Анулиране на акта и връщане на документите във фонда. Използвайте само при сгрешен акт. Да продължа?')) return;
+  if (!await askConfirm('Анулиране на акта и връщане на документите във фонда. Използвайте само при сгрешен акт. Да продължа?', { okLabel: 'Анулирай акта' })) return;
   const res = await window.api.deaccessionActs.revoke(id);
   if (!res.ok) return toast(res.error, 'err');
   closeModal(); renderActs(); toast('Актът е анулиран.', 'ok'); markSaved();

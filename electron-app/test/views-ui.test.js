@@ -117,7 +117,9 @@ test('съобщението има икона, бутон × за затвар�
   window.toast('Проба.', 'err');
   const t = d.querySelector('#toastsTop .toast.err');
   assert.ok(t.querySelector('.tico'), 'липсва икона');
-  assert.equal(t.querySelector('.tico').textContent, '✕');
+  // v2.4.33: иконата е SVG (currentColor), а видът се носи от data-kind — не текстов знак.
+  assert.ok(t.querySelector('.tico svg'), 'иконата не е SVG');
+  assert.equal(t.querySelector('.tico').getAttribute('data-kind'), 'err');
   assert.ok(t.querySelector('.tx'), 'липсва бутон за затваряне');
   assert.ok(t.querySelector('.tprog'), 'липсва лентичка-брояч');
   // Бутонът × затваря веднага (с кратка изходна анимация .out).

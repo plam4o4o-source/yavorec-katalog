@@ -206,7 +206,7 @@ async function chronicleView(id) {
 }
 window.chronicleView = chronicleView;
 async function chronicleDelete(id) {
-  if (!confirm('Изтриване на записа от летописа?')) return;
+  if (!await askConfirm('Изтриване на записа от летописа?')) return;
   await call(window.api.chronicle.delete(id), 'Записът е изтрит.');
   closeModal(); renderChronicle();
 }
