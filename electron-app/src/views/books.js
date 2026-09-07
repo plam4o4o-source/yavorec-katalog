@@ -470,7 +470,14 @@ async function bookForm(id, presetAcqId, prefill) {
               title="Избор от таблицата на УДК">Избери…</button>
           </div>
         </div>
-        ${fld('Авторски знак', 'author_mark', { val: v.author_mark || '', hint: 'напр. „В-15“' })}
+        <div class="field"><label>Авторски знак</label>
+          <div class="isbnRow">
+            <input name="author_mark" value="${esc(v.author_mark || '')}">
+            <button type="button" class="btn" id="amBtn" onclick="authorMarkSuggest()"
+              title="Предлага знака по фамилията — по таблицата, внесена в Настройки → Фонд">Предложи</button>
+          </div>
+          <div class="hint" id="amHint">напр. „В-15“</div>
+        </div>
         ${fld('Ключови думи', 'keywords', { val: v.keywords || '', list: 'keywords', hint: 'през запетая' })}
         ${fld('Адрес на корица (URL)', 'cover_url', { val: v.cover_url || '' })}
       </div>
@@ -594,6 +601,60 @@ function udkAppend(mod) {
   closeModal2();
 }
 window.udkAppend = udkAppend;
+
+/* ---------------- Авторски знак по фамилията ----------------
+   Копчето ПРЕДЛАГА, не решава. Знакът се смята по таблицата, внесена от самата
+   библиотека (Настройки → Фонд), и до полето се изписва ЗАЩО е този: по коя
+   фамилия и по кой ред от таблицата. Ако таблицата има отделен ред за конкретен
+   автор („Вазов, И.“), той се показва като избор — правилото е по фамилията, но
+   човекът вижда и по-точния ред и решава сам.
+   Вече попълнен и различен знак не се сменя без изричното „да“. */
+function amHint(html) { const h = $('#amHint'); if (h) h.innerHTML = html; }
+async function authorMarkSuggest() {
+  const f = $('#bookF');
+  if (!f) return;
+  const el = f.querySelector('[name=author_mark]');
+  const book = { author: (f.querySelector('[name=author]') || {}).value || '',
+                 title: (f.querySelector('[name=title]') || {}).value || '' };
+  const btn = $('#amBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await window.api.authorMark.suggest(book);
+    if (!r.ok) {
+      amHint('<b>Няма как да предложа.</b> ' + esc(r.error));
+      toast(r.error, 'err');
+      return;
+    }
+    const s = r.data;
+    if (!s.ok) {
+      amHint('<b>Няма как да предложа:</b> ' + esc(s.reason) + '.');
+      toast('Няма предложение: ' + s.reason, 'warn');
+      return;
+    }
+    const why = (s.from === 'title' ? 'без автор — по заглавието „' : 'фамилия „') + esc(s.basis) + '“' +
+      (s.exact === false ? ' <i>(името е без запетая — фамилията е предположение)</i>' : '') +
+      ' → ред „' + esc(s.prefix) + '“ → <b>' + esc(s.mark) + '</b>';
+    const alt = (s.refine || []).map(x =>
+      `<button type="button" class="btn sm" onclick="authorMarkTake('${esc(x.mark)}')">${esc(x.prefix)} → ${esc(x.mark)}</button>`).join(' ');
+    amHint(why + (alt ? '<br>В таблицата има ред за конкретен автор: ' + alt : ''));
+    const cur = (el.value || '').trim();
+    if (cur && cur !== s.mark) {
+      if (!await askConfirm('В полето вече пише „' + cur + '“.\n\nДа го сменя ли с „' + s.mark + '“?',
+        { okLabel: 'Смени' })) { toast('Знакът остава „' + cur + '“', 'ok'); return; }
+    }
+    el.value = s.mark;
+    toast('Авторски знак ' + s.mark, 'ok');
+  } catch (e) {
+    amHint('<b>Няма как да предложа.</b> ' + esc(e && e.message ? e.message : String(e)));
+    toast('Грешка при предлагането на авторски знак', 'err');
+  } finally { if (btn) btn.disabled = false; }
+}
+window.authorMarkSuggest = authorMarkSuggest;
+function authorMarkTake(mark) {
+  const el = $('#bookF [name=author_mark]');
+  if (el) { el.value = mark; toast('Авторски знак ' + mark, 'ok'); }
+}
+window.authorMarkTake = authorMarkTake;
 
 /* Търсене по ISBN в Google Books и Open Library. Попълват се само празните полета —
    вече въведеното от библиотекаря никога не се презаписва, защото данните от двете

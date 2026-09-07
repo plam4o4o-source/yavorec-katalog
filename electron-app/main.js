@@ -1238,6 +1238,12 @@ ipcMain.handle('settings:noticeDefaults', () =>
    Извадени в handlers/categories.js (Фаза 4, стъпка 7 от разбиването на
    монолита main.js на модули по домейн). */
 require('./handlers/categories')(ipcMain, { getDb: () => db, run, logAudit });
+/* Авторски знак — предлага знака по фамилията от таблица, внесена от файл на
+   самата библиотека (програмата не носи таблицата, виж модула). */
+require('./handlers/author-mark')(ipcMain, {
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path,
+  importers: require('./importers')
+});
 
 /* ---------------- Книги (фонд) + Лимит на броя записи ----------------
    Извадени в handlers/books.js (Фаза 4, стъпка 34, последният от "големите

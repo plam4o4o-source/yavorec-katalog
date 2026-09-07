@@ -322,5 +322,8 @@ function guessMapping(headers) {
 
 module.exports = {
   readTable, guessMapping, HEADER_MAP, decodeBuffer, parseDelimited, parseXlsx,
-  hasUnterminatedQuote, rowColumnCountWarning, MAX_DELIMITED_FILE_SIZE
+  hasUnterminatedQuote, rowColumnCountWarning, MAX_DELIMITED_FILE_SIZE,
+  /* unzipEntries се ползва и от handlers/author-mark.js: .docx и .odt са същият
+     ZIP контейнер като .xlsx, а тук той вече е с таваните срещу „zip bomb“. */
+  unzipEntries
 };

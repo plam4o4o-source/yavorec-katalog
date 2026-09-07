@@ -1,5 +1,15 @@
 PRAGMA foreign_keys = ON;
 
+/* Таблица за авторски знак — буквосъчетание и числото срещу него („ВАЗ“ → „15“).
+   НЕ идва с програмата: внася се веднъж от файл на библиотеката (виж
+   handlers/author-mark.js — числата са от чуждо издание и не се разпространяват
+   заедно с програмата). Празна таблица означава само, че копчето „Предложи“ до
+   полето „Авторски знак“ още няма откъде да предлага. */
+CREATE TABLE IF NOT EXISTS author_table (
+  prefix TEXT PRIMARY KEY,   -- с ГЛАВНИ букви, за да не зависи от изписването
+  mark   TEXT NOT NULL       -- числото като ТЕКСТ: „05“ не е 5
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id    INTEGER PRIMARY KEY AUTOINCREMENT,
   name  TEXT NOT NULL UNIQUE
