@@ -11,6 +11,93 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.39
+
+**BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата
+логика за Й/И е вярна и добре тествана; една грешна буква в подсказката.
+
+- **Подсказката „Х се търси от буква И“ можеше да показва грешна първа
+  буква.** Готовият знак (`mark`) се смята вярно — от нормализирания ключ
+  (`keyOf()`, който маха всичко освен кирилски букви). Но самият текст на
+  подсказката четеше буквата директно от `s.basis.charAt(0)` — а `basis` пази
+  фамилията както е дошла от записа, включително воден препинателен знак от
+  заварени данни (напр. „-Йовков“ от лош внос). За такъв ред подсказката
+  показваше „- се търси от буква И“ вместо „Й се търси от буква И“ — самата
+  ситуация, за която подсказката съществува (да не изглежда като грешен ред),
+  ставаше объркваща. Поправено: сървърът връща готовата буква (`letter`,
+  изведена от същия нормализиран ключ като знака), а екранът я ползва вместо
+  да гадае от суровия текст.
+
+Доказано с revert-and-retest (връщане на реда преди поправката кара новия
+тест да гръмне точно с грешката отгоре), с нова проверка в
+`test/author-mark.test.js`. Само поправка в кода и тестовете — без нова
+функционалност. Пълната поредица: 1314 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария + всички проверки на изгледа при 15 002
+записа.
+
+**EN:** A review of round twenty-seven's own fix (v2.4.38). The Й/И search
+logic itself is correct and well tested; one wrong letter in the on-screen
+hint. The computed mark itself was always correct (derived from the
+normalized surname key), but the "letter X is looked up under letter Y" hint
+text read its letter straight from the raw `basis` string, which can carry a
+leading punctuation character from legacy/dirty data (e.g. "-Йовков") —
+showing a nonsensical "- is looked up under И" instead of "Й is looked up
+under И", undermining the exact confusion this hint exists to prevent. Fixed by having
+the server return the already-normalized letter instead of having the client
+re-derive it from raw text. Code-only round: 1314 tests passing, 0 failing.
+
+## v2.4.38
+
+**BG:** Двадесет и седми кръг — **Й се търси от буква И** в авторския знак.
+Поправка на v2.4.36 по указание на библиотекаря.
+
+В v2.4.36 всяко име на Й оставаше без предложение („в таблицата няма нито един
+ред за буквата Й“) и това беше отчетено като липса в самото издание. Не е
+липса: **в авторските таблици Й изобщо не се изписва.** Й-имената се класират
+от буква И и там стоят с И — проверено ред по ред в истинската таблица:
+
+    Йовков   → „Иовк“ 77       Найденов → „Наи“ 17
+    Йорданов → „Иорд“ 83       Койчев   → „Коич“ 76
+    Йонков   → „Ионк“ 80       Стоилов  → „Стоил“ 79
+    Йотов    → „Иот“ 85        Бойчев   → „Боич“ 60
+
+В целия файл няма **нито един** ред с Й, а разделите са 28 — без Й и без Ь
+(Ь и не започва дума).
+
+Какво е променено:
+- **Й се заменя с И в ключа за търсене — навсякъде в думата, не само в
+  началото.** Вътрешното Й е по-коварният случай: Й се нарежда СЛЕД И, затова
+  без замяната „Райков“ пада на реда „Раич“ (29) вместо на своя „Раи“ (27) —
+  тоест мълчаливо ГРЕШЕН знак, а не липсващ. Точно този ред има свой тест.
+- **Знакът пази буквата на фамилията.** От И идва числото, не буквата:
+  „Йовков“ → **Й 77**, за да стои книгата при другите Й-автори на рафта.
+- **Казва се наяве.** Под полето сега пише „фамилия «Йовков» → ред «Иовк»
+  *(Й се търси от буква И)* → **Й 77**“, иначе редът „Иовк“ изглежда сгрешен.
+- **Ако някое издание все пак има собствен раздел Й, той има предимство** и
+  замяна не се прави — решава се веднъж за цялата внесена таблица.
+- **В проверката на заварените знаци Й и И се броят за една и съща буква.**
+  Една библиотека подписва Йовков с „Й 77“, друга — с „И 77“; и двете са
+  редовни навици и не бива да вдигат фалшива тревога. Проверката е за грешки
+  при въвеждане, а не за налагане на един от двата.
+
+Проверки: 4 нови теста (общо 1314), всеки проверен с мутация (33 мутации по
+целия кръг за авторския знак, всички уловени). Останалото от v2.4.36 и
+поправките от v2.4.37 (малката буква в проверката, чипът за вид в каталога) са
+непроменени.
+
+**EN:** Round twenty-seven — **Й is looked up under И** in the author sign; a
+correction to v2.4.36 on the librarian's instruction. Bulgarian author tables
+have no Й section at all: Й names are filed under И and spelled with И there
+("Йовков" is "Иовк" 77, "Найденов" is "Наи", "Койчев" is "Коич"), and the real
+table contains no Й row whatsoever — 28 sections, no Й and no Ь. Й is therefore
+folded to И throughout the search key, not just at the start: internal Й is the
+dangerous case, since Й sorts after И, so without folding "Райков" lands on
+"Раич" (29) instead of "Раи" (27) — a silently wrong sign rather than a missing
+one. The number comes from И but the sign keeps the surname's own letter
+("Й 77"), and the hint says so explicitly. A table that does have its own Й
+section takes precedence. In the mark audit Й and И count as the same letter,
+since both conventions are legitimate. 4 new tests (1 314 total).
+
 ## v2.4.37
 
 **BG:** Преглед на поправките от двадесет и четвъртия и двадесет и петия кръг

@@ -633,7 +633,16 @@ async function authorMarkSuggest() {
     }
     const why = (s.from === 'title' ? 'без автор — по заглавието „' : 'фамилия „') + esc(s.basis) + '“' +
       (s.exact === false ? ' <i>(името е без запетая — фамилията е предположение)</i>' : '') +
-      ' → ред „' + esc(s.prefix) + '“ → <b>' + esc(s.mark) + '</b>';
+      ' → ред „' + esc(s.prefix) + '“' +
+      /* Й няма собствен раздел в авторските таблици — търси се от И („Йовков“ е
+         записан като „Иовк“). Казва се наяве, иначе редът изглежда сгрешен.
+         s.letter, не s.basis.charAt(0) (проверка при прегледа): basis може да
+         носи водещ препинателен знак от заварени данни („-Йовков“) — keyOf() го
+         маха при самото търсене, но взет направо от basis той дава грешна буква
+         в самия текст на подсказката. */
+      (s.fromLetter ? ' <i>(' + esc((s.letter || s.basis.charAt(0)).toUpperCase()) + ' се търси от буква '
+        + esc(s.fromLetter) + ')</i>' : '') +
+      ' → <b>' + esc(s.mark) + '</b>';
     const alt = (s.refine || []).map(x =>
       `<button type="button" class="btn sm" onclick="authorMarkTake('${esc(x.mark)}')">${esc(x.prefix)} → ${esc(x.mark)}</button>`).join(' ');
     amHint(why + (alt ? '<br>В таблицата има ред за конкретен автор: ' + alt : ''));

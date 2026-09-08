@@ -24,6 +24,26 @@
 const BG_LETTERS = 'АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЬЮЯ';
 const IMPORT_EXTENSIONS = ['.docx', '.odt', '.xlsx', '.csv', '.tsv', '.txt', '.html', '.htm'];
 
+/* Й СЕ ТЪРСИ ОТ БУКВА И. В авторските таблици Й изобщо не се изписва: „Йовков“
+   стои като „Иовк“, „Найденов“ — като „Наи“, „Койчев“ — като „Коич“, „Стоилов“ —
+   като „Стоил“. Затова Й се заменя с И в КЛЮЧА ЗА ТЪРСЕНЕ — и то навсякъде в
+   думата, не само в началото: „Райков“ без замяна би паднал на „Раич“ (защото
+   Й се нарежда СЛЕД И) вместо на своя ред „Раи“.
+
+   Готовият знак обаче запазва буквата на ФАМИЛИЯТА: „Йовков“ → „Й 77“, за да
+   стои книгата при другите Й-автори на рафта. Тоест от И идва числото, не
+   буквата.
+
+   Ако някое издание все пак има собствен раздел Й, замяната отпада (виж
+   tableHasJot) — тогава таблицата си знае по-добре. */
+const foldJot = (s) => String(s == null ? '' : s).replace(/Й/g, 'И');
+const JOT_CACHE = new WeakMap();
+function tableHasJot(rows) {
+  if (!JOT_CACHE.has(rows)) JOT_CACHE.set(rows, rows.some(r => r.prefix.charAt(0) === 'Й'));
+  return JOT_CACHE.get(rows);
+}
+const searchKey = (rows, key) => (tableHasJot(rows) ? String(key || '') : foldJot(key));
+
 /* Windows-1251 → Unicode за горната половина на кода. Файл, записан от Excel
    или от стар Windows редактор, е обикновено в тази кодировка; прочетен като
    UTF-8, той не съдържа НИТО ЕДНА кирилска буква и таблицата излиза празна без
@@ -281,14 +301,15 @@ function parseTable(text) {
    фамилията: знакът винаги започва с нея. */
 function lookup(rows, key) {
   if (!key) return null;
-  const letter = key.charAt(0);
+  const k = searchKey(rows, key);          // Й се търси от И (виж foldJot)
+  const letter = k.charAt(0);
   /* Редовете за конкретен автор нарочно НЕ участват в търсенето: „Димитров, Г.“
      е за Георги Димитров, а не за всеки Димитров. Показват се отделно (виж
      refinements) и човекът решава. */
   const same = rows.filter(r => r.prefix.charAt(0) === letter && !isNamed(r.prefix));
   if (!same.length) return null;
   let hit = null;
-  for (const r of same) { if (r.prefix <= key) { if (!hit || r.prefix > hit.prefix) hit = r; } }
+  for (const r of same) { if (r.prefix <= k) { if (!hit || r.prefix > hit.prefix) hit = r; } }
   return hit || same.reduce((a, b) => (a.prefix < b.prefix ? a : b));
 }
 /* По-точните редове, които ПРОДЪЛЖАВАТ фамилията („ВАЗОВ“ → „Вазов, И.“). Не се
@@ -297,7 +318,8 @@ function lookup(rows, key) {
    Затова само се ПОКАЗВАТ до предложението, за да реши човекът. */
 function refinements(rows, key, limit) {
   if (!key) return [];
-  return rows.filter(r => isNamed(r.prefix) && r.prefix.replace(new RegExp(SEP_MARK, 'g'), '').startsWith(key))
+  const k = searchKey(rows, key);
+  return rows.filter(r => isNamed(r.prefix) && r.prefix.replace(new RegExp(SEP_MARK, 'g'), '').startsWith(k))
     .slice(0, limit == null ? 3 : limit);
 }
 /* „В“ + „15“ → „В-15“. Разделителят се ИЗВЕЖДА от вече въведените знаци на тази
@@ -341,7 +363,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     const key = keyOf(b.basis);
     if (!key) return { ok: false, reason: 'фамилията не е на кирилица' };
     const hit = lookup(rows, key);
-    if (!hit) return { ok: false, reason: 'в таблицата няма нито един ред за буквата „' + key.charAt(0) + '“' };
+    if (!hit) return { ok: false, reason: 'в таблицата няма нито един ред за буквата „' + searchKey(rows, key).charAt(0) + '“' };
     /* Когато името е без запетая, фамилията е ДОГАДКА (взима се последната дума)
        и може изобщо да не е фамилия: „Елин Пелин“ е псевдоним и се подписва цял.
        Затова се гледа и първата дума — ако таблицата има ред точно за такъв
@@ -353,12 +375,23 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     }
     const refine = [];
     for (const k of keys) for (const r of refinements(rows, k)) {
-      refine.push({ prefix: prefixLabel(r.prefix), mark: formatMark(r.prefix.charAt(0), r.mark, sep) });
+      // Буквата на знака е тази на самото име, а не на реда: редът за „Йовков“
+      // стои под И, но знакът пак е „Й“.
+      refine.push({ prefix: prefixLabel(r.prefix), mark: formatMark(k.charAt(0), r.mark, sep) });
     }
     return {
       ok: true, mark: formatMark(key.charAt(0), hit.mark, sep),
       basis: b.basis, from: b.from, exact: b.exact,
       prefix: prefixLabel(hit.prefix), num: hit.mark,
+      /* Буквата на ключа (проверка при прегледа): не e непременно първият знак на
+         b.basis — заварени данни може да носят водещ препинателен знак пред
+         фамилията („-Йовков“ от лош внос), keyOf() го маха, но екранът показваше
+         basis.charAt(0) directно и печатеше „- се търси от буква И“ вместо
+         „Й се търси от буква И“. Изпраща се готовата буква, за да не гадае клиентът. */
+      letter: key.charAt(0),
+      /* Редът е намерен под ДРУГА буква (Й се търси от И). Казва се наяве, за да
+         не изглежда като грешка, че „Йовков“ е сметнат по ред „Иовк“. */
+      fromLetter: hit.prefix.charAt(0) !== key.charAt(0) ? hit.prefix.charAt(0) : null,
       refine: refine.slice(0, 3)
     };
   }
@@ -472,7 +505,13 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
          null), нито в missing (mark не е празен). */
       const markLetter = ((mark.match(/[А-Яа-я]/) || [''])[0] || '').toUpperCase();
       if (!markLetter || !key) continue;
-      if (markLetter !== key.charAt(0)) mismatched.push({ ...b, expected: key.charAt(0), basis: basis.basis });
+      /* Й и И се броят за една и съща буква. Й няма собствен раздел в таблиците
+         (търси се от И), затова една библиотека подписва Йовков с „Й“, а друга —
+         с „И“; и двете са редовни. Проверката е за ГРЕШКИ при въвеждане, а не за
+         налагане на един от двата навика. */
+      if (foldJot(markLetter) !== foldJot(key.charAt(0))) {
+        mismatched.push({ ...b, expected: key.charAt(0), basis: basis.basis });
+      }
     }
     return { total: books.length, mismatched: mismatched.slice(0, 200), mismatchedTotal: mismatched.length,
       missingTotal: missing.length };
@@ -521,4 +560,5 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
 /* Чистите функции се излагат и без регистрация на канали — тестовете ги ползват
    направо, без база и без Electron. */
 module.exports.pure = { basisOf, keyOf, rowKeyOf, prefixLabel, refinements, isNamed, parseTable, lookup, formatMark,
-  detectSeparator, decodeCp1251, decodeFile, siftPairs, extractPairs, readTableText, docxText };
+  detectSeparator, decodeCp1251, decodeFile, siftPairs, extractPairs, readTableText, docxText,
+  foldJot, searchKey, tableHasJot };
