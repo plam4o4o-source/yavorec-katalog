@@ -383,6 +383,12 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
       ok: true, mark: formatMark(key.charAt(0), hit.mark, sep),
       basis: b.basis, from: b.from, exact: b.exact,
       prefix: prefixLabel(hit.prefix), num: hit.mark,
+      /* Буквата на ключа (проверка при прегледа): не e непременно първият знак на
+         b.basis — заварени данни може да носят водещ препинателен знак пред
+         фамилията („-Йовков“ от лош внос), keyOf() го маха, но екранът показваше
+         basis.charAt(0) directно и печатеше „- се търси от буква И“ вместо
+         „Й се търси от буква И“. Изпраща се готовата буква, за да не гадае клиентът. */
+      letter: key.charAt(0),
       /* Редът е намерен под ДРУГА буква (Й се търси от И). Казва се наяве, за да
          не изглежда като грешка, че „Йовков“ е сметнат по ред „Иовк“. */
       fromLetter: hit.prefix.charAt(0) !== key.charAt(0) ? hit.prefix.charAt(0) : null,

@@ -11,6 +11,41 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.39
+
+**BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата
+логика за Й/И е вярна и добре тествана; една грешна буква в подсказката.
+
+- **Подсказката „Х се търси от буква И“ можеше да показва грешна първа
+  буква.** Готовият знак (`mark`) се смята вярно — от нормализирания ключ
+  (`keyOf()`, който маха всичко освен кирилски букви). Но самият текст на
+  подсказката четеше буквата директно от `s.basis.charAt(0)` — а `basis` пази
+  фамилията както е дошла от записа, включително воден препинателен знак от
+  заварени данни (напр. „-Йовков“ от лош внос). За такъв ред подсказката
+  показваше „- се търси от буква И“ вместо „Й се търси от буква И“ — самата
+  ситуация, за която подсказката съществува (да не изглежда като грешен ред),
+  ставаше объркваща. Поправено: сървърът връща готовата буква (`letter`,
+  изведена от същия нормализиран ключ като знака), а екранът я ползва вместо
+  да гадае от суровия текст.
+
+Доказано с revert-and-retest (връщане на реда преди поправката кара новия
+тест да гръмне точно с грешката отгоре), с нова проверка в
+`test/author-mark.test.js`. Само поправка в кода и тестовете — без нова
+функционалност. Пълната поредица: 1314 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария + всички проверки на изгледа при 15 002
+записа.
+
+**EN:** A review of round twenty-seven's own fix (v2.4.38). The Й/И search
+logic itself is correct and well tested; one wrong letter in the on-screen
+hint. The computed mark itself was always correct (derived from the
+normalized surname key), but the "letter X is looked up under letter Y" hint
+text read its letter straight from the raw `basis` string, which can carry a
+leading punctuation character from legacy/dirty data (e.g. "-Йовков") —
+showing a nonsensical "- is looked up under И" instead of "Й is looked up
+under И", undermining the exact confusion this hint exists to prevent. Fixed by having
+the server return the already-normalized letter instead of having the client
+re-derive it from raw text. Code-only round: 1314 tests passing, 0 failing.
+
 ## v2.4.38
 
 **BG:** Двадесет и седми кръг — **Й се търси от буква И** в авторския знак.
