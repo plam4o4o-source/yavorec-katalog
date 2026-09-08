@@ -465,7 +465,12 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
       const basis = basisOf(b);
       const key = basis ? keyOf(basis.basis) : '';
       if (!mark) { if (key) missing.push(b); continue; }
-      const markLetter = (mark.match(/[А-Я]/) || [''])[0];
+      /* Главна и малка буква (проверка при прегледа): полето е свободен текст,
+         без насилствено главни букви при запис — „в-15“ е също толкова валиден
+         ръчен запис, колкото „В-15“. С /[А-Я]/ (само главни) такъв ред минаваше
+         покрай проверката мълчаливо — нито в mismatched (markLetter излизаше
+         null), нито в missing (mark не е празен). */
+      const markLetter = ((mark.match(/[А-Яа-я]/) || [''])[0] || '').toUpperCase();
       if (!markLetter || !key) continue;
       if (markLetter !== key.charAt(0)) mismatched.push({ ...b, expected: key.charAt(0), basis: basis.basis });
     }

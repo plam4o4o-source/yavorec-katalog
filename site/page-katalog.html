@@ -840,8 +840,14 @@ function run(){
   QW=F.q?F.q.toLowerCase().split(/\s+/).filter(Boolean):[];
   R=matchList(f);
   /* Броевете по отдел се смятат без филтъра по отдел — иначе избраният отдел
-     би показвал само себе си, а останалите нули. */
+     би показвал само себе си, а останалите нули. Същото важи и за вида на
+     документа (проверка при прегледа): без own noVid, избран вид свиваше R до
+     самия себе си, vidOrder падаше до 1 запис и цялата лента с чипове (пазена
+     от vidOrder.length>1) изчезваше — включително чипът, с който се маха
+     избора. Начало/Изчисти оставаше единственият изход, но той маха и
+     останалите активни филтри и търсенето. */
   var noDep=matchList({q:F.q,vid:F.vid,otdel:'',razdel:F.razdel,avtor:F.avtor,samo:F.samo,vitrina:SHELF});
+  var noVid=matchList({q:F.q,vid:'',otdel:F.otdel,razdel:F.razdel,avtor:F.avtor,samo:F.samo,vitrina:SHELF});
   var noAv=matchList({q:F.q,vid:F.vid,otdel:F.otdel,razdel:F.razdel,avtor:F.avtor,samo:false,vitrina:SHELF});
 
   if(SHELF==='__new__'&&!SORT)R=R.slice().sort(function(a,b){return a.d<b.d?1:(a.d>b.d?-1:0);});
@@ -862,7 +868,7 @@ function run(){
   noDep.forEach(function(g){var o=g.o||'—';if(!deps[o]){deps[o]=0;depOrder.push(o);}deps[o]++;});
   depOrder.sort(function(a,b){return deps[b]-deps[a];});
   var vids={},vidOrder=[];
-  R.forEach(function(g){var v=g.v||'—';if(!vids[v]){vids[v]=0;vidOrder.push(v);}vids[v]++;});
+  noVid.forEach(function(g){var v=g.v||'—';if(!vids[v]){vids[v]=0;vidOrder.push(v);}vids[v]++;});
   vidOrder.sort(function(a,b){return vids[b]-vids[a];});
 
   var h='<button type="button" class="kat-fchip'+(F.samo?' kat-fchip-on':'')+'" data-f="samo">само налични'+

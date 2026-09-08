@@ -105,8 +105,31 @@ function makeCatalog(n) {
   ok(d.querySelectorAll('#katAbc button:not([disabled])').length > 0, 'азбучникът е изцяло изключен');
   ok(d.getElementById('katSh').style.display === 'flex', 'витрината от katalog.json не се показа');
 
-  // --- търсене ---
+  // --- целият каталог (за проверката на чиповете по-долу — нужни са няколко вида) ---
   const q = d.getElementById('katQ');
+  q.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await sleep(50);
+  ok(d.getElementById('katHome').classList.contains('kat-hidden'), 'началният изглед остана видим при Enter в търсенето');
+
+  /* Проверка при прегледа: чипът за вид на документа броеше от R (вече
+     филтрирания резултат), не от отделно, невлияещо множество — за разлика
+     от отдела, който правилно има свой noDep. Избран вид свиваше R до себе
+     си, чиповете падаха до 1 и цялата лента (vidOrder.length>1) изчезваше —
+     без чип, с който изборът да се маха. Тук е нужен целият каталог, не
+     търсене по автор — синтетичните данни връзват автор и вид по един и същ
+     индекс, тоест резултат от търсене по автор има само ЕДИН вид документ. */
+  const vidChip = d.querySelector('.kat-fchip[data-vid]');
+  ok(vidChip, 'няма чип за вид на документа — предпоставка за следващата проверка');
+  if (vidChip) {
+    const vid = vidChip.getAttribute('data-vid');
+    vidChip.click();
+    const chipsAfter = d.querySelectorAll('.kat-fchip[data-vid]');
+    ok(chipsAfter.length > 0, 'лентата с видовете изчезна след избор на „' + vid + '“ — няма как да се махне филтърът');
+    ok(d.querySelector('.kat-fchip[data-vid="' + vid + '"].kat-fchip-on'), 'избраният вид не е отбелязан сред останалите чипове');
+    d.querySelector('.kat-fchip[data-vid="' + vid + '"]').click(); // изключваме, преди да продължи търсенето по-долу
+  }
+
+  // --- търсене ---
   let ms = T('търсене', () => { q.value = 'вазов'; q.dispatchEvent(new w.Event('input', { bubbles: true })); });
   await sleep(400);
   const rows = d.querySelectorAll('#katR .kat-row');

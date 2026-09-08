@@ -256,12 +256,17 @@ test('проверката посочва знаците, чиято буква 
   s.addBook({ inv: 2, author: 'Вазова, Вера', mark: 'Г-13' });               // сгрешено — както в истинската база
   s.addBook({ inv: 3, author: 'Славейков, Пенчо', mark: 'С 42' });           // вярно, друг разделител
   s.addBook({ inv: 4, author: 'Йовков, Йордан', mark: null });               // липсва
+  /* Проверка при прегледа: полето е свободен текст, без насилствено главни
+     букви при запис — малка буква е също толкова валиден ръчен запис. */
+  s.addBook({ inv: 5, author: 'Талев, Димитър', mark: 'г-15' });             // сгрешено, малка буква
   const a = await s.ok('authorMark:audit');
-  assert.equal(a.mismatchedTotal, 1);
-  assert.equal(a.mismatched[0].inv_number, 2);
+  assert.equal(a.mismatchedTotal, 2);
+  assert.deepEqual(a.mismatched.map(x => x.inv_number).sort(), [2, 5]);
   assert.deepEqual([a.mismatched[0].expected, a.mismatched[0].basis], ['В', 'Вазова']);
+  const lower = a.mismatched.find(x => x.inv_number === 5);
+  assert.deepEqual([lower.expected, lower.basis], ['Т', 'Талев'], 'малката буква на знака се разпознава и сравнява');
   assert.equal(a.missingTotal, 1, 'и колко са изобщо без знак');
-  assert.equal(a.total, 4);
+  assert.equal(a.total, 5);
 });
 
 test('при 15 000 документа груповото попълване свършва бързо и не изпуска нищо', async () => {

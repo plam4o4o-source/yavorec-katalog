@@ -11,6 +11,51 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.37
+
+**BG:** Преглед на поправките от двадесет и четвъртия и двадесет и петия кръг
+(v2.4.35 — новата страница на онлайн каталога; v2.4.36 — авторски знак по
+фамилията). И двата кръга са добре обмислени и добре покрити; по един реален
+пропуск във всеки.
+
+- **Онлайн каталог: чипът за вид на документа не можеше да се маха, след като
+  бъде избран.** Броят и лентата с чиповете за вид (книга/видеодокумент/…) се
+  смятаха от вече филтрирания резултат, а не от отделно, невлияещо множество
+  — за разлика от отдела, който правилно има свой `noDep`. Избран вид свиваше
+  резултата до себе си, чиповете падаха до 1 запис и цялата лента (пазена от
+  `vidOrder.length>1`) изчезваше — включително чипът, с който изборът се
+  маха. Читател, избрал „видеодокумент“, оставаше заклещен без видим изход
+  освен „Начало“, което маха и останалите активни филтри и търсенето.
+  Поправено със собствен `noVid` набор, огледален на `noDep`.
+- **Проверката на авторските знаци пропускаше малки букви.** `author_mark` е
+  свободно поле без насилствено главни букви при запис — „г-15“ е също
+  толкова валиден ръчен запис, колкото „Г-15“. Проверката в „Настройки →
+  Проверка на данните“ търсеше само `/[А-Я]/` (главни): ред с малка буква на
+  знака не влизаше нито в „несъответстващи“ (буквата излизаше празна), нито в
+  „липсващи“ (полето не е празно) — оставаше невидим и за двете броения.
+
+Всичко доказано с revert-and-retest в двете посоки: новите проверки в
+`site/test-page-katalog-view.js` (гърми с TypeError без поправката — вторият
+клик по вече изчезналия чип) и `test/author-mark.test.js` не минават без
+съответните поправки. Само поправки в кода и тестовете — без нова
+функционалност. Пълната поредица: 1310 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: `test-page-katalog.js` 8/8 сценария,
+`test-page-katalog-view.js` — всички проверки при 15 002 записа.
+
+**EN:** A review of rounds twenty-four and twenty-five (v2.4.35 — the new
+online-catalog page; v2.4.36 — surname-based author mark suggestions). Both
+rounds are well-designed and well-tested; one real gap in each. The
+document-type filter chip bar in the public catalog counted from the
+already-filtered result set instead of a separate, non-filtering set (unlike
+the analogous department facet, which already had its own `noDep`) —
+selecting a type shrank the chip bar down to one entry and the whole bar
+(gated on having more than one) vanished, leaving no on-screen control to
+deselect it. Fixed with a mirrored `noVid` set. Separately, the "Проверка на
+данните" author-mark-letter audit only matched uppercase Cyrillic, silently
+excluding any lowercase-typed mark from both its mismatched and missing
+counts. Both fixed and covered by revert-and-retest regression tests.
+Code-only round: 1310 tests passing, 0 failing.
+
 ## v2.4.36
 
 **BG:** Двадесет и пети кръг — **авторски знак по фамилията**. Досега знакът
