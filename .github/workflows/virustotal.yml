@@ -18,9 +18,6 @@ jobs:
             --pattern "*.exe" \
             --dir release
 
-          echo "Downloaded files:"
-          ls -lh release
-
       - name: Find EXE
         id: find_exe
         shell: bash
@@ -28,7 +25,7 @@ jobs:
           EXE=$(find release -type f -iname "*.exe" | head -n 1)
 
           if [ -z "$EXE" ]; then
-            echo "No EXE file found in the latest release."
+            echo "No EXE file found."
             exit 1
           fi
 
@@ -39,7 +36,6 @@ jobs:
         id: vt_url
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-        shell: bash
         run: |
           UPLOAD_URL=$(curl --fail --silent \
             --header "x-apikey: $VT_API_KEY" \
@@ -49,11 +45,11 @@ jobs:
           echo "upload_url=$UPLOAD_URL" >> "$GITHUB_OUTPUT"
 
       - name: Upload EXE to VirusTotal
+        id: upload
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
           UPLOAD_URL: ${{ steps.vt_url.outputs.upload_url }}
           EXE_FILE: ${{ steps.find_exe.outputs.file }}
-        shell: bash
         run: |
           curl --fail --silent --show-error \
             --request POST \
@@ -62,5 +58,60 @@ jobs:
             --form "file=@$EXE_FILE" \
             --output vt-result.json
 
-          echo "VirusTotal response:"
           cat vt-result.json
+
+          ANALYSIS_ID=$(python -c "import json; print(json.load(open('vt-result.json'))['data']['id'])")
+
+          echo "analysis_id=$ANALYSIS_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for VirusTotal analysis
+        env:
+          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id }}
+        run: |
+          echo "Analysis ID: $ANALYSIS_ID"
+
+          for i in {1..20}; do
+            RESPONSE=$(curl --fail --silent \
+              --header "x-apikey: $VT_API_KEY" \
+              "https://www.virustotal.com/api/v3/analyses/$ANALYSIS_ID")
+
+            STATUS=$(echo "$RESPONSE" | python -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['status'])")
+
+            echo "Analysis status: $STATUS"
+
+            if [ "$STATUS" = "completed" ]; then
+              echo "$RESPONSE" > analysis.json
+              break
+            fi
+
+            sleep 15
+          done
+
+          if [ ! -f analysis.json ]; then
+            echo "VirusTotal analysis did not finish in time."
+            exit 1
+          fi
+
+      - name: Show VirusTotal result
+        env:
+          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id }}
+        run: |
+          RESPONSE=$(cat analysis.json)
+
+          MALICIOUS=$(echo "$RESPONSE" | python -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['malicious'])")
+          SUSPICIOUS=$(echo "$RESPONSE" | python -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['suspicious'])")
+          HARMLESS=$(echo "$RESPONSE" | python -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['harmless'])")
+          UNDETECTED=$(echo "$RESPONSE" | python -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['undetected'])")
+
+          echo "================================="
+          echo "VirusTotal Result"
+          echo "================================="
+          echo "Malicious:   $MALICIOUS"
+          echo "Suspicious:  $SUSPICIOUS"
+          echo "Harmless:    $HARMLESS"
+          echo "Undetected:  $UNDETECTED"
+          echo ""
+          echo "Analysis:"
+          echo "https://www.virustotal.com/gui/file/$ANALYSIS_ID"
