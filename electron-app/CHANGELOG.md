@@ -11,6 +11,60 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.41
+
+**BG:** Преглед на поправките от двадесет и девети кръг (v2.4.40, новата
+таблица на УДК). Самите данни и подредбата са верни — build-udk.js прави
+`src/udk.js` от `src/udk.json` байт по байт същия като вградения файл,
+подредбата съвпада и с `localeCompare('bg')`, а нито един от 109-те стари кода
+не липсва.
+
+- **Правенето на `src/udk.js` можеше мълчаливо да пробута суров, изпълним
+  JavaScript в готовия файл.** `based_on`/`license_note`/`additions_note` от
+  `src/udk.json` отиват СУРОВИ в единствения блоков коментар на header-а.
+  Комбинация звезда-наклонена-черта в свободния текст на бележка затваря
+  коментара там, а следваща наклонена-звезда по-надолу в същия текст го отваря
+  пак — между двете застава суров код в `src/udk.js`, зареждан направо с
+  `<script>` без модул, който да го изолира. Доказано с repro: редактиран
+  `based_on` с точно такава комбинация оставяше `window.pwn=1;` извън всякакъв
+  коментар в изхода. Полетата не идват от читател, а от библиотекаря/
+  разработчика, но грешка в свободен текст на бележка не бива да пробутва
+  изпълним код в продукцията безшумно. Поправено: генераторът сега пада с ясна
+  грешка при правенето, вместо да произведе развален файл — доказано с
+  revert-and-retest.
+
+Проверено и НЕ прието за дефект на този кръг: (1) списъкът от 109 стари кода в
+регресионния тест носи един допълнителен ред („82-5“), който не е бил в
+старата таблица — не пропуска защита (и 109-те истински стари кода са там), а
+кодът така или иначе е и в новата подборка, затова тестът минава и с грешния,
+и с верния списък; (2) заглавията на класовете (`tip: "клас"`) се разпознават
+само от `data.entries`, не и от `data.additions` — в сегашните данни нито едно
+допълнение не е клас, затова пролуката не се задейства с нищо в самия файл;
+оставена без промяна този кръг, тъй като поправка без данни, които да я
+изпитат, е недоказуема.
+
+Само поправка в build-скрипта и тестовете — без промяна в самата таблица или
+в екрана. Пълната поредица: 1326 успешни, 0 неуспешни (UTC и Europe/Sofia).
+
+**EN:** A review of round twenty-nine's own fix (v2.4.40, the new UDC table).
+The data and its ordering are correct — build-udk.js reproduces `src/udk.js`
+byte-for-byte from `src/udk.json`, the ordering matches `localeCompare('bg')`
+too, and none of the 109 old codes are missing.
+
+- **Building `src/udk.js` could silently smuggle raw, executable JavaScript
+  into the generated file.** `based_on`/`license_note`/`additions_note` are
+  interpolated raw into the header's single block comment; a star-slash
+  sequence inside that free text closes the comment early, and a later
+  slash-star in the same text reopens it — leaving raw code sitting between
+  the two in a file loaded directly via `<script>` with no module boundary.
+  Confirmed with a repro (an edited `based_on` field left `window.pwn=1;`
+  outside any comment in the output). These fields come from the
+  librarian/developer, not a reader, but a mistake in free-form note text
+  should not silently smuggle executable code into production. Fixed: the
+  generator now fails loudly at build time instead of producing a broken
+  file — proven with revert-and-retest. Code-only round: 1326 tests passing,
+  0 failing (UTC and Europe/Sofia).
+
 ## v2.4.39
 
 **BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата

@@ -77,9 +77,29 @@ function cmpCode(a, b) {
 
 const js = (v) => JSON.stringify(v);
 
+/* Полетата по-долу (based_on, license_note, additions_note) отиват СУРОВИ в
+   единствения блоков коментар на header-а. Комбинацията звезда-наклонена
+   черта в тях затваря коментара там, а следваща наклонена-звезда по-надолу в
+   същия текст го отваря пак — между двете застава суров, изпълним JavaScript
+   в готовия файл, зареждан направо с <script src="udk.js"> без модул, който
+   да го изолира. Данните тук идват от библиотекаря/разработчика, не от
+   читател, но грешка в свободния текст на бележка не бива да пробутва
+   изпълним код в продукцията безшумно — затова пада още при правенето,
+   вместо да пропадне в src/udk.js. */
+function assertSafeComment(label, text) {
+  if (text.includes('*/')) {
+    throw new Error('src/udk.json: полето „' + label + '“ съдържа „*/“ — това би затворило '
+      + 'блоковия коментар на src/udk.js по средата и оставило суров код в готовия файл. '
+      + 'Махнете „*/“ от текста.');
+  }
+}
+
 function render(data) {
   const tree = build(data);
   const m = data.meta || {};
+  assertSafeComment('meta.based_on', m.based_on || '');
+  assertSafeComment('meta.license_note', m.license_note || '');
+  assertSafeComment('additions_note', data.additions_note || '');
   const opac = [];
   for (const e of data.entries.concat(data.additions || [])) {
     if (e.lib_opac && e.lib_opac !== e.lib) opac.push([e.code, e.lib_opac]);
@@ -132,4 +152,4 @@ if (require.main === module) {
   const n = build(data).reduce((s, g) => s + g[2].length, 0);
   process.stdout.write('src/udk.js — ' + n + ' кода в ' + build(data).length + ' класа\n');
 }
-module.exports = { render, build, cmpCode, MODIFIERS };
+module.exports = { render, build, cmpCode, MODIFIERS, assertSafeComment };
