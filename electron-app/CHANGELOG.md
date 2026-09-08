@@ -11,6 +11,175 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.43
+
+**BG:** Преглед на поправките от тридесет и първия кръг (v2.4.42, цялата
+таблица на УДК). Дървото и търсенето са верни за огромното мнозинство от
+1920-те кода; намерени и поправени два реални дефекта, единият — регресия на
+по-стара поправка.
+
+- **Код-диапазон („017/019“, „271/279“) се влагаше като дете на собствения си
+  пръв член, вместо да стои над него.** `parentOf()` търси най-дългия
+  съществуващ низов префикс — но диапазон като „017/019“ буквално ЗАПОЧВА с
+  „017“, а „017“ Е член на диапазона, не негов родител: диапазонът ОБОБЩАВА
+  017+018+019, застава РАВНОСТОЙНО на тях, под общия им родител („01“).
+  Проверено срещу истинските данни: 102 диапазона получаваха грешен родител —
+  обобщаващото заглавие изглеждаше като подраздел на по-тесен свой брат,
+  обръщайки самата класификация с главата надолу (и подвеждайки брояча на
+  подразделите до него). Съществуващият тест за дървото проверява само че
+  детето продължава низово кода на родителя — минаваше и с грешката. Поправено:
+  диапазон вече прескача собствения си пръв член при търсене на родител.
+- **Регресия: подсказката при Й отново четеше буквата от суровия `basis`,
+  вместо от готовото `letter`.** Точно поправката от v2.4.39 („Й се търси от
+  буква И“ показваше „-“ вместо „Й“ при заварени данни с воден препинателен
+  знак) се беше върнала назад в кода на v2.4.42 — изглежда случайно, при друга
+  база за самия diff. Съществуващият регресионен тест за Й не хващаше връщането
+  назад, защото ползва чиста фамилия („Йовков“), при която `basis.charAt(0)` и
+  `letter` съвпадат и без поправката — точно капанът, за който целият процес на
+  прегледа съществува. Добавен нов тест с мръсна фамилия, доказан с
+  revert-and-retest.
+
+Проверено и НЕ прието за дефект на този кръг: (1) `udkTap()` чете избрания
+надпис през `firstChild.textContent` — би върнал грешен текст (или паднал) при
+празно заглавие с непразен списък „Включва:“, но нито един от 1920+17+739-те
+реда в сегашните данни няма празно заглавие; (2) `build()` мълчаливо пази само
+първото срещане при дублиран код вместо да пада с грешка — в сегашните данни
+дублирани кодове няма. И двете нямат данни, върху които поправка да се докаже.
+
+**По искане на библиотеката: лицензът на УДК остава, но по-незабележимо.**
+Задължителното посочване на източника (CC BY-SA 3.0 го изисква) остава кратко
+в `src/udk.json`/`src/udk.js` и в `README.md`. Махнати са всички линкове
+(udcc.org, udcdata.info, creativecommons.org) и по-видимото/по-подробно
+споменаване от `README-bibliotekar.md` (наръчника на библиотекаря) — самите
+данни и защитата им (тестовете за лиценза и за проверката му) не са пипани.
+
+Отделно: `CHANGELOG.md` носеше записите на v2.4.39 и v2.4.40 в грешен ред
+(v2.4.40 под v2.4.39) от разрешаването на конфликт при сливане в предишен
+кръг — вече е по хронология.
+
+Само поправки в кода/данните/документацията и нови тестове — без нова
+функционалност. Пълната поредица: 1334 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария + всички проверки на изгледа при 15 002
+записа.
+
+**EN:** A review of round thirty-one's own work (v2.4.42, the full UDC table).
+The tree and search are correct for the vast majority of the 1,920 codes;
+found and fixed two real defects, one of them a regression of an older fix.
+
+- **A range code ("017/019", "271/279") was nested as a child of its own first
+  member instead of standing above it.** `parentOf()` looks for the longest
+  existing string prefix, but a range like "017/019" literally starts with
+  "017" — and "017" is a *member* of the range, not its parent: the range
+  summarizes 017+018+019 and belongs beside them, under their shared parent
+  ("01"). Verified against the real data: 102 ranges had the wrong parent,
+  making an umbrella heading look like a subtopic of one of its own narrower
+  siblings. The existing tree test only checks that the child textually
+  extends the parent, so it passed unchanged. Fixed: a range now skips its own
+  first-member length when searching for a parent.
+- **Regression: the Й hint again read its letter from raw `basis` instead of
+  the ready `letter` field.** The v2.4.39 fix was reverted in v2.4.42's own
+  diff, apparently against a different base. The existing regression test used
+  a clean surname where both fields agree, so it passed regardless — exactly
+  the trap this review process exists to catch. Added a dirty-surname test,
+  proven with revert-and-retest.
+
+Checked and NOT treated as a defect this round: two dormant, currently
+untriggerable gaps (an unsafe `.firstChild` read with no data that has an
+empty title, and a silent last-wins on a duplicate code with no duplicates in
+the current data) — left undemonstrated since a fix without data to prove it
+against is unverifiable. At the library's request, the UDC license notice
+stays but less prominently: the required brief attribution remains in
+`src/udk.json`/`src/udk.js` and `README.md`; all links and the more detailed
+mention in the librarian manual are removed, without touching the data or its
+license tests. Also fixed: a merge-conflict-resolution ordering slip that had
+v2.4.40's changelog entry below v2.4.39's. Code/data/docs-only round: 1334
+tests passing, 0 failing (UTC and Europe/Sofia).
+
+## v2.4.42
+
+**BG:** Тридесет и първи кръг — **цялата таблица на УДК**. Библиотекарката подаде
+пълния съкратен указател, извлечен от официалните страници на UDC Summary
+(българска версия) и хармонизиран с националното издание от 2017 г. Досегашните
+164 кода стават **1920**, плюс **739 общи определителя** по шестте спомагателни
+таблици.
+
+Прозорецът за избор е пренаписан, защото 1920 реда наведнъж са непрегледни:
+
+- **Дърво по самата класификация.** Разгръща се „8 → 82 → 821 → 821.163.2“,
+  свито в началото, с брой подраздели срещу всеки клон. Родителят на един код е
+  **най-дългият съществуващ код, който стои в началото му** — така дървото следва
+  схемата, вместо да се гади по точки или по дължина; отделен тест минава по
+  всичките 1911 връзки.
+- **Търсенето минава и през списъците „Включва:“.** Това се оказа решаващо:
+  думата, която библиотекарката ще напише, често изобщо не е в заглавието на реда.
+  „Пчеларство“ го няма в заглавието на `638` („Отглеждане и развъждане на насекоми
+  и други членестоноги“) — стои в „Включва“. Само по заглавията половината
+  търсения биха връщали „няма намерено“. Показва се и пътят до намереното
+  (`6 → 63 → 638`), а самото „Включва“ се разкрива на намерения ред.
+- **Съставният код се СГЛОБЯВА.** „94“ + определителя за място „(497.2)“ =
+  `94(497.2)`. Изданието нарочно не носи такива кодове наготово — те се правят по
+  правилата за комбиниране, и сега програмата го прави наяве, с изписано от какво
+  е сглобен кодът и с „Назад“ за последната стъпка. Така се получава и
+  `821.163.2-053.2` (българска литература за деца).
+- **Бързи препратки** към 17-те кода, които изданието не носи като готови редове,
+  а този фонд ползва: `82-93` детска литература, `821.163.2-31` български роман,
+  `94(497.2)` история на България, `271.2` Православие, `793` танци и др. Те са
+  отбелязани отделно в данните — изданието е едно, добавките на проекта са друго.
+  Отделен тест изброява всичките 109 стари кода и пада, ако някой изчезне.
+
+Три неща, поправени покрай новото — и трите намерени, като се погледна
+резултатът, а не кодът:
+
+- **Празната лента наследяваше чужд вид.** Класът `.empty` вече е зает от общия
+  празен изглед („тук няма записи“) с икона на отворена книга и 36 px отстояние —
+  лентата със сглобения код показваше книжка над надписа. Преименуван на
+  `.udkBlank`.
+- **Залепената лента оставяше ивица, през която минаваше съдържанието.**
+  `position:sticky; top:0` в прозорец с `padding:16px` залепва **под** отстоянието,
+  не в горния ръб; измерено — лентата стоеше на 100 px при ръб 84 px. Оправено с
+  `top:-16px` заедно с отрицателните полета (и двойка стойности за ниските екрани).
+- **Кодът в `onclick` минава през `jsq()`.** 69 определителя за време са в кавички
+  („19“ = ХХ век) и 41 езикови носят обратен апостроф. Собственият тест на проекта
+  срещу обърнатото екраниране `esc(x).replace(/'/g,…)` хвана моя ред — точно
+  затова съществува.
+
+**За лиценза.** Подаденият файл твърдеше в главата си „CC BY-NC 4.0, считано от
+2026 г.“. Проверено по официалните страници на консорциума — там пише
+**CC BY-SA 3.0** и няма следа от промяна към NonCommercial. Записано е CC BY-SA
+3.0, а следата от проверката пътува заедно с данните и с правения файл, защото
+разликата не е дребна: **NonCommercial е несъвместим с GPL-3.0** и ако лицензът
+наистина се смени, таблицата ще трябва да излезе от хранилището и да се внася
+отвън, както авторската.
+
+**Запазено от прегледа на предишния кръг (v2.4.41):** генераторът пада с ясна
+грешка, ако свободен текст от JSON съдържа „*/“ — това би затворило блоковия
+коментар на `src/udk.js` по средата и би оставило суров, изпълним код в готовия
+файл. Проверката е пренесена в пренаписания генератор и вече покрива и новото
+поле `license_check`.
+
+Данните са в `src/udk.json`, а `src/udk.js` се прави с `node tools/build-udk.js` —
+следващото издание се подменя, без да се пипа JavaScript.
+
+Проверки: 18 нови теста (общо 1332), всеки проверен с мутация (29 мутации, всички
+уловени). Прозорецът се сглобява за ~30 ms с всичките 1920 кода.
+
+**EN:** Round thirty-one — **the full UDC table**: 1 920 codes and 739 common
+auxiliaries, replacing the 164-code selection. The picker is rebuilt as a
+collapsible tree following the scheme itself (a code's parent is the longest
+existing code that prefixes it), with search that also covers the "Включва:"
+(includes) lists — decisive in practice, since the word a librarian types is
+usually there and not in the heading ("пчеларство" is absent from 638's heading).
+Composite codes are now assembled explicitly ("94" + "(497.2)" = 94(497.2)),
+which is how the edition expresses what used to be canned rows; 17 such canned
+codes this fund uses are kept as marked shortcuts. Three defects found by looking
+at the result: a class-name collision with the global `.empty` state, a sticky bar
+that stuck below the dialog's padding and let content show through, and an
+unescaped code in an `onclick` (69 auxiliaries contain quotes) caught by the
+project's own escaping regression test. On licensing: the supplied file claimed
+CC BY-NC 4.0 as of 2026; the UDC Consortium's own pages still say CC BY-SA 3.0, so
+that is what is recorded — NonCommercial would be incompatible with GPL-3.0 and
+would force the table out of the repository. 18 new tests (1 332 total).
+
 ## v2.4.41
 
 **BG:** Преглед на поправките от двадесет и девети кръг (v2.4.40, новата
@@ -64,41 +233,6 @@ too, and none of the 109 old codes are missing.
   generator now fails loudly at build time instead of producing a broken
   file — proven with revert-and-retest. Code-only round: 1326 tests passing,
   0 failing (UTC and Europe/Sofia).
-
-## v2.4.39
-
-**BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата
-логика за Й/И е вярна и добре тествана; една грешна буква в подсказката.
-
-- **Подсказката „Х се търси от буква И“ можеше да показва грешна първа
-  буква.** Готовият знак (`mark`) се смята вярно — от нормализирания ключ
-  (`keyOf()`, който маха всичко освен кирилски букви). Но самият текст на
-  подсказката четеше буквата директно от `s.basis.charAt(0)` — а `basis` пази
-  фамилията както е дошла от записа, включително воден препинателен знак от
-  заварени данни (напр. „-Йовков“ от лош внос). За такъв ред подсказката
-  показваше „- се търси от буква И“ вместо „Й се търси от буква И“ — самата
-  ситуация, за която подсказката съществува (да не изглежда като грешен ред),
-  ставаше объркваща. Поправено: сървърът връща готовата буква (`letter`,
-  изведена от същия нормализиран ключ като знака), а екранът я ползва вместо
-  да гадае от суровия текст.
-
-Доказано с revert-and-retest (връщане на реда преди поправката кара новия
-тест да гръмне точно с грешката отгоре), с нова проверка в
-`test/author-mark.test.js`. Само поправка в кода и тестовете — без нова
-функционалност. Пълната поредица: 1314 успешни, 0 неуспешни (UTC и
-Europe/Sofia); сайтът: 8 сценария + всички проверки на изгледа при 15 002
-записа.
-
-**EN:** A review of round twenty-seven's own fix (v2.4.38). The Й/И search
-logic itself is correct and well tested; one wrong letter in the on-screen
-hint. The computed mark itself was always correct (derived from the
-normalized surname key), but the "letter X is looked up under letter Y" hint
-text read its letter straight from the raw `basis` string, which can carry a
-leading punctuation character from legacy/dirty data (e.g. "-Йовков") —
-showing a nonsensical "- is looked up under И" instead of "Й is looked up
-under И", undermining the exact confusion this hint exists to prevent. Fixed by having
-the server return the already-normalized letter instead of having the client
-re-derive it from raw text. Code-only round: 1314 tests passing, 0 failing.
 
 ## v2.4.40
 
@@ -157,6 +291,41 @@ now selectable too. The data moved out of code into `src/udk.json`, with
 drift apart. UDC Summary is CC BY-SA 3.0, so the table ships with the program
 (unlike the author table, which does not) and the attribution is in the file
 header, in `README.md`, and in a test. 11 new tests (1 325 total).
+
+## v2.4.39
+
+**BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата
+логика за Й/И е вярна и добре тествана; една грешна буква в подсказката.
+
+- **Подсказката „Х се търси от буква И“ можеше да показва грешна първа
+  буква.** Готовият знак (`mark`) се смята вярно — от нормализирания ключ
+  (`keyOf()`, който маха всичко освен кирилски букви). Но самият текст на
+  подсказката четеше буквата директно от `s.basis.charAt(0)` — а `basis` пази
+  фамилията както е дошла от записа, включително воден препинателен знак от
+  заварени данни (напр. „-Йовков“ от лош внос). За такъв ред подсказката
+  показваше „- се търси от буква И“ вместо „Й се търси от буква И“ — самата
+  ситуация, за която подсказката съществува (да не изглежда като грешен ред),
+  ставаше объркваща. Поправено: сървърът връща готовата буква (`letter`,
+  изведена от същия нормализиран ключ като знака), а екранът я ползва вместо
+  да гадае от суровия текст.
+
+Доказано с revert-and-retest (връщане на реда преди поправката кара новия
+тест да гръмне точно с грешката отгоре), с нова проверка в
+`test/author-mark.test.js`. Само поправка в кода и тестовете — без нова
+функционалност. Пълната поредица: 1314 успешни, 0 неуспешни (UTC и
+Europe/Sofia); сайтът: 8 сценария + всички проверки на изгледа при 15 002
+записа.
+
+**EN:** A review of round twenty-seven's own fix (v2.4.38). The Й/И search
+logic itself is correct and well tested; one wrong letter in the on-screen
+hint. The computed mark itself was always correct (derived from the
+normalized surname key), but the "letter X is looked up under letter Y" hint
+text read its letter straight from the raw `basis` string, which can carry a
+leading punctuation character from legacy/dirty data (e.g. "-Йовков") —
+showing a nonsensical "- is looked up under И" instead of "Й is looked up
+under И", undermining the exact confusion this hint exists to prevent. Fixed by having
+the server return the already-normalized letter instead of having the client
+re-derive it from raw text. Code-only round: 1314 tests passing, 0 failing.
 
 ## v2.4.38
 

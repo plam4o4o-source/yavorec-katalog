@@ -538,32 +538,104 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
   width:100%; padding:9px 11px; border:1px solid var(--rule2); border-radius:3px;
   font-family:var(--sans); font-size:13px; margin-bottom:12px; background:#fff;
 }
-.udkGroup{margin-bottom:14px}
-.udkMain{
-  font-family:var(--serif); font-size:14px; font-weight:700; color:var(--spine);
-  padding-bottom:5px; border-bottom:1px solid var(--rule); margin-bottom:7px;
+/* ---- Избор на УДК (v2.4.40): дърво + сглобяване на съставен код ---- */
+/* Лентата със сглобения код стои залепена най-горе: тя трябва да се вижда и
+   докато се превърта до определителите — точно там човек има нужда да знае към
+   какво добавя. Отрицателните отстояния я изкарват до ръбовете на прозореца
+   („.modal .body“ има padding:16px 22px) — иначе съдържанието се показва в
+   ивицата НАД нея, преди да се плъзне отдолу. И „top“ е СЪЩОТО отрицателно
+   число, а не 0: залепването се мери от съдържанието на прозореца, тоест СЛЕД
+   неговия padding — с top:0 лентата застава 16 px по-ниско и точно в тази ивица
+   се вижда как минава съдържанието отдолу. Трите стойности (top, margin, padding)
+   вървят заедно с padding-а на „.modal .body“ — смени ли се той, сменят се и тук.
+   Затова има и медия-заявка: при ниски екрани padding-ът е 11 px. */
+.udkBuild{
+  position:sticky; top:-16px; z-index:5; background:var(--paper);
+  margin:-16px -22px 10px; padding:16px 22px 9px;
+  border:0; border-bottom:1px solid var(--rule); border-radius:0;
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
 }
-.udkSubs{display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:4px}
-.udkItem{
+@media (max-height: 800px){ .udkBuild{top:-11px; margin:-11px -22px 9px; padding:11px 22px 8px} }
+.udkBuildCode{
+  font-family:var(--mono); font-size:17px; font-weight:700; color:var(--brassD);
+  letter-spacing:.5px; flex:0 0 auto;
+}
+/* НЕ „.empty“: това име вече е заето от общия празен изглед („тук няма записи“)
+   с иконата на отворена книга и 36 px отстояние — лентата го наследяваше и
+   показваше книжка над надписа. */
+.udkBuildCode.udkBlank{color:var(--ink3); font-weight:400; font-size:13px; font-family:var(--sans)}
+.udkBuildLbl{color:var(--ink2); font-size:12.5px; flex:1; min-width:150px; line-height:1.35}
+.udkBuild .btn{flex:0 0 auto}
+
+/* Бързите препратки са ПОМОЩНА лента: държат се на два реда, за да не изтикат
+   дървото извън екрана: 17 кода с наименования иначе заемат пет реда. */
+.udkQuick{display:flex; gap:5px; flex-wrap:wrap; align-items:center; margin:0 0 8px;
+  max-height:58px; overflow-y:auto}
+.udkQuickLbl{font-size:11.5px; color:var(--ink3); margin-right:3px}
+.udkQuick .udkItem.udkQ1{width:auto; border:1px solid var(--rule2); background:var(--paper);
+  padding:2px 7px; font-size:11.5px; gap:6px}
+.udkQuick .udkQ1 .udkCode{font-size:11px}
+
+/* Общата форма на реда: и бързите препратки (.udkItem), и редовете в дървото
+   (.udkRow). Разстоянието между кода и наименованието е ЗАДАДЕНО (gap), а не
+   оставено на празното място в разметката — иначе „23/28“ и „Християнство“ се
+   долепват, щом кодът и надписът се изпишат без нов ред между тях. */
+.udkItem, .udkRow{
   display:flex; gap:8px; align-items:baseline; text-align:left; width:100%;
   background:none; border:1px solid transparent; border-radius:3px; padding:5px 7px;
   cursor:pointer; font-family:var(--sans); font-size:12.5px; color:var(--ink);
 }
+.udkRow{border:0; border-radius:0}
 .udkItem:hover{background:var(--paper3); border-color:var(--rule2)}
+.udkRow:hover{background:var(--paper3)}
 /* color:var(--brassD), не --brass (v1.70.0) — --brass като цвят на текст
    пада под WCAG AA (4.5:1) в темите „Бронз“ и „Теракота“; --brassD е
-   >=5.69:1 във всичките 6 теми. Важи и за .prsDates/.chrDate по-долу. */
+   >=5.69:1 във всичките 6 теми. */
 .udkCode{font-family:var(--mono); font-weight:700; color:var(--brassD); flex:0 0 auto; font-size:12px}
 .udkLbl{color:var(--ink2); line-height:1.3}
-/* Заглавието на класа е и бутон (избира самия клас „2“, „8“…), затова носи и
-   .udkItem. Двата селектора са с еднаква тежест, затова блокът стои СЛЕД
-   .udkItem — иначе рамката, отстоянието и фонът оттам щяха да го надвият. */
-.udkMain.udkItem{
-  padding:0 0 5px; margin-bottom:7px;
-  border:0; border-bottom:1px solid var(--rule); border-radius:0; background:none;
+.udkRow .udkCode{min-width:66px}
+.udkRow .udkLbl{flex:1}
+
+.udkTree{
+  max-height:38vh; overflow:auto; background:var(--paper);
+  border:1px solid var(--rule); border-radius:5px;
 }
-.udkMain.udkItem:hover{background:none; border-bottom-color:var(--brass)}
-.udkMain .udkLbl{color:var(--spine); font-weight:700; font-family:var(--serif)}
+.udkAuxTree{max-height:19vh}
+.udkNode{border-bottom:1px solid var(--rule)}
+.udkNode:last-child{border-bottom:0}
+.udkKids{display:none; padding-left:17px; border-left:1px solid var(--rule)}
+.udkNode.on > .udkKids{display:block}
+/* Деветте класа са заглавия на цели раздели и се четат като такива. */
+.udkNode.udkTop > .udkRow{
+  font-family:var(--serif); font-weight:700; font-size:13px;
+  color:var(--spine); background:var(--paper3);
+}
+.udkNode.udkTop > .udkRow .udkLbl{color:var(--spine)}
+.udkTw{flex:0 0 15px; color:var(--ink3); font-family:var(--mono); font-size:11px; text-align:center; user-select:none}
+.udkCount{flex:0 0 auto; color:var(--ink3); font-size:11px; font-family:var(--mono)}
+/* „Включва:“ се показва само на намерения ред — иначе редовете стават на абзаци
+   и дървото не се чете. Но по него СЕ ТЪРСИ винаги (виж udkFilter). */
+.udkAlso{display:none; color:var(--ink3); font-size:11.5px}
+.udkNode.udkHit > .udkRow .udkAlso{display:inline}
+.udkNode.udkHit > .udkRow{background:var(--paper3); box-shadow:inset 2px 0 0 var(--brass)}
+.udkPlus{
+  flex:0 0 auto; font-size:10.5px; color:var(--brassD); border:1px solid var(--rule2);
+  border-radius:3px; padding:1px 5px; background:var(--paper); visibility:hidden;
+}
+.udkRow:hover .udkPlus{visibility:visible}
+
+.udkTabs{display:flex; gap:4px; flex-wrap:wrap; margin:0 0 8px}
+.udkTab{
+  font-size:12px; padding:4px 9px; border:1px solid var(--rule2); border-radius:999px;
+  background:var(--paper); cursor:pointer; color:var(--ink2); font-family:var(--sans);
+}
+.udkTab:hover{border-color:var(--brass)}
+.udkTab.on{background:var(--brassD); border-color:var(--brassD); color:#fff}
+.udkTabN{opacity:.75; font-family:var(--mono); font-size:11px}
+.udkSecH{
+  font-family:var(--serif); font-size:13px; color:var(--spine); margin:16px 0 5px;
+  padding-bottom:4px; border-bottom:1px solid var(--rule);
+}
 
 /* ---------- Сливане на дубликати ---------- */
 .authGroup{border:1px solid var(--rule2); border-radius:4px; padding:12px 14px; margin-bottom:12px; background:var(--paper)}

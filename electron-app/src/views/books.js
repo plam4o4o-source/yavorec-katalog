@@ -545,57 +545,168 @@ async function bookCopyForm(id) {
 }
 window.bookCopyForm = bookCopyForm;
 /* ---------------- Избор на УДК от таблицата ----------------
-   Прозорецът се отваря върху формата за книга. Изборът замества стойността в
-   полето, а определителите се добавят накрая — полето остава свободен текст, за
-   да не пречи на съставни кодове, каквито таблицата не покрива. */
+   Прозорецът се отваря върху формата за книга и работи на две части:
+
+   • ДЪРВО на класификацията — 1920 кода, разгърнати по самата схема
+     („8 → 82 → 821 → 821.163.2“). Показват се свити: цялата таблица наведнъж е
+     непрегледна, а свитото дърво се чете като съдържание на книга.
+   • ОБЩИ ОПРЕДЕЛИТЕЛИ по спомагателните таблици, които се ДОБАВЯТ към вече
+     избран код: „94“ + „(497.2)“ = „94(497.2)“ — история на България. Точно
+     така изданието изразява това, което дотук стоеше като готов ред.
+
+   Търсенето минава през ЦЕЛИЯ текст на реда, включително списъка „Включва:“.
+   Това не е дребна подробност: думата, която библиотекарката ще напише, най-често
+   е точно там — „Пчеларство“ го няма в заглавието на 638 („Отглеждане и
+   развъждане на насекоми“), а стои в „Включва“. Само по заглавията половината
+   търсения биха връщали „няма намерено“.
+
+   Полето „УДК“ остава свободен текст: пълната схема (над 70 000 индекса) не е
+   тук и винаги ще има какво да се допише на ръка. */
+let UDK_BUILT = [];                       // стъпките на сглобения код
+
+function udkNodeHtml(n, lvl) {
+  const [code, head, also, kids] = n;
+  const find = (code + ' ' + head + ' ' + also).toLowerCase();
+  return `<div class="udkNode${lvl === 0 ? ' udkTop' : ''}" data-code="${esc(code)}" data-find="${esc(find)}">
+    <button type="button" class="udkRow" onclick="udkTap(this,event)">
+      <span class="udkTw">${kids.length ? '▸' : ''}</span>
+      <span class="udkCode">${esc(code)}</span>
+      <span class="udkLbl">${esc(head)}${also ? `<span class="udkAlso"> Включва: ${esc(also)}</span>` : ''}</span>
+      ${kids.length ? `<span class="udkCount">${udkCount(n)}</span>` : ''}
+      <span class="udkPlus">избери</span>
+    </button>
+    ${kids.length ? `<div class="udkKids">${kids.map(k => udkNodeHtml(k, lvl + 1)).join('')}</div>` : ''}
+  </div>`;
+}
+function udkCount(n) { return n[3].reduce((s, k) => s + 1 + udkCount(k), 0); }
+
 function udkPicker() {
-  /* Заглавието на класа СЪЩО се избира: книга, класирана само на „2“ или „8“,
-     е обичайна, а дотук класът беше само надпис и такъв код се пишеше на ръка. */
-  const rows = UDK_TREE.map(([code, name, subs]) => `
-    <div class="udkGroup">
-      <button type="button" class="udkMain udkItem" onclick="udkPick('${esc(code)}')"
-        title="Избира само класа „${esc(code)}“"><span class="udkCode">${esc(code)}</span>
-        <span class="udkLbl">${esc(name)}</span></button>
-      <div class="udkSubs">
-        ${subs.map(([c, t]) => `<button type="button" class="udkItem" onclick="udkPick('${esc(c)}')">
-          <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('')}
-      </div>
-    </div>`).join('');
+  UDK_BUILT = [];
+  const tree = UDK_TREE.map(n => udkNodeHtml(n, 0)).join('');
+  const quick = UDK_QUICK.map(([c, t]) =>
+    `<button type="button" class="udkItem udkQ1" onclick="udkPick('${jsq(c)}')" title="${esc(t)}">
+      <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('');
+  const tabs = UDK_AUX.map(([name, rows], i) =>
+    `<button type="button" class="udkTab${i === 0 ? ' on' : ''}" data-aux="${i}"
+      onclick="udkAuxTab(${i})">${esc(name)} <span class="udkTabN">${rows.length}</span></button>`).join('');
   modal2('Универсална десетична класификация (УДК)', `
-    <div class="note" style="margin-top:0">Изберете раздел — кодът влиза в полето „УДК“.
-    Определителите по-долу се добавят към вече избрания код.</div>
-    <input class="udkSearch" id="udkQ" placeholder="Търсене по код или наименование…" oninput="udkFilter()">
-    <div id="udkList">${rows}</div>
-    <div class="udkGroup" style="margin-top:12px">
-      <div class="udkMain">Общи определители (добавят се накрая)</div>
-      <div class="udkSubs">
-        ${UDK_MODIFIERS.map(([c, t]) => `<button type="button" class="udkItem" onclick="udkAppend('${esc(c)}')">
-          <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('')}
-      </div>
-    </div>`,
+    <div class="udkBuild">
+      <span class="udkBuildCode udkBlank" id="udkB">още нищо не е избрано</span>
+      <span class="udkBuildLbl" id="udkBL">Изберете раздел от дървото; после може да добавите определител.</span>
+      <button type="button" class="btn sm" id="udkUndo" onclick="udkUndo()" disabled>Назад</button>
+      <button type="button" class="btn pri sm" id="udkTake" onclick="udkTake()" disabled>Вземи кода</button>
+    </div>
+    <input class="udkSearch" id="udkQ" oninput="udkFilter()"
+      placeholder="Търсене по код или по дума — търси се и в „Включва:“ (напр. „пчеларство“, „821.163.2“)">
+    <div class="udkQuick"><span class="udkQuickLbl">Често ползвани:</span>${quick}</div>
+    <div class="hint" id="udkHits"></div>
+    <div class="udkTree" id="udkList">${tree}</div>
+    <div class="note d" id="udkNone" style="display:none">Няма намерен раздел.
+      Опитайте с друга дума или с част от кода — търси се и в списъците „Включва:“.</div>
+    <h4 class="udkSecH">Общи определители — добавят се към избрания код</h4>
+    <div class="hint" id="udkAuxHint">Първо изберете основен код от дървото по-горе.</div>
+    <div class="udkTabs">${tabs}</div>
+    <div class="udkTree udkAuxTree" id="udkAuxList"></div>`,
     `<button class="btn" onclick="closeModal2()">Затвори</button>`);
+  udkAuxTab(0);
+  udkBuildRender();
   setTimeout(() => { const q = $('#udkQ'); if (q) q.focus(); }, 50);
 }
 window.udkPicker = udkPicker;
+
+/* Натискане по реда: по „избери“ (или по ред без подраздели) взима кода, иначе
+   разгръща. Така един и същ ред и се отваря, и се избира — без две копчета. */
+function udkTap(btn, ev) {
+  const node = btn.parentElement;
+  const kids = node.querySelector(':scope > .udkKids');
+  if (!kids || (ev.target && ev.target.classList.contains('udkPlus'))) {
+    udkSet(node.dataset.code, btn.querySelector('.udkLbl').firstChild.textContent);
+    return;
+  }
+  node.classList.toggle('on');
+  btn.querySelector('.udkTw').textContent = node.classList.contains('on') ? '▾' : '▸';
+}
+window.udkTap = udkTap;
+
+function udkAuxTab(i) {
+  const rows = (UDK_AUX[i] || ['', []])[1];
+  document.querySelectorAll('.udkTab').forEach(t => t.classList.toggle('on', Number(t.dataset.aux) === i));
+  const box = $('#udkAuxList');
+  if (box) box.innerHTML = rows.map(([c, head, also]) =>
+    `<div class="udkNode" data-code="${esc(c)}"><button type="button" class="udkRow"
+      onclick="udkAddAux('${jsq(c)}')">
+      <span class="udkTw"></span><span class="udkCode">${esc(c)}</span>
+      <span class="udkLbl">${esc(head)}${also ? `<span class="udkAlso"> Включва: ${esc(also)}</span>` : ''}</span>
+      <span class="udkPlus">добави</span></button></div>`).join('');
+}
+window.udkAuxTab = udkAuxTab;
+
+function udkSet(code, label) { UDK_BUILT = [{ code, label }]; udkBuildRender(); }
+function udkAddAux(code) {
+  if (!UDK_BUILT.length) { toast('Първо изберете основен код от дървото.', 'warn'); return; }
+  const row = (UDK_AUX.find(a => a[1].some(r => r[0] === code)) || ['', []])[1].find(r => r[0] === code);
+  UDK_BUILT.push({ code, label: row ? row[1] : code });
+  udkBuildRender();
+}
+window.udkAddAux = udkAddAux;
+function udkUndo() { UDK_BUILT.pop(); udkBuildRender(); }
+window.udkUndo = udkUndo;
+
+function udkCodeNow() { return UDK_BUILT.map(x => x.code).join(''); }
+function udkBuildRender() {
+  const code = udkCodeNow();
+  const b = $('#udkB'); if (!b) return;
+  b.textContent = code || 'още нищо не е избрано';
+  b.classList.toggle('udkBlank', !code);
+  $('#udkBL').textContent = UDK_BUILT.length
+    ? UDK_BUILT.map(x => x.label).join(' + ')
+    : 'Изберете раздел от дървото; после може да добавите определител.';
+  $('#udkUndo').disabled = !UDK_BUILT.length;
+  $('#udkTake').disabled = !UDK_BUILT.length;
+  $('#udkAuxHint').textContent = UDK_BUILT.length
+    ? 'Добавя се към „' + code + '“ — напр. 94 + (497.2) = 94(497.2) „история на България“.'
+    : 'Първо изберете основен код от дървото по-горе.';
+}
+function udkTake() {
+  const code = udkCodeNow();
+  if (!code) return;
+  udkPick(code);
+}
+window.udkTake = udkTake;
+
 function udkFilter() {
   const q = ($('#udkQ').value || '').trim().toLowerCase();
-  document.querySelectorAll('#udkList .udkGroup').forEach(g => {
-    let shown = 0;
-    g.querySelectorAll('.udkSubs .udkItem').forEach(it => {
-      const hit = !q || it.textContent.toLowerCase().includes(q);
-      it.style.display = hit ? '' : 'none';
-      if (hit) shown++;
-    });
-    /* Заглавието на класа е и бутон, но не се крие заедно с редовете: то е
-       единственото, което казва в кой клас са намерените. Показва се, когато
-       групата има какво да покаже ИЛИ когато самото то съвпада. */
-    const head = g.querySelector('.udkMain');
-    const headHit = !q || (head && head.textContent.toLowerCase().includes(q));
-    if (head) head.style.display = (shown || headHit) ? '' : 'none';
-    g.style.display = (shown || headHit) ? '' : 'none';
+  const all = document.querySelectorAll('#udkList .udkNode');
+  const twist = (n, open) => {
+    n.classList.toggle('on', open);
+    const t = n.querySelector(':scope > .udkRow > .udkTw');
+    if (t && t.textContent) t.textContent = open ? '▾' : '▸';
+  };
+  all.forEach(n => n.classList.remove('udkHit'));
+  if (!q) {
+    all.forEach(n => { n.style.display = ''; twist(n, false); });
+    $('#udkHits').textContent = '';
+    $('#udkNone').style.display = 'none';
+    return;
+  }
+  all.forEach(n => { n.style.display = 'none'; });
+  let hits = 0;
+  all.forEach(n => {
+    if (!n.dataset.find.includes(q)) return;
+    hits++;
+    n.style.display = '';
+    n.classList.add('udkHit');
+    /* Пътят до намереното се отваря, иначе редът стои в затворен клон и не се
+       вижда — а точно пътят („6 → 63 → 638“) казва къде попада намереното. */
+    for (let p = n.parentElement; p && p.id !== 'udkList'; p = p.parentElement) {
+      if (p.classList && p.classList.contains('udkNode')) { p.style.display = ''; twist(p, true); }
+    }
   });
+  $('#udkHits').textContent = hits ? hits + (hits === 1 ? ' намерен ред' : ' намерени реда') : '';
+  $('#udkNone').style.display = hits ? 'none' : '';
 }
 window.udkFilter = udkFilter;
+
 function udkTargetInput() { return $('#bookF [name=udk]'); }
 function udkPick(code) {
   const el = udkTargetInput();
@@ -603,14 +714,6 @@ function udkPick(code) {
   closeModal2();
 }
 window.udkPick = udkPick;
-function udkAppend(mod) {
-  const el = udkTargetInput();
-  if (!el) return;
-  el.value = (el.value || '').trim() + mod;
-  toast('УДК ' + el.value, 'ok');
-  closeModal2();
-}
-window.udkAppend = udkAppend;
 
 /* ---------------- Авторски знак по фамилията ----------------
    Копчето ПРЕДЛАГА, не решава. Знакът се смята по таблицата, внесена от самата
@@ -646,10 +749,11 @@ async function authorMarkSuggest() {
       ' → ред „' + esc(s.prefix) + '“' +
       /* Й няма собствен раздел в авторските таблици — търси се от И („Йовков“ е
          записан като „Иовк“). Казва се наяве, иначе редът изглежда сгрешен.
-         s.letter, не s.basis.charAt(0) (проверка при прегледа): basis може да
-         носи водещ препинателен знак от заварени данни („-Йовков“) — keyOf() го
-         маха при самото търсене, но взет направо от basis той дава грешна буква
-         в самия текст на подсказката. */
+         s.letter, НЕ s.basis.charAt(0) (регресия от v2.4.42, поправка v2.4.39
+         пренесена обратно тук при прегледа): basis пази фамилията както е
+         дошла от записа, включително воден препинателен знак от заварени
+         данни („-Йовков“) — keyOf() го маха при самото търсене, но взет
+         направо от basis той дава грешна буква в текста на подсказката. */
       (s.fromLetter ? ' <i>(' + esc((s.letter || s.basis.charAt(0)).toUpperCase()) + ' се търси от буква '
         + esc(s.fromLetter) + ')</i>' : '') +
       ' → <b>' + esc(s.mark) + '</b>';

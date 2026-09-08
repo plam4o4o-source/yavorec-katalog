@@ -595,10 +595,16 @@ async function loadAuthSuggest(force) {
   return AUTH_SUGGEST;
 }
 function datalistsHtml(sug) {
+  /* Дървото се обхожда ДОКРАЙ: кодът, който библиотекарката ще напише, най-често
+     е от дълбочината („821.163.2“), а не от първото ниво. */
   const udkAll = [];
-  for (const [, , subs] of (typeof UDK_TREE !== 'undefined' ? UDK_TREE : [])) {
-    for (const [code, label] of subs) udkAll.push({ v: code, t: `${code} — ${label}` });
-  }
+  const walkUdk = (nodes) => {
+    for (const [code, label, , kids] of nodes) {
+      udkAll.push({ v: code, t: `${code} — ${label}` });
+      if (kids && kids.length) walkUdk(kids);
+    }
+  };
+  walkUdk(typeof UDK_TREE !== 'undefined' ? UDK_TREE : []);
   const seen = new Set(udkAll.map(x => x.v));
   for (const v of (sug.udk || [])) if (!seen.has(v)) udkAll.push({ v, t: v });
   const one = (name, values) =>

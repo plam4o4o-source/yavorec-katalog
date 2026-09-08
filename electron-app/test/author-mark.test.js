@@ -544,6 +544,32 @@ test('копчето „Предложи“ при Й обяснява, че р�
   assert.match(hint, /Й се търси от буква И/, 'иначе редът „ИОВК“ изглежда сгрешен: ' + hint);
 });
 
+test('копчето „Предложи“ чете буквата за подсказката от letter, не от суровия basis (v2.4.39 регресия, върната в v2.4.42)', async () => {
+  /* Предишният тест ползва „Йовков“ (чист текст) — там s.basis.charAt(0) СЪВПАДА
+     със s.letter и не разграничава двата пътя. basis носи водещ препинателен
+     знак от заварени данни („-Йовков“, лош внос): s.letter е нормализираната
+     буква „Й“, а s.basis.charAt(0) би дал „-“. Точно тази разлика хвана
+     регресията при прегледа на v2.4.42 (кодът в books.js мълчаливо се беше
+     върнал на s.basis.charAt(0), а нито един съществуващ тест не различаваше
+     двата пътя). */
+  const dom = buildDom({ ...FORM_DEPS,
+    'books.get': { id: 1, inv_number: 1, title: 'Старопланински легенди', author: '-Йовков, Йордан',
+      author_mark: '', status: 'наличен' },
+    'authorMark.suggest': { ok: true, mark: 'Й-77', basis: '-Йовков', from: 'author', exact: true,
+      prefix: 'ИОВК', num: '77', letter: 'Й', fromLetter: 'И', refine: [] } });
+  const { window } = dom, d = window.document;
+  await settle();
+  await window.bookForm(1);
+  await settle();
+  await window.authorMarkSuggest();
+  await settle();
+  const hint = d.getElementById('amHint').textContent.replace(/\s+/g, ' ');
+  assert.match(hint, /Й се търси от буква И/,
+    'подсказката трябва да чете буквата от letter: ' + hint);
+  assert.doesNotMatch(hint, /- се търси от буква И/,
+    'воденият препинателен знак от заварения запис не бива да излиза като буква: ' + hint);
+});
+
 test('когато няма внесена таблица, копчето обяснява, вместо да мълчи или да пише нещо в полето', async () => {
   const dom = buildDom({ ...FORM_DEPS,
     'books.get': { id: 1, inv_number: 1, title: 'Т', author: 'Вазов, Иван', author_mark: '', status: 'наличен' },
