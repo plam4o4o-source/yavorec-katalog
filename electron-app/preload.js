@@ -71,6 +71,16 @@ contextBridge.exposeInMainWorld('api', {
     usage: invoke('limits:usage'),
     update: invoke('limits:update')
   },
+  authorMark: {
+    status: invoke('authorMark:status'),
+    choose: invoke('authorMark:choose'),
+    confirm: invoke('authorMark:confirm'),
+    clear: invoke('authorMark:clear'),
+    suggest: invoke('authorMark:suggest'),
+    audit: invoke('authorMark:audit'),
+    fillPreview: invoke('authorMark:fillPreview'),
+    fillApply: invoke('authorMark:fillApply')
+  },
   categories: {
     list: invoke('categories:list'),
     create: invoke('categories:create'),

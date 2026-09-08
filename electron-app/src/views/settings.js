@@ -214,6 +214,9 @@ async function renderSetup() {
     ${setupMore('Номенклатури', 'контролирани списъци за полетата с избор', `
       ${setupHow('Контролирани списъци за полетата с избор — така „худ. л-ра“ и „художествена литература“ не се разпиляват като различни стойности. Вторият (незадължителен) надпис на реда е <b>публичният</b> — той се показва в онлайн каталога вместо вътрешния (напр. вътрешно „краеведски“, публично „Краезнание“). Записва се по един ред за стойност: <code>стойност | публичен надпис</code>.')}
       <div id="avEditors">зареждане…</div>`)}
+    ${setupMore('Авторски знак', 'таблица за подписване по фамилията', `
+      ${setupHow('Авторският знак („В-15“) се взима от <b>авторска таблица</b> — печатно издание с буквосъчетания и числата срещу тях. Таблицата <b>не идва с програмата</b> (тя е чуждо издание и не се разпространява с нея): внася се веднъж от файла на самата библиотека — <code>.docx</code>, <code>.odt</code>, <code>.xlsx</code>, <code>.csv</code>, <code>.txt</code> или записана страница. След това във формата на документа копчето „Предложи“ до полето „Авторски знак“ смята знака по фамилията и показва <b>по кой ред</b> го е сметнало. Програмата само предлага — знакът се записва от вас.')}
+      <div id="amBox">зареждане…</div>`)}
     ${setupCard('Проверка на данните', `
       ${setupHow('Търси несъответствия, които програмата не може да поправи сама: няколко екземпляра под един инвентарен номер, бройка 0, документ „отчислен“ без акт, един баркод на няколко документа. Нищо не се променя без ваше изрично действие, и нито едно от поправянията не променя броя документи или стойността на фонда.')}
       <div class="toolbar"><button class="btn" onclick="runDataChecks()">Провери сега</button></div>
@@ -338,6 +341,7 @@ async function renderSetup() {
   setupInitNav();
   loadNoticePlaceholders();
   loadAvEditors();
+  loadAuthorMarkBox();
   loadAnonHint();
   loadPdpBox();
   loadCircRulesBox();
@@ -453,6 +457,81 @@ async function loadAvEditors() {
       </div>
     </div>`).join('');
 }
+/* ---------------- Авторски знак (v2.4.36) ----------------
+   Таблицата с числата е чуждо печатно издание и НЕ идва с програмата — тук се
+   внася файлът на самата библиотека. Внасянето минава през преглед: първо се
+   казва колко реда и кои букви са разчетени и се показва мостра, и чак след
+   изричното „Запиши“ таблицата влиза в базата. Груповото попълване е отделно
+   действие, също с преглед, и никога не пипа вече попълнен знак. */
+async function loadAuthorMarkBox() {
+  const box = $('#amBox'); if (!box) return;
+  const st = await call(window.api.authorMark.status());
+  if (!st) { box.textContent = 'Състоянието на таблицата не се зареди.'; return; }
+  const ex = st.example && st.example.ok
+    ? `<div class="hint">Проба: фамилия „${esc(st.example.basis)}“ → ред „${esc(st.example.prefix)}“ → <b>${esc(st.example.mark)}</b></div>` : '';
+  box.innerHTML = st.rows ? `
+    <div class="note" style="margin-top:0">Внесена таблица: <b>${st.rows}</b> ${st.rows === 1 ? 'ред' : 'реда'},
+      ${st.letters} ${st.letters === 1 ? 'буква' : 'букви'}. Разделителят се взима от вече въведените знаци —
+      сега е „${st.separator === '' ? 'без разделител' : esc(st.separator)}“.</div>
+    ${ex}
+    <div class="hint">Мостра: ${st.sample.map(r => esc(r.prefix) + ' ' + esc(r.mark)).join(' · ')}</div>
+    <div class="toolbar" style="margin-top:8px">
+      <button class="btn" onclick="authorMarkChoose()">Внеси друг файл…</button>
+      <button class="btn" onclick="authorMarkFill()">Попълни празните знаци…</button>
+      <button class="btn dgr" onclick="authorMarkClear()">Изтрий таблицата</button>
+    </div>`
+    : `<div class="note d" style="margin-top:0">Няма внесена таблица — копчето „Предложи“ до полето
+      „Авторски знак“ още няма откъде да предлага. Изберете файла на библиотеката.</div>
+    <div class="toolbar"><button class="btn pri" onclick="authorMarkChoose()">Избери файл с авторската таблица…</button></div>`;
+}
+async function authorMarkChoose() {
+  const pv = await call(window.api.authorMark.choose());
+  if (!pv) return;                       // отказ или негоден файл — call() вече каза какво
+  if (!await askConfirm('РАЗЧЕТЕНА ТАБЛИЦА\n\n'
+    + 'Файл: ' + pv.file + '\n'
+    + 'Разчетени редове: ' + pv.rows + ' (' + pv.letters + ' букви)\n'
+    + (pv.dropped ? 'Отпаднали като шум: ' + pv.dropped + '\n' : '')
+    + 'Подредба: ' + pv.how + '\n\n'
+    + 'Мостра: ' + pv.sample.map(r => r.prefix + ' → ' + r.mark).join(' · ') + '\n\n'
+    + 'Ако мострата не прилича на авторска таблица, откажете — нищо няма да се запише.',
+    { okLabel: 'Запиши таблицата' })) { toast('Таблицата не е записана.', 'ok'); return; }
+  const r = await call(window.api.authorMark.confirm());
+  if (!r) return;
+  toast('Внесена е таблица с ' + r.rows + ' реда.', 'ok');
+  loadAuthorMarkBox();
+}
+window.authorMarkChoose = authorMarkChoose;
+async function authorMarkClear() {
+  if (!await askConfirm('Да изтрия ли внесената авторска таблица?\n\n'
+    + 'Вече записаните авторски знаци по документите НЕ се променят — маха се само таблицата, '
+    + 'по която се правят предложенията.', { kind: 'delete', okLabel: 'Изтрий' })) return;
+  const n = await call(window.api.authorMark.clear());
+  if (n == null) return;
+  toast('Таблицата е изтрита (' + n + ' реда).', 'ok');
+  loadAuthorMarkBox();
+}
+window.authorMarkClear = authorMarkClear;
+async function authorMarkFill() {
+  const pv = await call(window.api.authorMark.fillPreview());
+  if (!pv) return;
+  if (!pv.willTotal) {
+    toast(pv.skipTotal ? 'Няма какво да се попълни — за нито един от документите с празен знак таблицата не дава ред.'
+                       : 'Няма документи с празен авторски знак.', 'warn');
+    return;
+  }
+  const lines = pv.will.slice(0, 8).map(b => '  ' + (b.inv_number ?? '—') + ' · ' + (b.author || b.title || '') + ' → ' + b.mark);
+  if (!await askConfirm('ПОПЪЛВАНЕ НА ПРАЗНИТЕ АВТОРСКИ ЗНАЦИ\n\n'
+    + 'Ще бъдат попълнени ' + pv.willTotal + ' документа с празен знак.\n'
+    + (pv.skipTotal ? 'Остават без знак: ' + pv.skipTotal + ' (таблицата не дава ред за тях).\n' : '')
+    + '\nВече попълнените знаци НЕ се пипат.\n\nНапример:\n' + lines.join('\n')
+    + (pv.willTotal > lines.length ? '\n  … и още ' + (pv.willTotal - lines.length) : ''),
+    { okLabel: 'Попълни' })) return;
+  const n = await call(window.api.authorMark.fillApply());
+  if (n == null) return;
+  toast('Попълнени са ' + n + ' авторски знака.', 'ok');
+}
+window.authorMarkFill = authorMarkFill;
+
 async function saveAv(category) {
   const el = $('#av_' + category); if (!el) return;
   const values = el.value.split('\n').map(line => {
@@ -1026,10 +1105,11 @@ async function runDataChecks() {
   const box = $('#dataChecks');
   if (!box) return;
   box.innerHTML = '<div class="hint">Проверявам…</div>';
-  const [multi, dups, orphanDeacc] = await Promise.all([
+  const [multi, dups, orphanDeacc, amAudit] = await Promise.all([
     call(window.api.books.multiCopyRecords()),
     call(window.api.books.findDuplicateBarcodes()),
-    call(window.api.books.deaccessionedWithoutAct())
+    call(window.api.books.deaccessionedWithoutAct()),
+    call(window.api.authorMark.audit())
   ]);
   if (multi === null || dups === null || orphanDeacc === null) { box.innerHTML = ''; return; }
   const many = multi.filter(r => Number(r.quantity) > 1);
@@ -1086,7 +1166,33 @@ async function runDataChecks() {
         ${g.books.map(b => `<tr><td class="num">${b.inv_number ?? '—'}</td><td>${nameOf(b)}</td><td>${esc(b.status || '')}</td>
           <td><button class="btn sm" onclick="bookForm(${b.id})">Отвори</button></td></tr>`).join('')}
         </tbody></table></div></div>`).join('')}`
-      : '<div class="hint">Няма повтарящи се баркодове.</div>'}`;
+      : '<div class="hint">Няма повтарящи се баркодове.</div>'}
+
+    <h4 style="font-size:14px;margin:20px 0 6px">Авторски знаци, чиято буква не отговаря на фамилията</h4>
+    ${authorMarkAuditHtml(amAudit, nameOf)}`;
+}
+/* Авторският знак започва с първата буква на фамилията („Вазов“ → „В-15“).
+   Знак с друга буква е или грешка при въвеждане, или книга, подписана по нещо
+   друго (сборник по съставител, книга ЗА някого). Програмата не гадае кое от
+   двете — само посочва реда, за да го погледне човек. */
+function authorMarkAuditHtml(a, nameOf) {
+  if (!a) return '<div class="hint">Проверката не се извърши.</div>';
+  if (!a.mismatchedTotal) {
+    return '<div class="hint">Няма несъответствия'
+      + (a.missingTotal ? ' · документи без авторски знак: ' + a.missingTotal
+         + ' (могат да се попълнят от „Авторски знак“ по-горе)' : '') + '.</div>';
+  }
+  return `<div class="note d" style="margin-top:0">Знакът започва с първата буква на фамилията.
+    ${a.mismatchedTotal === 1 ? 'Един документ носи' : a.mismatchedTotal + ' документа носят'} знак с друга буква.
+    Това е или грешка при въвеждане, или подписване по друго (сборник по съставител, книга <i>за</i> някого) —
+    затова нищо не се променя само: отворете реда и решете.
+    ${a.mismatchedTotal > a.mismatched.length ? 'Показани са първите ' + a.mismatched.length + '.' : ''}</div>
+    <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th>
+      <th>Знак</th><th>По фамилия</th><th></th></tr></thead><tbody>
+    ${a.mismatched.map(b => `<tr><td class="num">${b.inv_number ?? '—'}</td><td>${nameOf(b)}</td>
+      <td>${esc(b.author_mark || '')}</td><td>${esc(b.basis || '')} → „${esc(b.expected)}“</td>
+      <td><button class="btn sm" onclick="bookForm(${b.id})">Отвори</button></td></tr>`).join('')}
+    </tbody></table></div>`;
 }
 window.runDataChecks = runDataChecks;
 async function clearOrphanDeaccession(id) {
