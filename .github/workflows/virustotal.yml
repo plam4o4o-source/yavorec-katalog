@@ -1,0 +1,35 @@
+name: VirusTotal Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Find EXE
+        id: find_exe
+        shell: bash
+        run: |
+          EXE=$(find . -type f -iname "*.exe" | head -n 1)
+
+          if [ -z "$EXE" ]; then
+            echo "No EXE file found."
+            exit 1
+          fi
+
+          echo "Found: $EXE"
+          echo "file=$EXE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to VirusTotal
+        env:
+          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+        run: |
+          curl --request POST \
+            --url https://www.virustotal.com/api/v3/files \
+            --header "x-apikey: $VT_API_KEY" \
+            --form "file=@${{ steps.find_exe.outputs.file }}"
