@@ -1,5 +1,5 @@
 'use strict';
-/* v2.4.36 — Авторски знак по фамилията.
+/* v2.4.38 — Авторски знак по фамилията (Й се търси от буква И).
    =====================================================================
    Таблицата с числата е чуждо издание и НЕ идва с програмата — внася се от
    файл на самата библиотека. Затова тук се проверява МЕХАНИЗМЪТ, а числата в
@@ -18,7 +18,7 @@ test.after(cleanupTmpDirs);
 
 const MOD = path.join(APP_DIR, 'handlers', 'author-mark');
 const { basisOf, keyOf, parseTable, lookup, formatMark, detectSeparator, decodeCp1251,
-        isNamed, prefixLabel, refinements, extractPairs } = require(MOD).pure;
+        isNamed, prefixLabel, refinements, extractPairs, foldJot } = require(MOD).pure;
 
 /* Измислена таблица със свойствата на истинската: вътре в буквата числата
    растат заедно с буквосъчетанието. */
@@ -121,6 +121,49 @@ test('взима най-голямото буквосъчетание, коет�
   assert.equal(lookup(rows, ''), null);
   // Не прескача в чужда буква: „ГА 11“ не бива да излезе при фамилия на „В“.
   assert.equal(lookup(rows, 'ВЯ').prefix.charAt(0), 'В');
+});
+
+/* ---------- Й се търси от буква И ---------- */
+/* В авторските таблици Й изобщо не се изписва: „Йовков“ стои като „Иовк“,
+   „Найденов“ — като „Наи“, „Койчев“ — като „Коич“. Числото идва от буква И,
+   но знакът пази буквата на фамилията: „Й 77“, за да стои книгата при другите
+   Й-автори на рафта. Ь няма — нито в таблиците, нито като начална буква. */
+const JOT_ROWS = parseTable([
+  'Бои 59', 'Боич 60',
+  'Ио 74', 'Иоан 75', 'Иов 76', 'Иовк 77', 'Иовч 79', 'Ионк 80', 'Иорд 83', 'Иот 85',
+  'Ива 16', 'Иван 18', 'Иванов 21',
+  'Наи 17', 'Нак 18',
+  'Раи 27', 'Раин 28', 'Раич 29'
+].join('\n')).rows;
+
+test('Й се търси от буква И, но знакът пази буквата на фамилията', () => {
+  assert.equal(foldJot('ЙОВКОВ'), 'ИОВКОВ');
+  assert.equal(foldJot('РАЙКОВ'), 'РАИКОВ', 'и вътре в думата, не само в началото');
+
+  const hit = lookup(JOT_ROWS, 'ЙОВКОВ');
+  assert.equal(hit.prefix, 'ИОВК', 'намерен е ' + (hit && hit.prefix));
+  assert.equal(hit.mark, '77');
+  assert.equal(formatMark('ЙОВКОВ'.charAt(0), hit.mark, ' '), 'Й 77',
+    'числото идва от И, но буквата остава Й — книгата стои при Й-авторите');
+  assert.equal(lookup(JOT_ROWS, 'ЙОРДАНОВ').mark, '83');
+  assert.equal(lookup(JOT_ROWS, 'ЙОНКОВ').mark, '80');
+
+  /* Вътрешното Й е същият случай и е по-коварен: без замяната „Райков“ пада на
+     „Раич“, защото Й се нарежда СЛЕД И — тоест мълчаливо ГРЕШЕН знак, а не
+     липсващ. Затова се проверява точно този ред. */
+  assert.equal(lookup(JOT_ROWS, 'РАЙКОВ').prefix, 'РАИ', 'Райков е „Раи“, не „Раич“');
+  assert.equal(lookup(JOT_ROWS, 'РАЙЧЕВ').prefix, 'РАИЧ');
+  assert.equal(lookup(JOT_ROWS, 'НАЙДЕНОВ').prefix, 'НАИ');
+  assert.equal(lookup(JOT_ROWS, 'БОЙЧЕВ').prefix, 'БОИЧ');
+  // Фамилия на И не се променя от нищо от горното.
+  assert.equal(lookup(JOT_ROWS, 'ИВАНОВ').prefix, 'ИВАНОВ');
+});
+
+test('ако някое издание все пак има раздел Й, той се ползва, вместо да се замества', () => {
+  const own = parseTable(['Ио 74', 'Иов 76', 'Йо 90', 'Йов 91', 'Йовк 92'].join('\n')).rows;
+  const hit = lookup(own, 'ЙОВКОВ');
+  assert.equal(hit.prefix, 'ЙОВК', 'собственият раздел Й има предимство: ' + hit.prefix);
+  assert.equal(hit.mark, '92');
 });
 
 /* ---------- по какво се подписва ---------- */
@@ -267,6 +310,34 @@ test('проверката посочва знаците, чиято буква 
   assert.deepEqual([lower.expected, lower.basis], ['Т', 'Талев'], 'малката буква на знака се разпознава и сравнява');
   assert.equal(a.missingTotal, 1, 'и колко са изобщо без знак');
   assert.equal(a.total, 5);
+});
+
+test('Й-фамилия през целия модул: знак „Й“ с числото от И, и без фалшива тревога в проверката', async () => {
+  const s = setup('am-jot');
+  /* Таблица с раздел И, който покрива и Й-имената („Иовк“ за Йовков), както е в
+     истинските авторски таблици — там раздел Й изобщо няма. */
+  const iSection = [['ИВ', '70'], ['ИВАНОВ', '72'], ['ИО', '74'], ['ИОАН', '75'], ['ИОВ', '76'],
+    ['ИОВК', '77'], ['ИОНК', '80'], ['ИОРД', '83'], ['ИОТ', '85']].map(([prefix, mark]) => ({ prefix, mark }));
+  s.write('t.csv', asCsv(TBL.filter(r => 'ЙИ'.indexOf(r.prefix.charAt(0)) < 0).concat(iSection)));
+  await s.ok('authorMark:choose'); await s.ok('authorMark:confirm');
+
+  const sug = await s.ok('authorMark:suggest', { author: 'Йовков, Йордан' });
+  assert.equal(sug.ok, true, sug.reason);
+  assert.equal(sug.mark, 'Й-77', 'числото идва от реда „Иовк“, а буквата остава Й');
+  assert.equal(sug.prefix, 'ИОВК', 'предложението показва истинския ред от таблицата');
+  assert.equal(sug.fromLetter, 'И', 'и казва, че редът е под друга буква — иначе изглежда като грешка');
+
+  const plain = await s.ok('authorMark:suggest', { author: 'Вазов, Иван' });
+  assert.equal(plain.fromLetter, null, 'при обикновена фамилия няма какво да се обяснява');
+
+  /* Проверката на заварените знаци не бива да вдига тревога за нито един от
+     двата редовни навика: една библиотека пише „Й 77“, друга — „И 77“. */
+  s.addBook({ inv: 1, author: 'Йовков, Йордан', mark: 'Й 77' });
+  s.addBook({ inv: 2, author: 'Йорданов, Петър', mark: 'И 83' });
+  s.addBook({ inv: 3, author: 'Йовков, Йордан', mark: 'Г 13' });   // истинска грешка
+  const a = await s.ok('authorMark:audit');
+  assert.equal(a.mismatchedTotal, 1, 'само сгрешеният ред: ' + JSON.stringify(a.mismatched.map(x => x.inv_number)));
+  assert.equal(a.mismatched[0].inv_number, 3);
 });
 
 test('при 15 000 документа груповото попълване свършва бързо и не изпуска нищо', async () => {
@@ -442,6 +513,24 @@ test('копчето „Предложи“ казва ЗАЩО е този зн
   await window.authorMarkSuggest();
   await settle();
   assert.equal(inp.value, 'В-14', 'при съгласие се сменя');
+});
+
+test('копчето „Предложи“ при Й обяснява, че редът е под буква И', async () => {
+  const dom = buildDom({ ...FORM_DEPS,
+    'books.get': { id: 1, inv_number: 1, title: 'Старопланински легенди', author: 'Йовков, Йордан',
+      author_mark: '', status: 'наличен' },
+    'authorMark.suggest': { ok: true, mark: 'Й-77', basis: 'Йовков', from: 'author', exact: true,
+      prefix: 'ИОВК', num: '77', fromLetter: 'И', refine: [] } });
+  const { window } = dom, d = window.document;
+  await settle();
+  await window.bookForm(1);
+  await settle();
+  await window.authorMarkSuggest();
+  await settle();
+  assert.equal(d.querySelector('#bookF [name=author_mark]').value, 'Й-77');
+  const hint = d.getElementById('amHint').textContent.replace(/\s+/g, ' ');
+  assert.match(hint, /ред „ИОВК“/, 'показва истинския ред: ' + hint);
+  assert.match(hint, /Й се търси от буква И/, 'иначе редът „ИОВК“ изглежда сгрешен: ' + hint);
 });
 
 test('когато няма внесена таблица, копчето обяснява, вместо да мълчи или да пише нещо в полето', async () => {
