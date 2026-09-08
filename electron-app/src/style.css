@@ -555,6 +555,15 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
    >=5.69:1 във всичките 6 теми. Важи и за .prsDates/.chrDate по-долу. */
 .udkCode{font-family:var(--mono); font-weight:700; color:var(--brassD); flex:0 0 auto; font-size:12px}
 .udkLbl{color:var(--ink2); line-height:1.3}
+/* Заглавието на класа е и бутон (избира самия клас „2“, „8“…), затова носи и
+   .udkItem. Двата селектора са с еднаква тежест, затова блокът стои СЛЕД
+   .udkItem — иначе рамката, отстоянието и фонът оттам щяха да го надвият. */
+.udkMain.udkItem{
+  padding:0 0 5px; margin-bottom:7px;
+  border:0; border-bottom:1px solid var(--rule); border-radius:0; background:none;
+}
+.udkMain.udkItem:hover{background:none; border-bottom-color:var(--brass)}
+.udkMain .udkLbl{color:var(--spine); font-weight:700; font-family:var(--serif)}
 
 /* ---------- Сливане на дубликати ---------- */
 .authGroup{border:1px solid var(--rule2); border-radius:4px; padding:12px 14px; margin-bottom:12px; background:var(--paper)}

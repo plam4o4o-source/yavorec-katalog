@@ -11,6 +11,60 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.41
+
+**BG:** Преглед на поправките от двадесет и девети кръг (v2.4.40, новата
+таблица на УДК). Самите данни и подредбата са верни — build-udk.js прави
+`src/udk.js` от `src/udk.json` байт по байт същия като вградения файл,
+подредбата съвпада и с `localeCompare('bg')`, а нито един от 109-те стари кода
+не липсва.
+
+- **Правенето на `src/udk.js` можеше мълчаливо да пробута суров, изпълним
+  JavaScript в готовия файл.** `based_on`/`license_note`/`additions_note` от
+  `src/udk.json` отиват СУРОВИ в единствения блоков коментар на header-а.
+  Комбинация звезда-наклонена-черта в свободния текст на бележка затваря
+  коментара там, а следваща наклонена-звезда по-надолу в същия текст го отваря
+  пак — между двете застава суров код в `src/udk.js`, зареждан направо с
+  `<script>` без модул, който да го изолира. Доказано с repro: редактиран
+  `based_on` с точно такава комбинация оставяше `window.pwn=1;` извън всякакъв
+  коментар в изхода. Полетата не идват от читател, а от библиотекаря/
+  разработчика, но грешка в свободен текст на бележка не бива да пробутва
+  изпълним код в продукцията безшумно. Поправено: генераторът сега пада с ясна
+  грешка при правенето, вместо да произведе развален файл — доказано с
+  revert-and-retest.
+
+Проверено и НЕ прието за дефект на този кръг: (1) списъкът от 109 стари кода в
+регресионния тест носи един допълнителен ред („82-5“), който не е бил в
+старата таблица — не пропуска защита (и 109-те истински стари кода са там), а
+кодът така или иначе е и в новата подборка, затова тестът минава и с грешния,
+и с верния списък; (2) заглавията на класовете (`tip: "клас"`) се разпознават
+само от `data.entries`, не и от `data.additions` — в сегашните данни нито едно
+допълнение не е клас, затова пролуката не се задейства с нищо в самия файл;
+оставена без промяна този кръг, тъй като поправка без данни, които да я
+изпитат, е недоказуема.
+
+Само поправка в build-скрипта и тестовете — без промяна в самата таблица или
+в екрана. Пълната поредица: 1326 успешни, 0 неуспешни (UTC и Europe/Sofia).
+
+**EN:** A review of round twenty-nine's own fix (v2.4.40, the new UDC table).
+The data and its ordering are correct — build-udk.js reproduces `src/udk.js`
+byte-for-byte from `src/udk.json`, the ordering matches `localeCompare('bg')`
+too, and none of the 109 old codes are missing.
+
+- **Building `src/udk.js` could silently smuggle raw, executable JavaScript
+  into the generated file.** `based_on`/`license_note`/`additions_note` are
+  interpolated raw into the header's single block comment; a star-slash
+  sequence inside that free text closes the comment early, and a later
+  slash-star in the same text reopens it — leaving raw code sitting between
+  the two in a file loaded directly via `<script>` with no module boundary.
+  Confirmed with a repro (an edited `based_on` field left `window.pwn=1;`
+  outside any comment in the output). These fields come from the
+  librarian/developer, not a reader, but a mistake in free-form note text
+  should not silently smuggle executable code into production. Fixed: the
+  generator now fails loudly at build time instead of producing a broken
+  file — proven with revert-and-retest. Code-only round: 1326 tests passing,
+  0 failing (UTC and Europe/Sofia).
+
 ## v2.4.39
 
 **BG:** Преглед на поправките от двадесет и седмия кръг (v2.4.38). Самата
@@ -45,6 +99,64 @@ showing a nonsensical "- is looked up under И" instead of "Й is looked up
 under И", undermining the exact confusion this hint exists to prevent. Fixed by having
 the server return the already-normalized letter instead of having the client
 re-derive it from raw text. Code-only round: 1314 tests passing, 0 failing.
+
+## v2.4.40
+
+**BG:** Двадесет и девети кръг — **новата таблица на УДК**. Библиотекарката подаде
+работен класификатор по **официалното национално издание на УДК, 2017 г.**
+(Национална библиотека „Св. св. Кирил и Методий“ съвместно с UDC Consortium) и
+по Multilingual UDC Summary. Той замества досегашната съкратена таблица, писана
+на ръка.
+
+- **146 кода от изданието вместо 109 съчинени.** Наименованията вече са тези от
+  изданието, а не преразказ: „Етнология. Културна антропология. Етнография.
+  Нрави. Обичаи. Традиции. Бит. Фолклор“ вместо „Етнография. Фолклор“.
+  Литературите по езици са пълни (германски, романски, славянски, балтийски,
+  кавказки групи с подразделите им) — за фонд, в който преводната литература е
+  голяма част, това е разликата между „чужда литература“ и точен код.
+- **Нито един стар код не е изгубен.** 27 кода от досегашната таблица ги нямаше
+  в новата подборка, а се ползват в този фонд: `004` компютри, `271.2`
+  Православие, `791` кино, `792` театър, **`793` танци и хореография**,
+  `796/799` спорт, `821.163.2-31` български роман, `821.163.2-93` българска
+  литература за деца, `94(497.2)` история на България и др. Те се запазват, но
+  стоят ОТДЕЛНО в данните и са отбелязани — горното е по изданието (CC BY-SA
+  3.0), долното е на проекта. Заварен запис във фонда не остава с код, който
+  вече го няма в избора; отделен тест изброява всичките 109 стари кода и пада,
+  ако някой изчезне.
+- **Класът вече също се избира** — натиска се заглавието му. Дотук „2“ и „8“
+  бяха само надписи и такъв код се пишеше на ръка, а книга, класирана само на
+  класа, е обичайна.
+- **Данните излязоха от кода.** Таблицата живее в `src/udk.json` (един ред на
+  код), а `src/udk.js` се ПРАВИ от него с `node tools/build-udk.js` — следващото
+  издание се подменя, без да се пипа JavaScript. Тест сравнява правения файл с
+  това, което генераторът прави сега, за да не се разминат незабелязано.
+- **Подредбата вътре в класа е по УДК**, а не по число или по азбука: „006“
+  преди „01“ (чете се знак по знак, не като 6 и 1), „82-93“ преди „82.0“
+  (тирето е преди точката), „82“ преди „821“.
+- **Лицензът е записан там, където се вижда.** УДК Summary е CC BY-SA 3.0 —
+  разпространява се с посочване на източника, затова таблицата ИДВА с
+  програмата (за разлика от авторската таблица, която е чуждо издание и се внася
+  от библиотеката). Бележката стои в главата на `src/udk.js` и в `README.md`, и
+  има тест, който пада, ако отпадне.
+
+Проверки: 11 нови теста (общо 1325), всеки проверен с мутация. Търсенето в
+прозореца оставя заглавието на класа видимо — иначе намереното виси без да се
+знае в кой клас е.
+
+**EN:** Round twenty-nine — **a new UDC table**. The librarian supplied a
+working classifier based on the official Bulgarian national UDC edition (2017,
+St. Cyril and St. Methodius National Library with the UDC Consortium) and the
+Multilingual UDC Summary, replacing the hand-written short table: 146 edition
+codes instead of 109 invented ones, with full language-by-language literature
+breakdowns. None of the old codes were dropped — 27 that the selection lacks but
+this fund uses (computing, Orthodoxy, cinema, theatre, **dance**, sport,
+Bulgarian novel/children's literature, Bulgarian history) are kept, marked
+separately as the project's own rather than the edition's. The class heading is
+now selectable too. The data moved out of code into `src/udk.json`, with
+`src/udk.js` generated by `tools/build-udk.js` and a test that fails if the two
+drift apart. UDC Summary is CC BY-SA 3.0, so the table ships with the program
+(unlike the author table, which does not) and the attribution is in the file
+header, in `README.md`, and in a test. 11 new tests (1 325 total).
 
 ## v2.4.38
 

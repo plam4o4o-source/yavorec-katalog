@@ -549,9 +549,13 @@ window.bookCopyForm = bookCopyForm;
    полето, а определителите се добавят накрая — полето остава свободен текст, за
    да не пречи на съставни кодове, каквито таблицата не покрива. */
 function udkPicker() {
+  /* Заглавието на класа СЪЩО се избира: книга, класирана само на „2“ или „8“,
+     е обичайна, а дотук класът беше само надпис и такъв код се пишеше на ръка. */
   const rows = UDK_TREE.map(([code, name, subs]) => `
     <div class="udkGroup">
-      <div class="udkMain">${esc(code)} — ${esc(name)}</div>
+      <button type="button" class="udkMain udkItem" onclick="udkPick('${esc(code)}')"
+        title="Избира само класа „${esc(code)}“"><span class="udkCode">${esc(code)}</span>
+        <span class="udkLbl">${esc(name)}</span></button>
       <div class="udkSubs">
         ${subs.map(([c, t]) => `<button type="button" class="udkItem" onclick="udkPick('${esc(c)}')">
           <span class="udkCode">${esc(c)}</span><span class="udkLbl">${esc(t)}</span></button>`).join('')}
@@ -577,12 +581,18 @@ function udkFilter() {
   const q = ($('#udkQ').value || '').trim().toLowerCase();
   document.querySelectorAll('#udkList .udkGroup').forEach(g => {
     let shown = 0;
-    g.querySelectorAll('.udkItem').forEach(it => {
+    g.querySelectorAll('.udkSubs .udkItem').forEach(it => {
       const hit = !q || it.textContent.toLowerCase().includes(q);
       it.style.display = hit ? '' : 'none';
       if (hit) shown++;
     });
-    g.style.display = shown ? '' : 'none';
+    /* Заглавието на класа е и бутон, но не се крие заедно с редовете: то е
+       единственото, което казва в кой клас са намерените. Показва се, когато
+       групата има какво да покаже ИЛИ когато самото то съвпада. */
+    const head = g.querySelector('.udkMain');
+    const headHit = !q || (head && head.textContent.toLowerCase().includes(q));
+    if (head) head.style.display = (shown || headHit) ? '' : 'none';
+    g.style.display = (shown || headHit) ? '' : 'none';
   });
 }
 window.udkFilter = udkFilter;
