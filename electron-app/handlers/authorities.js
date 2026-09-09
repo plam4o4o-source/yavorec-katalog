@@ -31,7 +31,6 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
      изцяло в по-дългото, а всяка инициала да съвпада с началото на останала дума.
      Затова „Димитър Колев“ и „Димитър Костов“ НЕ съвпадат: втората пълна дума е
      различна. */
-  const looseMatch = (a, b) => looseMatchTok(nameTokens(a), nameTokens(b));
   /* Сравнението е СИМЕТРИЧНО — проверява се и в двете посоки.
 
      Самата проверка не е: при равен брой пълни думи за „по-късо“ се взима
@@ -50,7 +49,10 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
     full: tokens.filter(t => t.length > 1),
     init: tokens.filter(t => t.length === 1)
   });
-  const looseMatchTok = (A, B) => { const a = splitName(A), b = splitName(B); return oneWay(a, b) || oneWay(b, a); };
+  /* Едната посока не стига (виж бележката по-горе) — оттук нататък сравнява
+     само това. Двете обвивки отпреди пренаписването (looseMatch/looseMatchTok)
+     останаха без нито едно повикване и затова ги няма: мъртъв код до жива
+     бележка кара следващия четец да търси несъществуваща разлика. */
   function looseMatchParts(a, b) { return oneWay(a, b) || oneWay(b, a); }
   function oneWay(a, b) {
     if (!a.full.length && !a.init.length) return false;

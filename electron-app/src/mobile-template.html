@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Инвентаризация — сканиране</title>
+<title>__TITLE__</title>
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:#1A1208;color:#EFE9D8;
@@ -46,19 +46,22 @@
 </header>
 <main>
   <div class="note" id="hint">
-    Натиснете <b>„Пусни камерата“</b> и насочете телефона към баркода на документа.
-    Всеки разчетен номер се добавя в списъка. Когато свършите, натиснете
+    Насочете телефона към баркода на документа: с <b>„Пусни камерата“</b> (жива камера) или с
+    <b>„Снимай баркод“</b> (снимка с камерата на телефона — работи и когато страницата е отворена
+    като файл). Всеки разчетен номер се добавя в списъка. Когато свършите, натиснете
     <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, имейл или както Ви е удобно) —
     там се въвежда в „Инвентаризация“.
   </div>
-  <div class="note err" id="nocam" style="display:none">
-    Този браузър не може да чете баркодове с камерата. Ползвайте <b>Chrome на Android</b>,
-    или въвеждайте номерата на ръка в полето по-долу — резултатът е същият.
-  </div>
+  <div class="note err" id="nocam" style="display:none"></div>
 
   <video id="cam" playsinline muted></video>
   <button class="btn" id="startBtn">Пусни камерата</button>
   <button class="btn sec" id="stopBtn" style="display:none">Спри камерата</button>
+  <!-- Снимка през самото приложение „Камера“ на телефона. Не минава през
+       getUserMedia и затова НЕ иска разрешение от страницата — единственият път,
+       който работи, когато страницата е отворена като файл от паметта. -->
+  <button class="btn sec" id="shotBtn" style="display:none">Снимай баркод</button>
+  <input type="file" id="shotInp" accept="image/*" capture="environment" style="display:none">
 
   <div class="stat">
     <div class="box"><b id="cnt">0</b><span>сканирани</span></div>
@@ -81,8 +84,15 @@
 /* Списъкът се пази в паметта на браузъра, за да не се загуби при заключване на
    екрана или случайно затваряне на страницата по време на обхождането. */
 var KEY = 'inventar-scan-v1';
+var SLUG = '__SLUG__';                    // името на библиотеката за името на файла
 var codes = [];
 var dups = 0;
+/* Празна лента не се показва: при непопълнени настройки редът оставаше празен
+   и заглавието висеше над нищо. */
+(function () {
+  var el = document.getElementById('libName');
+  if (el && !el.textContent.trim()) el.style.display = 'none';
+})();
 try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); codes = saved.codes || []; dups = saved.dups || 0; } catch (e) {}
 
 function persist() { try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups })); } catch (e) {} }
@@ -144,7 +154,10 @@ document.getElementById('fileBtn').addEventListener('click', function () {
   var blob = new Blob([codes.join('\n')], { type: 'text/plain;charset=utf-8' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'inventarizaciya-' + new Date().toISOString().slice(0, 10) + '.txt';
+  /* Името на библиотеката влиза и в името на файла: в един разговор във Вайбър
+     се събират списъци от повече от една проверка. В САМИЯ файл не влиза нищо
+     освен номерата — програмата чете всяка дума като номер (importScansRun). */
+  a.download = 'inventarizaciya-' + (SLUG ? SLUG + '-' : '') + new Date().toISOString().slice(0, 10) + '.txt';
   a.click();
 });
 document.getElementById('clearBtn').addEventListener('click', function () {
@@ -154,18 +167,120 @@ document.getElementById('clearBtn').addEventListener('click', function () {
 
 /* ---- Камерата като баркод четец ----
    BarcodeDetector е наличен в Chrome на Android. Където го няма, страницата
-   продължава да работи с ръчно въвеждане — затова не се спира с грешка. */
+   продължава да работи с ръчно въвеждане — затова не се спира с грешка.
+
+   ЗА РАЗРЕШЕНИЕТО НА КАМЕРАТА (v2.4.45). Страницата се прехвърля на телефона
+   като файл и се отваря оттам — тоест на адрес file:// (или content://, ако се
+   отвори направо от Вайбър/пощата). Chrome пази разрешенията ПО АДРЕС на
+   страницата, а такъв адрес няма собствен адрес, на който да се запише
+   разрешение: на Android заявката се отказва, БЕЗ изобщо да се покаже въпросът
+   „Разрешавате ли достъп до камерата?“. Точно това се получаваше — човекът
+   натиска „Пусни камерата“, нищо не пита и нищо не става.
+
+   Оттук нататък страницата:
+   • го КАЗВА предварително, вместо да остави библиотекаря да чака въпрос,
+     който няма да дойде;
+   • предлага „Снимай баркод“ — снимка през самото приложение „Камера“ на
+     телефона (input type=file capture). То си има собствено разрешение и не
+     зависи от адреса на страницата, затова работи и от файл;
+   • пази живата камера за случаите, в които тя наистина работи — на компютър
+     и когато страницата е отворена по https://. */
 var stream = null, detector = null, timer = null;
 var video = document.getElementById('cam');
-if (!('BarcodeDetector' in window)) {
-  document.getElementById('nocam').style.display = 'block';
-  document.getElementById('startBtn').disabled = true;
+var noCam = document.getElementById('nocam');
+var startBtn = document.getElementById('startBtn');
+var shotBtn = document.getElementById('shotBtn');
+var LOCAL_FILE = !/^https?:$/.test(location.protocol);
+
+function newDetector() {
+  return new BarcodeDetector({
+    formats: ['code_39', 'code_128', 'ean_13', 'ean_8', 'codabar', 'itf', 'qr_code']
+  });
 }
-document.getElementById('startBtn').addEventListener('click', async function () {
+function showNoCam(html) { noCam.innerHTML = html; noCam.style.display = 'block'; }
+
+/* Обяснява ОТКАЗА с думи, които вършат работа на място. Дотук се показваше
+   съобщението на самия браузър („Permission denied“, а при липсващ
+   navigator.mediaDevices — „Cannot read properties of undefined“). */
+function camErrText(e) {
+  var n = (e && e.name) || '';
+  if (n === 'NotAllowedError' || n === 'SecurityError') {
+    return LOCAL_FILE
+      ? 'Chrome отказва камерата на страница, отворена като файл от паметта на телефона — затова и не пита за разрешение. Ползвайте <b>„Снимай баркод“</b> или въвеждайте номерата на ръка.'
+      : 'Достъпът до камерата е отказан. Разрешете го от катинарчето вляво от адреса и опитайте пак.';
+  }
+  if (n === 'NotFoundError' || n === 'OverconstrainedError') {
+    return 'Не е намерена задна камера на това устройство. Ползвайте <b>„Снимай баркод“</b> или ръчното въвеждане.';
+  }
+  if (n === 'NotReadableError') {
+    return 'Камерата е заета от друго приложение. Затворете го и опитайте пак.';
+  }
+  if (n === 'TypeError' || !navigator.mediaDevices) {
+    return 'Този браузър не дава жива камера на страница, отворена като файл. Ползвайте <b>„Снимай баркод“</b> или ръчното въвеждане.';
+  }
+  return escHtml((e && e.message) || e);
+}
+
+/* Какво може ТОЗИ телефон, казано преди първото натискане, а не след него. */
+(function capabilities() {
+  var canRead = ('BarcodeDetector' in window);
+  var canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (!canRead) {
+    startBtn.disabled = true;
+    showNoCam('Този браузър не може да чете баркодове с камерата. Ползвайте <b>Chrome на Android</b>, ' +
+      'или въвеждайте номерата на ръка в полето по-долу — резултатът е същият.');
+    /* Подсказката отгоре сочи двата бутона за камера; тук ги няма нито един, а
+       текст, който сочи несъществуващо копче, губи повече време от липсата му. */
+    document.getElementById('hint').innerHTML =
+      'Въведете инвентарния номер в полето по-долу и натиснете Enter — по един номер наведнъж. ' +
+      'Когато свършите, натиснете <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, ' +
+      'имейл или както Ви е удобно) — там се въвежда в „Инвентаризация“.';
+    return;
+  }
+  shotBtn.style.display = 'inline-block';   // снимката работи навсякъде, където има четец
+  if (!canLive) {
+    startBtn.disabled = true;
+    showNoCam('Живата камера не е достъпна в този браузър. Ползвайте <b>„Снимай баркод“</b> — ' +
+      'снима се с приложението „Камера“ на телефона и номерът се разчита от снимката.');
+    return;
+  }
+  if (LOCAL_FILE) {
+    showNoCam('Страницата е отворена като <b>файл</b> от паметта на телефона. В този режим Chrome ' +
+      'не пита за достъп до камерата и живата камера няма да тръгне. Ползвайте <b>„Снимай баркод“</b> — ' +
+      'снимка с приложението „Камера“, номерът се разчита от нея. (Живата камера работи, ако страницата ' +
+      'се отвори по интернет адрес, започващ с https://.)');
+  }
+})();
+
+/* ---- Снимка през приложението „Камера“ ---- */
+var shotInp = document.getElementById('shotInp');
+shotBtn.addEventListener('click', function () { shotInp.click(); });
+shotInp.addEventListener('change', async function () {
+  var file = this.files && this.files[0];
+  this.value = '';                       // за да се приеме и същият файл втори път
+  if (!file) return;
   try {
-    detector = new BarcodeDetector({
-      formats: ['code_39', 'code_128', 'ean_13', 'ean_8', 'codabar', 'itf', 'qr_code']
-    });
+    if (!detector) detector = newDetector();
+    var bmp = await createImageBitmap(file);
+    var found = await detector.detect(bmp);
+    if (bmp.close) bmp.close();
+    if (!found || !found.length) {
+      showNoCam('На снимката няма разчетен баркод. Снимайте по-отблизо, така че баркодът да пълни кадъра.');
+      beep(false);
+      return;
+    }
+    noCam.style.display = 'none';
+    // Един кадър може да хване няколко етикета; всеки влиза веднъж.
+    var seen = {};
+    found.forEach(function (b) { if (!seen[b.rawValue]) { seen[b.rawValue] = 1; addCode(b.rawValue); } });
+  } catch (e) {
+    showNoCam('Снимката не можа да се прочете: ' + escHtml((e && e.message) || e));
+  }
+});
+
+startBtn.addEventListener('click', async function () {
+  try {
+    detector = newDetector();
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 } }
     });
@@ -195,10 +310,7 @@ document.getElementById('startBtn').addEventListener('click', async function () 
       } catch (e) {}
     }, 350);
   } catch (e) {
-    document.getElementById('nocam').style.display = 'block';
-    document.getElementById('nocam').innerHTML =
-      'Камерата не се стартира: ' + escHtml(e && e.message ? e.message : e) +
-      '<br>Проверете дали сте разрешили достъп до камерата, или въвеждайте номерата на ръка.';
+    showNoCam('<b>Живата камера не тръгна.</b> ' + camErrText(e));
   }
 });
 document.getElementById('stopBtn').addEventListener('click', function () {

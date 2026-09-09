@@ -7,15 +7,42 @@ const { resolveScannedBook } = require('../security-utils');
 module.exports = function registerMobileHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, normalizeScanCode } = deps;
 
+  /* Името на библиотеката влиза на ТРИ места, не само в заглавната лента:
+     в <title> (така се казва разделът в Chrome и точно това име получава
+     иконата, ако страницата се добави на началния екран), в лентата на самата
+     страница и в предложеното име на файла. На телефона на библиотекаря стоят
+     и други файлове; „inventarizaciya-skener.html“ не казва нищо, а страницата
+     на две библиотеки изглежда еднакво. */
+  const FALLBACK_TITLE = 'Инвентаризация — сканиране';
+  const escHtml = (v) => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  /* Латиница за името на файла: Windows не приема < > : " / \ | ? *, а кирилица
+     в име на файл минава през Вайбър/имейл различно според програмата. */
+  const BG2LAT = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',
+    н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'c',ч:'ch',ш:'sh',щ:'sht',ъ:'a',ь:'y',ю:'yu',я:'ya' };
+  const slug = (v) => String(v || '').toLowerCase()
+    .replace(/[а-яё]/g, (ch) => BG2LAT[ch] || '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
   ipcMain.handle('mobile:generate', async () => {
     try {
       const s = getDb().prepare('SELECT lib_name, org, place FROM settings WHERE id = 1').get() || {};
       const name = [s.lib_name || s.org || '', s.place || ''].filter(Boolean).join(' · ');
       const tpl = fs.readFileSync(path.join(__dirname, '..', 'src', 'mobile-template.html'), 'utf8');
-      const html = tpl.replace('__LIB__', name.replace(/[<>&]/g, ''));
+      /* Заместването е с ФУНКЦИЯ, а не с низ: при низ „$&“, „$'“ и „$1“ в името
+         са специални за String.replace и биха вкарали части от самата страница
+         в заглавието ѝ. Името идва от настройките, тоест от човек. */
+      const base = slug(s.lib_name || s.org || '');
+      const fill = {
+        __LIB__: escHtml(name),
+        __TITLE__: escHtml(name ? name + ' · Инвентаризация' : FALLBACK_TITLE),
+        __SLUG__: base                     // само [a-z0-9-] — влиза в JS низ в страницата
+      };
+      const html = tpl.replace(/__LIB__|__TITLE__|__SLUG__/g, (m) => fill[m]);
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Запишете страницата за сканиране с телефон',
-        defaultPath: 'inventarizaciya-skener.html',
+        defaultPath: base ? `inventarizaciya-skener-${base}.html` : 'inventarizaciya-skener.html',
         filters: [{ name: 'HTML страница', extensions: ['html'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };

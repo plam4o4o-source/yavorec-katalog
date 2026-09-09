@@ -8,7 +8,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
       SELECT s.*,
-             (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id) AS scanned,
+             /* Приключена проверка показва СНИМКАТА (scanned_final) — същото
+                число, което влиза и в протокола по чл. 40. Иначе списъкът
+                показваше суровия брой сканирания до самия бутон „Протокол“,
+                който печата поправеното: „в обхвата 9 · проверени 7 · липсващи
+                4“ на екрана срещу „проверени 6“ на хартия (проверка при
+                прегледа на v2.4.45). Текуща проверка и сесиите отпреди
+                снимката имат NULL и се броят както досега. */
+             COALESCE(s.scanned_final,
+                      (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id)) AS scanned,
              (SELECT COUNT(*) FROM inventory_session_missing m WHERE m.session_id = s.id) AS missing
       FROM inventory_sessions s ORDER BY s.date DESC
     `).all())

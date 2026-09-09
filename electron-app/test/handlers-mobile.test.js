@@ -55,7 +55,10 @@ function setup() {
     },
     logAudit: (action, detail) => auditLog.push({ action, detail }),
     dialog: {
-      showSaveDialog: async () => savedDialogs.saveDialog || { canceled: false, filePath: path.join(dir, 'out.html') }
+      showSaveDialog: async (win, opts) => {
+        savedDialogs.lastOptions = opts;   // предложеното име на файла е част от проверката
+        return savedDialogs.saveDialog || { canceled: false, filePath: path.join(dir, 'out.html') };
+      }
     },
     getMainWindow: () => ({}),
     fs, path, normalizeScanCode
@@ -87,6 +90,66 @@ test('mobile:generate writes the mobile scanner page with the library name subst
   const html = fs.readFileSync(result.data, 'utf8');
   assert.ok(html.includes('НЧ Васил Левски · с. Яворец'));
   assert.ok(!html.includes('__LIB__'));
+});
+
+/* ------------------------------------------------------------------
+   Името на библиотеката в самата страница (v2.4.45)
+   ------------------------------------------------------------------ */
+
+test('името от настройките влиза и в <title>, и в предложеното име на файла', async () => {
+  /* Заглавието не е украса: то е името на раздела в Chrome и точно него получава
+     иконата, ако страницата се добави на началния екран. Дотук навсякъде пишеше
+     „Инвентаризация — сканиране“, а библиотеката се четеше само от лентата вътре. */
+  const { db, ipcMain, savedDialogs } = setup();
+  db.prepare("UPDATE settings SET lib_name='Библиотека при НЧ „Васил Левски“', place='с. Яворец' WHERE id=1").run();
+  const result = await ipcMain.invoke('mobile:generate');
+  assert.equal(result.ok, true, result.error);
+  const html = fs.readFileSync(result.data, 'utf8');
+  const title = html.match(/<title>([\s\S]*?)<\/title>/)[1];
+  assert.match(title, /Библиотека при НЧ/, 'заглавието трябва да носи името на библиотеката: ' + title);
+  assert.match(title, /Инвентаризация/, 'но и за какво е страницата: ' + title);
+  assert.equal(/__[A-Z]+__/.test(html), false, 'нито един незаместен образец не бива да стигне до телефона');
+  const slug = html.match(/var SLUG = '(.*)'/)[1];
+  assert.match(slug, /^[a-z0-9-]+$/, 'името за файла е на латиница и без знаци, които Windows не приема');
+  assert.match(savedDialogs.lastOptions.defaultPath, new RegExp('^inventarizaciya-skener-' + slug + '\\.html$'),
+    'предложеното име на файла също носи библиотеката: ' + savedDialogs.lastOptions.defaultPath);
+});
+
+test('при непопълнени настройки страницата пази смислено заглавие и общо име на файла', async () => {
+  const { ipcMain, savedDialogs } = setup();        // празен ред settings
+  const result = await ipcMain.invoke('mobile:generate');
+  assert.equal(result.ok, true, result.error);
+  const html = fs.readFileSync(result.data, 'utf8');
+  assert.equal(html.match(/<title>([\s\S]*?)<\/title>/)[1], 'Инвентаризация — сканиране');
+  assert.equal(html.match(/var SLUG = '(.*)'/)[1], '');
+  assert.equal(savedDialogs.lastOptions.defaultPath, 'inventarizaciya-skener.html');
+  assert.equal(/__[A-Z]+__/.test(html), false);
+});
+
+test('име с „$&“ влиза буквално, а не като част от самата страница', async () => {
+  /* String.replace с НИЗ за заместител тълкува $&, $` и $1. Името идва от
+     настройките, тоест го пише човек: „Библиотека $& Читалище“ би вкарало
+     самия образец обратно, а „$`“ — цялото начало на файла в заглавието му. */
+  const { db, ipcMain } = setup();
+  db.prepare("UPDATE settings SET lib_name=?, place='' WHERE id=1").run("Библиотека $& $` $' $1");
+  const result = await ipcMain.invoke('mobile:generate');
+  assert.equal(result.ok, true, result.error);
+  const html = fs.readFileSync(result.data, 'utf8');
+  assert.ok(html.includes("Библиотека $&amp; $` $&#39; $1"),
+    'името трябва да се появи както е въведено (с екранирани HTML знаци)');
+  assert.equal(html.includes('<!DOCTYPE html>\n<html lang="bg">\n<head>\n<meta charset="utf-8">\n<meta name="viewport"'
+    + ' content="width=device-width, initial-scale=1, viewport-fit=cover">\n<title><!DOCTYPE'), false,
+    '$` не бива да вкара началото на файла в заглавието');
+});
+
+test('ъгловите скоби в името се екранират, вместо да се изтриват', async () => {
+  /* Дотук се махаха с replace(/[<>&]/g, ''): „Иван & Мария“ ставаше „Иван  Мария“. */
+  const { db, ipcMain } = setup();
+  db.prepare("UPDATE settings SET lib_name='Читалище „Х&Y“', place='' WHERE id=1").run();
+  const result = await ipcMain.invoke('mobile:generate');
+  const html = fs.readFileSync(result.data, 'utf8');
+  assert.ok(html.includes('Читалище „Х&amp;Y“'), 'амперсандът се показва, а не изчезва');
+  assert.equal(html.includes('<script>alert'), false);
 });
 
 function startSession(db, overrides = {}) {
