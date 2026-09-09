@@ -3,6 +3,9 @@ name: VirusTotal Scan
 on:
   workflow_dispatch:
 
+  release:
+    types: [published]
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -155,11 +158,14 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
 
           data = json.load(open("analysis.json"))
           attrs = data["data"]["attributes"]
 
           stats = attrs.get("stats") or attrs.get("last_analysis_stats") or {}
+
+          sha256 = os.environ["SHA256"]
 
           print("")
           print("========================================")
@@ -167,7 +173,7 @@ jobs:
           print("========================================")
           print("")
           print("SHA-256:")
-          print(data["data"].get("id", "${SHA256}"))
+          print(sha256)
           print("")
           print("Malicious:  ", stats.get("malicious", 0))
           print("Suspicious: ", stats.get("suspicious", 0))
@@ -175,7 +181,7 @@ jobs:
           print("Undetected: ", stats.get("undetected", 0))
           print("")
           print("VirusTotal:")
-          print("https://www.virustotal.com/gui/file/${SHA256}")
+          print(f"https://www.virustotal.com/gui/file/{sha256}")
           print("")
           print("========================================")
           PY
