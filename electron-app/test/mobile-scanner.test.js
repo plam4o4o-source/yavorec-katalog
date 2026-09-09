@@ -27,12 +27,8 @@ const { JSDOM, VirtualConsole } = require('jsdom');
 const PAGE = fs.readFileSync(path.join(__dirname, '..', 'src', 'mobile-template.html'), 'utf8');
 
 /* Страницата се пуска както я получава телефонът — с вече заместени образци. */
-function openPage({ url, barcodeDetector = true, mediaDevices = true, detected = [],
-                    lib = 'Библиотека · с. Яворец' } = {}) {
-  const html = PAGE
-    .replace(/__LIB__/g, lib)
-    .replace(/__TITLE__/g, lib ? lib + ' · Инвентаризация' : 'Инвентаризация — сканиране')
-    .replace(/__SLUG__/g, 'biblioteka');
+function openPage({ url, barcodeDetector = true, mediaDevices = true, detected = [] } = {}) {
+  const html = PAGE.replace(/__SLUG__/g, 'biblioteka');   // единственият останал образец
   const virtualConsole = new VirtualConsole();          // тихо: beep() търси AudioContext
   const state = { detected: detected.slice(), bitmaps: 0 };
   const dom = new JSDOM(html, {
@@ -161,10 +157,14 @@ test('копираният списък съдържа САМО номера —
   assert.equal(/[А-Яа-я]/.test(d.getElementById('out').value), false, 'нито дума кирилица в списъка');
 });
 
-test('празна лента с името не оставя ивица под заглавието', () => {
-  const { d } = openPage({ url: 'file:///x/skener.html', lib: '' });
-  assert.equal(d.getElementById('libName').style.display, 'none');
-  const full = openPage({ url: 'file:///x/skener.html', lib: 'Библиотека · с. Яворец' });
-  assert.notEqual(full.d.getElementById('libName').style.display, 'none');
-  assert.match(full.d.getElementById('libName').textContent, /Библиотека/);
+test('името на библиотеката не се изписва никъде в страницата', () => {
+  /* По искане на библиотеката (v2.4.46): телефонът се носи из читалището и
+     между хора. Името остава само в името на файла — тоест в SLUG, който се
+     ползва при изнасянето на списъка, но не се ПОКАЗВА. */
+  const { d } = openPage({ url: 'file:///x/skener.html' });
+  assert.equal(d.getElementById('libName'), null, 'лентата с името я няма');
+  assert.equal(d.title, 'Инвентаризация — сканиране');
+  assert.equal(d.querySelectorAll('header .sub').length, 0, 'няма и празен ред под заглавието');
+  assert.equal(/Яворец|Библиотека/.test(d.body.textContent), false,
+    'нищо в текста на страницата не назовава библиотеката');
 });
