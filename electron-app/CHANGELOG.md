@@ -11,6 +11,37 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.46
+
+**BG:** По искане на библиотеката: **името на библиотеката не се изписва в
+страницата за сканиране с телефон.**
+
+Миналият кръг (v2.4.45) го сложи на три места — в лентата под заглавието, в
+заглавието на раздела (оттам го взима и иконата на началния екран) и в името на
+файла. Заявката беше за файла; на екрана името няма какво да каже — библиотекарят
+знае в коя библиотека е, а телефонът се носи из читалището и между хора.
+
+- Махнати са **лентата с името** и името от **заглавието на раздела**: страницата
+  пише само „Инвентаризация — сканиране“.
+- Остава единствено в **имената на файловете**:
+  `inventarizaciya-skener-<библиотека>.html` за самата страница и
+  `inventarizaciya-<библиотека>-<дата>.txt` за изнесения списък — заради тях
+  беше заявката, за да не се бъркат файловете на две библиотеки в един разговор
+  във Вайбър.
+- Наръчникът, помощта в програмата и упътването в страницата казват същото.
+
+Проверено с истински браузър: в готовата страница няма нито едно споменаване на
+библиотеката, а разчитането на баркод от снимка работи, както преди. Пълната
+поредица: 1380 успешни, 0 неуспешни (UTC и Europe/Sofia).
+
+**EN:** At the library's request, the phone scanning page no longer displays the
+library name — neither in the bar under the heading nor in the tab title (which
+also names the home-screen icon). The previous round put it in three places; the
+request had been about the file. It stays only in the file names (the page
+itself and the exported list), which is what the original request was for.
+Verified in a real browser: the generated page contains no mention of the
+library, and barcode reading from a photo still works. 1380 tests passing.
+
 ## v2.4.45
 
 **BG:** Сканирането с телефон проговори (по сигнал от библиотеката) + преглед на

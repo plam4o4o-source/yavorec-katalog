@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>__TITLE__</title>
+<title>Инвентаризация — сканиране</title>
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:#1A1208;color:#EFE9D8;
@@ -40,9 +40,13 @@
 </style>
 </head>
 <body>
+<!-- Името на библиотеката НЕ се изписва на страницата (по искане на библиотеката,
+     v2.4.46): телефонът се носи из читалището и между хора, а на екрана няма
+     какво да казва името — библиотекарят знае в коя библиотека е. Остава само в
+     ИМЕТО на записания файл и на изнесения списък, за да не се бъркат файловете
+     на две библиотеки в един разговор във Вайбър. -->
 <header>
   <h1>Инвентаризация — сканиране</h1>
-  <div class="sub" id="libName">__LIB__</div>
 </header>
 <main>
   <div class="note" id="hint">
@@ -87,12 +91,6 @@ var KEY = 'inventar-scan-v1';
 var SLUG = '__SLUG__';                    // името на библиотеката за името на файла
 var codes = [];
 var dups = 0;
-/* Празна лента не се показва: при непопълнени настройки редът оставаше празен
-   и заглавието висеше над нищо. */
-(function () {
-  var el = document.getElementById('libName');
-  if (el && !el.textContent.trim()) el.style.display = 'none';
-})();
 try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); codes = saved.codes || []; dups = saved.dups || 0; } catch (e) {}
 
 function persist() { try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups })); } catch (e) {} }
