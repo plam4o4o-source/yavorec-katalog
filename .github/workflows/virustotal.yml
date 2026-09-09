@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Download latest GitHub Release EXE
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,9 +25,7 @@ jobs:
             --pattern "*.exe" \
             --dir release
 
-          echo "Downloaded files:"
           ls -lh release
-
 
       - name: Find EXE
         id: find_exe
@@ -43,17 +40,14 @@ jobs:
           echo "Found EXE: $EXE"
           echo "file=$EXE" >> "$GITHUB_OUTPUT"
 
-
       - name: Calculate SHA-256
         id: hash
         run: |
           EXE="${{ steps.find_exe.outputs.file }}"
-
           SHA256=$(sha256sum "$EXE" | awk '{print $1}')
 
           echo "SHA-256: $SHA256"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-
 
       - name: Check VirusTotal
         id: check
@@ -71,24 +65,18 @@ jobs:
           echo "VirusTotal HTTP status: $HTTP_CODE"
 
           if [ "$HTTP_CODE" = "200" ]; then
-
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "File already exists in VirusTotal."
 
           elif [ "$HTTP_CODE" = "404" ]; then
-
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "File not found in VirusTotal."
-            echo "The file will be uploaded."
+            echo "File not found. Uploading."
 
           else
-
-            echo "VirusTotal returned unexpected HTTP status: $HTTP_CODE"
+            echo "VirusTotal returned HTTP $HTTP_CODE"
             cat vt-existing.json
             exit 1
-
           fi
-
 
       - name: Get VirusTotal upload URL
         id: upload_url
@@ -103,10 +91,7 @@ jobs:
             "https://www.virustotal.com/api/v3/files/upload_url" \
             | python -c "import sys,json; print(json.load(sys.stdin)['data'])")
 
-          echo "Upload URL obtained."
-
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-
 
       - name: Upload EXE to VirusTotal
         id: upload
@@ -126,26 +111,19 @@ jobs:
             --form "file=@$EXE_FILE" \
             --output vt-upload.json
 
-          echo "VirusTotal upload response:"
           cat vt-upload.json
 
           ANALYSIS_ID=$(python -c \
             "import json; print(json.load(open('vt-upload.json'))['data']['id'])")
 
-          echo "Analysis ID: $ANALYSIS_ID"
-
           echo "analysis_id=$ANALYSIS_ID" >> "$GITHUB_OUTPUT"
 
-
       - name: Wait for VirusTotal analysis
-        id: analysis
         if: steps.check.outputs.exists != 'true'
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
           ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id }}
         run: |
-          echo "Waiting for VirusTotal analysis..."
-
           for i in {1..40}; do
 
             RESPONSE=$(curl \
@@ -160,17 +138,11 @@ jobs:
             echo "Attempt $i - status: $STATUS"
 
             if [ "$STATUS" = "completed" ]; then
-
               echo "$RESPONSE" > analysis.json
-
-              echo "VirusTotal analysis completed."
-
               break
-
             fi
 
             sleep 15
-
           done
 
           if [ ! -f analysis.json ]; then
@@ -178,14 +150,10 @@ jobs:
             exit 1
           fi
 
-
       - name: Get existing VirusTotal file information
         if: steps.check.outputs.exists == 'true'
         run: |
           cp vt-existing.json analysis.json
-
-          echo "Using existing VirusTotal analysis."
-
 
       - name: Create VirusTotal report
         id: report
@@ -196,7 +164,7 @@ jobs:
           import json
           import os
 
-          with open("analysis.json", "r") as f:
+          with open("analysis.json", "r", encoding="utf-8") as f:
               data = json.load(f)
 
           attrs = data["data"]["attributes"]
@@ -214,27 +182,30 @@ jobs:
           harmless = stats.get("harmless", 0)
           undetected = stats.get("undetected", 0)
 
-          report = f"""## 🛡️ VirusTotal Scan
+          lines = [
+              "## 🛡️ VirusTotal Scan",
+              "",
+              "**Status:** ✅ Successfully scanned",
+              "",
+              "| Result | Count |",
+              "|---|---:|",
+              f"| 🔴 Malicious | {malicious} |",
+              f"| 🟠 Suspicious | {suspicious} |",
+              f"| 🟢 Harmless | {harmless} |",
+              f"| ⚪ Undetected | {undetected} |",
+              "",
+              "**SHA-256**",
+              "",
+              f"`{sha256}`",
+              "",
+              "**VirusTotal**",
+              "",
+              f"https://www.virustotal.com/gui/file/{sha256}",
+              "",
+              "_This VirusTotal scan was performed automatically by GitHub Actions._",
+          ]
 
-**Status:** ✅ Successfully scanned
-
-| Result | Count |
-|---|---:|
-| 🔴 Malicious | {malicious} |
-| 🟠 Suspicious | {suspicious} |
-| 🟢 Harmless | {harmless} |
-| ⚪ Undetected | {undetected} |
-
-**SHA-256**
-
-`{sha256}`
-
-**VirusTotal**
-
-https://www.virustotal.com/gui/file/{sha256}
-
-_This VirusTotal scan was performed automatically by GitHub Actions._
-"""
+          report = "\n".join(lines) + "\n"
 
           print(report)
 
@@ -242,7 +213,7 @@ _This VirusTotal scan was performed automatically by GitHub Actions._
               f.write(report)
 
           with open("scan-results.txt", "w", encoding="utf-8") as f:
-              f.write(f"VirusTotal Scan: SUCCESS\n")
+              f.write("VirusTotal Scan: SUCCESS\n")
               f.write(f"SHA-256: {sha256}\n")
               f.write(f"Malicious: {malicious}\n")
               f.write(f"Suspicious: {suspicious}\n")
@@ -251,11 +222,9 @@ _This VirusTotal scan was performed automatically by GitHub Actions._
               f.write(f"VirusTotal: https://www.virustotal.com/gui/file/{sha256}\n")
           PY
 
-
       - name: Show VirusTotal result
         run: |
           cat virustotal-report.md
-
 
       - name: Publish VirusTotal result to GitHub Release
         if: github.event_name == 'release'
@@ -263,41 +232,18 @@ _This VirusTotal scan was performed automatically by GitHub Actions._
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "Updating GitHub Release: $RELEASE_TAG"
-
-          CURRENT_NOTES=$(gh release view "$RELEASE_TAG" \
+          gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --json body \
-            --jq '.body')
+            --jq '.body' > current-notes.md
 
-          REPORT=$(cat virustotal-report.md)
-
-          python - <<'PY'
-          import os
-
-          current = os.environ.get("CURRENT_NOTES", "")
-          report = open("virustotal-report.md", encoding="utf-8").read()
-
-          marker = "## 🛡️ VirusTotal Scan"
-
-          if marker in current:
-              current = current.split(marker)[0].rstrip()
-
-          if current:
-              new_notes = current + "\n\n" + report
-          else:
-              new_notes = report
-
-          with open("release-notes.md", "w", encoding="utf-8") as f:
-              f.write(new_notes)
-          PY
+          cat virustotal-report.md >> current-notes.md
 
           gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --notes-file release-notes.md
+            --notes-file current-notes.md
 
           echo "GitHub Release updated successfully."
-
 
       - name: Upload scan report as GitHub artifact
         uses: actions/upload-artifact@v4
@@ -306,7 +252,6 @@ _This VirusTotal scan was performed automatically by GitHub Actions._
           path: |
             virustotal-report.md
             scan-results.txt
-
 
       - name: Complete
         run: |
