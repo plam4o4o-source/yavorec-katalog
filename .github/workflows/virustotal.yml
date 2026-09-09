@@ -19,12 +19,10 @@ jobs:
             --pattern "*.exe" \
             --dir release
 
-          echo "Downloaded files:"
           ls -lh release
 
       - name: Find EXE
         id: find_exe
-        shell: bash
         run: |
           EXE=$(find release -type f -iname "*.exe" | head -n 1)
 
@@ -38,7 +36,6 @@ jobs:
 
       - name: Calculate SHA-256
         id: hash
-        shell: bash
         run: |
           EXE="${{ steps.find_exe.outputs.file }}"
           SHA256=$(sha256sum "$EXE" | awk '{print $1}')
@@ -46,12 +43,11 @@ jobs:
           echo "SHA-256: $SHA256"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
-      - name: Check VirusTotal for existing file
+      - name: Check VirusTotal
         id: check
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
           SHA256: ${{ steps.hash.outputs.sha256 }}
-        shell: bash
         run: |
           HTTP_CODE=$(curl \
             --silent \
@@ -65,39 +61,39 @@ jobs:
           if [ "$HTTP_CODE" = "200" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "File already exists in VirusTotal."
+
           elif [ "$HTTP_CODE" = "404" ]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "File not found in VirusTotal. It will be uploaded."
+            echo "File not found. Uploading."
+
           else
             echo "VirusTotal returned HTTP $HTTP_CODE"
             cat vt-existing.json
             exit 1
           fi
 
-      - name: Get VirusTotal upload URL
-        id: vt_url
+      - name: Get upload URL
+        id: upload_url
         if: steps.check.outputs.exists != 'true'
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-        shell: bash
         run: |
-          UPLOAD_URL=$(curl \
+          URL=$(curl \
             --fail \
             --silent \
             --header "x-apikey: $VT_API_KEY" \
-            https://www.virustotal.com/api/v3/files/upload_url \
+            "https://www.virustotal.com/api/v3/files/upload_url" \
             | python -c "import sys,json; print(json.load(sys.stdin)['data'])")
 
-          echo "upload_url=$UPLOAD_URL" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Upload EXE to VirusTotal
+      - name: Upload EXE
         id: upload
         if: steps.check.outputs.exists != 'true'
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-          UPLOAD_URL: ${{ steps.vt_url.outputs.upload_url }}
+          UPLOAD_URL: ${{ steps.upload_url.outputs.url }}
           EXE_FILE: ${{ steps.find_exe.outputs.file }}
-        shell: bash
         run: |
           curl \
             --fail \
@@ -107,61 +103,79 @@ jobs:
             --url "$UPLOAD_URL" \
             --header "x-apikey: $VT_API_KEY" \
             --form "file=@$EXE_FILE" \
-            --output vt-result.json
+            --output vt-upload.json
 
-          cat vt-result.json
+          cat vt-upload.json
 
-          ANALYSIS_ID=$(python -c "import json; print(json.load(open('vt-result.json'))['data']['id'])")
+          ANALYSIS_ID=$(python -c "import json; print(json.load(open('vt-upload.json'))['data']['id'])")
 
           echo "analysis_id=$ANALYSIS_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Get existing analysis ID
-        id: existing
-        if: steps.check.outputs.exists == 'true'
-        env:
-          SHA256: ${{ steps.hash.outputs.sha256 }}
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-
-          data = json.load(open("vt-existing.json"))
-          print("Existing VirusTotal file found.")
-          print("SHA-256:", data["data"]["id"])
-          PY
-
-          echo "analysis_id=" >> "$GITHUB_OUTPUT"
-
-      - name: Show VirusTotal file result
+      - name: Wait for VirusTotal analysis
+        id: analysis
+        if: steps.check.outputs.exists != 'true'
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-          SHA256: ${{ steps.hash.outputs.sha256 }}
-        shell: bash
+          ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id }}
         run: |
-          curl \
-            --fail \
-            --silent \
-            --header "x-apikey: $VT_API_KEY" \
-            "https://www.virustotal.com/api/v3/files/$SHA256" \
-            --output file-report.json
+          for i in {1..40}; do
 
+            RESPONSE=$(curl \
+              --fail \
+              --silent \
+              --header "x-apikey: $VT_API_KEY" \
+              "https://www.virustotal.com/api/v3/analyses/$ANALYSIS_ID")
+
+            STATUS=$(echo "$RESPONSE" | python -c \
+              "import sys,json; print(json.load(sys.stdin)['data']['attributes']['status'])")
+
+            echo "Attempt $i - status: $STATUS"
+
+            if [ "$STATUS" = "completed" ]; then
+              echo "$RESPONSE" > analysis.json
+              break
+            fi
+
+            sleep 15
+          done
+
+          if [ ! -f analysis.json ]; then
+            echo "VirusTotal analysis did not complete."
+            exit 1
+          fi
+
+      - name: Get existing file information
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          cp vt-existing.json analysis.json
+
+      - name: Show VirusTotal result
+        env:
+          SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
           python - <<'PY'
           import json
 
-          data = json.load(open("file-report.json"))
-          attr = data["data"]["attributes"]
+          data = json.load(open("analysis.json"))
+          attrs = data["data"]["attributes"]
 
-          stats = attr.get("last_analysis_stats", {})
+          stats = attrs.get("stats") or attrs.get("last_analysis_stats") or {}
 
-          print("=================================")
-          print("VirusTotal Result")
-          print("=================================")
-          print("SHA-256:", data["data"]["id"])
-          print("Malicious:", stats.get("malicious", 0))
-          print("Suspicious:", stats.get("suspicious", 0))
-          print("Harmless:", stats.get("harmless", 0))
-          print("Undetected:", stats.get("undetected", 0))
+          print("")
+          print("========================================")
+          print("        VIRUSTOTAL RESULT")
+          print("========================================")
+          print("")
+          print("SHA-256:")
+          print(data["data"].get("id", "${SHA256}"))
+          print("")
+          print("Malicious:  ", stats.get("malicious", 0))
+          print("Suspicious: ", stats.get("suspicious", 0))
+          print("Harmless:   ", stats.get("harmless", 0))
+          print("Undetected: ", stats.get("undetected", 0))
           print("")
           print("VirusTotal:")
-          print("https://www.virustotal.com/gui/file/" + data["data"]["id"])
+          print("https://www.virustotal.com/gui/file/${SHA256}")
+          print("")
+          print("========================================")
           PY
