@@ -90,7 +90,14 @@ test('askConfirm: прозорец с икона, заглавие, текст �
   assert.equal(cancel.textContent, 'Отказ');
   assert.ok(ok.classList.contains('dgr'), 'изтриването е червен бутон');
   assert.equal(d.activeElement, cancel, 'при необратимо действие фокусът е на „Отказ“ — Enter не изтрива по инерция');
-  assert.equal(box.querySelector('.body').getAttribute('role'), 'alertdialog');
+  /* Ролята е върху ЦЕЛИЯ прозорец, не върху .body (одит v2.4.44): „Отказ“ и
+     бутонът на действието стоят в <footer>, тоест при старото място самите
+     бутони на диалога оставаха ИЗВЪН елемента, обявен за диалог. */
+  assert.equal(box.getAttribute('role'), 'alertdialog');
+  assert.equal(box.getAttribute('aria-modal'), 'true');
+  assert.equal(box.querySelector('.body').getAttribute('role'), null, 'ролята не бива да е на две места');
+  const dialog = d.querySelector('[role="alertdialog"]');
+  assert.ok(dialog.contains(ok) && dialog.contains(cancel), 'бутоните трябва да са ВЪТРЕ в обявения диалог');
   ok.click();
   assert.equal(await p, true);
   await new Promise(r => setTimeout(r, 200));

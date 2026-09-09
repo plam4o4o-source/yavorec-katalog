@@ -31,15 +31,36 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
      изцяло в по-дългото, а всяка инициала да съвпада с началото на останала дума.
      Затова „Димитър Колев“ и „Димитър Костов“ НЕ съвпадат: втората пълна дума е
      различна. */
-  function looseMatch(a, b) {
-    const A = nameTokens(a), B = nameTokens(b);
-    if (!A.length || !B.length) return false;
-    const fullA = A.filter(t => t.length > 1), fullB = B.filter(t => t.length > 1);
-    const initA = A.filter(t => t.length === 1), initB = B.filter(t => t.length === 1);
-    const aShorter = fullA.length <= fullB.length;
-    const short = aShorter ? fullA : fullB;
-    const long = (aShorter ? fullB : fullA).slice();
-    const shortInit = aShorter ? initA : initB;
+  /* Сравнението е СИМЕТРИЧНО — проверява се и в двете посоки.
+
+     Самата проверка не е: при равен брой пълни думи за „по-късо“ се взима
+     първото име и се гледат само НЕГОВИТЕ инициали. Затова „Иванов“ ≈
+     „Г. Иванов“ излизаше вярно, а „Г. Иванов“ ≈ „Иванов“ — невярно. Досега
+     редовете се сравняваха в реда на заявката (ORDER BY n DESC), тоест дали
+     двата записа изобщо ще бъдат предложени за сливане зависеше от това КОЙ
+     ОТ ДВАТА има повече книги — една и съща база даваше различни групи според
+     броевете. Обхождането в двете посоки маха тази зависимост и не разхлабва
+     правилото: „Димитър Колев“ и „Димитър Костов“ пак не съвпадат, „Г. Иванов“
+     и „П. Иванов“ също. */
+  /* Думите се разделят на пълни и инициали ВЕДНЪЖ на стойност (splitName), а не
+     наново при всяка двойка — при няколко хиляди стойности това е разликата
+     между секунди и части от секундата. */
+  const splitName = (tokens) => ({
+    full: tokens.filter(t => t.length > 1),
+    init: tokens.filter(t => t.length === 1)
+  });
+  /* Едната посока не стига (виж бележката по-горе) — оттук нататък сравнява
+     само това. Двете обвивки отпреди пренаписването (looseMatch/looseMatchTok)
+     останаха без нито едно повикване и затова ги няма: мъртъв код до жива
+     бележка кара следващия четец да търси несъществуваща разлика. */
+  function looseMatchParts(a, b) { return oneWay(a, b) || oneWay(b, a); }
+  function oneWay(a, b) {
+    if (!a.full.length && !a.init.length) return false;
+    if (!b.full.length && !b.init.length) return false;
+    const aShorter = a.full.length <= b.full.length;
+    const short = aShorter ? a.full : b.full;
+    const long = (aShorter ? b.full : a.full).slice();
+    const shortInit = aShorter ? a.init : b.init;
     for (const w of short) {
       const i = long.indexOf(w);
       if (i < 0) return false;
@@ -84,18 +105,50 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
         }
         buckets = [...m.values()];
       } else {
-        // Сравнение всеки-с-всеки през union-find. Стойностите са няколкостотин,
-        // затова цената е нищожна, а резултатът е далеч по-точен от ключ.
+        /* Хлабавото сравнение минава през union-find, но НЕ всеки с всеки.
+           Досега беше всеки с всеки, с преизчисляване на думите при всяка двойка,
+           и коментарът твърдеше, че „стойностите са няколкостотин“. При истински
+           фонд от 15 000 книги различните автори са ~15 000, а не няколкостотин:
+           измерено, повикването отнемаше 2 мин. 21 сек. и през цялото време
+           програмата стои залепнала — повикването е синхронно, прозорецът не се
+           прерисува и изглежда като увиснала.
+
+           Стесняването е точно, не приблизително: looseMatch иска ВСЯКА пълна
+           дума на по-късото име да я има в по-дългото. Значи две имена могат да
+           съвпаднат само ако делят поне една пълна дума — освен ако по-късото е
+           само от инициали („И. В.“), каквито са единици. Затова се сравняват
+           само двойките от една и съща дума, а имената без нито една пълна дума
+           се сравняват с всички. Резултатът е същият; работата е много по-малка.
+           Думите се смятат ВЕДНЪЖ на стойност, а не наново при всяка двойка. */
         const parent = rows.map((_, i) => i);
         const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-        for (let i = 0; i < rows.length; i++) {
-          for (let j = i + 1; j < rows.length; j++) {
-            if (looseMatch(rows[i].value, rows[j].value)) {
-              const a = find(i), b = find(j);
-              if (a !== b) parent[a] = b;
-            }
+        const union = (i, j) => { const a = find(i), b = find(j); if (a !== b) parent[a] = b; };
+        const parts = rows.map(r => splitName(nameTokens(r.value)));
+        const words = new Map();                       // пълна дума → редовете с нея
+        const initialsOnly = [];                       // „И. В.“ — няма пълна дума
+        parts.forEach((p, i) => {
+          if (!p.full.length) { initialsOnly.push(i); return; }
+          for (const w of new Set(p.full)) {
+            if (!words.has(w)) words.set(w, []);
+            words.get(w).push(i);
           }
+        });
+        /* Проверка само в рамките на една дума — това е ЦЯЛОТО ограничение върху
+           работата. Тук стоеше и пропускане на двойките, които вече са в една
+           група (`find(i) === find(j)`), но при мутационната проверка се оказа,
+           че не държи нищо: измерено при 15 000 различни автора и 208 имена само
+           от инициали, повикването отнема 706 ms с него и 643 ms без него.
+           Махнато — правилото на този проект е да няма непроверена находчивост.
+           (Списък от изпробвани двойки също не влиза: при 15 000 стойности той
+           сам по себе си надхвърля тавана на Set.) */
+        const pair = (i, j) => {
+          if (i === j) return;
+          if (looseMatchParts(parts[i], parts[j])) union(i, j);
+        };
+        for (const list of words.values()) {
+          for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) pair(list[a], list[b]);
         }
+        for (const i of initialsOnly) for (let j = 0; j < rows.length; j++) pair(i, j);
         const m = new Map();
         rows.forEach((r, i) => {
           const k = find(i);

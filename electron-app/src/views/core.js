@@ -246,16 +246,82 @@ window.beep = beep;
    след closeModal() се отвори нов прозорец, отложеното изчистване се отменя —
    иначе таймерът би изтрил току-що отвореното съдържание. */
 let MODAL_CLOSE_T = null;
+/* Колко живее прозорецът СЛЕД затварянето (изчезването е с преход, не мигом).
+   Числото е на едно място, защото по него се води и пазачът срещу двойно
+   вписване в bootstrap.js: докато прозорецът се вижда, бутонът в него не бива
+   да оживява отново. Сменя ли се тук, сменя се и преходът в style.css. */
+const MODAL_FADE_MS = 140;
+window.MODAL_FADE_MS = MODAL_FADE_MS;
+/* Действие след затваряне на прозореца — например опресняване на списъка отдолу.
+   Прозорецът се затваря по ТРИ начина: бутон в подножието, ✕ в заглавието и Esc.
+   Досега опресняването висеше само на един от бутоните (кардексът на периодиката),
+   тоест затваряне с ✕ или с Esc оставяше списъка отзад със старите числа —
+   току-що вписан брой продължаваше да се води неполучен. */
+let MODAL_ON_CLOSE = null;
+function onModalClose(fn) { MODAL_ON_CLOSE = typeof fn === 'function' ? fn : null; }
+window.onModalClose = onModalClose;
+/* ЗАДЪРЖАНЕ НА ФОКУСА В ПРОЗОРЕЦА (v2.4.44).
+   Измерено с отворена форма „Нов документ“: Tab минава поле → „Отказ“ → „Запиши“
+   → и ИЗЛИЗА в страничната лента ЗАД затъмнението, където Enter отваря друг
+   раздел, а попълнената форма остава отворена и невидима зад него. Затова обходът
+   се затваря в кръг, а самият прозорец се обявява като диалог, за да го съобщи и
+   екранният четец. Прилага се на двата слоя и на askConfirm(). */
+/* Видимостта се проверява само там, където средата НАИСТИНА мери оформление.
+   Без това условие клопката е празна навсякъде, където няма истинско
+   разполагане (безглав преглед, автоматична проверка): getClientRects() връща
+   нула за всичко, списъкът излиза празен, trapTab() се отказва мълчаливо и
+   обходът пак излиза в менюто зад затъмнението — тоест поправката би минала за
+   налична, без да работи. getClientRects() е и по-точно от offsetParent, който
+   е null и за напълно видим елемент с position:fixed. */
+function focusables(box) {
+  const measured = !!(document.body && document.body.getClientRects().length);
+  return [...box.querySelectorAll('a[href],button,input,select,textarea,[tabindex]')]
+    .filter(el => !el.disabled && el.tabIndex !== -1 && !el.closest('[hidden]')
+      && (!measured || el.getClientRects().length > 0));
+}
+function trapTab(box, e) {
+  if (e.key !== 'Tab') return;
+  const f = focusables(box);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !box.contains(document.activeElement))) {
+    e.preventDefault(); last.focus();
+  } else if (!e.shiftKey && (document.activeElement === last || !box.contains(document.activeElement))) {
+    e.preventDefault(); first.focus();
+  }
+}
+window.trapTab = trapTab;
+function markDialog(box, label) {
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  if (label) box.setAttribute('aria-label', label);
+}
 function modal(title, body, footer) {
+  MODAL_ON_CLOSE = null;
   clearTimeout(MODAL_CLOSE_T);
   $('#veil').classList.remove('closing');
   $('#modal').innerHTML =
     `<header><h2>${esc(title)}</h2><button class="x" onclick="closeModal()">&times;</button></header>
      <div class="body">${body}</div>
      ${footer ? `<footer>${footer}</footer>` : ''}`;
+  markDialog($('#modal'), title);
   $('#veil').classList.add('on');
   setTimeout(() => { const i = $('#modal input,#modal select,#modal textarea'); if (i) i.focus(); }, 40);
 }
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const on = (sel) => { const v = $(sel); return v && v.classList.contains('on') && !v.classList.contains('closing'); };
+  /* Отгоре надолу, по същия ред, по който ги затваря и Esc: въпросът (z-index
+     90) е над прегледа преди печат (80), а той — над двата слоя прозорци.
+     Прегледът се отваря ВЪРХУ отворен прозорец („Квитанция“ в сметката на
+     читателя, „Печат на акта“ и др.) и дотук капанът не го познаваше: Tab
+     дърпаше фокуса в прозореца ОТДОЛУ, а „Печат…“, „Запази PDF…“ и „Отказ“
+     ставаха недостижими с клавиатура (проверка при прегледа на v2.4.45). */
+  if (on('#veilC')) trapTab($('#modalC'), e);
+  else if (on('#printPreview')) trapTab($('#printPreview'), e);
+  else if (on('#veil2')) trapTab($('#modal2'), e);
+  else if (on('#veil')) trapTab($('#modal'), e);
+}, true);
 function closeModal() {
   const veil = $('#veil');
   if (!veil.classList.contains('on') || veil.classList.contains('closing')) return;
@@ -264,7 +330,10 @@ function closeModal() {
   MODAL_CLOSE_T = setTimeout(() => {
     veil.classList.remove('on', 'closing');
     $('#modal').innerHTML = '';
-  }, 140);
+  }, MODAL_FADE_MS);
+  const after = MODAL_ON_CLOSE;
+  MODAL_ON_CLOSE = null;
+  if (after) { try { after(); } catch (err) { console.error('след затваряне на прозорец:', err); } }
 }
 window.closeModal = closeModal;
 
@@ -278,6 +347,7 @@ function modal2(title, body, footer) {
     `<header><h2>${esc(title)}</h2><button class="x" onclick="closeModal2()">&times;</button></header>
      <div class="body">${body}</div>
      ${footer ? `<footer>${footer}</footer>` : ''}`;
+  markDialog($('#modal2'), title);
   $('#veil2').classList.add('on');
 }
 function closeModal2() {
@@ -288,7 +358,7 @@ function closeModal2() {
   MODAL2_CLOSE_T = setTimeout(() => {
     veil.classList.remove('on', 'closing');
     $('#modal2').innerHTML = '';
-  }, 140);
+  }, MODAL_FADE_MS);
 }
 window.closeModal2 = closeModal2;
 
@@ -456,8 +526,15 @@ function askConfirm(text, opts) {
   clearTimeout(CFM_CLOSE_T);
   veil.classList.remove('closing');
   box.className = 'modal cfm ' + p.kind;
+  /* Ролята стои върху ЦЕЛИЯ прозорец, а не върху .body: „Отказ“ и бутонът на
+     действието са в <footer>, тоест дотук самите бутони на диалога оставаха
+     ИЗВЪН елемента, обявен за диалог. */
+  box.setAttribute('role', 'alertdialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-labelledby', 'cfmTitle');
+  box.setAttribute('aria-describedby', 'cfmMsg');
   box.innerHTML =
-    `<div class="body" role="alertdialog" aria-modal="true" aria-labelledby="cfmTitle" aria-describedby="cfmMsg">
+    `<div class="body">
        <span class="cfmIco" aria-hidden="true">${svgIcon(CFM_ICON[p.kind])}</span>
        <div class="cfmText"><h2 class="cfmTitle" id="cfmTitle"></h2><div class="cfmMsg" id="cfmMsg"></div></div>
      </div>
@@ -476,7 +553,7 @@ function askConfirm(text, opts) {
       done = true;
       document.removeEventListener('keydown', onKey, true);
       veil.classList.add('closing');
-      CFM_CLOSE_T = setTimeout(() => { veil.classList.remove('on', 'closing'); box.innerHTML = ''; }, 140);
+      CFM_CLOSE_T = setTimeout(() => { veil.classList.remove('on', 'closing'); box.innerHTML = ''; }, MODAL_FADE_MS);
       if (prev && prev.isConnected && typeof prev.focus === 'function') prev.focus();
       resolve(val);
     };
@@ -594,6 +671,14 @@ async function loadAuthSuggest(force) {
   AUTH_SUGGEST = await call(window.api.authorities.suggest()) || {};
   return AUTH_SUGGEST;
 }
+/* Списъкът се смята веднъж на пускане на програмата. След вписване на нов
+   документ или читател той е ОСТАРЯЛ: авторът, издателството или ключовата дума,
+   въведени преди минута, не се предлагат до края на деня — точно раздвояването,
+   което тази помощ съществува да предотврати. Най-болезнено е при „Запиши и нов“:
+   при партида от 40 книги нито едно от вече въведените имена не се подсказва.
+   Забравя се само отбелязването; следващата форма го зарежда наново. */
+function forgetAuthSuggest() { AUTH_SUGGEST = null; }
+window.forgetAuthSuggest = forgetAuthSuggest;
 function datalistsHtml(sug) {
   /* Дървото се обхожда ДОКРАЙ: кодът, който библиотекарката ще напише, най-често
      е от дълбочината („821.163.2“), а не от първото ниво. */

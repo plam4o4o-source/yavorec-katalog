@@ -16,7 +16,12 @@ function readersFilterMatch(r) {
 }
 function readersRowsHtml(shown) {
   return shown.length ? shown.map(r => `
-    <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note ? ' <span class="badge w" title="${esc(r.alert_note)}">бележка</span>' : ''}</td>
+    <tr data-id="${r.id}"><td>${esc(r.name)}${r.alert_note
+      /* Вложеният низ е с ОБРАТНИ апострофи: в единични кавички „${…}“ се
+         изписваше буквално и подсказката гласеше „${esc(r.alert_note)}“ —
+         библиотекарката виждаше кода вместо самата бележка, а значката казва
+         само „бележка“, тоест текстът ѝ не се виждаше никъде в списъка. */
+      ? ` <span class="badge w" title="${esc(r.alert_note)}">бележка</span>` : ''}</td>
       <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
       <td class="num">${r.open_loans == null ? '' : `<span class="loansCnt ${r.overdue_loans ? 'warn' : ''}" title="${r.overdue_loans

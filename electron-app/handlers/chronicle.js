@@ -35,8 +35,12 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
     run(() => {
       const o = {}; for (const f of CHRONICLE_FIELDS) o[f] = d[f] ?? null;
       if (!o.year && o.date) o.year = String(o.date).slice(0, 4);
-      getDb().prepare(`UPDATE chronicle SET ${CHRONICLE_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
+      /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
+         база записът може да е изтрит от другото работно място, а одитната
+         следа не бива да твърди редакция, каквато не се е случвала. */
+      const info = getDb().prepare(`UPDATE chronicle SET ${CHRONICLE_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
         .run({ ...o, id: d.id });
+      if (!info.changes) throw new Error('Записът не е намерен — вероятно е изтрит от друго работно място.');
       logAudit('Летопис', 'редакция: ' + (d.title || ''));
     })
   );

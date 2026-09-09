@@ -30,8 +30,12 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
   ipcMain.handle('persons:update', (e, d) =>
     run(() => {
       const o = {}; for (const f of PERSON_FIELDS) o[f] = d[f] ?? null;
-      getDb().prepare(`UPDATE persons SET ${PERSON_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
+      /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
+         база записът може да е изтрит от другото работно място, а одитната
+         следа не бива да твърди редакция, каквато не се е случвала. */
+      const info = getDb().prepare(`UPDATE persons SET ${PERSON_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
         .run({ ...o, id: d.id });
+      if (!info.changes) throw new Error('Записът не е намерен — вероятно е изтрит от друго работно място.');
       logAudit('Персоналии', 'редакция: ' + (d.name || ''));
     })
   );

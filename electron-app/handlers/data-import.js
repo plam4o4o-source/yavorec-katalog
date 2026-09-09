@@ -7,6 +7,7 @@
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
+  const { assertUniqueBarcode } = require('./books');
   const { ENUM_COLUMNS } = require('../db/enum-triggers');
   /* Позволените стойности се четат от същия списък, който създава тригерите — така
      двата не могат да се разминат при бъдеща промяна. */
@@ -298,7 +299,13 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             else if (rawStatus && !knownStatus) report.statusToNote = (report.statusToNote || 0) + 1;
             const payload = {
               inv_number: inv,
-              barcode: cell(row, 'barcode') || String(inv),
+              /* НЕ „|| String(inv)“. Дотук вносът си измисляше баркод, равен на
+                 инвентарния номер, когато файлът няма колона за баркод — точно
+                 сблъсъкът, който assertUniqueBarcode() пази: заварен документ с
+                 етикет „700“ и внесен документ с инв. № 700 стават неразличими
+                 при сканиране и resolveScannedBook() отказва И ДВАТА. Празно поле
+                 е вярното: етикетът се печата после от „Баркод етикети“. */
+              barcode: cell(row, 'barcode') || null,
               // today() от deps, а не собствено new Date(): същият часовник, който
               // ползва status_date по-долу и всеки друг handler. Преди тук стоеше
               // пряко извикване, което заобикаляше инжектирания часовник — заради
@@ -346,6 +353,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               acquisition_id: null,
               cn_sort: callNumber ? cnSortKey(callNumber) : null
             };
+            /* Същата проверка, която пази формата за книга. Вносът върви в
+               транзакция и вече вкараните редове се виждат от заявката, затова
+               тя хваща и два еднакви баркода В САМИЯ ФАЙЛ, не само сблъсък със
+               заварените данни. Грешката е на реда — редът отпада с обяснение,
+               а не целият внос. */
+            assertUniqueBarcode(db, payload.barcode, payload.inv_number, null);
             const info = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
               VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`).run(payload);
             db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);

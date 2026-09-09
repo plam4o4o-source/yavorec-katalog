@@ -12,6 +12,52 @@
 // на споделена стойност напред.
 const { resolveScannedBook } = require('../security-utils');
 
+/* Одит v2.4.29: един баркод = един екземпляр. Дублиран баркод се приемаше
+   мълчаливо при запис и редакция, а после resolveScannedBook() (security-utils.js)
+   отказва ВСЯКО сканиране на този етикет на гишето, в акт и при инвентаризация —
+   дефект, който се появява седмици по-късно и далеч от причината. Проверката е
+   в транзакцията, срещу другите редове. books:findDuplicateBarcodes остава за
+   старите данни. */
+function assertUniqueBarcode(db, barcode, invNumber, selfId) {
+  const code = barcode == null ? '' : String(barcode).trim();
+  const self = selfId || -1;
+  if (code) {
+    const other = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(code, self);
+    if (other) {
+      throw new Error('Баркод ' + code + ' вече е на инв. № ' + (other.inv_number ?? other.id)
+        + ' — един баркод се лепи само на един екземпляр. Дайте на този документ друг етикет '
+        + '(„Баркод етикети“) или оставете полето празно.');
+    }
+    /* Числов баркод, равен на ЧУЖД инвентарен номер, също прави сканирането
+       двусмислено (resolveScannedBook отказва и двата документа). */
+    if (/^\d{1,9}$/.test(code)) {
+      const byInv = db.prepare('SELECT id, inv_number FROM books WHERE inv_number = ? AND id != ? LIMIT 1').get(parseInt(code, 10), self);
+      if (byInv) {
+        throw new Error('Баркод ' + code + ' съвпада с инвентарния номер на друг документ (инв. № ' + byInv.inv_number
+          + ') — при сканиране програмата няма как да различи двата. Дайте на този документ друг етикет.');
+      }
+    }
+  }
+  if (invNumber != null) {
+    /* Съвпадението е ЧИСЛОВО (както при resolveScannedBook), не текстово: баркод
+       „007“ отговаря на сканиране на инв. № 7 (CAST('007' AS INTEGER) = 7), а
+       точното текстово сравнение по-долу би пропуснало точно този случай —
+       проверката би минала тук, а по-късно скенерът пак би отказал. */
+    /* v2.4.31 (производителност): дотук се четяха ВСИЧКИ баркодове (15 000 реда,
+       16 ms при всеки запис на книга) и се сравняваха в JavaScript. Числово равен
+       баркод е или точно същият низ (idx_books_barcode), или същото число с
+       водещи нули („007“) — само баркодовете, започващи с „0“, минават през
+       CAST; GLOB '0*' пак ползва индекса. Резултатът е същият. */
+    const byCode = db.prepare(`SELECT id, inv_number, barcode FROM books
+      WHERE id != ? AND (barcode = ? OR (barcode GLOB '0*' AND barcode NOT GLOB '*[^0-9]*' AND length(barcode) <= 9 AND CAST(barcode AS INTEGER) = ?))
+      LIMIT 1`).get(self, String(invNumber), invNumber);
+    if (byCode) {
+      throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
+        + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');
+    }
+  }
+}
+
 module.exports = function registerBooksHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode } = deps;
   /* Одит v2.3.1 №9(a) — позволените стойности се четат от същия списък, който
@@ -270,51 +316,6 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     return n;
   }
 
-  /* Одит v2.4.29: един баркод = един екземпляр. Дублиран баркод се приемаше
-     мълчаливо при запис и редакция, а после resolveScannedBook() (security-utils.js)
-     отказва ВСЯКО сканиране на този етикет на гишето, в акт и при инвентаризация —
-     дефект, който се появява седмици по-късно и далеч от причината. Проверката е
-     в транзакцията, срещу другите редове. books:findDuplicateBarcodes остава за
-     старите данни. */
-  function assertUniqueBarcode(db, barcode, invNumber, selfId) {
-    const code = barcode == null ? '' : String(barcode).trim();
-    const self = selfId || -1;
-    if (code) {
-      const other = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(code, self);
-      if (other) {
-        throw new Error('Баркод ' + code + ' вече е на инв. № ' + (other.inv_number ?? other.id)
-          + ' — един баркод се лепи само на един екземпляр. Дайте на този документ друг етикет '
-          + '(„Баркод етикети“) или оставете полето празно.');
-      }
-      /* Числов баркод, равен на ЧУЖД инвентарен номер, също прави сканирането
-         двусмислено (resolveScannedBook отказва и двата документа). */
-      if (/^\d{1,9}$/.test(code)) {
-        const byInv = db.prepare('SELECT id, inv_number FROM books WHERE inv_number = ? AND id != ? LIMIT 1').get(parseInt(code, 10), self);
-        if (byInv) {
-          throw new Error('Баркод ' + code + ' съвпада с инвентарния номер на друг документ (инв. № ' + byInv.inv_number
-            + ') — при сканиране програмата няма как да различи двата. Дайте на този документ друг етикет.');
-        }
-      }
-    }
-    if (invNumber != null) {
-      /* Съвпадението е ЧИСЛОВО (както при resolveScannedBook), не текстово: баркод
-         „007“ отговаря на сканиране на инв. № 7 (CAST('007' AS INTEGER) = 7), а
-         точното текстово сравнение по-долу би пропуснало точно този случай —
-         проверката би минала тук, а по-късно скенерът пак би отказал. */
-      /* v2.4.31 (производителност): дотук се четяха ВСИЧКИ баркодове (15 000 реда,
-         16 ms при всеки запис на книга) и се сравняваха в JavaScript. Числово равен
-         баркод е или точно същият низ (idx_books_barcode), или същото число с
-         водещи нули („007“) — само баркодовете, започващи с „0“, минават през
-         CAST; GLOB '0*' пак ползва индекса. Резултатът е същият. */
-      const byCode = db.prepare(`SELECT id, inv_number, barcode FROM books
-        WHERE id != ? AND (barcode = ? OR (barcode GLOB '0*' AND barcode NOT GLOB '*[^0-9]*' AND length(barcode) <= 9 AND CAST(barcode AS INTEGER) = ?))
-        LIMIT 1`).get(self, String(invNumber), invNumber);
-      if (byCode) {
-        throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
-          + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');
-      }
-    }
-  }
   ipcMain.handle('books:create', (e, book) =>
     run(() => {
       const db = getDb();
@@ -665,3 +666,8 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
 
   return { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit };
 };
+/* Ползва се и от вноса на файл (handlers/data-import.js): дублиран баркод,
+   вкаран през вноса, чупи сканирането също толкова трайно, колкото дублиран
+   баркод, вкаран от формата. */
+module.exports.assertUniqueBarcode = assertUniqueBarcode;
+

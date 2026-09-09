@@ -200,9 +200,13 @@ test('картонът не предлага поле за брой екземп
     'бройка не се праща изобщо — картонът е за един екземпляр');
   const txt = window.document.querySelector('#bookF').textContent;
   assert.ok(!/Налични бройки/.test(txt), 'старото име подсказваше брой');
-  // Текстът стои в стойността на изключено поле, не в текста на формата.
-  const ro = [...window.document.querySelectorAll('#bookF input[disabled]')].map(e => e.value).join(' | ');
+  /* v2.4.44: текстът стоеше в стойността на ИЗКЛЮЧЕНО поле и се режеше с 93 px
+     („един инвентарен номер, ед“), без да може да се превърти или маркира.
+     Сега е четим текст — затова се проверява в .fieldRead, а не в input. */
+  const ro = [...window.document.querySelectorAll('#bookF .fieldRead')].map(e => e.textContent).join(' | ');
   assert.match(ro, /един инвентарен номер, един екземпляр/);
+  assert.equal(window.document.querySelector('#bookF .fieldRead input'), null,
+    'вече не е поле — нито изключено');
   assert.ok(window.document.querySelector('[onclick="bookCopyForm(1)"]'), 'бутонът „+ Още екземпляр“');
 });
 

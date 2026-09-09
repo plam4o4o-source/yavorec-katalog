@@ -8,7 +8,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
       SELECT s.*,
-             (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id) AS scanned,
+             /* Приключена проверка показва СНИМКАТА (scanned_final) — същото
+                число, което влиза и в протокола по чл. 40. Иначе списъкът
+                показваше суровия брой сканирания до самия бутон „Протокол“,
+                който печата поправеното: „в обхвата 9 · проверени 7 · липсващи
+                4“ на екрана срещу „проверени 6“ на хартия (проверка при
+                прегледа на v2.4.45). Текуща проверка и сесиите отпреди
+                снимката имат NULL и се броят както досега. */
+             COALESCE(s.scanned_final,
+                      (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id)) AS scanned,
              (SELECT COUNT(*) FROM inventory_session_missing m WHERE m.session_id = s.id) AS missing
       FROM inventory_sessions s ORDER BY s.date DESC
     `).all())
@@ -255,15 +263,28 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            Заета книга, която все пак е сканирана (върната на гишето, но още
            нерегистрирана), е ПРОВЕРЕНА — тя е била в ръцете на комисията. */
         const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id)).length;
-        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ? WHERE id = ?')
-          .run(mode, pool.length, onLoanInPool, excused.length, sessionId);
+        /* „Проверени“ се брои СРЕЩУ ОБХВАТА, а не като брой сканирания. Обхватът
+           се смята наново при приключване (книга, отчислена или преместена в друг
+           отдел, докато проверката тече, вече не е в него), а сканиранията са
+           всичко, което комисията е минала. Дотук се връщаше суровият брой
+           сканирания и четирите числа НАДХВЪРЛЯХА обхвата — точно това, което
+           бележката по-горе иска да няма: 10 книги, отчислена една по време на
+           проверката, даваше „в обхвата 9 · проверени 6 · липсващи 4“, тоест 10
+           от 9 в подписания протокол по чл. 40. Излезлите от обхвата се връщат
+           ОТДЕЛНО (outOfScope), за да ги обяви протоколът, вместо да ги скрие. */
+        const poolIds = new Set(pool.map(b => b.id));
+        const scannedInPool = scannedIds.filter(id => poolIds.has(id)).length;
+        const outOfScope = scannedIds.length - scannedInPool;
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ? WHERE id = ?')
+          .run(mode, pool.length, onLoanInPool, excused.length, scannedInPool, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
-          ' — проверени ' + scannedIds.length + ', липсващи ' + missing.length + ' от ' + pool.length +
+          ' — проверени ' + scannedInPool + ', липсващи ' + missing.length + ' от ' + pool.length +
+          (outOfScope ? ', ' + outOfScope + ' сканирани излязоха от обхвата по време на проверката' : '') +
           (excused.length ? ', ' + excused.length + (excused.length === 1 ? ' документ за реставрация (не се проверява на място)'
             : ' документа за реставрация (не се проверяват на място)') : ''));
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
         return {
-          mode, scanned: scannedIds.length, missing: missing.length, pool: pool.length,
+          mode, scanned: scannedInPool, missing: missing.length, pool: pool.length, outOfScope,
           unchecked: unchecked.length, onLoan: onLoanInPool, atBinder: excused.length,
           allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
         };

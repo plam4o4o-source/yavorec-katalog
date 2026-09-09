@@ -105,6 +105,7 @@ async function importRun() {
   if (!res.ok) return toast(res.error, 'err');
   const r = res.data;
   markSaved();
+  forgetAuthSuggest();   // цял фонд наведнъж — списъкът за автодовършване е съвсем друг
   modal('Въвеждането приключи', `
     <div class="kpis">
       ${kpi(KPI_ICONS.check, r.added, 'Въведени документа', 'добавени във фонда', 'ok')}

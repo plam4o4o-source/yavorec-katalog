@@ -59,8 +59,12 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('analytics:update', (e, d) =>
     run(() => {
-      getDb().prepare(`UPDATE analytics SET ${ANALYTIC_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
+      /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
+         база записът може да е изтрит от другото работно място, а одитната
+         следа не бива да твърди редакция, каквато не се е случвала. */
+      const info = getDb().prepare(`UPDATE analytics SET ${ANALYTIC_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
         .run({ ...analyticParams(d), id: d.id });
+      if (!info.changes) throw new Error('Описанието не е намерено — вероятно е изтрито от друго работно място.');
       logAudit('Аналитично описание', 'редакция: ' + (d.title || ''));
     })
   );

@@ -266,6 +266,13 @@ async function doCloseInvent() {
       <div class="card"><div class="num">${r.missing}</div><div class="lbl">Липсващи</div></div>
       <div class="card"><div class="num">${r.allowedLoss.toFixed(1)}</div><div class="lbl">Допустими</div></div>
     </div>
+    ${r.outOfScope
+      ? `<div class="note">${r.outOfScope === 1
+          ? 'Един сканиран документ е излязъл от обхвата, докато проверката е течала'
+          : r.outOfScope + ' сканирани документа са излезли от обхвата, докато проверката е течала'}
+         (отчислени или преместени в друг отдел) — затова „Проверени“ е по-малко от броя сканирания.
+         Тези документи не влизат в протокола: обхватът се снима към ПРИКЛЮЧВАНЕТО.</div>`
+      : ''}
     ${r.mode === 'full'
       ? (over > 0
         ? `<div class="note d">Липсите надвишават нормативите за естествени загуби с ${over.toFixed(1)} документа (чл. 51 – 53).</div>`
@@ -296,7 +303,12 @@ async function printInventProtocol(id) {
   const s = await call(window.api.inventorySessions.get(id));
   if (!s) return;
   const st = SETTINGS_CACHE || {};
-  const scanned = s.scans.length;
+  /* ПРОВЕРЕНИТЕ КЪМ ПРИКЛЮЧВАНЕТО, не броят сканирания — по същата причина като
+     pool_final точно отдолу: обхватът се смята наново при приключване, а документ,
+     отчислен или преместен в друг отдел, докато проверката тече, излиза от него.
+     Печатаният брой сканирания правеше протокола несъбираем: „в обхвата 9 ·
+     проверени 6 · липсващи 4“. Стари сесии нямат снимка и падат обратно. */
+  const scanned = s.scanned_final != null ? s.scanned_final : s.scans.length;
   const missing = s.missing.length;
   const missingValue = s.missing.reduce((n, m) => n + (Number(m.price) || 0), 0);
   /* ПУЛЪТ КЪМ ПРИКЛЮЧВАНЕТО, не снимката от започването. Одит на документите

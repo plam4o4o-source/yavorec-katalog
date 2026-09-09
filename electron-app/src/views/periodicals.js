@@ -80,7 +80,12 @@ async function openPeriodical(id) {
       </tbody></table></div>` : '<div class="hint">Все още няма вписани броеве.</div>'}`,
     `<button class="btn dgr" onclick="delPeriodical(${id})">Изтрий изданието</button>
      <button class="btn" onclick="closeModal();periodicalForm(${id})">Редактирай</button>
-     <button class="btn pri" onclick="closeModal();periodikaRefreshIfShown()">Затвори</button>`);
+     <button class="btn pri" onclick="closeModal()">Затвори</button>`);
+  /* Опресняването виси на ЗАТВАРЯНЕТО, а не на един бутон: ✕ и Esc затварят
+     същия прозорец и дотук оставяха списъка отзад със старите „Броеве“ и
+     „Следващ очакван брой“ — току-що вписан брой продължаваше да се води
+     закъснял. */
+  onModalClose(periodikaRefreshIfShown);
   setTimeout(() => { const f = $('#issueF [name=issue_no]'); if (f) f.focus(); }, 0);
 }
 window.openPeriodical = openPeriodical;
