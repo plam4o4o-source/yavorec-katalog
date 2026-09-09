@@ -1,6 +1,14 @@
 /* ---------------- Категории (управляват се в „Настройки“) ---------------- */
+/* Прибира се като останалите настройки (v2.4.47): списъкът расте с фонда, а се
+   пипа веднъж — при подреждането на видовете документи. Свитият ред казва колко
+   са, за да не се налага да се отваря само за да се види това.
+   setupMore() идва от settings.js; и двата файла са обикновени скриптове в един
+   и същ глобален обхват, а повикването става чак при пречертаване на
+   „Настройки“, тоест след като и двата са изпълнени. */
 function categoriesCardHtml(cats) {
-  return `<div class="card setupCard"><h3 style="margin-top:0">Категории (видове документи)</h3>
+  const n = (cats || []).length;
+  return setupMore('Категории (видове документи)',
+    n ? pl(n, 'вид документ', 'вида документи') : 'няма въведени', `
     <div class="note" style="margin-top:0">Категориите се избират при вписване на всеки документ във фонда
     и излизат в справките и в онлайн каталога.</div>
     <div class="toolbar"><button class="btn pri" onclick="categoryForm()">+ Нова категория</button></div>
@@ -9,8 +17,7 @@ function categoriesCardHtml(cats) {
       ${cats.map(c => `<tr><td>${esc(c.name)}</td>
         <td><button class="btn sm" onclick="categoryForm(${c.id}, '${jsq(c.name)}')">Редакция</button>
             <button class="btn sm dgr" onclick="deleteCategory(${c.id})">Изтрий</button></td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="hint">Няма категории.</div>'}
-  </div>`;
+      </tbody></table></div>` : '<div class="hint">Няма категории.</div>'}`);
 }
 function categoryForm(id, name) {
   modal(id ? 'Редакция на категория' : 'Нова категория',

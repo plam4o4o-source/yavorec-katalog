@@ -1112,7 +1112,24 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 /* ---------- Настройки (преустроени във v2.4.27) ----------
    Лява лепкава навигация по раздели, търсене, свити рядко пипани карти. */
 .setupWrap{display:grid; grid-template-columns:210px minmax(0,1fr); gap:24px; align-items:start}
-.setupNav{position:sticky; top:0; display:flex; flex-direction:column; gap:2px; padding-top:2px}
+/* Менюто на настройките се движи със страницата и остава на екрана, но паркира
+   ПОД горната лента, не зад нея: #topbar е също sticky с top:0, затова меню със
+   същото top:0 се залепва на същото място и първите му редове (полето за
+   търсене и първият раздел) стоят скрити зад лентата. Височината ѝ идва от
+   setTopbarH() в core.js — мери се, защото се променя с темата и с мащаба на
+   Windows; 89px е само резервната стойност.
+   max-height: дългото меню трябва да се превърта САМО, ако не се побира —
+   иначе долните раздели стават недостижими, щом менюто е залепено. */
+.setupNav{
+  position:sticky; top:calc(var(--topbar-h, 89px) + 14px);
+  max-height:calc(100vh - var(--topbar-h, 89px) - 28px); overflow-y:auto;
+  display:flex; flex-direction:column; gap:2px;
+  /* 3 px отвсякъде, не 2 px отгоре: overflow-y:auto прави менюто изрязваща
+     кутия (и по хоризонтала), а пръстенът на фокуса е 2 px с 1 px отстояние —
+     при по-малко отстояние той се реже точно по ръбовете на полето за търсене
+     и на редовете, които са на цялата ширина. */
+  padding:3px;
+}
 .setupNav #setupSearch{
   width:100%; box-sizing:border-box; margin:0 0 10px; padding:7px 10px; font:inherit; font-size:13px;
   border:1px solid var(--rule2); border-radius:5px; background:var(--paper2); color:var(--ink);
@@ -1127,7 +1144,12 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 .setupNavS{display:block; font-size:11px; color:var(--ink3); margin-top:1px}
 .setupNavHint{margin-top:10px; padding:0 12px}
 .setupBody{min-width:0; display:flex; flex-direction:column; gap:14px}
-.setupSec{scroll-margin-top:8px; padding-bottom:12px; border-bottom:1px solid var(--rule)}
+/* scroll-margin-top по височината на лентата (v2.4.47): менюто вика
+   scrollIntoView({block:'start'}), а „start“ е горният ръб на превъртаната
+   част — под залепената лента. Измерено: щракване по раздел в менюто оставяше
+   81 px от него, включително заглавието му, скрити зад лентата — тоест
+   собствената навигация на настройките те пращаше ПОД началото на раздела. */
+.setupSec{scroll-margin-top:calc(var(--topbar-h, 89px) + 8px); padding-bottom:12px; border-bottom:1px solid var(--rule)}
 .setupSec:last-child{border-bottom:0}
 .setupHead{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:6px 0 12px}
 .setupHead h2{font-family:var(--serif); font-size:21px; margin:0; color:var(--spine2); letter-spacing:.005em}
