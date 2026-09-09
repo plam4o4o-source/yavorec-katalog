@@ -9,6 +9,13 @@
      paper/paper3 комбинации. */
   --ink:#1B1813; --ink2:#5C5344; --ink3:#676054;
   --spine:#1A1208; --spine2:#241809; --spine3:#3A2A12;
+  /* Приглушеният текст в тъмната лента (заглавия на групи, кредит, „автоматичен
+     запис“). Дотук беше зашитото #8A8168 — измерено, то пада до 2,67:1 върху
+     --spine на темата по подразбиране („InvLib“) при изискване 4,5:1, а лентата
+     стои на всичките 24 екрана. Стойността е ЕДНА за всички теми и минава
+     навсякъде (най-лошото е 4,71:1); тест го проверява за всяка тема, за да не
+     се счупи при добавяне на нова. */
+  --spineDim:#B5AEA2;
   /* --brass беше #96731F: бял текст върху него (.btn.pri, .rankNo, .dnvToday,
      .tagLocal) даваше 4.40:1 — под прага на WCAG AA от 4.5:1. Затъмнен е с
      един тон до 4.80:1; разликата е практически невидима, но бутоните вече
@@ -85,7 +92,14 @@ body{
 ::selection{background:var(--brassL); color:var(--spine)}
 /* Единен фокус за клавиатурна навигация — само при :focus-visible, за да не
    се появява рамка при обикновено кликане с мишката. */
-:where(button,a,select):focus-visible{outline:2px solid var(--brassL); outline-offset:1px}
+/* Пръстенът е с --brassD, а не с --brassL: измерено, светлият тон е между 1,63:1
+   и 2,42:1 върху хартията в шест от седемте теми (при изискване 3:1 за признак
+   на интерфейса) — тоест фокусът се вижда само в тъмната лента, а по бутоните,
+   таблиците и прозорците практически го няма. --brassD е най-малко 5,69:1 върху
+   светлото. В самата лента е обратното (--brassD пада до 1,19:1 върху --spine),
+   затова там пръстенът остава светъл — виж правилото при #rail по-долу. */
+:where(button,a,select):focus-visible{outline:2px solid var(--brassD); outline-offset:1px}
+#rail :where(button,a,select):focus-visible{outline-color:var(--brassL)}
 /* Светлите скролбари на основната част; тъмните на страничната лента са
    зададени отделно при #rail и надделяват по специфичност. */
 ::-webkit-scrollbar{width:11px; height:11px}
@@ -133,7 +147,7 @@ body{
 /* Тънка линия след заглавието на групата запълва остатъка от реда */
 .nav-grp{
   display:flex; align-items:center; gap:9px;
-  font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:#8A8168;
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--spineDim);
   padding:13px 20px 6px;
 }
 /* На лаптоп 1366×768 при мащаб 125 % лентата има ~614 px височина, а менюто
@@ -352,9 +366,30 @@ table.ledger.ibTable td:nth-child(4){min-width:150px}
   font-family:var(--mono); font-size:12.5px; text-align:right; background:transparent; color:var(--ink);
 }
 .dnvCell:hover{border-color:var(--rule2); background:#fff}
-.dnvCell:focus{border-color:var(--brass); background:#fff; outline:none; box-shadow:0 0 0 2px rgba(150,115,31,.15)}
+/* Пръстенът е ИСТИНСКИ outline, а не сянка. Досегашният „box-shadow 15 %“ мери
+   1,19:1 срещу клетката — тоест не се вижда; освен това беше зашит в бронзово и
+   в синята тема стоеше редом до син кант. */
+.dnvCell:focus{border-color:var(--brass); background:#fff; outline:2px solid var(--brassD); outline-offset:-1px}
 .dnvCell.hrs{width:62px; text-align:center}
-.dnvCell.saved{background:var(--greenL); border-color:var(--green)}
+/* „.saved“ идва СЛЕД „:focus“ при еднаква тежест и го надвиваше: току-що
+   записана клетка (700 ms зелена) нямаше НИКАКЪВ признак на фокус — точно когато
+   човек се връща на нея да я поправи. Затова фокусът се записва и в комбинация. */
+/* Записаното НЕ се предава само с цвят: отметка, нарисувана в самата клетка (тя е
+   <input>, вътре в нея не може да се сложи знак). Вижда се и при монохромен екран,
+   и при далтонизъм — навсякъде другаде в програмата всяко състояние има втори
+   признак освен цвета (текст, знак или „!“), само това нямаше. */
+.dnvCell.saved{
+  background:var(--greenL) no-repeat right 3px center;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%233E6B4A' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5'/%3E%3C/svg%3E");
+  background-size:11px 11px; border-color:var(--green); padding-right:17px;
+}
+/* На фокус клетката се пише — отметката отстъпва на курсора, а пръстенът се
+   вижда (иначе „.saved“ идваше след „:focus“ и записаната клетка нямаше никакъв
+   признак на фокус точно когато човек се връща да я поправи). */
+.dnvCell.saved:focus{
+  background:#fff; border-color:var(--brass); padding-right:8px;
+  outline:2px solid var(--brassD); outline-offset:-1px;
+}
 .dnvTable td.calc{background:var(--paper3); font-weight:600; font-family:var(--mono); padding:8px 10px}
 .dnvTable tr.dnvToday td.dnvDay{background:var(--brass); color:#fff}
 .dnvTable tr.dnvTotal{font-weight:600; background:var(--paper3)}
@@ -567,10 +602,24 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .udkBuildLbl{color:var(--ink2); font-size:12.5px; flex:1; min-width:150px; line-height:1.35}
 .udkBuild .btn{flex:0 0 auto}
 
+/* Поле само за четене, което е ИЗРЕЧЕНИЕ, а не стойност („1 — един инвентарен
+   номер, един екземпляр“). Пренася се на нов ред, вместо да се реже като
+   <input disabled>: измерено, в полето се събираха 93 px по-малко от текста и
+   се четеше „1 — един инвентарен номер, ед“, при това без възможност да се
+   превърти или маркира, защото полето е изключено. */
+.fieldRead{
+  font-family:var(--sans); font-size:13px; color:var(--ink2); line-height:1.35;
+  padding:8px 0 0; min-height:34px;
+}
+
 /* Бързите препратки са ПОМОЩНА лента: държат се на два реда, за да не изтикат
-   дървото извън екрана: 17 кода с наименования иначе заемат пет реда. */
+   дървото извън екрана: 17 кода с наименования иначе заемат пет реда.
+   Височината пуска РОВНО два реда (26 px чип + 5 px разстояние), за да не остава
+   разрязан по средата трети ред: измерено, при 58 px три чипа се показваха
+   наполовина — изглежда като счупено, а не като „има още“. Че има още, се вижда
+   от лентата за превъртане. */
 .udkQuick{display:flex; gap:5px; flex-wrap:wrap; align-items:center; margin:0 0 8px;
-  max-height:58px; overflow-y:auto}
+  max-height:62px; overflow-y:auto; scroll-padding:2px}
 .udkQuickLbl{font-size:11.5px; color:var(--ink3); margin-right:3px}
 .udkQuick .udkItem.udkQ1{width:auto; border:1px solid var(--rule2); background:var(--paper);
   padding:2px 7px; font-size:11.5px; gap:6px}
@@ -700,8 +749,8 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .userBadge:hover{background:var(--paper3); border-color:var(--brassD); box-shadow:var(--sh)}
 /* Докато служителят не е избран — приглушено, за да личи, че е подкана */
 .userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
-.appCredit{font-size:10px; color:#8A8168; margin-top:10px; text-align:center; line-height:1.4}
-.savedIndicator{font-size:11px; color:#8A8168; margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}
+.appCredit{font-size:10px; color:var(--spineDim); margin-top:10px; text-align:center; line-height:1.4}
+.savedIndicator{font-size:11px; color:var(--spineDim); margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}
 .savedIndicator .dot{width:6px; height:6px; border-radius:50%; background:var(--green); flex:0 0 auto}
 
 /* ---------- Checkbox полета ---------- */
@@ -735,7 +784,16 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .lbl-sig .ls-avt{font-size:8pt; line-height:1.1}
 
 /* ---------- Читателска карта (стандарт 90 x 60 мм) ---------- */
-.rcard{
+/* „.lbl.rcard“, а не само „.rcard“: картата се печата като етикет и носи ДВАТА
+   класа, а setPrintPage() влага правило за .lbl (align-items:center;
+   justify-content:center — вярното за баркод етикет) в <style>, добавен СЛЕД
+   този файл. При еднаква тежест печели по-късното, тоест дотук отпечатаната
+   карта се подреждаше по средата: измерено, цветната лента със заглавието
+   излизаше 64 px широка на място x=138 вместо 338 px през цялата карта.
+   Прегледът на екрана се спасяваше от „.cardPreview .rcard“ (по-висока тежест) —
+   тоест библиотекарката одобряваше на екрана една карта, а от принтера излизаше
+   друга. */
+.lbl.rcard, .rcard{
   display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch;
   padding:0; overflow:hidden; text-align:left; background:#fff; border-radius:1.5mm;
 }
@@ -825,6 +883,11 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .ppFoot .hint{flex:1; margin:0}
 
 @media print{
+  /* Хартията е БЯЛА. body носи var(--paper) — кремаво, синкаво или розово според
+     темата — а „Запази PDF…“ печата с printBackground:true. Инвентарната книга,
+     която се прошнурова и заверява по чл. 26, ал. 2, излизаше цветна от край до
+     край, при това в различен цвят според това коя тема е избрана на екрана. */
+  body{background:#fff}
   body *{visibility:hidden}
   #printArea, #printArea *{visibility:visible}
   #printArea{position:absolute; left:0; top:0; width:100%; display:block !important; padding:0}
@@ -968,6 +1031,10 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 @media (prefers-reduced-motion: reduce){
   .toast, #view.viewIn, tr.rowFlash td, .savedIndicator .dot, .veil.on .modal{animation:none !important}
   .toast.out, .veil, .veil.closing .modal{transition:none !important}
+  /* Останалите три движения: повдигането с 1 px при посочване на бърз бутон,
+     на картон в „Персоналии“ и в „Летопис“, и пълзящата лента на заетостта.
+     Малки са, но настройката иска движението да е изключено, а не намалено. */
+  .quickBtn, .prsCard, .chrItem, .bar-fill{transition:none !important}
 }
 
 /* ============================================================================

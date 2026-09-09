@@ -416,8 +416,12 @@ async function bookForm(id, presetAcqId, prefill) {
           ? `<div class="field"><label>Екземпляри под този номер</label>
               <input type="text" value="${esc(String(v.quantity))} — стар запис" disabled>
               <span class="fh" style="color:#b00">Един инвентарен номер отговаря на един екземпляр. Поправя се от „Настройки“ → „Проверка на данните“; записването тук не променя бройката.</span></div>`
+          /* Не е поле за въвеждане, а изречение: в четириколонната мрежа надписът
+             „1 — един инвентарен номер, един екземпляр“ се реже с 93 px и се чете
+             „1 — един инвентарен номер, ед“, а полето е disabled, тоест не може
+             нито да се превърти, нито да се маркира. Показва се като текст. */
           : `<div class="field"><label>Екземпляр</label>
-              <input type="text" value="1 — един инвентарен номер, един екземпляр" disabled>
+              <div class="fieldRead">1 — един инвентарен номер, един екземпляр</div>
               <span class="fh">втори екземпляр: бутонът „+ Още екземпляр“</span></div>`}
       </div>
       <div class="grid g4">
@@ -880,6 +884,7 @@ async function saveBook(id, andNew) {
   let savedId = id;
   if (id) { if (await call(window.api.books.update(d), 'Книгата е обновена.') === null) return; }
   else { savedId = await call(window.api.books.create(d), 'Книгата е добавена.'); if (savedId === null) return; }
+  forgetAuthSuggest();          // авторът/издателството от този запис вече се предлагат
   closeModal(); await RENDERERS[VIEW]();
   if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
   /* „Запиши и нов“ (v2.4.27, A2): каталогизирането на партида от 40 книги беше

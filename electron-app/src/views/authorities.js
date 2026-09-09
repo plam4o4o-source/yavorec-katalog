@@ -86,7 +86,7 @@ async function authMerge(i) {
   if (!r) return;
   toast(`Слети ${r.merged} стойности в „${target.value}“ — променени ${r.changed} документа.`, 'ok');
   markSaved();
-  AUTH_SUGGEST = null; // списъкът за автодовършване вече е различен
+  forgetAuthSuggest(); // списъкът за автодовършване вече е различен
   renderAuth();
 }
 window.authMerge = authMerge;

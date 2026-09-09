@@ -530,7 +530,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -692,6 +692,13 @@ const MIGRATIONS = [
   { version: 13, run: () => {
     db.prepare("UPDATE circulation_rules SET loan_days = NULL WHERE loan_days IS NOT NULL AND loan_days <= 0").run();
     db.prepare("UPDATE circulation_rules SET extension_days = NULL WHERE extension_days IS NOT NULL AND extension_days <= 0").run();
+  } },
+  /* v2.4.44: снимка на ПРОВЕРЕНИТЕ към приключването (виж schema.sql). Старите
+     сесии остават с NULL и протоколът пада обратно към броя сканирания — както
+     прави и с pool_final. Не се презаписват със задна дата: подписаният протокол
+     е това, което е било отпечатано тогава. */
+  { version: 14, run: () => {
+    ensureColumns('inventory_sessions', { scanned_final: 'INTEGER' });
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от

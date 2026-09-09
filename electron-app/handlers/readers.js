@@ -125,6 +125,13 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const prev = db.prepare('SELECT * FROM readers WHERE id = ?').get(r.id);
+      /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция. Дотук UPDATE-ът
+         просто не намираше какво да промени, повикването връщаше „ok“, а в
+         одитната следа влизаше „Редакция на читател“, каквато не се е случвала.
+         Режимът с две работни места към обща мрежова база е изрично поддържан,
+         тоест изтрит от другаде читател е нормален случай, не хипотеза. Същата
+         проверка пази и books:update. */
+      if (!prev) throw new Error('Читателят не е намерен — вероятно е изтрит от друго работно място.');
       const payload = readerPayload(r, prev);
       preparePiiForWrite(payload, prev);
       db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)

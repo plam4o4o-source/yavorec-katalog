@@ -83,6 +83,62 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 /* ---------------- Старт ---------------- */
+/* ============================================================================
+   ЕДНО ЩРАКВАНЕ = ЕДНО ВПИСВАНЕ (v2.4.44)
+   ----------------------------------------------------------------------------
+   Бутоните в прозорците не се заключваха, докато записът тече, а closeModal()
+   маха прозореца чак след 140 ms (плавното затваряне). При обикновено двойно
+   щракване второто попадение хваща жив бутон над още попълнена форма и
+   действието тръгва ВТОРИ ПЪТ. Проверено в jsdom: „Плати“ с 4,50 лв. праща
+   account.pay два пъти и читателят е кредитиран с 9,00 лв.; „Впиши посещения“
+   праща visits.add два пъти, а handlers/visits.js събира (count = count + нов) —
+   50 посещения стават 100 в официалната статистика. Нищо не се вижда на екрана:
+   няма грешка, няма второ съобщение.
+
+   Затова тук — а не на двайсет места — всяко действие, което ВПИСВА нов ред, се
+   обвива веднъж: докато повикването не приключи, повторните извиквания се
+   пренебрегват, а натиснатият бутон стои недостъпен. Файлът се зарежда последен
+   (виж бележката най-горе), затова функциите вече съществуват.
+
+   Списъкът е ИЗРИЧЕН, а не по име: тест проверява, че всяко име тук съществува —
+   преименувана функция иначе би останала без пазач, без нищо да се счупи. */
+const ONCE_ACTIONS = [
+  'savePayment', 'saveCharge', 'chargeAnnualFee',      // пари по сметката на читателя
+  'saveVisits',                                        // официална статистика за посещенията
+  'saveBook', 'saveReader', 'saveAcq', 'saveAct',      // фонд, КДБФ, отчисляване
+  'saveAnalytic', 'saveChronicle', 'savePerson',       // краезнание
+  'saveMzs', 'savePeriodical', 'addIssue', 'saveHold',
+  'saveSuggestion', 'saveCategory', 'saveEmployee',
+  'addClosedDay', 'createShelf', 'lnkAdd'
+];
+const ONCE_RUNNING = new Set();
+for (const name of ONCE_ACTIONS) {
+  const fn = window[name];
+  if (typeof fn !== 'function') continue;
+  window[name] = function (...args) {
+    if (ONCE_RUNNING.has(name)) return undefined;
+    ONCE_RUNNING.add(name);
+    /* Натиснатият бутон е и фокусираният — Chromium фокусира бутона при
+       щракване. Ако по някаква причина не е, пазачът пак държи: наборът
+       ONCE_RUNNING сам по себе си спира второто повикване. */
+    const btn = document.activeElement;
+    const lock = btn && btn.tagName === 'BUTTON' && !btn.disabled ? btn : null;
+    if (lock) lock.disabled = true;
+    let out;
+    try {
+      out = fn.apply(this, args);
+    } finally {
+      Promise.resolve(out).catch(() => {}).then(() => {
+        ONCE_RUNNING.delete(name);
+        /* Бутонът се отключва само ако още стои на екрана: при успех прозорецът
+           вече е затворен и елементът е изхвърлен. */
+        if (lock && lock.isConnected) lock.disabled = false;
+      });
+    }
+    return out;
+  };
+}
+
 initUserBadge();
 initAppCredit();
 initSavedIndicator();
