@@ -11,6 +11,64 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.47
+
+**BG:** Две заявки от библиотеката за екрана „Настройки“.
+
+- **Менюто вляво (и търсенето в него) вече остава на екрана при превъртане.**
+  То беше залепено, но на `top:0` — точно мястото, на което стои и самата горна
+  лента. Измерено в браузър при 1366×768: лентата е 89 px, менюто се залепваше
+  на 0 px и първите му редове — **полето „Търсене в настройките…“ и първият
+  раздел** — стояха скрити зад нея (проверка кой елемент е най-отгоре на това
+  място връщаше лентата, не менюто). Сега менюто паркира ПОД лентата, по
+  **измерена** нейна височина: тя се променя с темата, с мащаба на Windows и
+  когато заглавието се пренесе на два реда, затова числото не е преписано в
+  стила. Дълго меню на нисък екран се превърта в себе си, вместо долните
+  раздели да станат недостижими. При тесен прозорец (под 1100 px) менюто си
+  остава лента над съдържанието, както досега — там вертикалното място е малко.
+- **„Календар на библиотеката“, „Резервно копие“ и „Категории (видове
+  документи)“ вече се прибират** като останалите рядко пипани настройки. Свитият
+  ред казва какво има вътре: „3 вида документи“, „последно: 08.09.2026 · 2
+  копия“, „работни дни и затворени дни — празници и отпуск“. Търсенето отваря
+  само̀ съвпадналите, а отвореният раздел остава отворен и след запис
+  (страницата се пречертава).
+
+Покрай тях, намерено при прегледа и поправено, защото е същият екран:
+
+- **Щракване по раздел в менюто отвеждаше ПОД началото му.** Превъртането
+  оставяше 81 px от раздела — заедно със заглавието му — скрити зад лентата
+  (измерено). Сега отстоянието се води по същата измерена височина.
+- Височината се преизчислява и при **смяна на раздел**, не само при пускане и
+  преоразмеряване: дългите заглавия („Книга за движение на библиотечния фонд“)
+  пренасят лентата на два реда и я правят 119 px вместо 89 px.
+- Менюто получи 3 px отстояние: то вече е изрязваща кутия (за да може да се
+  превърта), а пръстенът на фокуса е 2 px с 1 px отстояние и се режеше по
+  ръбовете на полето за търсене и на редовете.
+
+Проверено в истински браузър (Chromium), не само с тестове: положението на
+менюто при три размера на прозореца и на три места на превъртане, къде застава
+всеки раздел при щракване в менюто, височината на лентата при четири раздела, и
+че съдържанието на трите прибрани раздела е налице и работи. 11 нови теста,
+всеки проверен с мутация. Пълната поредица: 1391 успешни, 0 неуспешни (UTC и
+Europe/Sofia).
+
+**EN:** Two requests from the library for the Settings screen. The left menu
+(with its search box) now stays on screen while scrolling: it was already
+sticky, but at `top:0` — the very place the sticky top bar occupies, so its
+first rows (the search field and the first section) sat hidden behind it
+(measured in a real browser: an 89 px bar, the menu parking at 0). It now parks
+below the bar, using the bar's measured height, and scrolls internally if a
+window is too short. Below 1100 px the menu stays a row above the content, as
+before. And “Library calendar”, “Backup” and “Categories” now collapse like the
+other rarely-touched settings, each showing a one-line summary of what is inside
+(counts, last backup date); search opens the ones it matches, and an opened
+section stays open across redraws. Found while reviewing the same screen and
+fixed with them: clicking a section in the menu scrolled it to 8 px, leaving
+81 px of it — its heading included — behind the sticky bar; the bar's height is
+now also re-measured on route change (a long view title wraps it to 119 px); and
+the menu got 3 px of padding, since making it scrollable also made it clip the
+2 px focus ring. 11 new tests, each mutation-checked.
+
 ## v2.4.46
 
 **BG:** По искане на библиотеката: **името на библиотеката не се изписва в

@@ -63,6 +63,24 @@ function csvSafe(x) {
   return '"' + s.replace(/"/g, '""') + '"';
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+/* Височината на горната лента — в CSS променлива, за да могат залепените
+   отстрани менюта да паркират ПОД нея, а не зад нея (v2.4.47).
+   #topbar е position:sticky; top:0; z-index:10, тоест винаги стои най-горе в
+   #main. Меню със същото top:0 се залепва на СЪЩОТО място и минава отдолу:
+   измерено — лентата с настройките се залепваше на 0 px при лента, висока
+   89 px, тоест полето за търсене и първият раздел стояха скрити зад нея
+   (elementFromPoint върху първия ред връщаше самата лента).
+   Числото се мери, а не се преписва: лентата се преоразмерява с темата, с
+   мащаба на Windows и с дългите заглавия. 89px в CSS е само резервната
+   стойност, ако скриптът не е стигнал дотук. */
+function setTopbarH() {
+  const bar = document.getElementById('topbar');
+  if (!bar) return;
+  const h = Math.round(bar.getBoundingClientRect().height);
+  if (h) document.documentElement.style.setProperty('--topbar-h', h + 'px');
+}
+window.setTopbarH = setTopbarH;
 /* Клавиатурна активация на кликаеми <div> карти (v1.70.0) — .prsCard/.chrItem
    (Персоналии/Летопис) бяха обикновени <div onclick>, без tabindex и без
    клавиатурен път за отваряне; вижте tabindex="0" role="button" на самите
