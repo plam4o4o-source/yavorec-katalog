@@ -27,12 +27,21 @@ function readersRowsHtml(shown) {
       <td class="num">${r.open_loans == null ? '' : `<span class="loansCnt ${r.overdue_loans ? 'warn' : ''}" title="${r.overdue_loans
         ? pl(r.overdue_loans, 'просрочен документ', 'просрочени документа') + ' от ' + r.open_loans + ' заети'
         : (r.open_loans ? pl(r.open_loans, 'зает документ', 'заети документа') : 'няма заети документи')}">${r.open_loans}${r.overdue_loans ? ' !' : ''}</span>`}</td>
+      ${/* Две действия на реда, останалите — в менюто „⋯“ (v2.4.50). Дотук
+            шестте бутона на ред правеха 54 бутона на екран, а най-видното нещо
+            на всеки ред беше червеното „Изтрий“. Остават заемането (заради
+            което се отваря този списък) и редакцията; печатът, сметката и
+            изтриването се ползват по-рядко. */''}
       <td class="actsCell"><div class="rowActs"><button class="btn sm pri" onclick="CIRC.readerId=${r.id};CIRC.mode='out';location.hash='#circ'" title="Отваря гишето с този читател">Заемане</button>
           <button class="btn sm" onclick="readerForm(${r.id})">Редакция</button>
-          <button class="btn sm" onclick="printReaderCard(${r.id})">Картон</button>
-          <button class="btn sm" onclick="printCardOne(${r.id})" title="Печат на читателската карта само на този читател">Карта</button>
-          <button class="btn sm" onclick="accountModal(${r.id})">Сметка</button>
-          <button class="btn sm dgr" onclick="deleteReader(${r.id})">Изтрий</button></div></td></tr>`).join('')
+          <button class="btn sm rowMore" onclick="rowMenu(this)" aria-haspopup="menu" aria-expanded="false"
+            title="Още действия за ${esc(r.name || 'читателя')}" aria-label="Още действия за ${esc(r.name || 'читателя')}">⋯</button>
+          <div class="rowMoreItems">
+            <button class="btn" onclick="printReaderCard(${r.id})">Картон</button>
+            <button class="btn" onclick="printCardOne(${r.id})" title="Печат на читателската карта само на този читател">Читателска карта</button>
+            <button class="btn" onclick="accountModal(${r.id})">Сметка</button>
+            <button class="btn dgr" onclick="deleteReader(${r.id})">Изтрий</button>
+          </div></div></td></tr>`).join('')
     : `<tr><td colspan="7" class="empty">Няма намерени читатели.</td></tr>`;
 }
 function readersMoreHtml(more, total) {
@@ -125,6 +134,11 @@ async function renderReaders() {
   $('#view').innerHTML = `
     <div class="toolbar">
       <input type="search" id="rSearch" list="dl_searchReaders" placeholder="Търсене по име, телефон или № карта…" value="${esc(READERS_QUERY)}">
+      ${/* Основното действие стои ВЕДНАГА след търсенето и в двата регистъра
+            (v2.4.50). Дотук беше последно в лентата: в „Книги“ лентата се
+            пренасяше и „+ Нова книга“ оставаше само̀ на втори ред, а в
+            „Читатели“ стоеше между филтрите — едно и също нещо на две места. */''}
+      <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
       <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;readersFilterChanged()" title="Филтър по категория">
         <option value="">— всички категории —</option>
         ${KATEG.map(k => `<option value="${esc(k)}" ${READERS_FILTER_CAT === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
@@ -134,7 +148,6 @@ async function renderReaders() {
         <option value="активен" ${READERS_FILTER_STATUS === 'активен' ? 'selected' : ''}>активен</option>
         <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
       </select>
-      <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
       <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
     <div class="wrap"><table class="ledger readersTable">

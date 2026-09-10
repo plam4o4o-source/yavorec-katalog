@@ -261,7 +261,8 @@ test('Просрочени: изгледът НЕ смята дни и обез�
   assert.equal(cells[4].textContent.trim(), '17');
   // v2.4.29: сумата е в клетка „лв. над €“ (mnyCell) — целият текст в title, без „/“ в потока.
   assert.equal(cells[5].querySelector('.money').title, mny(window, 3.4));
-  assert.equal(cells[5].textContent.trim(), mny(window, 3.4).replace(' / ', ''));
+  // v2.4.50: и двете валути са на един ред — „/“ отпада, интервалът остава.
+  assert.equal(cells[5].textContent.trim(), mny(window, 3.4).replace(' / ', ' '));
 });
 
 /* ================= 1б) „Аналитично описание“ ================= */

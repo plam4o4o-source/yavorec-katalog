@@ -11,6 +11,128 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.50
+
+**BG:** Кръг по външния вид, по поръчка на библиотеката. Шест неща, всяко
+измерено в истински браузър преди и след поправката — не преценено на око.
+
+- **Действията на реда.** В „Читатели“ на всеки ред стояха ШЕСТ бутона по 24 px
+  височина — при девет реда това са 54 бутона на един екран, а най-видното нещо
+  на всеки ред беше червеното „Изтрий“. Остават трите най-често използвани
+  („Заемане“, „Редакция“ и „⋯“), вече по 32 px; картонът, читателската карта,
+  сметката и изтриването се отварят от „⋯“. В „Библиотечен фонд“ единственото
+  действие на реда беше пак червеното „Изтрий“ — четиринайсет червени бутона на
+  екран за нещо, което се прави веднъж в годината; и то влезе в „⋯“. Самото
+  изтриване не е променяно: пита както преди. Менюто се затваря при Esc, при
+  щракване встрани, при превъртане и при преоразмеряване, обхожда се със
+  стрелките и връща фокуса на копчето, от което е отворено.
+- **Лявата лента се побира.** 24 раздела в 7 групи не се събираха: измерено при
+  1366×768 лентата продължаваше 358 px под екрана, тоест „Справки“, „Онлайн
+  каталог“, „Баркод етикети“, „Одитна следа“ и „Настройки“ не се виждаха, докато
+  някой не се сети да превърти — а нищо на екрана не подсказваше, че има още.
+  Сега заглавието на всяка група се натиска и я сгъва, а изборът се помни между
+  пусканията. По подразбиране всичко е отворено: при надграждане нищо не изчезва
+  под ръцете на човек, който знае къде стои всяко нещо. Сгъната група, в която е
+  ТЕКУЩИЯТ раздел, показва него — лявата лента винаги отговаря на въпроса „къде
+  съм“. Със сгънати пет групи лентата се побира изцяло (358 px преливане → 0).
+- **Един шрифт за цялата програма.** Бутоните и полетата за избор не наследяват
+  шрифта на страницата — браузърът им дава системния. Преброено: 72 елемента с
+  Arial срещу 186 със Segoe UI, тоест всеки бутон и всяко „— всички отдели —“
+  бяха видимо от друга програма. Сега са 0 срещу 258. Полето за избор се изравни
+  по височина с полето за търсене (36 px).
+- **Основното действие стои на едно и също място.** „+ Нова книга“ и „+ Нов
+  читател“ вече са веднага след полето за търсене и в двата регистъра. Дотук
+  бяха последни в лентата с инструменти: в „Книги“ лентата се пренасяше и
+  бутонът оставаше сам на втори ред, а в „Читатели“ стоеше между филтрите.
+- **Без дребен текст в парите и надписите.** Сумата в таблица се изписваше на
+  два реда — левовете отгоре, еврото отдолу с 10,5 px, най-дребният текст в
+  цялата програма, точно на реда с дължимото обезщетение, който се чете
+  най-внимателно. Сега е „12.00 лв. (6.14 €)“ на един ред, еврото — 12 px.
+  Надписите за състояние („наличен“, „активен“, „3/5“) минаха от 11 на 12 px.
+- **Смяната на раздел вече не лъже.** `route()` сменяше заглавието горе веднага,
+  но не пипаше мястото за съдържание: докато данните се теглят, там стоеше
+  СТАРИЯТ раздел, а ако тегленето се провалеше, рендерът излизаше тихо
+  (`if (!r) return;` в почти всеки раздел) и под новото заглавие оставаше чуждият
+  екран — заглавие „Читатели“ над таблицата на книгите. Сега мястото се изчиства
+  веднага („Зарежда се…“), а при провал казва наяве какво е станало и предлага
+  „Опитай пак“.
+
+Намерени при прегледа на самия кръг и поправени в него — всяко открито с
+измерване, не с четене:
+
+- Правилото за трите точки беше **мъртво**: `.rowActs .btn.sm` (три класа)
+  надвиваше `.rowMore` (един) и „⋯“ си оставаше 12 px вместо по-едро.
+- Сгъната група, в която е текущият раздел, **не се сгъваше изобщо** — щракваш
+  по заглавието ѝ и не се променя нищо, а вътре се записва невидимо състояние.
+  Копчето изглеждаше счупено. Сега се сгъва като всяка друга, но текущият
+  раздел остава видим в нея.
+- Скриването на редовете **не работеше в браузър**: `#nav a{display:flex}` е
+  по-тежко от браузърското `[hidden]{display:none}` и всичките четири реда на
+  сгънатата група си стояха на екрана. В jsdom това не личи — правилото се
+  вижда само при истинско изчертаване.
+- Сгъването **изпускаше фокуса** в началото на страницата (лентата се
+  пресъздава заедно с натиснатото копче), а превъртането до текущия раздел
+  дърпаше лентата обратно и изнасяше натиснатото заглавие извън екрана.
+- При бързо превключване, докато базата се бави, **закъснелият** рендер лепваше
+  червената кутия върху „Зарежда се…“ на СЛЕДВАЩИЯ раздел, който се зарежда
+  съвсем нормално.
+- Менюто се обявяваше като меню без редове в него (`role="menu"` без
+  `role="menuitem"`) и оставаше отворено, когато фокусът излезе от него с Tab
+  (проверено в Chromium: `focusin` изобщо не се обажда, когато фокусът падне
+  върху `<body>` — слуша се `focusout`).
+- **„Изтрий“ в самото меню беше НЕВИДИМО.** `.rowMenuPop .btn` маха червения
+  ФОН на `.btn.dgr`, но не пипа `color:#fff` — бели букви върху светло меню,
+  измерен контраст **1.01**. Открито върху снимка на екрана, не от тест. Сега
+  червеното е в буквите: 6.72–7.10 във всичките седем теми, 5.53 при посочване.
+
+Проверено и НЕ прието за дефект: най-дребният текст в програмата вече не е
+еврото, а редът „Създадено от…“ в дъното на лявата лента (10 px) и надписите
+върху баркод етикетите; първото е подпис, а вторите се печатат на етикет 38×19
+мм и по-едро не се побира. Заглавията на колоните остават 11 px — това е
+приетият вид на таблица и не се променя заедно с останалото.
+
+Всяка нова проверка е доказана с мутация: върната поправка → съответната
+проверка пада (35 върнати поправки, 35 паднали проверки). Отделно всичките 24
+раздела се изчертават срещу ИСТИНСКИТЕ обработчици и истинска база — новото
+съобщение за провал не се появява там, където всичко е наред.
+
+Пълната поредица: 1422 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8
+сценария + всички проверки при 15 002 записа.
+
+**EN:** An appearance round requested by the library. Six things, each measured
+in a real browser before and after, not judged by eye. Row actions: the readers
+list had six 24 px buttons per row (54 on one screen, the red "Delete" the most
+prominent thing on every row) — three remain at 32 px and the rest moved into a
+"⋯" menu; in the catalogue the row's only action was that same red "Delete", now
+also behind "⋯" (the deletion itself is unchanged and still asks). The sidebar
+now fits: 24 sections in 7 groups ran 358 px past the bottom of a 1366×768
+screen with nothing on screen to suggest more; groups now fold from their
+heading, the choice is remembered, everything starts expanded so nothing
+disappears on upgrade, and a folded group still shows the section you are in.
+One font throughout: buttons and select boxes were drawn in the system font
+(measured: 72 elements in Arial against 186 in Segoe UI; now 0 against 258).
+The primary button ("+ New book" / "+ New reader") now sits immediately after
+the search box in both registers. No more tiny text in money and status labels:
+amounts were stacked with the euro at 10.5 px — the smallest text in the
+program, on the compensation line of all places — and now read "12.00 лв.
+(6.14 €)" on one line at 12 px; status badges went from 11 to 12 px. And
+switching sections no longer lies: the content area is cleared at once and says
+so plainly when the data does not arrive, instead of leaving the previous
+section's screen under the new title. Six defects found while reviewing this
+round were fixed inside it, each caught by measurement rather than reading: a
+dead CSS rule (three-class selector beating a one-class one), a group header
+that toggled invisible state and looked broken, row hiding that did not work in
+a browser because `#nav a{display:flex}` outweighs `[hidden]{display:none}`,
+focus dropped to the start of the page on folding, a late render stamping an
+error over the next section's live placeholder, a menu announced as a menu
+with no items in it that stayed open when focus left it, and the "Delete" item
+inside that menu rendering white-on-light at a measured contrast of 1.01 —
+invisible, and caught on a screenshot rather than by any test. Every new
+assertion is proved by mutation (35 reverted fixes, 35 failing assertions), and
+all 24 sections are additionally rendered against the real IPC handlers on a real
+database. Full suite: 1422 passing, 0 failing (UTC and Europe/Sofia); site: 8
+scenarios plus all checks at 15,002 records.
+
 ## v2.4.49
 
 **BG:** Преглед на кръга за производителност (v2.4.48). Самите три поправки са

@@ -591,7 +591,11 @@ test('Настройки → Фонд: внасянето минава през 
       how: 'буквосъчетание, после число', sample: [{ prefix: 'ВАЗ', mark: '14' }] } });
   const { window } = dom, d = window.document;
   await settle();
-  window.location.hash = '#settings';
+  /* Разделът е „#setup“, не „#settings“ (v2.4.50). Дотук грешният адрес
+     водеше на „Табло“, рендерът му се проваляше тихо и в мястото за съдържание
+     ОСТАВАШЕ страницата с настройките от началното пускане — тестът намираше
+     каквото търси по случайност. Сега route() изчиства мястото и грешката личи. */
+  window.location.hash = '#setup';
   await window.route();
   await settle();
   const box = d.getElementById('amBox');
@@ -616,7 +620,11 @@ test('груповото попълване показва какво ще ст�
       will: [{ id: 1, inv_number: 7, author: 'Габе, Дора', title: 'Малката', mark: 'Г-13' }], skip: [] } });
   const { window } = dom, d = window.document;
   await settle();
-  window.location.hash = '#settings';
+  /* Разделът е „#setup“, не „#settings“ (v2.4.50). Дотук грешният адрес
+     водеше на „Табло“, рендерът му се проваляше тихо и в мястото за съдържание
+     ОСТАВАШЕ страницата с настройките от началното пускане — тестът намираше
+     каквото търси по случайност. Сега route() изчиства мястото и грешката личи. */
+  window.location.hash = '#setup';
   await window.route();
   await settle();
   assert.match(d.getElementById('amBox').textContent, /2398/, 'състоянието трябва да показва внесената таблица');
@@ -640,7 +648,11 @@ test('„Проверка на данните“ посочва знаците �
         author_mark: '886.7/Г 13', expected: 'В', basis: 'Вазова' }] } });
   const { window } = dom, d = window.document;
   await settle();
-  window.location.hash = '#settings';
+  /* Разделът е „#setup“, не „#settings“ (v2.4.50). Дотук грешният адрес
+     водеше на „Табло“, рендерът му се проваляше тихо и в мястото за съдържание
+     ОСТАВАШЕ страницата с настройките от началното пускане — тестът намираше
+     каквото търси по случайност. Сега route() изчиства мястото и грешката личи. */
+  window.location.hash = '#setup';
   await window.route();
   await settle();
   await window.runDataChecks();

@@ -91,11 +91,58 @@ let VIEW = 'dash';
 function go(v) { location.hash = v; }
 window.go = go;
 
+/* ---------------- Сгъване на групите в лентата (v2.4.50) ----------------
+   24 раздела в 7 групи не се побират: измерено при 1366×768 лентата продължава
+   358 px ПОД екрана, тоест „Справки“, „Онлайн каталог“, „Етикети“, „Одитна
+   следа“ и „Настройки“ не се виждат, докато не се превърти — а нищо на екрана
+   не подсказва, че има още.
+
+   Групите се сгъват с натискане на заглавието и състоянието се помни между
+   пусканията. По подразбиране всички са отворени: при надграждане нищо не бива
+   да изчезва под ръцете на човек, който знае къде стои всяко нещо.
+
+   Групата с ТЕКУЩИЯ раздел се сгъва като всяка друга, но самият текущ раздел
+   остава видим в нея — иначе отваряш „Настройки“, сгъваш групата ѝ и лявата
+   лента вече не показва къде си. Ако вместо това заглавието ѝ просто не се
+   поддаваше на натискане, копчето би изглеждало счупено: щракваш и не става
+   нищо (открито при прегледа на кръга). */
+const NAV_FOLD_KEY = 'invlib-nav-folded';
+let NAV_FOLDED = new Set();
+try { NAV_FOLDED = new Set(JSON.parse(localStorage.getItem(NAV_FOLD_KEY) || '[]')); } catch (e) { /* без запомняне */ }
+
+function toggleNavGroup(name) {
+  if (NAV_FOLDED.has(name)) NAV_FOLDED.delete(name); else NAV_FOLDED.add(name);
+  try { localStorage.setItem(NAV_FOLD_KEY, JSON.stringify([...NAV_FOLDED])); } catch (e) { /* без запомняне */ }
+  drawNav();
+  /* drawNav() пресъздава цялата лента и заедно с нея копчето, което току-що е
+     натиснато — фокусът иначе пада в началото на страницата и следващият Tab
+     тръгва отначало (проверено в Chromium: activeElement става <body>). */
+  const пак = [...document.querySelectorAll('#nav .nav-grp')]
+    .find(b => b.querySelector('.nav-grpTx') && b.querySelector('.nav-grpTx').textContent === name);
+  if (пак && typeof пак.focus === 'function') пак.focus();
+}
+window.toggleNavGroup = toggleNavGroup;
+
+/* Превъртането до текущия раздел става само при СМЯНА на раздел. drawNav() се
+   вика и при всяко сгъване; тогава превъртането дърпаше лентата обратно към
+   отбелязания ред и изнасяше току-що натиснатото заглавие извън екрана. */
+let NAV_SCROLLED_TO = null;
 function drawNav() {
-  $('#nav').innerHTML = NAV.map(g =>
-    `<div class="nav-grp">${esc(g.g)}</div>` +
-    g.items.map(([k, t]) =>
-      `<a href="#${k}" class="${VIEW === k ? 'on' : ''}"><span class="ic">${NAV_ICONS[k] || '•'}</span><span class="tx">${esc(t)}</span></a>`
-    ).join('')
-  ).join('');
+  $('#nav').innerHTML = NAV.map(g => {
+    const here = g.items.some(([k]) => k === VIEW);
+    const folded = NAV_FOLDED.has(g.g);
+    return `<button type="button" class="nav-grp${folded ? ' folded' : ''}" aria-expanded="${!folded}"
+        onclick="toggleNavGroup('${jsq(g.g)}')" title="${folded ? 'Разгъва' : 'Сгъва'} групата">
+        <span class="nav-grpTx">${esc(g.g)}</span><span class="nav-grpChev" aria-hidden="true"></span>
+      </button>` +
+      `<div class="nav-items"${folded && !here ? ' hidden' : ''}>` + g.items.map(([k, t]) =>
+        `<a href="#${k}" class="${VIEW === k ? 'on' : ''}"${VIEW === k ? ' aria-current="page"' : ''}${folded && VIEW !== k ? ' hidden' : ''}><span class="ic">${NAV_ICONS[k] || '•'}</span><span class="tx">${esc(t)}</span></a>`
+      ).join('') + '</div>';
+  }).join('');
+  /* Текущият раздел се вижда и когато лентата е по-дълга от екрана: дотук при
+     „Настройки“ отбелязаният ред стоеше под долния ръб. */
+  if (NAV_SCROLLED_TO === VIEW) return;
+  NAV_SCROLLED_TO = VIEW;
+  const on = $('#nav a.on');
+  if (on && typeof on.scrollIntoView === 'function') on.scrollIntoView({ block: 'nearest' });
 }
