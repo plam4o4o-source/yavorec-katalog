@@ -51,7 +51,9 @@ const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
 const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
 /* Същата сума за КЛЕТКА в таблица (v2.4.29): левовете над евровете, без пренасяне —
    „3.00 лв. / 1.53 €“ се чупеше на четири реда в инвентарната книга и в „Просрочени“. */
-const mnyCell = (n) => `<span class="money" title="${bgn(n)} лв. / ${eur(n)} €">${bgn(n)} лв.<small>${eur(n)} €</small></span>`;
+/* Интервалът пред <small> е нужен: и двете суми са на един ред (v2.4.50) и без
+   него биха се долепили — „12,00 лв.(6,14 €)“. */
+const mnyCell = (n) => `<span class="money" title="${bgn(n)} лв. / ${eur(n)} €">${bgn(n)} лв. <small>${eur(n)} €</small></span>`;
 /* Огледало на csvCell() от security-utils.js за изнасянията, които се сглобяват
    в екранния слой. Excel и LibreOffice изпълняват като ФОРМУЛА всяка клетка,
    започваща с =, +, - или @; водещият апостроф ги неутрализира. Двете
@@ -604,6 +606,104 @@ async function call(promise, okMsg) {
   if (okMsg) { toast(okMsg, 'ok'); markSaved(); }
   return res.data;
 }
+
+/* ---------------- Меню „⋯“ за действията на един ред (v2.4.50) ----------------
+   В „Читатели“ на всеки ред стояха ШЕСТ бутона по 24 px — при 9 реда това са 54
+   бутона на един екран, а най-видното нещо на реда беше червеното „Изтрий“.
+   Остават най-често използваните, а останалите се събират тук.
+
+   Изскачащото меню е ЕДНО за цялата страница и стои в <body> с position:fixed.
+   Причината е измерена: таблиците са в .wrap{overflow-x:auto}, а това прави
+   кутията изрязваща и по вертикала — меню, нарисувано вътре в реда, би било
+   отрязано от долния ръб на таблицата. Съдържанието се копира от скрития
+   .rowMoreItems на самия ред, тоест всеки раздел си пише бутоните както преди,
+   с готовите onclick-ове. */
+let ROW_MENU_BTN = null;
+function rowMenuClose() {
+  const pop = $('#rowMenuPop');
+  if (!pop || !pop.classList.contains('on')) return;
+  pop.classList.remove('on');
+  pop.innerHTML = '';
+  if (ROW_MENU_BTN) {
+    ROW_MENU_BTN.setAttribute('aria-expanded', 'false');
+    /* Фокусът се връща на копчето, а не пада в началото на страницата. */
+    if (ROW_MENU_BTN.isConnected) ROW_MENU_BTN.focus();
+    ROW_MENU_BTN = null;
+  }
+}
+window.rowMenuClose = rowMenuClose;
+function rowMenu(btn) {
+  const pop = $('#rowMenuPop');
+  /* closest('.rowActs'), а не parentElement: копчето „⋯“ винаги е в .rowActs, но
+     разделите го обвиват различно и пряката връзка родител–дете е чуплива. */
+  const acts = (btn.closest && btn.closest('.rowActs')) || btn.parentElement;
+  const items = acts && acts.querySelector('.rowMoreItems');
+  if (!pop || !items) return;
+  const same = ROW_MENU_BTN === btn && pop.classList.contains('on');
+  rowMenuClose();
+  if (same) return;                       // второто натискане по същото копче затваря
+  ROW_MENU_BTN = btn;
+  pop.innerHTML = items.innerHTML;
+  /* Копчетата се обявяват като редове на меню. Без това четецът съобщава „меню,
+     0 елемента“ — role="menu" на кутията изисква role="menuitem" в нея. */
+  pop.querySelectorAll('button, a').forEach(el => el.setAttribute('role', 'menuitem'));
+  pop.classList.add('on');
+  btn.setAttribute('aria-expanded', 'true');
+  /* Мястото се смята след показването — дотогава менюто няма размери. Ако не
+     стига до долния ръб на прозореца, изскача НАГОРЕ; ако излиза вдясно,
+     подравнява се по десния си ръб с копчето. */
+  const r = btn.getBoundingClientRect(), p = pop.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom;
+  pop.style.top = (below > p.height + 8 ? r.bottom + 4 : Math.max(8, r.top - p.height - 4)) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.right - p.width, window.innerWidth - p.width - 8)) + 'px';
+  const first = pop.querySelector('button, a');
+  if (first) first.focus();
+}
+window.rowMenu = rowMenu;
+document.addEventListener('click', (e) => {
+  const pop = $('#rowMenuPop');
+  if (!pop || !pop.classList.contains('on')) return;
+  if (pop.contains(e.target)) { setTimeout(rowMenuClose, 0); return; }   // избрано действие
+  if (ROW_MENU_BTN && ROW_MENU_BTN.contains(e.target)) return;           // rowMenu() ще се справи
+  rowMenuClose();
+}, true);
+document.addEventListener('keydown', (e) => {
+  const pop = $('#rowMenuPop');
+  if (!pop || !pop.classList.contains('on')) return;
+  if (e.key === 'Escape') { rowMenuClose(); return; }
+  /* Стрелките се движат по редовете на менюто — Tab също работи, но при
+     role="menu" четецът очаква именно стрелки. */
+  if (!/^(ArrowDown|ArrowUp|Home|End)$/.test(e.key) || !pop.contains(document.activeElement)) return;
+  const list = [...pop.querySelectorAll('button, a')];
+  if (!list.length) return;
+  const i = list.indexOf(document.activeElement);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1
+    : e.key === 'ArrowDown' ? (i + 1) % list.length : (i - 1 + list.length) % list.length;
+  list[next].focus();
+  e.preventDefault();
+}, true);
+/* Превъртане или преоразмеряване мести реда, а менюто стои на фиксирано място —
+   затова се затваря, вместо да увисне до чужд ред. Прихващането (третият
+   параметър) е задължително: „scroll“ на вътрешна кутия не се качва нагоре, но
+   минава по пътя надолу — точно така се хваща превъртането на .wrap. */
+window.addEventListener('scroll', rowMenuClose, true);
+window.addEventListener('resize', rowMenuClose);
+/* Фокусът излезе от менюто (Tab след последния ред) — менюто не е прозорец и не
+   заключва обхождането, затова просто се затваря след него.
+   „focusout“, а не „focusin“: проверено в Chromium — Tab след последния ред
+   оставя фокуса върху <body> и focusin изобщо не се обажда, тоест менюто щеше да
+   виси отворено насред страницата. focusout се обажда винаги, а къде отива
+   фокусът се чете от relatedTarget (null, когато пада в <body>). */
+document.addEventListener('focusout', (e) => {
+  const pop = $('#rowMenuPop');
+  if (!pop || !pop.classList.contains('on') || !pop.contains(e.target)) return;
+  const to = e.relatedTarget;
+  if (to && (pop.contains(to) || (ROW_MENU_BTN && ROW_MENU_BTN.contains(to)))) return;
+  /* Затварянето само по себе си връща фокуса на копчето „⋯“; тук това би
+     отменило хода на човека, затова копчето се забравя предварително. */
+  if (ROW_MENU_BTN) { ROW_MENU_BTN.setAttribute('aria-expanded', 'false'); ROW_MENU_BTN = null; }
+  rowMenuClose();
+}, true);
 
 /* ---------------- Индикатор за последен автоматичен запис ----------------
    Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се

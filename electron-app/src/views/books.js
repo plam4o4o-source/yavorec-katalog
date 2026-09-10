@@ -98,7 +98,16 @@ function booksRowsHtml(shown) {
       <td class="num">${esc(b.year || '')}</td>
       <td><span class="badge ${b.status === 'наличен' ? 'ok' : 'warn'}">${esc(b.status || '')}</span></td>
       <td><span class="badge ${b.available > 0 ? 'ok' : 'warn'}">${b.available}/${b.quantity}</span></td>
-      <td><button class="btn sm dgr" onclick="deleteBook(${b.id})">Изтрий</button></td>
+      ${/* Изтриването е зад „⋯“ (v2.4.50): то беше ЕДИНСТВЕНОТО действие на реда
+            и с червения си цвят беше най-видното нещо в целия списък на фонда —
+            четиринайсет червени бутона на екран за действие, което се прави
+            веднъж в годината. Самото изтриване не е променяно: пита както преди. */''}
+      <td class="actsCell"><div class="rowActs">
+        <button class="btn sm rowMore" onclick="rowMenu(this)" aria-haspopup="menu" aria-expanded="false"
+          title="Още действия за инв. № ${esc(b.inv_number || '')}" aria-label="Още действия за инв. № ${esc(b.inv_number || '')}">⋯</button>
+        <div class="rowMoreItems">
+          <button class="btn dgr" onclick="deleteBook(${b.id})">Изтрий</button>
+        </div></div></td>
     </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`;
 }
 function booksMoreHtml(more, total) {
@@ -229,6 +238,8 @@ async function renderBooks() {
     търсенето, филтрите, груповата редакция и добавянето на нови документи.</div>
     <div class="toolbar">
       <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
+      ${/* Веднага след търсенето — на същото място, както в „Читатели“ (v2.4.50). */''}
+      <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
       <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
         <option value="title" ${BOOKS_SORT === 'title' ? 'selected' : ''}>По заглавие</option>
         <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
@@ -246,7 +257,6 @@ async function renderBooks() {
       <button class="btn" id="bulkBtn" onclick="openBulkEdit()" ${n ? '' : 'disabled'}>Групова редакция…</button>
       <button class="btn" id="bulkShelfBtn" onclick="bulkAddToShelf()" ${n ? '' : 'disabled'}
         title="Добавя маркираните документи в тематична витрина на онлайн каталога">Във витрина…</button>
-      <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
     </div>
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"

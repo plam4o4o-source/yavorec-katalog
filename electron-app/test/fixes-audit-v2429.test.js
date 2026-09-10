@@ -425,9 +425,24 @@ test('Читатели: колона „Заети“ с „!“ при прос
   assert.equal(c2.textContent.trim(), '0');
   assert.ok(!c2.classList.contains('warn'));
   assert.equal(rows[2].querySelector('.loansCnt'), null, 'ред без броячи (стар отговор) остава празен, не „undefined“');
-  assert.equal(rows[0].querySelectorAll('.rowActs .btn').length, 6);
-  assert.ok(doc.querySelector('#rBody button[onclick="printCardOne(1)"]'), 'бутонът „Карта“ остава на реда');
+  /* v2.4.50: на самия ред остават три копчета — заемане, редакция и „⋯“; другите
+     четири се преместиха в скритото .rowMoreItems, откъдето rowMenu() ги вади. */
   const css = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
+  const acts = rows[0].querySelector('.rowActs');
+  const onRow = [...acts.children].filter(el => el.tagName === 'BUTTON');
+  assert.deepEqual(onRow.map(b => b.textContent.trim()), ['Заемане', 'Редакция', '⋯']);
+  const more = acts.querySelector('.rowMoreItems');
+  assert.ok(more, 'скритите действия са в .rowMoreItems');
+  assert.deepEqual([...more.querySelectorAll('button')].map(b => b.textContent.trim()),
+    ['Картон', 'Читателска карта', 'Сметка', 'Изтрий']);
+  assert.equal(acts.querySelector('.rowMore').getAttribute('aria-haspopup'), 'menu');
+  assert.ok(more.querySelector('button[onclick="printCardOne(1)"]'), 'бутонът за читателската карта остава достъпен');
+  /* Червеното „Изтрий“ вече го няма на самия ред — беше най-видното нещо в целия
+     списък, а се използва веднъж годишно. */
+  assert.equal(onRow.filter(b => b.classList.contains('dgr')).length, 0);
+  assert.equal(more.querySelectorAll('.btn.dgr').length, 1);
+  assert.match(css, /\.rowActs \.rowMoreItems\{display:none\}/, 'менюто на реда стои скрито до натискане');
+  assert.match(css, /\.rowActs \.btn\.sm\{padding:6px 10px; font-size:12px; min-height:32px\}/, 'копчетата на реда са 32 px');
   assert.match(css, /table\.ledger\.readersTable td:first-child\{white-space:nowrap\}/);
   assert.match(css, /table\.ledger\.ibTable th\{white-space:nowrap/);
   assert.match(css, /table\.ledger\.oditTable td:nth-child\(2\)/);
@@ -634,7 +649,13 @@ test('mnyCell(): левове над евро в една клетка; Прос
   const dom = buildDom({});
   const { window } = dom; await settle();
   const html = window.eval('mnyCell(7.5)');
-  assert.match(html, /^<span class="money" title="7\.50 лв\. \/ 3\.83 €">7\.50 лв\.<small>3\.83 €<\/small><\/span>$/);
+  /* v2.4.50: двете валути са на ЕДИН ред, разделени с интервал — еврото беше на
+     10,5 px под левовете, най-дребният текст в програмата. Интервалът пред
+     <small> е част от поправката: без него излиза „7.50 лв.(3.83 €)“. */
+  assert.match(html, /^<span class="money" title="7\.50 лв\. \/ 3\.83 €">7\.50 лв\. <small>3\.83 €<\/small><\/span>$/);
+  const cssM = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
+  assert.match(cssM, /\.money\{display:inline;/, 'клетката вече не е колонка');
+  assert.match(cssM, /\.money small\{font-size:12px/, 'еврото е 12 px, не 10,5');
   for (const f of ['overdue.js', 'inv-book.js']) {
     assert.match(fs.readFileSync(path.join(APP_DIR, 'src', 'views', f), 'utf8'), /mnyCell\(/, f);
   }

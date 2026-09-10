@@ -145,11 +145,26 @@ body{
 .brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
 #nav{padding:10px 0 20px}
 /* Тънка линия след заглавието на групата запълва остатъка от реда */
+/* Заглавието на групата е БУТОН (v2.4.50): сгъва групата и помни състоянието.
+   Изглежда като надпис — само стрелката и промяната при посочване издават, че
+   се натиска. width:100% + text-align:left, защото <button> по подразбиране е
+   центриран и свит по съдържание. */
 .nav-grp{
-  display:flex; align-items:center; gap:9px;
-  font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--spineDim);
+  display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+  background:none; border:0; cursor:pointer; font-family:inherit;
+  font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--spineDim);
   padding:13px 20px 6px;
 }
+.nav-grp:hover{color:var(--paper)}
+.nav-grpTx{flex:0 0 auto}
+/* Стрелката сочи надолу при отворена група и надясно при сгъната. Рисува се със
+   собствени ръбове, за да следва цвета на реда като иконите в менюто. */
+.nav-grpChev{
+  flex:0 0 auto; width:0; height:0; margin-left:-2px;
+  border-left:4px solid transparent; border-right:4px solid transparent;
+  border-top:5px solid currentColor; opacity:.75; transition:transform .12s ease;
+}
+.nav-grp.folded .nav-grpChev{transform:rotate(-90deg)}
 /* На лаптоп 1366×768 при мащаб 125 % лентата има ~614 px височина, а менюто
    (24 реда + 7 групи + логото) минаваше 1 400 px — „Отчети“ и „Настройки“ бяха
    под ръба при всяко стартиране (v2.4.27, A5). Логото отстъпва при ниска
@@ -161,6 +176,12 @@ body{
   .nav-grp{padding:9px 20px 4px}
 }
 .nav-grp::after{content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--spine3),transparent)}
+/* Празно място под сгънатата група не остава: редовете ѝ се махат от подредбата.
+   Правилата се пишат ИЗРИЧНО, защото браузърското „[hidden]{display:none}“ е по
+   атрибут (0-1-0) и по-долното „#nav a{display:flex}“ (1-0-1) го надвива —
+   измерено в Chromium: скритите редове на сгънатата текуща група се виждаха
+   всичките четири. */
+.nav-items[hidden], #nav a[hidden]{display:none}
 /* Лявата ивица е винаги заделена (прозрачна извън активния ред), за да не
    подскача текстът при смяна на раздел. */
 #nav a{
@@ -410,6 +431,13 @@ table.ledger.ibTable td:nth-child(4){min-width:150px}
   font-family:var(--sans); font-size:13px; background:#fff;
   transition:border-color .12s, box-shadow .12s;
 }
+/* Родните полета НЕ наследяват шрифта на страницата — браузърът им дава
+   системния. Измерено в Chromium преди поправката: 72 елемента с Arial срещу
+   186 със Segoe UI, тоест всеки БУТОН и всяко „— всички отдели —“ бяха с друг
+   шрифт от текста до тях. Тук се изравняват с останалата програма. */
+button, select, textarea{font-family:var(--sans)}
+select, textarea{font-size:13px; color:var(--ink)}
+.toolbar select{padding:8px 10px; border:1px solid var(--rule2); border-radius:4px; background:#fff; min-height:36px}
 
 /* ---------- Сканиране на баркод (заемане/връщане, инвентаризация, отчисляване) ---------- */
 .scan{
@@ -453,7 +481,7 @@ table.ledger tbody tr:hover{background:var(--paper3)}
    32px) важеше и за колоните .num на регистър, поставен В карта — датите и
    размерите на резервните копия и правилата по категория излизаха с 32px. */
 table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; color:inherit}
-.badge{padding:2px 8px; border-radius:10px; font-size:11px}
+.badge{padding:2px 8px; border-radius:10px; font-size:12px}
 .badge.ok{background:var(--greenL); color:var(--green)}
 .badge.warn{background:var(--redL); color:var(--red)}
 
@@ -759,7 +787,7 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .fh{font-weight:400; color:var(--ink3); font-size:11px}
 
 /* ---------- Badge (статус/КПИ маркери) ---------- */
-.badge{padding:2px 8px; border-radius:10px; font-size:11px; background:var(--paper3); color:var(--ink2)}
+.badge{padding:2px 8px; border-radius:10px; font-size:12px; background:var(--paper3); color:var(--ink2)}
 .badge.ok{background:var(--greenL); color:var(--green)}
 .badge.warn{background:var(--redL); color:var(--red)}
 .num.warn{color:var(--red); font-weight:700}
@@ -1044,6 +1072,8 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
      на картон в „Персоналии“ и в „Летопис“, и пълзящата лента на заетостта.
      Малки са, но настройката иска движението да е изключено, а не намалено. */
   .quickBtn, .prsCard, .chrItem, .bar-fill{transition:none !important}
+  /* Стрелката на групата в лентата (v2.4.50) — завърта се при сгъване. */
+  .nav-grpChev{transition:none !important}
 }
 
 /* ============================================================================
@@ -1208,16 +1238,54 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 .dashActions .quickGrid{grid-template-columns:repeat(6,minmax(0,1fr))}
 .dashActions .quickBtn{padding:12px 8px}
 @media (max-width:1180px){.dashActions .quickGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-/* Пари в таблица: „3.00 лв.“ над „1.53 €“ вместо четири реда от пренасяне. */
-.money{display:inline-flex; flex-direction:column; line-height:1.25; white-space:nowrap; font-family:var(--mono)}
-.money small{font-size:10.5px; color:var(--ink3)}
+/* Пари в таблица — двете валути на ЕДИН ред (v2.4.50). Първо (v2.4.29) бяха
+   сложени една НАД друга, за да не се чупи „3.00 лв. / 1.53 €“ на четири реда;
+   това реши пренасянето, но остави еврото на 10,5 px — най-дребният текст в
+   цялата програма, точно на реда с дължимото обезщетение, който се чете
+   най-внимателно. Сега: „12.00 лв. (6.14 €)“ — еврото е с една стъпка
+   по-малко, не с три. */
+.money{display:inline; white-space:nowrap; font-family:var(--mono)}
+.money small{font-size:12px; color:var(--ink3)}
+.money small::before{content:'('}
+.money small::after{content:')'}
 table.ledger td.nowrap, table.ledger th.nowrap{white-space:nowrap}
 table.ledger td.ts{white-space:nowrap; line-height:1.3}
 table.ledger td.ts .hint{display:block; font-size:11px}
 table.ledger td.ts .sep{position:absolute; opacity:0; width:0; overflow:hidden}
 /* Бутоните на реда в „Читатели“ не се пренасят на два реда. */
-.rowActs{display:flex; flex-wrap:nowrap; gap:3px; white-space:nowrap}
-.rowActs .btn.sm{padding:4px 6px; font-size:12px}
+.rowActs{display:flex; flex-wrap:nowrap; gap:4px; white-space:nowrap; align-items:center}
+/* 32 px височина (v2.4.50): дотук бутоните на реда бяха 24 px — под всякаква
+   препоръка за цел на щракване, а в „Читатели“ бяха по шест на ред. */
+.rowActs .btn.sm{padding:6px 10px; font-size:12px; min-height:32px}
+.rowActs .rowMoreItems{display:none}
+/* Трите точки се пишат по-едро от надписите до тях. Селекторът е с ТРИ класа:
+   .rowActs .btn.sm по-горе е 0-3-0 и надвиваше самичкото .rowMore (измерено в
+   Chromium: 12 px вместо 15). */
+.rowActs .btn.sm.rowMore{font-size:16px; line-height:1; letter-spacing:1px; padding:2px 10px}
+
+/* Изскачащото меню на реда. position:fixed — виж бележката при rowMenu() в
+   core.js: таблицата го изрязва, ако стои вътре в нея. */
+.rowMenuPop{
+  display:none; position:fixed; z-index:70; min-width:150px; padding:5px;
+  background:var(--paper2); border:1px solid var(--rule2); border-radius:6px;
+  box-shadow:0 10px 30px rgba(27,24,19,.22);
+}
+.rowMenuPop.on{display:flex; flex-direction:column; gap:2px}
+.rowMenuPop .btn{
+  width:100%; justify-content:flex-start; text-align:left;
+  min-height:32px; padding:6px 10px; font-size:12.5px; border-color:transparent; background:none;
+}
+.rowMenuPop .btn:hover{background:var(--paper3); border-color:var(--rule2)}
+/* Изтриването е последно и отделено с линия — не бива да е съседно на редовите
+   действия, които се натискат често. Цветът се задава ИЗРИЧНО: .rowMenuPop .btn
+   по-горе маха червения фон на .btn.dgr, но не пипа color:#fff — надписът
+   излизаше бял върху светло меню, контраст 1.01, тоест невидим (открито върху
+   снимка на екрана, не от тест). Тук червеното се мести от фона в буквите. */
+.rowMenuPop .btn.dgr{
+  margin-top:4px; border-top:1px solid var(--rule); border-radius:0 0 4px 4px;
+  color:var(--red);
+}
+.rowMenuPop .btn.dgr:hover{background:var(--redL); border-color:var(--red); color:var(--red)}
 table.ledger td.actsCell{width:1%; white-space:nowrap}
 table.ledger.readersTable th, table.ledger.readersTable td{padding:8px 8px}
 table.ledger.readersTable th{white-space:nowrap}
@@ -1237,3 +1305,12 @@ table.ledger.readersTable td:first-child{white-space:nowrap}
 .rankTitle .hint{display:inline; font-size:12px}
 table.ledger.oditTable td:nth-child(2), table.ledger.oditTable td:nth-child(3){white-space:nowrap}
 table.ledger.oditTable td:nth-child(3) .badge{white-space:nowrap}
+
+/* ---------- Смяна на раздел (v2.4.50) ----------
+   Мястото на съдържанието се изчиства ВЕДНАГА и казва какво става, вместо да
+   държи чуждия раздел, докато новият се изтегли. */
+.viewLoading{
+  padding:26px 2px; color:var(--ink3); font-size:13px;
+}
+.viewFailed{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.viewFailed .btn{margin-left:auto}
