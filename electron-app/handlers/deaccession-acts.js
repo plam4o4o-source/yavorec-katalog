@@ -175,8 +175,18 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            разпечатката и КДБФ казваха 9, а следата, която инспекторът чете, за да
            възстанови какво се е случило — 3. */
         let docCount = 0;
+        /* Сглобена ВЕДНЪЖ, извън обхождането — както qStmt точно отгоре. Дотук
+           стоеше вътре в него: BOOK_SELECT е дълга заявка с присъединяване и
+           подзаявка, а акт за отчисляване на цял остарял раздел носи хиляди
+           номера. Измерено при 2 000 документа: 223 ms за съставянето на акта. */
+        const bookStmt = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`);
+        /* И тази — последната, останала вътре в обхождането след кръга v2.4.48
+           (проверка при прегледа): точно правилото, което кръгът въвежда, беше
+           нарушено в самото обхождане, което поправя. */
+        const offStmt = db.prepare(`UPDATE books SET status = ?, status_date = ?,
+          deaccession_act_id = ?, deaccession_date = ? WHERE id = ?`);
         bookIds.forEach(bookId => {
-          const b = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(bookId);
+          const b = bookStmt.get(bookId);
           /* Одит v2.4.24: дотук липсващият ред просто се ПРОПУСКАШЕ (`if (!b) return`).
              Другото работно място може да изтрие документа, докато формата стои
              отворена (handlers/books.js спира само вече отчислените) — актът се
@@ -215,8 +225,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             status_before: b.status || null
           });
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
-          db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
-            .run('отчислен', act.date, actId, act.date, b.id);
+          offStmt.run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
           cancelledHolds += cancelHolds.run(b.id).changes;
         });
@@ -265,14 +274,16 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         const act = db.prepare('SELECT no, year FROM deaccession_acts WHERE id = ?').get(id);
         if (!act) throw new Error('Актът не е намерен — вероятно вече е анулиран, включително от друго работно място.');
         const items = db.prepare('SELECT book_id, status_before FROM deaccession_items WHERE act_id = ?').all(id);
+        // Сглобена веднъж, извън обхождането — по същата причина като при съставянето.
+        const backStmt = db.prepare(`UPDATE books SET status=?, status_date=date('now'),
+          deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`);
         items.forEach(it => {
           if (it.book_id) {
             // Връща се ТОВА, което документът е бил преди акта (виж
             // ensureLoanActColumn). Старите актове нямат снимка — за тях остава
             // 'наличен', както досега.
             const back = it.status_before && it.status_before !== 'отчислен' ? it.status_before : 'наличен';
-            db.prepare(`UPDATE books SET status=?, status_date=date('now'), deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`)
-              .run(back, it.book_id);
+            backStmt.run(back, it.book_id);
           }
         });
         /* Заеманията, закрити принудително от този акт (най-често при причина

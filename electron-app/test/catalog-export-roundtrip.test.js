@@ -18,6 +18,16 @@ const registerBooksHandlers = require('../handlers/books');
 const registerCatalogHandlers = require('../handlers/catalog');
 const { csvCell } = require('../security-utils');
 
+/* Истинският записвач от main.js, а не подставка: изведеният файл трябва да е в
+   същия формат като автоматично публикувания (v2.4.49 — дотук ръчното извеждане
+   пишеше по стария начин и връщаше 2 МБ разлика в git). */
+const catalogJsonText = (() => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const body = src.match(/function catalogJsonText\(payload\) \{[\s\S]*?\n\}/)[0];
+  return new Function('console', body + '; return catalogJsonText;')({ error() {} });
+})();
+
+
 
 /* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
    фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
@@ -90,6 +100,7 @@ function setup() {
     execFile: (cmd, args, opts, cb) => cb(null, '', ''),
     BOOK_SELECT, csvCell,
     flushCatalogWrite: () => ({ written: true }),
+    catalogJsonText,
     buildCatalogPayload: () => ({
       library: 'НЧ „Тест — 1900“', generated: '2026-08-04',
       items: db.prepare('SELECT inv_number AS inv, title, author FROM books ORDER BY inv_number').all()

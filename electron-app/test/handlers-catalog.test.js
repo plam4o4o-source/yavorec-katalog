@@ -17,6 +17,16 @@ const registerCatalogHandlers = require('../handlers/catalog');
    вика csvCell" оцеляваше. Вж. test/helpers/prod-values.js. */
 const { BOOK_SELECT, csvCell } = require('./helpers/prod-values.js');
 
+/* Истинският записвач от main.js, а не подставка: изведеният файл трябва да е в
+   същия формат като автоматично публикувания (v2.4.49 — дотук ръчното извеждане
+   пишеше по стария начин и връщаше 2 МБ разлика в git). */
+const catalogJsonText = (() => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const body = src.match(/function catalogJsonText\(payload\) \{[\s\S]*?\n\}/)[0];
+  return new Function('console', body + '; return catalogJsonText;')({ error() {} });
+})();
+
+
 
 /* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
    фикстура тук създава каталог в /tmp. Одитът завари 80 431 каталога / 23 GB;
@@ -93,6 +103,7 @@ function setup({ execFileOverrides } = {}) {
     BOOK_SELECT,
     csvCell,
     flushCatalogWrite: () => { flushCalls.push(1); return flushResult; },
+    catalogJsonText,
     buildCatalogPayload: () => ({
       library: 'Читалище X', place: 'Село Y', generated: '2026-08-02',
       items: db.prepare('SELECT inv_number AS inv, title AS t FROM books').all()
