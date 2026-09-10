@@ -410,8 +410,7 @@ async function bookForm(id, presetAcqId, prefill) {
         ${fld('Сигнатура', 'call_number', { val: v.call_number || '' })}
       </div>
       <div class="grid g4">
-        ${fld('Цена (лв.)', 'price', { val: v.price ?? 0, type: 'number', step: '0.01', req: 1 })}
-        ${fld('Цена (€)', 'price_eur', { val: eur(v.price || 0), type: 'number', step: '0.01', hint: 'автоматично при промяна' })}
+        ${mnyField('Цена', 'price', { val: v.price ?? 0, req: 1, min: 0 })}
         ${fld('Отдел / местонахождение', 'department', { type: 'select', opts: avSelectOpts(AV.department, OTDELI, v.department), val: v.department })}
         ${/* ЕДИН ИНВЕНТАРЕН НОМЕР = ЕДИН ЕКЗЕМПЛЯР. Дотук тук стоеше свободно
               числово поле „Налични бройки“, а наръчникът изрично учеше библиотекаря
@@ -526,11 +525,6 @@ async function bookForm(id, presetAcqId, prefill) {
         title="Записва и отваря нова форма със същата партида, дата на вписване, отдел, вид документ, издателство, място и език и следващия инвентарен номер">Запиши и нов</button>` : ''}
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
-  const priceEl = $('#bookF [name=price]'), priceEurEl = $('#bookF [name=price_eur]');
-  if (priceEl && priceEurEl) {
-    priceEl.addEventListener('input', () => { priceEurEl.value = eur(priceEl.value); });
-    priceEurEl.addEventListener('input', () => { priceEl.value = (parseFloat(priceEurEl.value || 0) * EUR_RATE).toFixed(2); });
-  }
 }
 window.bookForm = bookForm;
 /* „+ Още екземпляр“ — вторият екземпляр от едно заглавие е ВТОРИ ЗАПИС със свой

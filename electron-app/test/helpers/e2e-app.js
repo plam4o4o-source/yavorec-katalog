@@ -315,7 +315,9 @@ function effectiveDaysLate(db, dueDate, inDate) {
 }
 const today = () => new Date().toISOString().slice(0, 10);
 const bgDate = (d) => d ? d.split('-').reverse().join('.') : '';
-const mny = (n) => (Number(n) || 0).toFixed(2) + ' лв. / ' + ((Number(n) || 0) / 1.95583).toFixed(2) + ' €';
+/* Огледало на mny() от src/views/core.js: от v2.4.51 записаната стойност е в
+   ЕВРО, а левът е справочен. */
+const mny = (n) => (Number(n) || 0).toFixed(2) + ' € / ' + ((Number(n) || 0) * 1.95583).toFixed(2) + ' лв.';
 
 module.exports = {
   bootApp, preloadTable, addDays, nextWorkDay, closedDaysBetween, effectiveDaysLate, today, bgDate, mny, sleep

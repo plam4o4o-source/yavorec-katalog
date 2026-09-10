@@ -168,7 +168,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       const date = issue.date || today();
       if (!isValidIsoDate(date)) throw new Error('Датата на броя (' + issue.date + ') е невалидна.');
       const price = issue.price == null || String(issue.price).trim() === '' ? 0 : Number(String(issue.price).replace(',', '.'));
-      if (!Number.isFinite(price) || price < 0) throw new Error('Цената на броя трябва да е число (лв.).');
+      if (!Number.isFinite(price) || price < 0) throw new Error('Цената на броя трябва да е число (€).');
       const per = db.prepare('SELECT title FROM periodicals WHERE id = ?').get(issue.periodical_id);
       if (!per) throw new Error('Изданието не е намерено.');
       const info = db.prepare(`

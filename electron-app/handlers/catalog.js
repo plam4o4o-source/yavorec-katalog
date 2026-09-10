@@ -553,7 +553,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         'SELECT b.id, COALESCE(i.quantity, 1) AS fund_qty FROM books b LEFT JOIN inventory i ON i.book_id = b.id'
       ).all().map(r => [r.id, r.fund_qty]));
       const h = ['Инв. №', 'Баркод', 'Дата на вписване', 'Категория', 'Автор', 'Заглавие', 'Поредица', 'Място', 'Издателство',
-        'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Бройки', 'Цена (лв.)', 'Цена (€)', 'Обща стойност (лв.)', 'Състояние'];
+        'Година', 'ISBN', 'Език', 'УДК', 'Сигнатура', 'Отдел', 'Бройки', 'Цена (€)', 'Цена (лв.)', 'Обща стойност (€)', 'Състояние'];
       // Защита срещу CSV/formula injection (Фаза 3): свободните текстови полета (заглавие,
       // автор и т.н.) идват от каталогизатора и биха могли случайно или нарочно да
       // започват с =, +, -, @ — символи, които Excel/LibreOffice изпълняват като формула
@@ -566,7 +566,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
           b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title,
           [b.series, b.series_no].filter(Boolean).join(' '), b.city, b.publisher,
           b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
-          q, (b.price || 0).toFixed(2), ((b.price || 0) / 1.95583).toFixed(2),
+          /* Цените се пазят в ЕВРО от v2.4.51; левът е справочна колонка до тях.
+             Общата стойност се смята в записаната валута, не от преобразуваната —
+             иначе сборът в изнесения файл не съвпада със сбора в програмата. */
+          q, (b.price || 0).toFixed(2), ((b.price || 0) * 1.95583).toFixed(2),
           ((b.price || 0) * q).toFixed(2), b.status
         ].map(esc).join(';');
       })).join('\r\n');

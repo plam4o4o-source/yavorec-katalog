@@ -152,8 +152,16 @@ async function renderSetup() {
           ${fld('Максимум документи на читател', 'max_books', { val: s.max_books, type: 'number', min: 0, hint: '0 = без ограничение' })}
           ${fld('Брой продължения', 'extensions_count', { val: s.extensions_count, type: 'number', min: 0, hint: 'празно = 2 · 0 = без ограничение' })}
           ${fld('Дни на продължение', 'extension_days', { val: s.extension_days, type: 'number', min: 1 })}
-          ${fld('Обезщетение за забава (лв./ден)', 'fine_per_day', { val: s.fine_per_day, type: 'number', step: '0.01', min: 0 })}
-          ${fld('Годишна такса (лв.)', 'annual_fee', { val: s.annual_fee, type: 'number', step: '0.01', min: 0 })}
+          ${mnyField('Обезщетение за забава (на ден)', 'fine_per_day', { val: s.fine_per_day, min: 0,
+            hint: 'проверете стойността' })}
+          ${mnyField('Годишна такса', 'annual_fee', { val: s.annual_fee, min: 0 })}
+          <div class="note" style="grid-column:1/-1">
+            <b>Тарифите са преобразувани от лева в евро</b> при обновяването до
+            v2.4.51 по фиксирания курс 1.95583 и са закръглени до цял евроцент.
+            При дребни суми закръгляването се вижда: 0.05 лв./ден става 0.03 €/ден
+            (≈ 0.06 лв.). Прегледайте двете стойности и ги задайте както решава
+            настоятелството — програмата няма как да знае каква е новата тарифа.
+          </div>
         </div>
         <div class="grid g2">
           ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',

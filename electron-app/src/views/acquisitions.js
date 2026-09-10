@@ -73,7 +73,7 @@ async function acqForm() {
         ${fld('Дата на документа', 'doc_date', { val: today(), type: 'date' })}
       </div>
       <div class="grid g2">
-        ${fld('Обща стойност по документа (лв.)', 'sum', { type: 'number', step: '0.01', hint: 'оставете празно, ако документът не обявява стойност' })}
+        ${mnyField('Обща стойност по документа', 'sum', { min: 0, hint: 'оставете празно, ако документът не обявява стойност' })}
         ${fld('Адрес на дарителя', 'donor_address', { hint: 'задължително при дарение — чл. 6, ал. 5' })}
       </div>
       ${fld('Забележка', 'note', { type: 'textarea', rows: 2 })}
@@ -224,7 +224,7 @@ async function printDonationDoc(id) {
     ${acqCountNote(a)}
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th>${
-      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Стойност, лв.</th></tr></thead><tbody>
+      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Стойност, €</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${

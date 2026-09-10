@@ -27,9 +27,9 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
     ['count_phrase', 'напр. „3 просрочени документа“'],
     ['it_them', '„го“ или „ги“, според броя'],
     ['list', 'списък на просрочените документи'],
-    ['fine', 'сума на обезщетението, напр. „1.23 лв. (0.63 €)“'],
+    ['fine', 'сума на обезщетението, напр. „0.63 € (1.23 лв.)“'],
     ['fine_line', 'ред с обезщетението (или празно, ако е 0)'],
-    ['fine_sms', ', обезщетение ... лв (или празно, ако е 0)'],
+    ['fine_sms', ', обезщетение ... € (или празно, ако е 0)'],
     ['librarian', 'име на библиотекаря'], ['librarian_line', 'библиотекар + нов ред (или празно)'],
     ['place', 'населено място'], ['place_line', 'нов ред + място (или празно)'],
     ['date', 'днешна дата'],
@@ -61,9 +61,12 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       reader: r.name, library: lib, library_short: shortLib,
       count: r.n, count_phrase: `${r.n} просрочен${one ? ' документ' : 'и документа'}`,
       it_them: one ? 'го' : 'ги', list,
-      fine: fine > 0 ? `${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €)` : '',
-      fine_line: fine > 0 ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} лв. (${(fine / EUR_RATE).toFixed(2)} €).` : '',
-      fine_sms: fine > 0 ? `, обезщетение ${fine.toFixed(2)} лв` : '',
+      /* Обезщетението е ЗАПИСАНО в евро от v2.4.51 — не се дели повторно по
+         курса. Дотук писмото, имейлът и SMS-ът показваха три различни числа за
+         едно и също задължение (открито при прегледа на кръга). */
+      fine: fine > 0 ? `${fine.toFixed(2)} € (${(fine * EUR_RATE).toFixed(2)} лв.)` : '',
+      fine_line: fine > 0 ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} € (${(fine * EUR_RATE).toFixed(2)} лв.).` : '',
+      fine_sms: fine > 0 ? `, обезщетение ${fine.toFixed(2)} €` : '',
       librarian: s.librarian || '', librarian_line: s.librarian ? s.librarian + '\n' : '',
       place: s.place || '', place_line: s.place ? '\n' + s.place : '',
       date: bgDate(today()),

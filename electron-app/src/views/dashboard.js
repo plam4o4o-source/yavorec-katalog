@@ -40,11 +40,36 @@ async function renderDash() {
         : ''}
     </div>
 
-    <!-- v2.4.29: подредба на таблото — бързите действия са лента под показателите
-         (дотук колона от шест бутона, която правеше долния ред двойно по-висок и
-         оставяше „Предстоящи връщания“ и „За днес“ наполовина празни); списъкът с
-         работа за деня стои до просрочените, а годината — до предстоящите. -->
-    <div style="margin-top:16px">
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
+        ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
+        ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
+        <th>Читател</th><th>Документ</th><th class="nowrap">Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
+        ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
+        <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
+        <td class="num warn">${l.daysLate ?? ''}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
+      </div>
+      <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
+        <div class="statRows">
+          <div><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
+          <div><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
+          <div><span>Заемания</span><b>${r.loansYear}</b></div>
+          <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
+        </div>
+        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
+        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
+        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
+      </div>
+    </div>
+
+    <!-- Подредба на таблото (v2.4.51): двата реда от преди v2.4.29. „Бързи
+         действия“ се върнаха като КАРТА в долния ред вместо лента на цяла
+         ширина — лентата отваряше собствен ред и вдигаше таблото с 145 px,
+         без да показва нищо повече. Измерено при 1366×768: 1115 → 970 px. -->
+    <div class="grid g3" style="margin-top:16px">
       <div class="card dashActions"><h3 style="margin-top:0">Бързи действия</h3>
         <div class="quickGrid">
           <button class="quickBtn" onclick="bookForm()"><span>${DASH_ICONS.plus}</span>Нов документ</button>
@@ -55,17 +80,12 @@ async function renderDash() {
           <button class="quickBtn" onclick="go('labels')"><span>${NAV_ICONS.labels}</span>Етикети</button>
         </div>
       </div>
-    </div>
-
-    <div class="grid g3" style="margin-top:16px">
-      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
-        ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
-        ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Читател</th><th>Документ</th><th class="nowrap">Инв. №</th><th>Срок</th><th>Дни</th></tr></thead><tbody>
-        ${r.overdueRows.map(l => `<tr><td>${esc(l.reader_name)}</td><td>${esc(l.title)}</td>
-        <td class="num">${l.inv_number ?? ''}</td><td class="num">${bg(l.date_due)}</td>
-        <td class="num warn">${l.daysLate ?? ''}</td></tr>`).join('')}
-        </tbody></table></div>` : '<div class="empty"><p>Няма просрочени заемания.</p></div>'}
+      <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
+        <div style="font-size:13px">
+          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
+          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
+          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
+        </div>
       </div>
       <div class="card"><h3 style="margin-top:0">За днес${r.today.isTodayOpen === false ? ' <span class="badge warn">затворен ден</span>' : ''}</h3>
         <div class="statRows">
@@ -87,29 +107,6 @@ async function renderDash() {
             <b><a href="#periodika">${r.today.overduePeriodicals}</a></b></div>` : ''}
         </div>
         <div class="hint" style="margin-top:8px">Пререгистрацията е дължима една година след последното записване.</div>
-      </div>
-    </div>
-
-    <div class="grid g3" style="margin-top:16px">
-      <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
-        <div style="font-size:13px">
-          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
-          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
-          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
-        </div>
-      </div>
-      <div class="card"><h3 style="margin-top:0">Годината ${r.year}</h3>
-        <div class="statRows">
-          <div><span>Постъпили документи</span><b>${r.acquiredYear}</b></div>
-          <div><span>Отчислени документи</span><b>${r.deaccessionedYear}</b></div>
-          <div><span>Заемания</span><b>${r.loansYear}</b></div>
-          <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
-        </div>
-        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
-          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
-        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
-        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
       </div>
     </div>
 

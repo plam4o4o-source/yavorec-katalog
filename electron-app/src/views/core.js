@@ -42,18 +42,27 @@ window.yearOptions = yearOptions;
 /* Фиксиран, необратим курс лев–евро по Регламент (ЕС) 2025/1409 на Съвета — БНБ,
    в сила от 01.01.2026 г. Не е борсов курс и не се обновява. */
 const EUR_RATE = 1.95583;
-const bgn = (n) => (Number(n) || 0).toFixed(2);
+/* ОТ v2.4.51 СТОЙНОСТИТЕ В БАЗАТА СА В ЕВРО. Дотук бяха в лева, а еврото се
+   смяташе при показване; миграция 15 преобразува веднъж всички парични колони.
+   Причината не е козметична: сборът от закръглени преобразувания НЕ е равен на
+   преобразувания сбор, тоест инвентарната книга показваше обща стойност, която
+   не съвпада със сбора на собствените си редове — точно това проверява
+   регионалната библиотека. Сега сборовете се правят във валутата на записа.
+   `bgn()` остава като СПРАВОЧНА стойност (стари фактури, заварени документи). */
+const bgn = (n) => ((Number(n) || 0) * EUR_RATE).toFixed(2);
 /* Съгласуване по число (одит v2.4.25): „1 документ“, „2 документа“. Връща числото
    и формата; за наречията/глаголите (остана/останаха) се подава цял израз. */
 const pl = (n, one, many) => n + ' ' + (Number(n) === 1 ? one : many);
 const dni = (n) => pl(n, 'ден', 'дни');
-const eur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
-const mny = (n) => bgn(n) + ' лв. / ' + eur(n) + ' €';
-/* Същата сума за КЛЕТКА в таблица (v2.4.29): левовете над евровете, без пренасяне —
-   „3.00 лв. / 1.53 €“ се чупеше на четири реда в инвентарната книга и в „Просрочени“. */
-/* Интервалът пред <small> е нужен: и двете суми са на един ред (v2.4.50) и без
-   него биха се долепили — „12,00 лв.(6,14 €)“. */
-const mnyCell = (n) => `<span class="money" title="${bgn(n)} лв. / ${eur(n)} €">${bgn(n)} лв. <small>${eur(n)} €</small></span>`;
+const eur = (n) => (Number(n) || 0).toFixed(2);
+/* Обратното преобразуване — за полето „лв.“ при въвеждане на стара фактура. */
+const bgnToEur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
+const mny = (n) => eur(n) + ' € / ' + bgn(n) + ' лв.';
+/* Същата сума за КЛЕТКА в таблица. Еврото е водещо (v2.4.51), левът остава в
+   скоби — заварените документи и фактурите отпреди 2026 г. са в лева и хората
+   още смятат в тях. Интервалът пред <small> е нужен: двете суми са на един ред
+   (v2.4.50) и без него биха се долепили — „6.14 €(12.00 лв.)“. */
+const mnyCell = (n) => `<span class="money" title="${eur(n)} € / ${bgn(n)} лв.">${eur(n)} € <small>${bgn(n)} лв.</small></span>`;
 /* Огледало на csvCell() от security-utils.js за изнасянията, които се сглобяват
    в екранния слой. Excel и LibreOffice изпълняват като ФОРМУЛА всяка клетка,
    започваща с =, +, - или @; водещият апостроф ги неутрализира. Двете
@@ -586,6 +595,50 @@ function askConfirm(text, opts) {
   });
 }
 window.askConfirm = askConfirm;
+
+/* ---------------- Поле за парична сума (v2.4.51) ----------------
+   Записва се в ЕВРО, но до полето стои второ, в ЛЕВА: старите фактури, актове и
+   инвентарни описи са в лева и библиотекарката пише каквото пише на документа
+   пред нея, вместо да смята наум. Двете се следят взаимно при писане.
+
+   Полето в лева НЯМА атрибут name — formData() събира само наименувани полета,
+   тоест към обработчика заминава единствено сумата в евро и нито един канал не
+   се променя заради второто поле. */
+function mnyField(label, name, opts) {
+  opts = opts || {};
+  const празно = opts.val === '' || opts.val == null;
+  const e = празно ? '' : eur(opts.val);
+  const b = празно ? '' : bgn(opts.val);
+  const мин = opts.min != null ? ` min="${esc(String(opts.min))}"` : '';
+  return `<div class="field">
+    <label for="mf_${name}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
+    <div class="mnyPair">
+      <input id="mf_${name}" name="${name}" type="number" step="0.01"${мин} ${opts.req ? 'required' : ''} value="${esc(e)}"
+        aria-label="${esc(label)} в евро"><span class="mnyCur">€</span>
+      <input type="number" step="0.01"${мин} data-bgn-for="${name}" value="${esc(b)}"
+        aria-label="${esc(label)} в лева (за документ отпреди 2026 г.)"><span class="mnyCur">лв.</span>
+    </div>
+    <div class="fh mnyNote">Записва се в евро; дясното поле е за сума по документ в лева.</div>
+  </div>`;
+}
+window.mnyField = mnyField;
+/* Един делегиран слушател за цялата програма, вместо закачане във всяка форма:
+   прозорците се пресъздават при всяко отваряне и ръчното закачане се пропуска
+   лесно (точно това се беше случило с двойното поле за цена в „Книги“). */
+document.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!el || el.tagName !== 'INPUT') return;
+  const заЛева = el.getAttribute && el.getAttribute('data-bgn-for');
+  if (заЛева) {
+    const цел = el.form ? el.form.querySelector(`[name="${заЛева}"]`)
+      : document.querySelector(`[name="${заЛева}"]`);
+    if (цел) цел.value = el.value === '' ? '' : bgnToEur(el.value);
+    return;
+  }
+  if (!el.name) return;
+  const огледало = document.querySelector(`[data-bgn-for="${el.name}"]`);
+  if (огледало) огледало.value = el.value === '' ? '' : bgn(el.value);
+});
 
 function formData(sel) {
   const out = {};

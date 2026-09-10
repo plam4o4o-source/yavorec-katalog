@@ -354,7 +354,7 @@ async function printInventProtocol(id) {
       ? `<br><b>Заети от читатели към деня на проверката:</b> ${onLoan} — не се проверяват на място и не се смятат за липсващи.` : ''}${
       atBinder != null && atBinder > 0
       ? `<br><b>За реставрация към деня на проверката:</b> ${atBinder} — при подвързвача, не се проверяват на място и не се смятат за липсващи.` : ''}</div>
-    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, лв. / €</th></tr></thead><tbody>
+    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, € / лв.</th></tr></thead><tbody>
     ${s.missing.map((m, n) => `<tr><td>${n + 1}</td><td>${m.inv_number ?? ''}</td>
       <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td><td>${m.price == null ? '—' : mny(m.price)}</td></tr>`).join('')}
     <tr><td colspan="3"><b>ОБЩО ${missing} ${missing === 1 ? 'документ' : 'документа'}</b></td><td><b>${mny(missingValue)}</b></td></tr>
