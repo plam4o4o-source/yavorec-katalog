@@ -250,7 +250,7 @@ test('CSV: BOM, 20 колони на всеки ред, кавички и фор
   assert.equal(header.length, 20);
   assert.ok(header.includes('Поредица'));
   assert.ok(header.includes('Бройки'));
-  assert.ok(header.includes('Обща стойност (лв.)'));
+  assert.ok(header.includes('Обща стойност (€)'));
   assert.equal(header[0], 'Инв. №');
   for (const line of lines.slice(1)) {
     assert.equal(parseCsvLine(line).length, 20, 'ред с различен брой колони: ' + line);
@@ -260,8 +260,10 @@ test('CSV: BOM, 20 колони на всеки ред, кавички и фор
   const col = (name) => header.indexOf(name);
   assert.equal(r1[col('Заглавие')], 'Приказки & легенди <избрано>'); // без XML екраниране в CSV
   assert.equal(r1[col('Автор')], 'Вазов, Иван');
-  assert.equal(r1[col('Цена (лв.)')], '19.56');
-  assert.equal(r1[col('Цена (€)')], (19.56 / 1.95583).toFixed(2)); // официалният курс лв./евро
+  /* От v2.4.51 записаната цена е в ЕВРО, а левът е справочна колонка до нея —
+     затова посоката на пресмятането е обърната: 19.56 € × 1.95583 = 38.26 лв. */
+  assert.equal(r1[col('Цена (€)')], '19.56');
+  assert.equal(r1[col('Цена (лв.)')], (19.56 * 1.95583).toFixed(2)); // официалният курс лв./евро
 
   const r2 = parseCsvLine(lines[2]);
   // Защита от formula injection: водещ апостроф пред „=SUM…“, стойността иначе е цяла.

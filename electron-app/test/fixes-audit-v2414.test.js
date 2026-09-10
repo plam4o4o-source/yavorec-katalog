@@ -449,7 +449,7 @@ test('читател с неплатено задължение не може д
 
   const res = ipcMain.invoke('readers:delete', rid);
   assert.equal(res.ok, false, 'дължимото трябва да спре изтриването');
-  assert.match(res.error, /дължи 4\.00 лв/);
+  assert.match(res.error, /дължи 4\.00 €/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM readers WHERE id = ?').get(rid).n, 1, 'читателят е още там');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM account_lines').get().n, 1, 'касовият дневник също');
 });

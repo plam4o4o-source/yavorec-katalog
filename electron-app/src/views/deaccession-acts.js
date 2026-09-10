@@ -175,7 +175,7 @@ async function printActDoc(id) {
           а редовете печатат единична цена, и без колоната документът се сумира
           на едно число, а твърди друго. */''}
     <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th>${
-      showQty ? '<th>Бр.</th>' : ''}<th>Стойност, лв.</th></tr></thead><tbody>
+      showQty ? '<th>Бр.</th>' : ''}<th>Стойност, €</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
     <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td>${

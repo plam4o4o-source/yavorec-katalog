@@ -69,7 +69,7 @@ async function openPeriodical(id) {
       <form id="issueF" onsubmit="return false" class="grid g3">
         ${fld('Номер на брой', 'issue_no', { req: 1, onkey: `if(event.key==='Enter'){event.preventDefault();addIssue(${id})}` })}
         ${fld('Дата на постъпване', 'date', { val: today(), type: 'date' })}
-        ${fld('Цена (лв.)', 'price', { type: 'number', step: '0.01' })}
+        ${mnyField('Цена', 'price', { min: 0 })}
       </form>
       <button type="button" class="btn pri" onclick="addIssue(${id})">Добави брой</button>
     </fieldset>

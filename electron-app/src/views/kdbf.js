@@ -223,7 +223,7 @@ function printKdbfDoc() {
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
-     <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, лв.</th></tr></thead><tbody>
+     <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, €</th></tr></thead><tbody>
      <tr><td>Наличност към 01.01.${y} г.</td><td>${r.stockEnd.n - r.acquiredYear.n + r.deaccYear.n}</td>
        <td>${mny(r.stockEnd.v - r.acquiredYear.v + r.deaccYear.v)}</td></tr>
      <tr><td>Постъпили през ${y} г.</td><td>${r.acquiredYear.n}</td><td>${mny(r.acquiredYear.v)}</td></tr>

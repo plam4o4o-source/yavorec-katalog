@@ -385,22 +385,30 @@ test('показателите в Инвентарна книга, Справк�
   assert.doesNotMatch(src, /kpi\('[^']*[\u{1F300}-\u{1FAFF}\u2705]/u, 'reports.js не подава емоджи на kpi()');
 });
 
-test('Табло: бързите действия са лента под показателите, „За днес“ е до „Просрочени“, а заглавието му е без емоджи', async () => {
+test('Табло: два реда карти, „Бързи действия“ е КАРТА в долния, а заглавието на „За днес“ е без емоджи', async () => {
   const dom = buildDom({ 'dashboard.full': DASH_MOCK });
   const { window } = dom; await settle();
   await window.renderDash(); await settle();
   const doc = window.document;
   const act = doc.querySelector('#view .card.dashActions');
-  assert.ok(act, 'лентата с бързи действия има клас dashActions');
+  assert.ok(act, 'картата с бързи действия има клас dashActions');
   assert.equal(act.querySelectorAll('.quickBtn').length, 6);
+  /* v2.4.51: „Бързи действия“ се върна като карта в ДОЛНИЯ ред (подредбата отпреди
+     v2.4.29). Лентата на цяла ширина отваряше собствен ред и вдигаше таблото със
+     145 px, без да показва нищо повече — измерено в Chromium при 1366×768:
+     1115 → 970 px, а превъртането 436 → 291 px. */
   const heads = [...doc.querySelectorAll('#view .card > h3')].map(h => h.textContent.trim());
-  assert.ok(heads.indexOf('Бързи действия') < heads.indexOf('Просрочени заемания'), 'действията са преди просрочените');
+  assert.ok(heads.indexOf('Бързи действия') > heads.indexOf('Просрочени заемания'), 'действията са СЛЕД просрочените');
   const grids = [...doc.querySelectorAll('#view .grid.g3')];
+  assert.equal(grids.length, 2, 'долната част е два реда, не три');
   const firstGridHeads = [...grids[0].querySelectorAll(':scope > .card > h3')].map(h => h.textContent.trim());
-  assert.deepEqual(firstGridHeads, ['Просрочени заемания', 'За днес']);
+  assert.deepEqual(firstGridHeads, ['Просрочени заемания', 'Годината 2026']);
+  const secondGridHeads = [...grids[1].querySelectorAll(':scope > .card > h3')].map(h => h.textContent.trim());
+  assert.deepEqual(secondGridHeads, ['Бързи действия', 'Предстоящи връщания (до 3 дни)', 'За днес']);
+  const css2 = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
+  assert.match(css2, /\.dashActions \.quickGrid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/,
+    'шестте копчета се редят 2×3 в собствената си колона');
   assert.doesNotMatch(heads.join('|'), emojiRe, 'няма емоджи в заглавията');
-  const css = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
-  assert.match(css, /\.dashActions \.quickGrid\{grid-template-columns:repeat\(6,minmax\(0,1fr\)\)\}/);
 });
 
 test('Читатели: колона „Заети“ с „!“ при просрочие, бутоните на реда са в .rowActs, таблицата е readersTable', async () => {
@@ -652,10 +660,10 @@ test('mnyCell(): левове над евро в една клетка; Прос
   /* v2.4.50: двете валути са на ЕДИН ред, разделени с интервал — еврото беше на
      10,5 px под левовете, най-дребният текст в програмата. Интервалът пред
      <small> е част от поправката: без него излиза „7.50 лв.(3.83 €)“. */
-  assert.match(html, /^<span class="money" title="7\.50 лв\. \/ 3\.83 €">7\.50 лв\. <small>3\.83 €<\/small><\/span>$/);
+  assert.match(html, /^<span class="money" title="7\.50 € \/ 14\.67 лв\.">7\.50 € <small>14\.67 лв\.<\/small><\/span>$/);
   const cssM = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
   assert.match(cssM, /\.money\{display:inline;/, 'клетката вече не е колонка');
-  assert.match(cssM, /\.money small\{font-size:12px/, 'еврото е 12 px, не 10,5');
+  assert.match(cssM, /\.money small\{font-size:12px/, 'втората валута е 12 px, не 10,5');
   for (const f of ['overdue.js', 'inv-book.js']) {
     assert.match(fs.readFileSync(path.join(APP_DIR, 'src', 'views', f), 'utf8'), /mnyCell\(/, f);
   }

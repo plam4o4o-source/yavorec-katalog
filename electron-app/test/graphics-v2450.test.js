@@ -352,8 +352,8 @@ test('mnyCell(): двете валути на един ред, еврото 12 p
   const dom = buildDom({});
   const { window } = dom; await settle();
   const html = window.eval('mnyCell(12)');
-  assert.match(html, /^<span class="money" title="12\.00 лв\. \/ 6\.14 €">12\.00 лв\. <small>6\.14 €<\/small><\/span>$/);
-  assert.ok(/лв\. <small>/.test(html), 'интервалът пред <small> е задължителен — иначе „12.00 лв.(6.14 €)“');
+  assert.match(html, /^<span class="money" title="12\.00 € \/ 23\.47 лв\.">12\.00 € <small>23\.47 лв\.<\/small><\/span>$/);
+  assert.ok(/€ <small>/.test(html), 'интервалът пред <small> е задължителен — иначе „12.00 €(23.47 лв.)“');
   assert.match(CSS, /\.money\{display:inline; white-space:nowrap; font-family:var\(--mono\)\}/,
     'дотук беше inline-flex column: левовете НАД евровете');
   assert.match(CSS, /\.money small\{font-size:12px; color:var\(--ink3\)\}/, 'еврото беше 10,5 px');

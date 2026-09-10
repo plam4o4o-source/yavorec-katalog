@@ -138,7 +138,7 @@ test('„Продължи“ на просрочено заемане НАЧИС
   assert.ok(db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(r).suspended_until,
     'наказанието в дни също се налага — както при връщане');
   const ext = auditLog.find(a => a.action === 'Продължение на заемане');
-  assert.match(ext.detail, /начислена забава 36 дни, 1\.80 лв\./);
+  assert.match(ext.detail, /начислена забава 36 дни, 1\.80 €/);
 });
 
 test('продължението на заемане В СРОК не начислява нищо', async () => {
@@ -602,7 +602,7 @@ test('изтриването на ред от сметката оставя сл
   assert.equal(auditLog.length, 1);
   assert.match(auditLog[0].detail, /Иванка/);
   assert.match(auditLog[0].detail, /2025-03-11/);
-  assert.match(auditLog[0].detail, /12\.00 лв\./);
+  assert.match(auditLog[0].detail, /12\.00 €/);
 
   const again = await ipcMain.invoke('account:deleteLine', line.data);
   assert.equal(again.ok, false, 'изтрит ред не се „изтрива“ втори път с ok:true');

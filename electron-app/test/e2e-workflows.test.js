@@ -190,7 +190,7 @@ test('3. нова книга през формата — в базата, в „
   await h.go('invbook');
   assert.match(h.text('#ibBody'), /101.*Вазов, Иван.*Под игото/);
   assert.match(h.viewText(), /1 Вписани общо/);
-  assert.match(h.viewText(), /Неотчислени 12\.50 лв\./);
+  assert.match(h.viewText(), /Неотчислени 12\.50 € \/ 24\.45 лв\./);
   noRendererErrors();
 });
 
@@ -240,7 +240,7 @@ test('5. продължение на просрочено заемане от �
   await h.go('over');
   assert.match(h.viewText(), new RegExp('Общо дължимо обезщетение: ' + E.mny(fine).replace(/[.\/]/g, '\\$&')));
   const row = h.$('#ovBody tr');
-  // v2.4.29: сумата в клетката е „X лв.“ над „Y €“ (mnyCell), без наклонена черта.
+  // v2.4.51: сумата в клетката е „X €“ и „Y лв.“ на един ред (mnyCell), без наклонена черта.
   assert.match(h.text(row), new RegExp('Иван Читателов 101 Под игото ' + E.bgDate(due).replace(/\./g, '\\.') + ' ' + late + ' ' + E.mny(fine).replace(' / ', ' ').replace(/[.\/]/g, '\\$&')));
   const n = h.toasts.length;
   await h.clickButton('Продължи', '#ovBody');
@@ -369,7 +369,7 @@ test('7. партида в „Постъпления“, инвентиран д
   assert.equal(acq.sum, 25);
   assert.equal(acq.committee1, 'Мария Иванова');
   assert.ok(h.toasts.some(t => t.msg === 'Партидата е заведена в КДБФ част 1.'));
-  assert.match(h.text('#acqBody'), /1 \/ \d{4}.*Книжарница „Хеликон“ закупуване фактура № Ф-0001 2 0 0\.00 лв\./);
+  assert.match(h.text('#acqBody'), /1 \/ \d{4}.*Книжарница „Хеликон“ закупуване фактура № Ф-0001 2 0 0\.00 €/);
 
   // Отваряне и инвентиране на документ по партидата.
   await h.clickButton('Отвори', '#acqBody');
@@ -388,14 +388,14 @@ test('7. партида в „Постъпления“, инвентиран д
   assert.ok(b, 'книгата по партидата не е записана: ' + JSON.stringify(h.lastToast()));
   ids.book2 = b.id;
   assert.equal(b.acquisition_id, ids.acq1);
-  assert.match(h.text('#acqBody'), /Книжарница „Хеликон“.*2 1 12\.50 лв\./, 'списъкът на партидите не отчита инвентирания документ');
+  assert.match(h.text('#acqBody'), /Книжарница „Хеликон“.*2 1 12\.50 €/, 'списъкът на партидите не отчита инвентирания документ');
 
   await h.go('kdbf');
   assert.match(h.text('#vTitle'), /Книга за движение на библиотечния фонд/);
   const p1 = h.text('#view tbody');
   assert.match(p1, /1 Книжарница „Хеликон“ закупуване фактура № Ф-0001/);
-  assert.match(p1, /2 1 12\.50 лв\. \/ 6\.39 € 102 – 102 книга: 1/, 'редът на партидата в Част № 1: ' + p1);
-  assert.match(p1, /ОБЩО за \d{4} г\. 2 1 12\.50 лв\./);
+  assert.match(p1, /2 1 12\.50 € \/ 24\.45 лв\. 102 – 102 книга: 1/, 'редът на партидата в Част № 1: ' + p1);
+  assert.match(p1, /ОБЩО за \d{4} г\. 2 1 12\.50 €/);
   noRendererErrors();
 });
 
@@ -411,15 +411,15 @@ test('8. акт за отчисляване чрез сканиране → до
   h.type('#actF [name=reason_code]', '4');
   let n = h.toasts.length;
   await h.scan('#actScan', '103');
-  assert.match(h.text('#actList'), /103 Неизвестен\. Стара книга 3\.00 лв\..*ОБЩО 1 документ 3\.00 лв\./);
+  assert.match(h.text('#actList'), /103 Неизвестен\. Стара книга 3\.00 €.*ОБЩО 1 документ 3\.00 €/);
   assert.ok(h.toastsSince(n).some(t => t.type === 'err' && t.msg === 'Внимание: инв. № 103 в момента е зает от читател.'), JSON.stringify(h.toastsSince(n)));
   await h.scan('#actScan', '103');
   assert.ok(h.lastToast().msg === 'Инв. № 103 вече е в списъка.', JSON.stringify(h.lastToast()));
   await h.scan('#actScan', '101');
-  assert.match(h.text('#actList'), /ОБЩО 2 документа 15\.50 лв\./);
+  assert.match(h.text('#actList'), /ОБЩО 2 документа 15\.50 €/);
   const row101 = Array.from(h.document.querySelectorAll('#actList tbody tr')).find(tr => /Под игото/.test(tr.textContent));
   await h.click(row101.querySelector('button.dgr'));
-  assert.match(h.text('#actList'), /ОБЩО 1 документ 3\.00 лв\./);
+  assert.match(h.text('#actList'), /ОБЩО 1 документ 3\.00 €/);
   n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
   assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 1: отчислен е 1 документ.'), JSON.stringify(h.toastsSince(n)));
@@ -439,7 +439,7 @@ test('8. акт за отчисляване чрез сканиране → до
   const closed = q('SELECT * FROM loans WHERE id = ?', lent.id);
   assert.equal(closed.date_in, T, 'заемането на отчисления документ не е закрито от акта');
   assert.equal(closed.deaccession_act_id, act.id);
-  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*т\. 4\. Физически изхабени 1 3\.00 лв\./);
+  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*т\. 4\. Физически изхабени 1 3\.00 €/);
 
   // Отчисленият не се заема, не се сканира в акт и се вижда в инвентарната книга и в КДБФ Част № 3.
   await selectReaderAtDesk('1001');
@@ -451,17 +451,17 @@ test('8. акт за отчисляване чрез сканиране → до
   await h.go('kdbf');
   await h.clickButton('Част № 3', '#view');
   await h.waitFor(() => /Приложение № 3/.test(h.viewText()), 'Част № 3');
-  assert.match(h.text('#view tbody'), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' 1 / \\d{4} т\\. 4\\. Физически изхабени 1 3\\.00 лв\\.'));
+  assert.match(h.text('#view tbody'), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' 1 / \\d{4} т\\. 4\\. Физически изхабени 1 3\\.00 €'));
   await h.clickButton('Част № 2', '#view');
   await h.waitFor(() => /Приложение № 2/.test(h.viewText()), 'Част № 2');
   // 101, 110, 102, 103 постъпили; 103 отчислен → наличност 3 (стойност 12.50 + 1 + 12.50).
-  assert.match(h.viewText(), /4 Постъпили през \d{4} 29\.00 лв\..*1 Отчислени през \d{4} 3\.00 лв\..*3 Наличност 31\.12\.\d{4} 26\.00 лв\./);
+  assert.match(h.viewText(), /4 Постъпили през \d{4} 29\.00 €.*1 Отчислени през \d{4} 3\.00 €.*3 Наличност 31\.12\.\d{4} 26\.00 €/);
 
   // Анулиране.
   await h.go('acts');
   await h.clickButton('Отвори', '#view tbody');
   await h.waitFor(() => /Акт за отчисляване № 1/.test(h.modal()), 'акта');
-  assert.match(h.modal(), /103 Неизвестен\. Стара книга 3\.00 лв\..*ОБЩО 1 3\.00 лв\./);
+  assert.match(h.modal(), /103 Неизвестен\. Стара книга 3\.00 €.*ОБЩО 1 3\.00 €/);
   n = h.toasts.length;
   await h.clickButton('Анулирай акта', '#modal footer');
   assert.match(h.hooks.confirms[h.hooks.confirms.length - 1], /Анулиране на акта/);
@@ -546,7 +546,7 @@ test('9. инвентаризация: започване, сканиране, �
   assert.match(p, /Какво е проверявано: справочен фонд · отдел „справочен“/);
   assert.match(p, /Документи в обхвата: 3 Проверени документи: 1 Липсващи: 1/);
   assert.match(p, /Заети от читатели към деня на проверката: 1/);
-  assert.match(p, /203 Речник В 40\.00 лв\..*ОБЩО 1 документ 40\.00 лв\./);
+  assert.match(p, /203 Речник В 40\.00 €.*ОБЩО 1 документ 40\.00 €/);
   h.window.ppClose();
   // v2.4.29: колоната „Обхват“ показва и ограничението по отдел („отдел „справочен““).
   assert.match(h.text('#view tbody'), /1 \/ \d{4}.*справочен фонд отдел „справочен“ 3 1.*1 Мария Иванова.*приключена пълна/);
@@ -582,7 +582,7 @@ test('10. просрочен читател — екранът „Напомня
   assert.match(p, /До: Иван Читателов/);
   assert.match(p, new RegExp('101 Под игото ' + E.bgDate(T).replace(/\./g, '\\.') + ' ' + E.bgDate(due).replace(/\./g, '\\.')));
   assert.match(p, /Това е ВТОРО напомняне\./);
-  assert.match(p, new RegExp('Общо дължимо обезщетение: ' + E.mny(fine).replace(/[.\/]/g, '\\$&') + ' \\(0\\.10 лв\\./ден забава'));
+  assert.match(p, new RegExp('Общо дължимо обезщетение: ' + E.mny(fine).replace(/[.\/]/g, '\\$&') + ' \\(0\\.10 €/ден забава'));
   assert.match(p, /Библиотекар: Мария Иванова/);
   assert.equal(q('SELECT COUNT(*) AS n FROM notice_log').n, 0, 'напомнянето е вписано преди печатът да е потвърден');
   h.window.ppPrint();
@@ -611,7 +611,7 @@ test('11. сметка: начисление, плащане, квитанция
   await h.go('readers');
   await h.clickButton('Сметка', `#rBody tr[data-id="${ids.reader1}"]`);
   await h.waitFor(() => /Сметка — Иван Читателов/.test(h.modal()), 'сметката');
-  assert.match(h.modal(), /Карта 1001 0\.00 лв\./);
+  assert.match(h.modal(), /Карта 1001 0\.00 € \/ 0\.00 лв\./);
   assert.match(h.modal(), /Няма движения/);
   assert.equal(h.button('Годишна такса', '#modal').disabled, false);
 
@@ -623,16 +623,16 @@ test('11. сметка: начисление, плащане, квитанция
   let n = h.toasts.length;
   await h.clickButton('Начисли', '#modal2 footer');
   assert.ok(h.toastsSince(n).some(t => t.msg === 'Начислено.'), JSON.stringify(h.toastsSince(n)));
-  await h.waitFor(() => /1\.50 лв\./.test(h.modal()), 'обновената сметка');
-  assert.match(h.modal(), /1\.50 лв\. \/ 0\.77 € \(дължи\)/);
-  assert.match(h.modal(), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' обезщетение \\+1\\.50 лв\\. \\/ 0\\.77 € забава по инв\\. № 101'));
+  await h.waitFor(() => /1\.50 €/.test(h.modal()), 'обновената сметка');
+  assert.match(h.modal(), /1\.50 € \/ 2.93 лв\. \(дължи\)/);
+  assert.match(h.modal(), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' обезщетение \\+1\\.50 € \\/ 2.93 лв\\. забава по инв\\. № 101'));
   const charge = q("SELECT * FROM account_lines WHERE kind = 'начисление'");
   assert.equal(charge.amount, 1.5);
   assert.equal(charge.type, 'обезщетение');
 
   await h.clickButton('Годишна такса', '#modal');
-  await h.waitFor(() => /6\.50 лв\./.test(h.modal()), 'таксата');
-  assert.match(h.modal(), /6\.50 лв\. \/ 3\.32 € \(дължи\)/);
+  await h.waitFor(() => /6\.50 €/.test(h.modal()), 'таксата');
+  assert.match(h.modal(), /6\.50 € \/ 12.71 лв\. \(дължи\)/);
 
   await h.clickButton('Плащане…', '#modal');
   await h.waitFor(() => h.$('#payF'), 'формата за плащане');
@@ -648,13 +648,13 @@ test('11. сметка: начисление, плащане, квитанция
   const p = h.printed();
   assert.match(p, new RegExp('КВИТАНЦИЯ № ' + pay.id + ' / ' + E.bgDate(T).replace(/\./g, '\\.')));
   assert.match(p, /Читател: Иван Читателов \(карта 1001\)/);
-  assert.match(p, /Платена сума: 6\.50 лв\. \/ 3\.32 €/);
+  assert.match(p, /Платена сума: 6\.50 € \/ 12.71 лв\./);
   assert.match(p, /Основание: плащане Бележка: в брой/);
-  assert.match(p, /няма задължение \(0\.00 лв\.\)/);
+  assert.match(p, /няма задължение \(0\.00 €\)/);
   h.window.ppClose();
-  assert.match(h.modal(), /0\.00 лв\. \/ 0\.00 €/);
+  assert.match(h.modal(), /0\.00 € \/ 0\.00 лв\./);
   assert.doesNotMatch(h.modal(), /\(дължи\)/);
-  assert.match(h.modal(), /плащане -6\.50 лв\./);
+  assert.match(h.modal(), /плащане -6\.50 €/);
   h.window.closeModal();
   assert.deepEqual(all("SELECT action FROM audit_log WHERE action IN ('Начисление','Плащане') ORDER BY id").map(x => x.action),
     ['Начисление', 'Начисление', 'Плащане']);

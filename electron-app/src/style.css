@@ -439,6 +439,23 @@ button, select, textarea{font-family:var(--sans)}
 select, textarea{font-size:13px; color:var(--ink)}
 .toolbar select{padding:8px 10px; border:1px solid var(--rule2); border-radius:4px; background:#fff; min-height:36px}
 
+/* ---------- Парично поле: евро + лева (v2.4.51) ----------
+   Записва се лявото (в евро); дясното е за суми по стар документ в лева и се
+   пресмята при писане и в двете посоки. Двете са в един ред, за да се вижда, че
+   са една и съща сума, а не две отделни. */
+/* flex:1 1 0 + min-width:0 — двете полета делят каквото място има КОЛОНАТА на
+   формата (измерена 244 px), вместо да настояват за собствена ширина: с
+   flex-basis 110px вторият ред падаше под първия и сумата изглеждаше като две
+   отделни. nowrap го прави видимо, ако някога пак не се побере. */
+.mnyPair{display:flex; align-items:center; gap:5px; flex-wrap:nowrap}
+.mnyPair input{flex:1 1 0; min-width:0; padding:9px 8px; border:1px solid var(--rule2);
+  border-radius:4px; font-family:var(--mono); font-size:13px; background:#fff; text-align:right}
+.mnyPair input:focus{outline:2px solid var(--brass); outline-offset:1px}
+.mnyCur{flex:0 0 auto; color:var(--ink3); font-size:13px; font-weight:600}
+/* Първата валута е водещата: тя се записва. */
+.mnyPair input[name]{font-weight:600}
+.mnyNote{margin-top:5px; display:block}
+
 /* ---------- Сканиране на баркод (заемане/връщане, инвентаризация, отчисляване) ---------- */
 .scan{
   width:100%; padding:12px 14px; border:2px solid var(--brass); border-radius:2px;
@@ -1235,9 +1252,12 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 
 /* ===== v2.4.29 — графични подобрения по останалите екрани ===== */
 /* Таблото: бързите действия са лента (шест бутона в един ред), не колона. */
-.dashActions .quickGrid{grid-template-columns:repeat(6,minmax(0,1fr))}
-.dashActions .quickBtn{padding:12px 8px}
-@media (max-width:1180px){.dashActions .quickGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* „Бързи действия“ е КАРТА в долния ред (v2.4.51), не лента на цяла ширина:
+   шестте копчета се редят 2×3 в собствената си колона, както преди v2.4.29.
+   Лентата отваряше собствен ред и вдигаше таблото със 145 px, без да показва
+   нищо повече — измерено при 1366×768. */
+.dashActions .quickGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.dashActions .quickBtn{padding:11px 8px}
 /* Пари в таблица — двете валути на ЕДИН ред (v2.4.50). Първо (v2.4.29) бяха
    сложени една НАД друга, за да не се чупи „3.00 лв. / 1.53 €“ на четири реда;
    това реши пренасянето, но остави еврото на 10,5 px — най-дребният текст в

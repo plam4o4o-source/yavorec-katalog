@@ -56,7 +56,7 @@ function chargeOther(readerId) {
   modal2('Ново начисление', `
     <form id="chgF" onsubmit="return false">
       ${fld('Вид', 'type', { type: 'select', opts: ['годишна такса', 'обезщетение', 'друго'], val: 'друго', allowEmpty: false })}
-      ${fld('Сума (лв.)', 'amount', { type: 'number', step: '0.01', val: '', req: 1 })}
+      ${mnyField('Сума', 'amount', { req: 1, min: 0 })}
       ${fld('Бележка', 'note', { val: '' })}
     </form>`,
     `<button class="btn" onclick="closeModal2()">Отказ</button>
@@ -73,7 +73,7 @@ window.saveCharge = saveCharge;
 function payAccount(readerId) {
   modal2('Плащане', `
     <form id="payF" onsubmit="return false">
-      ${fld('Сума (лв.)', 'amount', { type: 'number', step: '0.01', val: '', req: 1 })}
+      ${mnyField('Сума', 'amount', { req: 1, min: 0 })}
       ${fld('Бележка', 'note', { val: '' })}
     </form>`,
     `<button class="btn" onclick="closeModal2()">Отказ</button>
@@ -115,7 +115,7 @@ function printReceiptLine(lineId) {
           личи дали дължи още. Състоянието на сметката КЪМ МОМЕНТА НА ПЕЧАТА се
           изписва изрично, със същото число, което стои и в самата сметка. */''}
     ${hasBal ? `<br><br>Състояние на сметката към ${bg(today())} г.: <b>${
-      bal > 0 ? 'дължими ' + mny(bal) : bal < 0 ? 'надплатени ' + mny(-bal) : 'няма задължение (0.00 лв.)'
+      bal > 0 ? 'дължими ' + mny(bal) : bal < 0 ? 'надплатени ' + mny(-bal) : 'няма задължение (0.00 €)'
     }</b>` : ''}</div>
     <div class="pmeta" style="font-size:9pt">Квитанцията отразява едно движение по сметката на читателя.
     Номерът ѝ е поредният номер на движението в регистъра на сметките.</div>

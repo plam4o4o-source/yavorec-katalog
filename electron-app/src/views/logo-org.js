@@ -243,7 +243,7 @@ async function printOverdueNotices() {
     </tbody></table>
     ${levelLine(levels[r.reader_id] || 1)}
     <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b>${perDay
-      ? ` (${esc(perDay)} лв./ден забава съгласно Правилата за обслужване на читателите на библиотеката,
+      ? ` (${esc(perDay)} €/ден забава съгласно Правилата за обслужване на читателите на библиотеката,
         приети на основание чл. 43, ал. 2 от Наредба № 3 от 18.11.2014 г.)` : ''}.</div>
     ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''), null, logNotices);
 }

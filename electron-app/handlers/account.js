@@ -31,11 +31,11 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
          Дотогава проверката гледаше суровата, а записът — закръглената, затова
          0.004 лв. минаваше и се записваше ред от 0.00 лв. */
       const amt = toCents(raw);
-      if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 лв.).');
+      if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 €).');
       const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
         .run(reader_id, date || today(), 'начисление', type || 'друго', amt, note || null);
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-      logAudit('Начисление', (r ? r.name : reader_id) + ' — ' + (type || 'друго') + ' ' + amt.toFixed(2) + ' лв.');
+      logAudit('Начисление', (r ? r.name : reader_id) + ' — ' + (type || 'друго') + ' ' + amt.toFixed(2) + ' €');
       return info.lastInsertRowid;
     })
   );
@@ -49,11 +49,11 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
          лв. минаваше, влизаше ред от 0.00 лв. и веднага се отпечатваше квитанция
          „Платена сума: 0.00 лв.“ за подпис от читателя. */
       const amt = toCents(raw);
-      if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 лв.).');
+      if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 €).');
       const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
         .run(reader_id, date || today(), 'плащане', 'плащане', -amt, note || null);
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
-      logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' лв.');
+      logAudit('Плащане', (r ? r.name : reader_id) + ' — ' + amt.toFixed(2) + ' €');
       return info.lastInsertRowid;
     })
   );
@@ -73,7 +73,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
       db.prepare('DELETE FROM account_lines WHERE id = ?').run(id);
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(l.reader_id);
       logAudit('Изтрит ред от сметката', (r ? r.name : 'читател № ' + l.reader_id)
-        + ' — ' + l.date + ', ' + (l.type || l.kind) + ' ' + Math.abs(Number(l.amount) || 0).toFixed(2) + ' лв.'
+        + ' — ' + l.date + ', ' + (l.type || l.kind) + ' ' + Math.abs(Number(l.amount) || 0).toFixed(2) + ' €'
         + (l.note ? ' (' + l.note + ')' : ''));
     })
   );
