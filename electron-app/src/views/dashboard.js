@@ -14,10 +14,106 @@ const DASH_ICONS = {
   holds: navIco('<path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.3"/>'),
   plus: navIco('<path d="M12 5v14M5 12h14"/>')
 };
+/* Микрографика на заеманията по седмици (v2.4.52). Дванайсет стълбчета в 108×24 px
+   — колкото се събира под надписа на показателя, без да го разтяга. Числата остават
+   и като ТЕКСТ отдолу: графиката е допълнение към тях, не заместител, а екранният
+   четец не чете стълбчета. Последната седмица е по-тъмна, защото е незавършена. */
+function dashSpark(weeks) {
+  const w = Array.isArray(weeks) ? weeks : [];
+  if (!w.length) return '';
+  const max = Math.max(1, ...w);
+  const bars = w.map((v, i) => {
+    const h = Math.max(1, Math.round(v / max * 20));
+    const last = i === w.length - 1;
+    return `<rect x="${i * 9}" y="${22 - h}" width="6" height="${h}" rx="1"
+      fill="var(${last ? '--brassD' : '--brass'})" opacity="${last ? 1 : 0.45}"/>`;
+  }).join('');
+  return `<svg class="spark" viewBox="0 0 108 24" width="108" height="24" role="img"
+    aria-label="Заемания по седмици за последните ${w.length} седмици: ${w.join(', ')}">${bars}</svg>`;
+}
+/* Просрочията ПО ТЕЖЕСТ (v2.4.52). „240 просрочени“ не казва какво да се направи;
+   разликата между три дни и три месеца е разликата между напомняне и акт по чл. 30.
+   Лентата е за окото, легендата под нея носи същите числа като текст. */
+function dashOverdueBars(b) {
+  const d7 = (b && b.d7) || 0, d30 = (b && b.d30) || 0, more = (b && b.more) || 0;
+  const tot = d7 + d30 + more;
+  if (!tot) return '';
+  const p = (n) => (n / tot * 100).toFixed(2) + '%';
+  return `<div class="sevBar" role="img"
+      aria-label="По дни забава: до 7 дни — ${d7}; от 8 до 30 дни — ${d30}; над 30 дни — ${more}">
+      <span style="width:${p(d7)};background:var(--brass)"></span>
+      <span style="width:${p(d30)};background:var(--amber)"></span>
+      <span style="width:${p(more)};background:var(--red)"></span>
+    </div>
+    <div class="sevLeg" aria-hidden="true">
+      <span><i style="background:var(--brass)"></i>до 7 дни ${d7}</span>
+      <span><i style="background:var(--amber)"></i>8–30 ${d30}</span>
+      <span><i style="background:var(--red)"></i>над 30 ${more}</span>
+    </div>`;
+}
+/* Предстоящите връщания, ГРУПИРАНИ ПО ДЕН (v2.4.52). Дотук всеки ред носеше и
+   собствената си дата с най-едрия шрифт на таблото, при положение че всички дати са
+   в рамките на три дни — тоест най-силният акцент отиваше за най-малко важното.
+   Денят става заглавие на групата, а заглавието на документа — главното на реда. */
+const DASH_DAY_NAMES = ['неделя', 'понеделник', 'вторник', 'сряда', 'четвъртък', 'петък', 'събота'];
+function dashUpcomingHtml(rows, byDay, total, max) {
+  if (!total) return '<div class="hint">Няма предстоящи връщания.</div>';
+  const t = today();
+  const tm = new Date(t + 'T12:00:00Z');
+  tm.setUTCDate(tm.getUTCDate() + 1);
+  const tomorrowIso = tm.toISOString().slice(0, 10);
+  const dayLabel = (d) => d === t ? 'Днес' : d === tomorrowIso ? 'Утре'
+    : DASH_DAY_NAMES[new Date(d + 'T12:00:00Z').getUTCDay()];
+  const shownRows = new Map();
+  for (const l of rows) {
+    if (!shownRows.has(l.date_due)) shownRows.set(l.date_due, []);
+    shownRows.get(l.date_due).push(l);
+  }
+  /* Дните се вземат от БРОЯЧА на базата, а редовете — от прозореца. Така „Днес · 154“
+     е вярно дори когато отдолу стоят шест реда, а ден, който изобщо не е влязъл в
+     прозореца, все пак се обявява с точния си брой, вместо да изчезне. */
+  const days = (byDay && byDay.length) ? byDay
+    : [...shownRows.keys()].map(d => ({ date: d, n: shownRows.get(d).length }));
+  /* ВСИЧКИ дни получават заглавие (те са най-много четири — днес и три напред), а
+     редовете се пълнят, докато стигне мястото. Така се вижда формата на следващите
+     три дни („утре 40, в събота 6“), а не само първият ден и едно общо „още“. */
+  let shown = 0;
+  const out = [];
+  for (const day of days) {
+    out.push(`<div class="upDay"><span class="upDayName">${esc(dayLabel(day.date))}</span>
+      <span class="upDayDate">${bg(day.date)}</span><span class="upDayN">${day.n}</span></div>`);
+    for (const l of (shownRows.get(day.date) || [])) {
+      if (shown >= max) break;
+      out.push(`<div class="upRow2"><span class="upTitle" title="${esc(l.title)}">${esc(l.title)}</span>
+        <span class="upWho">${esc(l.reader_name || '')}</span></div>`);
+      shown++;
+    }
+  }
+  const rest = total - shown;
+  if (rest > 0) {
+    out.push(`<button class="upMore" onclick="go('circ')">още ${pl(rest, 'документ', 'документа')} до 3 дни →</button>`);
+  }
+  return out.join('');
+}
 async function renderDash() {
   const r = await call(window.api.dashboard.full());
   if (!r) return;
   const pct = r.inventoryTarget ? Math.min(100, Math.round(r.inventoryScannedYear / r.inventoryTarget * 100)) : 0;
+  /* Общият брой идва ОТДЕЛНО от показаните редове — списъкът вече е прозорец (виж
+     handlers/dashboard.js). Отговор без брояч пада обратно към дължината, за да не
+     се счупи екранът, ако някога се разминат версиите на двете страни. */
+  const upTotal = r.upcomingCount != null ? r.upcomingCount : r.upcoming.length;
+  /* Напредъкът по чл. 40 се мери спрямо КАЛЕНДАРА, не спрямо кръгло число: 8% през
+     януари е в график, 60% през декември — не. Прагът е десет пункта под изминалата
+     част от годината, за да не се мени при разлика от няколко дни. */
+  const nowD = new Date();
+  const yStart = new Date(nowD.getFullYear(), 0, 1), yEnd = new Date(nowD.getFullYear(), 11, 31);
+  const daysLeft = Math.max(0, Math.ceil((yEnd - nowD) / 86400000));
+  const elapsedPct = (nowD - yStart) / (yEnd - yStart) * 100;
+  const invDone = pct >= 100;
+  const invBehind = !invDone && pct < elapsedPct - 10;
+  const invLeft = Math.max(0, r.inventoryTarget - r.inventoryScannedYear);
+  const perMonth = Math.ceil(invLeft / Math.max(1, Math.round(daysLeft / 30)));
   $('#view').innerHTML = `
     <div class="card dashScan">
       <div class="dashScan-l">
@@ -30,9 +126,16 @@ async function renderDash() {
 
     <div class="kpis">
       ${kpi(DASH_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
-      ${kpi(DASH_ICONS.loans, r.loansOpen, 'Заети в момента', 'при ' + pl(r.activeReaders, 'активен читател', 'активни читатели'))}
-      ${kpi(DASH_ICONS.overdue, r.overdueCount, 'Просрочени', r.overdueCount ? 'изискват внимание' : 'няма закъснения', r.overdueCount ? 'warn' : 'ok')}
-      ${kpi(DASH_ICONS.upcoming, r.upcoming.length, 'Връщания до 3 дни', r.upcoming.length ? 'предстоящи' : 'няма предстоящи')}
+      ${kpi(DASH_ICONS.loans, r.loansOpen, 'Заети в момента',
+        'при ' + pl(r.activeReaders, 'активен читател', 'активни читатели')
+        + dashSpark(r.loansWeeks)
+        + (r.loansWeeks && r.loansWeeks.length
+          ? `<span class="kpiFoot">${pl(r.loansWeeks[r.loansWeeks.length - 1], 'заемане', 'заемания')} тази седмица · 12 седмици назад</span>`
+          : ''))}
+      ${kpi(DASH_ICONS.overdue, r.overdueCount, 'Просрочени',
+        (r.overdueCount ? 'изискват внимание' : 'няма закъснения') + dashOverdueBars(r.overdueBuckets),
+        r.overdueCount ? 'warn' : 'ok')}
+      ${kpi(DASH_ICONS.upcoming, upTotal, 'Връщания до 3 дни', upTotal ? 'предстоящи' : 'няма предстоящи')}
       ${r.holdsReady || r.holdsWaiting
         ? kpi(DASH_ICONS.holds, r.holdsReady, 'Заделени за читатели', r.holdsReady
             ? 'чакат да бъдат взети' + (r.holdsWaiting ? ' · ' + r.holdsWaiting + ' в опашка' : '')
@@ -40,7 +143,32 @@ async function renderDash() {
         : ''}
     </div>
 
-    <div class="grid g3" style="margin-top:16px">
+    <!-- Изискването по чл. 40, т. 2 е ЕДИНСТВЕНОТО на таблото с краен срок
+         (31 декември). Дотук стоеше в дъното на „Годината“ като „0 / 1465“ и лента —
+         на 2 500 px надолу при истински фонд, тоест се виждаше чак когато вече е
+         късно. Стои веднага под показателите и казва не само докъде е стигнало, а и
+         дали изостава спрямо календара и с какво темпо се навакса. -->
+    <div class="card normCard${invBehind ? ' behind' : ''}">
+      ${ringSvg(pct, 'от изисквания обхват', {
+        compact: true,
+        color: invDone ? 'var(--green)' : (invBehind ? 'var(--red)' : 'var(--brass)')
+      })}
+      <div class="normBody">
+        <h3>Инвентаризация ${r.year}
+          <span class="badge ${invDone ? 'ok' : (invBehind ? 'warn' : 'w')}">${invDone ? 'изпълнена' : (invBehind ? 'изостава' : 'в график')}</span></h3>
+        <div class="normNum"><b>${r.inventoryScannedYear.toLocaleString('bg-BG')}</b> от
+          <b>${r.inventoryTarget.toLocaleString('bg-BG')}</b> ${r.inventoryTarget === 1 ? 'документ' : 'документа'}
+          <div class="hint">чл. 40, т. 2 — не по-малко от ${r.inventoryPct}% от фонда годишно</div></div>
+        <div class="normPace">${invDone
+          ? 'Изискването за тази година е изпълнено.'
+          : `Остават <b>${daysLeft}</b> ${daysLeft === 1 ? 'ден' : 'дни'} до 31 декември — по
+             <b>${perMonth.toLocaleString('bg-BG')}</b> ${perMonth === 1 ? 'документ' : 'документа'} на месец, за да бъде изпълнено.`}</div>
+      </div>
+      <button class="btn ${invBehind ? 'pri' : ''} normBtn" onclick="go('invent')">${
+        r.inventoryScannedYear ? 'Продължи проверката' : 'Започни проверка'}</button>
+    </div>
+
+    <div class="grid g3 dashGrid" style="margin-top:16px">
       <div class="card" style="grid-column:span 2"><h3 style="margin-top:0">Просрочени заемания
         ${r.overdueRows.length ? '<button class="btn sm" style="float:right" onclick="go(\'over\')">Всички</button>' : ''}</h3>
         ${r.overdueRows.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
@@ -57,11 +185,9 @@ async function renderDash() {
           <div><span>Заемания</span><b>${r.loansYear}</b></div>
           <div><span>Записани читатели</span><b>${r.readersYear}</b></div>
         </div>
-        <hr style="border:0;border-top:1px solid var(--rule);margin:12px 0 10px">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
-          <span>Инвентаризация</span><b>${r.inventoryScannedYear} / ${r.inventoryTarget}</b></div>
-        <div class="bar"><div class="bar-fill ${pct >= 100 ? 'done' : ''}" style="width:${pct}%"></div></div>
-        <div class="hint" style="margin-top:7px">Чл. 40, т. 2: ежегодно не по-малко от <b>${r.inventoryPct}%</b> от фонда по репрезентативния метод.</div>
+        <!-- Инвентаризацията се премести горе, в собствен ред (v2.4.52): тук стоеше
+             последна в най-дългата карта и се виждаше едва след превъртане. Не се
+             показва на две места — едно число, едно място. -->
       </div>
     </div>
 
@@ -69,7 +195,7 @@ async function renderDash() {
          действия“ се върнаха като КАРТА в долния ред вместо лента на цяла
          ширина — лентата отваряше собствен ред и вдигаше таблото с 145 px,
          без да показва нищо повече. Измерено при 1366×768: 1115 → 970 px. -->
-    <div class="grid g3" style="margin-top:16px">
+    <div class="grid g3 dashGrid" style="margin-top:16px">
       <div class="card dashActions"><h3 style="margin-top:0">Бързи действия</h3>
         <div class="quickGrid">
           <button class="quickBtn" onclick="bookForm()"><span>${DASH_ICONS.plus}</span>Нов документ</button>
@@ -80,17 +206,15 @@ async function renderDash() {
           <button class="quickBtn" onclick="go('labels')"><span>${NAV_ICONS.labels}</span>Етикети</button>
         </div>
       </div>
-      <div class="card"><h3 style="margin-top:0">Предстоящи връщания (до 3 дни)</h3>
-        <div style="font-size:13px">
-          ${r.upcoming.length ? r.upcoming.map(l => `<div class="upcomingRow">
-          <span style="flex:1">${esc(l.title)}</span><span class="hint">${esc(l.reader_name)}</span>
-          <b class="num">${bg(l.date_due)}</b></div>`).join('') : '<span class="hint">Няма.</span>'}
-        </div>
+      <div class="card"><h3 style="margin-top:0">Предстоящи връщания
+        ${upTotal ? `<button class="btn sm" style="float:right" onclick="go('circ')">Всички ${upTotal}</button>` : ''}</h3>
+        <div class="upList">${dashUpcomingHtml(r.upcoming, r.upcomingByDay, upTotal, 6)}</div>
       </div>
       <div class="card"><h3 style="margin-top:0">За днес${r.today.isTodayOpen === false ? ' <span class="badge warn">затворен ден</span>' : ''}</h3>
         <div class="statRows">
-          <div><span>Връщания до 3 дни — напомнете <b>преди</b> срока</span>
-            <b>${r.upcoming.length ? `<a href="#circ">${r.upcoming.length}</a>` : '0'}</b></div>
+          <!-- „Връщания до 3 дни“ стоеше и тук, и като показател горе, и като цяла
+               карта до него — едно и също число на три места в един екран (v2.4.52).
+               Остава горе, където му е мястото: показател с брой. -->
           <div><span>Читатели без изпратено напомняне за просрочие</span>
             <b>${r.today.dueReminders ? `<a href="#over">${r.today.dueReminders}</a>` : '0'}</b></div>
           <div><span>Дължими пререгистрации (до 14 дни)</span>

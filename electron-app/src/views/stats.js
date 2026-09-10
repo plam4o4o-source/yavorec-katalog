@@ -98,19 +98,29 @@ async function renderStats() {
       </div>
     </div>`;
 }
-/* Пръстеновидна диаграма за процент — чист SVG, без външни библиотеки. */
-function ringSvg(pct, label) {
+/* Пръстеновидна диаграма за процент — чист SVG, без външни библиотеки.
+   opts.color: цветът се задава отвън, когато „добре“ не значи „високо“. Прагът по
+   подразбиране (90/70) е верен за „върнати в срок“, но е безсмислен за напредък по
+   годишна цел: 8% през януари е в график, а 60% през декември — не. Таблото (v2.4.52)
+   подава свой цвят по календара; всичко останало ползва подразбирането, както досега.
+   opts.compact: само пръстенът, без надписа отстрани — когато текстът е наоколо. */
+function ringSvg(pct, label, opts) {
+  const o = opts || {};
   const R = 34, C = 2 * Math.PI * R;
-  const on = Math.max(0, Math.min(100, pct));
-  const col = on >= 90 ? 'var(--green)' : on >= 70 ? 'var(--brass)' : 'var(--red)';
-  return `<div class="ring">
-    <svg class="ringSvg" width="86" height="86" viewBox="0 0 86 86">
+  const on = Math.max(0, Math.min(100, Math.round(pct)));
+  const col = o.color || (on >= 90 ? 'var(--green)' : on >= 70 ? 'var(--brass)' : 'var(--red)');
+  const svg = `<svg class="ringSvg" width="86" height="86" viewBox="0 0 86 86" role="img"
+      aria-label="${esc(String(on))}% ${esc(label || 'върнати в срок')}">
       <circle cx="43" cy="43" r="${R}" fill="none" stroke="var(--paper3)" stroke-width="10"/>
-      <circle cx="43" cy="43" r="${R}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
-        stroke-dasharray="${(C * on / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 43 43)"/>
+      ${/* При 0% дъгата НЕ се рисува: заоблената шапка на нулева дължина оставя
+            точка на дванайсет часа, която прилича на повреда, а не на „още нищо“. */
+        on > 0 ? `<circle cx="43" cy="43" r="${R}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="${(C * on / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 43 43)"/>` : ''}
       <text x="43" y="48" text-anchor="middle" font-size="18" font-weight="700" fill="var(--brassD)"
         font-family="Georgia,serif">${on}%</text>
-    </svg>
+    </svg>`;
+  if (o.compact) return `<div class="ring ringOnly">${svg}</div>`;
+  return `<div class="ring">${svg}
     <div class="ringTxt"><div class="rt-n">${on}%</div>
       <div class="rt-l">${esc(label || 'върнати в срок')}</div></div>
   </div>`;

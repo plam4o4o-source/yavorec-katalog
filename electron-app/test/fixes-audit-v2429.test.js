@@ -404,7 +404,7 @@ test('Табло: два реда карти, „Бързи действия“ 
   const firstGridHeads = [...grids[0].querySelectorAll(':scope > .card > h3')].map(h => h.textContent.trim());
   assert.deepEqual(firstGridHeads, ['Просрочени заемания', 'Годината 2026']);
   const secondGridHeads = [...grids[1].querySelectorAll(':scope > .card > h3')].map(h => h.textContent.trim());
-  assert.deepEqual(secondGridHeads, ['Бързи действия', 'Предстоящи връщания (до 3 дни)', 'За днес']);
+  assert.deepEqual(secondGridHeads, ['Бързи действия', 'Предстоящи връщания'  /* v2.4.52: обхватът се вижда от групите по ден и от бутона „още N … до 3 дни“ */, 'За днес']);
   const css2 = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
   assert.match(css2, /\.dashActions \.quickGrid\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/,
     'шестте копчета се редят 2×3 в собствената си колона');
