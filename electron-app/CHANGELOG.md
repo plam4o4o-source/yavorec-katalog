@@ -11,6 +11,61 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.49
+
+**BG:** Преглед на кръга за производителност (v2.4.48). Самите три поправки са
+верни — сверени поотделно: отбелязването на липсващите с една заявка дава СЪЩИТЕ
+документи (сравнено с независимо изчисление от суровите редове), стеснената
+заявка не изпуска поле, което някой чете по-нататък, а сглобеният `katalog.json`
+се разчита като точно същия обект — проверено и с кавички, нов ред, табулация,
+обратна наклонена черта, емоджи и `</script>` вътре в данните. Върху истинския
+`katalog.json` на хранилището: 1092 → 797 КБ, същото съдържание.
+
+Намерени и поправени три неща:
+
+- **Правилото на кръга беше нарушено в самото обхождане, което поправя.** При
+  съставянето на акт за отчисляване UPDATE-ът за всеки документ все още се
+  сглобяваше наново вътре в обхождането — актът за цял раздел носи хиляди
+  номера. Сглобява се веднъж, като другите две.
+- **Проверката за това не можеше да го хване.** Тя четеше „600 знака след еди-кой
+  си ред“ и разпознаваше само една точна форма; сега отрязва ТЯЛОТО на всяко от
+  трите обхождания по балансирани скоби и отказва всеки `db.prepare()` вътре.
+  Доказано: с върнатия дефект новата проверка пада, старата минаваше.
+- **Ръчното „Извеждане на онлайн каталог“ пишеше по стария начин.** Изведен файл,
+  сложен в папката на каталога, връщаше точно разликата от 2 МБ в git, която
+  новият формат съществува да избегне. Сега двата пътя пишат еднакво.
+
+Проверено и НЕ прието за дефект: праговете по време в тестовете на кръга (250 и
+400 ms) НЕ ловят връщането назад — измерено на тази машина, старият код
+приключва за ~158 ms и минава прага. Не са затегнати, защото праг по часовник
+зависи от машината и от натоварването ѝ; вместо това е записано наяве в теста
+какво пази той и какво не, а истинската преграда е правилото за `db.prepare()`.
+Поправени са и две проверки, които не проверяваха нищо: сравнение на обект със
+самия себе си и тест за резервния път, който само четеше кода, без да го пуска —
+сега функцията се изпълнява върху три товара, включително такъв, който трябва да
+падне обратно към стария начин.
+
+Пълната поредица: 1397 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8
+сценария + всички проверки при 15 002 записа.
+
+**EN:** A review of the performance round (v2.4.48). The three fixes themselves
+are correct, each verified independently: the single-statement marking of missing
+documents produces the same set as an independent computation from raw rows, the
+narrowed SELECT drops nothing read downstream, and the hand-built `katalog.json`
+round-trips exactly — including quotes, newlines, tabs, backslashes, emoji and
+`</script>` inside the data (on this repository's real catalogue: 1092 → 797 KB,
+identical content). Three things fixed: the round's own rule was still broken
+inside one of the loops it fixed (the per-document UPDATE when creating a
+deaccession act); the test meant to catch that read a fixed number of characters
+and recognised only one exact shape, and now extracts each loop body by balanced
+braces; and the manual catalogue export still wrote the old format, which would
+reintroduce the very 2 MB git diff the new format exists to avoid. Checked and
+NOT accepted as a defect: the round's wall-clock thresholds do not catch a
+regression (measured: the old code closes in ~158 ms against a 250 ms
+threshold) — left as a coarse guard, with the test now saying so plainly, since
+the real guard is the source rule. Two assertions that asserted nothing were
+fixed as well.
+
 ## v2.4.48
 
 **BG:** По-бърза работа — намерено с ИЗМЕРВАНЕ на истинската програма върху
@@ -80,17 +135,15 @@ loop** — recompiling the same SQL once per row.
   still one changed line in git. The hand-built text is verified before writing
   (parsed back and compared); on any mismatch it falls back to the old format.
 
-**The VirusTotal workflow is untouched in this release.** It ran manually only, and
-failed red exactly when the file was new: uploading only queues the file, so
-`GET /files/{sha256}` right after it returns 404 and `curl --fail` exits with an
-error — the upload succeeded, the analysis started, and the workflow reported
-failure. Rewritten: it polls `/analyses/{id}` until completed (every 20 s — the
-free key allows 4 requests per minute), checks the secret first and by name, runs
-automatically after a successful build, and prints the result as a table in the
-run summary. Engine detections do not turn the run red: an unsigned
-electron-builder installer routinely collects a few heuristic flags.
+**The VirusTotal workflow is untouched in this release.** The patch also carried
+a rewrite of it, but the workflow has since been reworked by hand in the
+repository and that version is newer, so it was left alone. One observation from
+the review stands and is passed on: it triggers on `release: published`, while
+releasing creates the release **before** electron-builder uploads the files —
+measured across the last three releases, the `.exe` appears 67, 73 and 83 seconds
+after publication, so a run triggered that way may find nothing to scan.
 
-Checks: 6 new tests, 13 mutations (all caught). Full suite: 1,364 passing, 0
+Checks: 6 new tests, 13 mutations (all caught). Full suite: 1,397 passing, 0
 failing; site: 8 scenarios plus all view checks at 15,002 records.
 ## v2.4.47
 

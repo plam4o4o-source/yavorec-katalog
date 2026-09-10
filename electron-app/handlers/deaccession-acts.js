@@ -180,6 +180,11 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            подзаявка, а акт за отчисляване на цял остарял раздел носи хиляди
            номера. Измерено при 2 000 документа: 223 ms за съставянето на акта. */
         const bookStmt = db.prepare(`${BOOK_SELECT} WHERE b.id = ?`);
+        /* И тази — последната, останала вътре в обхождането след кръга v2.4.48
+           (проверка при прегледа): точно правилото, което кръгът въвежда, беше
+           нарушено в самото обхождане, което поправя. */
+        const offStmt = db.prepare(`UPDATE books SET status = ?, status_date = ?,
+          deaccession_act_id = ?, deaccession_date = ? WHERE id = ?`);
         bookIds.forEach(bookId => {
           const b = bookStmt.get(bookId);
           /* Одит v2.4.24: дотук липсващият ред просто се ПРОПУСКАШЕ (`if (!b) return`).
@@ -220,8 +225,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             status_before: b.status || null
           });
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
-          db.prepare('UPDATE books SET status = ?, status_date = ?, deaccession_act_id = ?, deaccession_date = ? WHERE id = ?')
-            .run('отчислен', act.date, actId, act.date, b.id);
+          offStmt.run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
           cancelledHolds += cancelHolds.run(b.id).changes;
         });

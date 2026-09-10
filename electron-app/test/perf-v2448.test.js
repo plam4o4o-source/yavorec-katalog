@@ -1,5 +1,6 @@
 'use strict';
-/* v2.4.45 — тридесет и четвърти кръг: производителност.
+/* v2.4.48 — тридесет и пети кръг: производителност.
+   (Кръпката дойде като „v2.4.45“; номерът беше зает и е преномерирана.)
    =====================================================================
    Трите места са намерени с ИЗМЕРВАНЕ на истинската програма върху истинска
    база от 15 000 книги, 2 000 читатели и 9 400 заемания, а не с четене на кода.
@@ -9,9 +10,15 @@
    Тестовете тук доказват ДВЕ различни неща и нарочно ги разделят:
      • че поправеното дава СЪЩИЯ резултат (равенство, доказано с независимо
        изчисление върху суровите редове);
-     • че наистина е по-бързо (праг, който старият начин не минава).
-   Праговете са с широк запас — машината на всеки е различна; те ловят
-   връщането на квадратичното поведение, а не колебанията от няколко ms.
+     • че сглобяването на заявката е ИЗВАДЕНО от обхождането — по текста на
+       кода, а не по часовника.
+
+   ЗА ПРАГОВЕТЕ ПО ВРЕМЕ (проверка при прегледа на v2.4.49): те НЕ ловят
+   връщането назад и не бива да се четат така. Измерено на тази машина: със
+   стария код приключването отнема ~158 ms при праг 250 ms, тоест тестът минава
+   и с дефекта; при натоварена машина същият праг пада и при поправения код.
+   Оставени са като груб предпазител срещу нещо драстично, а истинската преграда
+   е правилото за db.prepare() в обхождането по-долу.
 
    Всеки тест е проверен с мутация. */
 process.env.TZ = 'Europe/Sofia';
@@ -173,15 +180,22 @@ test('katalog.json се разчита като точно същия обект
   const text = fs.readFileSync(file, 'utf8');
 
   const parsed = JSON.parse(text);                       // 1) валиден JSON
-  const payload = (await app.invoke('catalog:status')).ok ? parsed : parsed;
   assert.ok(Array.isArray(parsed.items) && parsed.items.length > 0, 'каталогът има записи');
   assert.equal(typeof parsed.library, 'string');
   assert.equal(typeof parsed.generated, 'string');
 
-  /* 2) СЪЩИТЕ данни, както при стария начин на записване. Сравнява се с
-     JSON.stringify на прочетеното — ако сглобяването на текста разместеше или
-     губеше поле, това щеше да проличи тук. */
-  assert.equal(JSON.stringify(parsed), JSON.stringify(JSON.parse(JSON.stringify(parsed))));
+  /* 2) СЪЩИТЕ данни — сверени с НЕЗАВИСИМ източник, самата база, а не с
+     повторно разчитане на същия текст (проверка при прегледа на v2.4.49:
+     дотук тук стоеше JSON.stringify(parsed) === JSON.stringify(JSON.parse(
+     JSON.stringify(parsed))), което е вярно за всеки обект и не проверява нищо). */
+  const inDb = db.prepare(`SELECT COUNT(*) AS n FROM books
+    WHERE status != 'отчислен' AND COALESCE(department,'') != 'служебен'`).get().n;
+  assert.equal(parsed.items.length, inDb, 'във файла трябва да са всички публикуеми документи');
+  const sample = parsed.items[0];
+  const row = db.prepare('SELECT title, author, inv_number FROM books WHERE inv_number = ?').get(sample.inv);
+  assert.ok(row, 'записът от файла съществува в базата: инв. № ' + sample.inv);
+  assert.equal(sample.t, row.title, 'заглавието във файла е това от базата');
+  assert.equal(sample.a, row.author, 'авторът във файла е този от базата');
 
   /* 3) Един запис на ред: точно толкова реда, колкото са записите. Това е
      смисълът на формата — заради git diff-а и заради големината на файла. */
@@ -201,48 +215,85 @@ test('katalog.json се разчита като точно същия обект
 });
 
 test('сглобяването на katalog.json пада обратно към стария начин, ако проверката не мине', () => {
-  /* Проверката „разчети обратно и сравни“ е причината този формат изобщо да е
-     допустим: текстът се сглобява на ръка, а счупен katalog.json значи потъмнял
-     каталог на сайта. Тук се доказва, че проверката ЯДЕ от собствения си резултат
-     — сглобеният текст на непразен товар се разчита като същия обект. */
+  /* Функцията се ИЗПЪЛНЯВА, а не се чете (проверка при прегледа на v2.4.49:
+     дотук тестът само търсеше редове в main.js — празно тяло би минало).
+     Вади се от main.js и се пуска върху три товара: обикновен, със зли знаци и
+     такъв, който НЕ може да се запише вярно. */
   const src = fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8');
-  assert.match(src, /function catalogJsonText\(payload\)/, 'липсва сглобяването');
-  assert.match(src, /JSON\.stringify\(JSON\.parse\(text\)\) === JSON\.stringify\(payload\)/,
-    'липсва проверката „разчети обратно и сравни“');
-  assert.match(src, /return JSON\.stringify\(payload, null, 2\);/,
-    'липсва падането обратно към стария начин');
+  const body = src.match(/function catalogJsonText\(payload\) \{[\s\S]*?\n\}/);
+  assert.ok(body, 'липсва сглобяването');
+  const silent = { error() {} };                       // без шум в изхода на теста
+  const catalogJsonText = new Function('console', body[0] + '; return catalogJsonText;')(silent);
+
+  const normal = { library: 'Б', generated: '2026-09-10', items: [{ inv: 1, t: 'Т' }, { inv: 2, t: 'Д' }] };
+  assert.equal(JSON.stringify(JSON.parse(catalogJsonText(normal))), JSON.stringify(normal),
+    'обикновеният товар се разчита като същия обект');
+  assert.match(catalogJsonText(normal), /\n {4}\{"inv":1,"t":"Т"\},\n/, 'по един запис на ред');
+
+  /* Зли знаци, каквито има в истински фонд: кавички, нов ред, обратна наклонена
+     черта, кирилица, емоджи, „</script>“. */
+  const nasty = { library: 'Б "х" \\ у', items: [{ inv: 3, t: 'ред1\nред2\tтаб "цитат"' },
+    { inv: 4, t: '</script><img src=x onerror=alert(1)>', a: '😀' }] };
+  assert.equal(JSON.stringify(JSON.parse(catalogJsonText(nasty))), JSON.stringify(nasty),
+    'и злите знаци се разчитат като същия обект');
+
+  /* Товар, който НЕ може да се сглоби вярно (undefined не е JSON): трябва да
+     падне обратно към стария начин, а не да произведе счупен файл. */
+  const bad = { a: 1, u: undefined, items: [{ inv: 5 }] };
+  const out = catalogJsonText(bad);
+  assert.equal(out, JSON.stringify(bad, null, 2), 'при разминаване се пише по стария начин');
+  JSON.parse(out);                                    // и той е валиден JSON
+
   assert.match(src, /fs\.writeFileSync\(tmp, catalogJsonText\(payload\), 'utf8'\)/,
     'записът трябва да минава през сглобяването');
+  const cat = fs.readFileSync(path.join(APP_DIR, 'handlers', 'catalog.js'), 'utf8');
+  assert.match(cat, /fs\.writeFileSync\(filePath, catalogJsonText\(payload\), 'utf8'\)/,
+    'ръчното извеждане пише в СЪЩИЯ формат — иначе изведен файл в папката на каталога прави 2 МБ разлика в git');
 });
 
 /* ---------------- 4. Пропускът, който е общ и на трите ---------------- */
 
+/* Тялото на едно обхождане, отрязано по БАЛАНСИРАНИ скоби, а не по брой знаци:
+   правило, което гледа „600 знака след еди-кое си“, пропуска нарушение малко
+   по-надолу в същото обхождане — точно това се случи с UPDATE-а при съставянето
+   на акта (намерен при прегледа на v2.4.49). */
+function loopBody(src, marker) {
+  const at = src.indexOf(marker);
+  assert.notEqual(at, -1, 'липсва обхождането „' + marker + '“');
+  let i = src.indexOf('{', at), depth = 0;
+  for (let j = i; j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}') { depth--; if (!depth) return src.slice(i, j + 1); }
+  }
+  throw new Error('незатворено обхождане: ' + marker);
+}
+
 test('в нито едно обхождане не се сглобява заявка наново на всеки ред', () => {
   /* Това е ПРАВИЛОТО, а не отделен случай: db.prepare() компилира SQL. Вътре в
      обхождане на 15 000 реда това са 15 000 компилации на един и същ низ.
-     Проверяват се точно трите места от този кръг — общо правило за целия проект
-     тук би било гадаене по отстъпи и би падало при всяко невинно разместване. */
+     Проверяват се четирите обхождания от този кръг — за целия проект правилото
+     би било гадаене, защото има и напълно основателни db.prepare() в цикъл
+     (напр. по РАЗЛИЧНИ таблици). */
   const inv = fs.readFileSync(path.join(APP_DIR, 'handlers', 'inventory-sessions.js'), 'utf8');
+  const acts = fs.readFileSync(path.join(APP_DIR, 'handlers', 'deaccession-acts.js'), 'utf8');
   const closeBody = inv.slice(inv.indexOf("ipcMain.handle('inventorySessions:close'"));
-  /* ТЯЛОТО на обхождането, а не 400 знака след него: следващият блок съвсем
-     основателно съдържа db.prepare() — той е ЕДНАТА заявка, заради която тестът
-     съществува. Краят е затварящата скоба в началото на ред със същия отстъп. */
-  const at = closeBody.indexOf('missing.forEach(');
-  const loop = closeBody.slice(at, closeBody.indexOf('\n        });', at) + 12);
-  assert.ok(loop.length > 40 && loop.length < 400, 'тялото на обхождането е отрязано на грешно място');
-  assert.equal(/db\.prepare\(/.test(loop), false, 'db.prepare() пак е вътре в обхождането на липсващите');
+
+  for (const [src, marker, what] of [
+    [closeBody, 'missing.forEach(', 'отбелязването на липсващите'],
+    [acts, 'bookIds.forEach(', 'съставянето на акта'],
+    [acts, 'items.forEach(', 'анулирането на акта']
+  ]) {
+    const body = loopBody(src, marker);
+    assert.equal(/db\.prepare\(/.test(body), false,
+      'db.prepare() е вътре в обхождането при ' + what + ' — компилира се наново на всеки документ');
+  }
+
+  /* И положителната страна: заявките наистина съществуват, сглобени веднъж. */
   assert.match(closeBody, /UPDATE books SET status='липсващ'[\s\S]{0,200}id IN \(SELECT book_id FROM inventory_session_missing/,
     'отбелязването трябва да е ЕДНА заявка върху вписаните редове');
   assert.match(closeBody, /SELECT id, inv_number, title, author, price, status FROM books/,
     'обхватът трябва да тегли шестте ползвани полета, а не всичките 38');
-
-  const acts = fs.readFileSync(path.join(APP_DIR, 'handlers', 'deaccession-acts.js'), 'utf8');
-  const create = acts.slice(acts.indexOf('let docCount = 0;'), acts.indexOf('let docCount = 0;') + 600);
-  assert.match(create, /const bookStmt = db\.prepare\(/, 'заявката за документа трябва да е сглобена веднъж');
-  assert.equal(/bookIds\.forEach\(bookId => \{\s*const b = db\.prepare\(/.test(create), false,
-    'db.prepare() пак е вътре в обхождането на документите');
-  const revoke = acts.slice(acts.indexOf("ipcMain.handle('deaccessionActs:revoke'"));
-  assert.match(revoke, /const backStmt = db\.prepare\(/, 'връщането на състоянието трябва да е сглобено веднъж');
-  assert.equal(/items\.forEach\(it => \{[\s\S]{0,400}db\.prepare\(/.test(revoke), false,
-    'db.prepare() пак е вътре в обхождането при анулиране');
+  assert.match(acts, /const bookStmt = db\.prepare\(/, 'заявката за документа — веднъж');
+  assert.match(acts, /const offStmt = db\.prepare\(/, 'отчисляването на документа — веднъж');
+  assert.match(acts, /const backStmt = db\.prepare\(/, 'връщането на състоянието — веднъж');
 });

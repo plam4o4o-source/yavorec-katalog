@@ -1689,5 +1689,5 @@ require('./handlers/shelves')(ipcMain, {
 });
 const { startAutoPushTimer, stopAutoPushTimer } = require('./handlers/catalog')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, execFile,
-  BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload
+  BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
 });

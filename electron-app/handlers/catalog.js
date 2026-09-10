@@ -18,7 +18,7 @@
 module.exports = function registerCatalogHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, dialog, getMainWindow, fs, path, execFile,
-    BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload
+    BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
   } = deps;
 
   function gitRun(folder, args) {
@@ -523,7 +523,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
       const payload = buildCatalogPayload();
-      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+      /* Същият записвач като при автоматичното публикуване (v2.4.49): дотук
+         ръчното извеждане пишеше по стария начин и изведеният файл, сложен в
+         папката на каталога, връщаше 2 МБ разлика в git при всяка книга. */
+      fs.writeFileSync(filePath, catalogJsonText(payload), 'utf8');
       logAudit('Извеждане на каталог', filePath + ' — ' + payload.items.length + ' записа');
       return { ok: true, data: filePath };
     } catch (err) {
