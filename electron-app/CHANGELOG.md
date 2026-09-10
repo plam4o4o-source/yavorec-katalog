@@ -11,6 +11,87 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.48
+
+**BG:** По-бърза работа — намерено с ИЗМЕРВАНЕ на истинската програма върху
+истинска база (15 000 документа, 2 000 читатели, 9 400 заемания), а не с четене
+на кода. Отварянето на разделите се оказа наред след кръга v2.4.31 (най-бавният
+раздел се показва за 128 ms, пускането на програмата отнема 282 ms, а
+натискането на клавиш в полето за търсене — под 40 ms). Чакането се оказа на
+съвсем други три места, при това с една и съща причина: **`db.prepare()` ВЪТРЕ в
+обхождането**, тоест компилиране на един и същ SQL по веднъж на ред.
+
+- **Приключването на пълна инвентаризация: 657 → 174 ms** (при фонд от 15 000 и
+  комисия, която още не е стигнала докрай). Отбелязването на всеки липсващ
+  документ сглобяваше заявката наново — 14 000 компилации на един и същ ред SQL,
+  плюс 14 000 отделни изпълнения. Сега е ЕДНА заявка върху току-що вписаните
+  редове. Освен това обхватът се теглеше с `SELECT *` — 38 колони, включително
+  анотацията и адреса на кориците, за да се погледнат шест числа; сега се тегли
+  само това, което се ползва.
+- **Съставяне на акт за отчисляване на 2 000 документа: 223 → 126 ms; анулиране
+  на същия акт: 212 → 45 ms.** Същото: дългата заявка за документа (с
+  присъединяване и подзаявка) и връщането на предишното състояние се сглобяваха
+  наново на всеки инвентарен номер. Актът за цял морално остарял раздел носи
+  хиляди номера.
+- **Публичният `katalog.json`: 6,01 → 4,05 МБ** при 14 644 заглавия. Файлът не се
+  чете от програмата — ТЕГЛИ се от всеки посетител на каталога на сайта, по
+  мобилен интернет. Записваше се с разредка по подразбиране, тоест всяко поле на
+  свой ред: две трети от файла бяха водещи интервали. Сега всеки ЗАПИС е на свой
+  ред — една трета по-малко за посетителя, а разликата в git остава смислена
+  (променена книга = един променен ред, а не целият файл). Форматът е валиден
+  JSON по същия начин; страницата не се променя.
+
+  Текстът се сглобява на ръка, затова **се проверява, преди да бъде записан**:
+  разчита се обратно и се сравнява с оригинала, а при най-малкото разминаване се
+  пише по стария начин. Счупен `katalog.json` значи потъмнял каталог на сайта, а
+  това не бива да зависи от една запетая. Проверката струва ~30 ms на запис —
+  съзнателна размяна: 30 ms в програмата срещу 2 МБ на всяко отваряне на
+  каталога от читател.
+
+**Работният поток за VirusTotal НЕ е пипан в това издание.** Кръпката носеше и
+негово пренаписване, но междувременно той е преработен на ръка в хранилището и
+тази версия е по-скорошна — затова е оставена както си е. Едно наблюдение от
+прегледа обаче остава в сила: работният поток тръгва на `release: published`, а
+издаването създава release-а **преди** electron-builder да качи файловете в него
+— измерено при последните три издания, `.exe` се появява 67, 73 и 83 секунди
+СЛЕД публикуването, тоест пускане по този повод може да не намери какво да
+провери.
+
+Проверки: 6 нови теста, 13 мутации (всички уловени). Пълната поредица: 1397
+успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария + всички проверки при 15 002 записа.
+
+**EN:** Speed, found by MEASURING the real program against a real database
+(15,000 documents, 2,000 readers, 9,400 loans) rather than by reading code.
+Opening the sections turned out to be fine after round v2.4.31 (slowest section
+128 ms, startup 282 ms, a keystroke in the search box under 40 ms). The waiting
+was in three other places, all with the same cause: **`db.prepare()` INSIDE the
+loop** — recompiling the same SQL once per row.
+
+- **Closing a full inventory: 657 → 174 ms** at 15,000 documents. Marking each
+  missing document recompiled the statement — 14,000 compilations of one line of
+  SQL. Now it is a single statement over the rows just written. The scope was
+  also read with `SELECT *` — 38 columns to look at six numbers.
+- **Creating a deaccession act for 2,000 documents: 223 → 126 ms; revoking it:
+  212 → 45 ms.** Same cause.
+- **The public `katalog.json`: 6.01 → 4.05 MB** at 14,644 titles. The file is not
+  read by the program — it is DOWNLOADED by every visitor of the library's online
+  catalogue, over mobile data. Two thirds of it was indentation whitespace. Now
+  one RECORD per line: a third smaller for the visitor, while a changed book is
+  still one changed line in git. The hand-built text is verified before writing
+  (parsed back and compared); on any mismatch it falls back to the old format.
+
+**The VirusTotal workflow is untouched in this release.** It ran manually only, and
+failed red exactly when the file was new: uploading only queues the file, so
+`GET /files/{sha256}` right after it returns 404 and `curl --fail` exits with an
+error — the upload succeeded, the analysis started, and the workflow reported
+failure. Rewritten: it polls `/analyses/{id}` until completed (every 20 s — the
+free key allows 4 requests per minute), checks the secret first and by name, runs
+automatically after a successful build, and prints the result as a table in the
+run summary. Engine detections do not turn the run red: an unsigned
+electron-builder installer routinely collects a few heuristic flags.
+
+Checks: 6 new tests, 13 mutations (all caught). Full suite: 1,364 passing, 0
+failing; site: 8 scenarios plus all view checks at 15,002 records.
 ## v2.4.47
 
 **BG:** Две заявки от библиотеката за екрана „Настройки“.
