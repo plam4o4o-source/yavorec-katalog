@@ -61,11 +61,62 @@ const DNEVNIK_B_GROUPS = [
 function dnevnikGroups(cols) {
   return cols === DNEVNIK_B_COLS ? DNEVNIK_B_GROUPS : DNEVNIK_A_GROUPS;
 }
-function dnevnikGroupHeadHtml(cols, firstLabel) {
-  const g = dnevnikGroups(cols);
+function dnevnikGroupHeadHtml(cols, firstLabel, groups, short) {
+  const g = groups || dnevnikGroups(cols);
   if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return '';
   return `<tr><th>${esc(firstLabel || '')}</th>${
-    g.map(([l, n]) => `<th colspan="${n}" style="text-align:center">${esc(l)}</th>`).join('')}</tr>`;
+    g.map(([l, n]) => `<th colspan="${n}" style="text-align:center">${esc(short ? dnevnikShortLabel(l) : l)}</th>`).join('')}</tr>`;
+}
+/* На хартия колоните са заковани за листа (table-layout:fixed), затова пояснението
+   в скоби не може да „разтегли“ клетката си: групата „от които ползвани в читалня“
+   е ЕДНА колона, а пояснението ѝ — цял ред текст, и заглавието ставаше десет реда
+   високо. В печата над таблицата остава само името на групата, а пояснението слиза
+   под таблицата като бележка — на същия лист, до същата таблица. */
+function dnevnikShortLabel(l) { return l.split(' (')[0]; }
+function dnevnikShortLabel0([l]) { return dnevnikShortLabel(l); }
+function dnevnikGroupNotes(groups) {
+  return (groups || []).filter(([l]) => l.indexOf(' (') > 0)
+    .map(([l]) => dnevnikShortLabel(l) + ' — ' + l.slice(l.indexOf(' (') + 2).replace(/\)$/, ''));
+}
+function dnevnikNotesHtml(groups) {
+  const n = dnevnikGroupNotes(groups);
+  return n.length ? `<div class="pnote">${n.map(t => '* ' + esc(t)).join('<br>')}</div>` : '';
+}
+/* РАЗДЕЛЯНЕ НА ШИРОКАТА ТАБЛИЦА ПО ЛИСТОВЕ (v2.4.54).
+   =====================================================================
+   Раздел А има 34 колони, Раздел Б — 39. Измерено на истински данни: на А4
+   пейзаж с поле 8 mm полезната ширина е 1063 px, а таблицата излиза 2099 px —
+   тоест 868 px (45%) от ДНЕВНИКА НА БИБЛИОТЕКАТА се отрязват от принтера и
+   НИКЪДЕ не се появяват. Същото и в годишния статистически отчет (Раздел А и Б):
+   2073 px при 1047 px полезни, 987 px отрязани. Двата документа излизат от
+   сградата непълни — а именно те се показват на проверяващия.
+
+   Свиване до листа не става: 1063/2099 значи мащаб 0,50, тоест шрифт 3,75 pt.
+   Затова таблицата се разделя на ЛИСТОВЕ по границите на собствените си групи
+   („По възраст“, „По пол“, „По образование“ …) — както се разгъва хартиена
+   тетрадка. Колоната с деня се повтаря на всеки лист, за да е четим всеки ред
+   сам за себе си. Групите НЕ се режат по средата: така отпечатаното „Всичко“
+   винаги стои до разбивката, чийто сбор е.
+
+   MAX е брой колони на лист. 20 + колоната с деня заемат ~13 mm на колона при
+   А4 пейзаж — колкото е и сега на екрана. */
+const DNEVNIK_PRINT_MAX_COLS = 20;
+function dnevnikPrintPages(cols, groups, max) {
+  const g = groups || dnevnikGroups(cols);
+  const limit = max || DNEVNIK_PRINT_MAX_COLS;
+  // Разминаване между групите и колоните: не се гадае — печата се на един лист,
+  // както досега (групиращият ред и без това не се строи в този случай).
+  if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return [{ cols, groups: null }];
+  const pages = [];
+  let cur = { cols: [], groups: [] }, at = 0;
+  for (const [label, n] of g) {
+    if (cur.cols.length && cur.cols.length + n > limit) { pages.push(cur); cur = { cols: [], groups: [] }; }
+    cur.groups.push([label, n]);
+    cur.cols.push(...cols.slice(at, at + n));
+    at += n;
+  }
+  if (cur.cols.length) pages.push(cur);
+  return pages;
 }
 /* Всички реални (въвеждани) полета от ДВАТА раздела. Записът в базата презаписва целия ред,
    затова при запис на клетка от Раздел А трябва да се изпратят и стойностите на Раздел Б —
@@ -326,18 +377,27 @@ function printDnevnikDoc() {
   const sectionTitle = DNEVNIK_TAB === 'b'
     ? 'Б. РЕГИСТРИРАНЕ НА ЗАЕТИТЕ КНИГИ, ПЕРИОДИЧНИ ИЗДАНИЯ И ДРУГИ МАТЕРИАЛИ'
     : 'А. РЕГИСТРИРАНЕ НА ЧИТАТЕЛИТЕ И ПОСЕЩЕНИЯТА';
-  const rowHtml = (label, row) => `<tr><td>${esc(label)}</td>${cols.map(([k]) => `<td>${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
+  /* Листовете носят ЕДИН И СЪЩ месец, само колоните са различни — затова
+     заглавието се повтаря с „лист N от M“, за да не се разбъркат на бюрото. */
+  const pages = dnevnikPrintPages(cols);
+  const rowHtml = (pc, label, row) => `<tr><td>${esc(label)}</td>${
+    pc.map(([k]) => `<td>${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
+  const tableHtml = (page, i) => `
+    ${i ? '<div class="pbreak"></div>' : ''}
+    <div class="pmeta"><b>${esc(sectionTitle)}</b><br>${esc(MESETSI[r.month - 1])} ${r.year} г.${
+      pages.length > 1 ? ` · лист ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
+    <table class="dnvPrint"><colgroup><col style="width:11%">${
+      page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
+    ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
+    <tr><th>Число</th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
+    ${r.days.map(row => rowHtml(page.cols, row.day, row)).join('')}
+    ${rowHtml(page.cols, 'Всичко за месеца', r.monthTotal)}
+    ${rowHtml(page.cols, 'Всичко от нач. на годината', r.ytdTotal)}
+    </tbody></table>${dnevnikNotesHtml(page.groups)}`;
   setPrintPage({ name: `Дневник ${String(DNEVNIK_MONTH).padStart(2, '0')}.${DNEVNIK_YEAR}`, landscape: true, margin: '8mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">ДНЕВНИК НА БИБЛИОТЕКАТА</h2>
-    <div class="pmeta"><b>${esc(sectionTitle)}</b><br>${esc(MESETSI[r.month - 1])} ${r.year} г.</div>
-    <table style="font-size:7.5pt"><thead>
-    ${dnevnikGroupHeadHtml(cols)}
-    <tr><th>Число</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
-    ${r.days.map(row => rowHtml(row.day, row)).join('')}
-    ${rowHtml('Всичко за месеца', r.monthTotal)}
-    ${rowHtml('Всичко от нач. на годината', r.ytdTotal)}
-    </tbody></table>
+    ${pages.map(tableHtml).join('')}
     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printDnevnikDoc = printDnevnikDoc;

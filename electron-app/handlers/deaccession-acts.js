@@ -33,6 +33,26 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
        снимка по чл. 35, ал. 2 (виж quantity в db/schema.sql). */
     const hasStatus = db.prepare('PRAGMA table_info(deaccession_items)').all().some(c => c.name === 'status_before');
     if (!hasStatus) db.exec('ALTER TABLE deaccession_items ADD COLUMN status_before TEXT');
+    /* Същият белег и върху резервациите (v2.4.54), но с ДРУГА цел от тази при
+       заеманията — и разликата е нарочна.
+
+       Заемането, закрито от акт, се ОТВАРЯ ОБРАТНО при анулиране: книгата реално
+       е у читателя и следата, че я държи, не бива да изчезва. Резервацията НЕ се
+       възкресява: това е решено в по-ранен кръг („одит #10, обратна посока“,
+       test/reaudit-v24-b.test.js) и остава в сила — анулирането поправя регистъра,
+       а не връща времето в читалнята; читателят, на когото е казано, че книгата
+       я няма, не бива да се озове пак на опашка, която не е поставял.
+
+       Счупеното беше друго: резервацията изчезваше БЕЗСЛЕДНО. Никъде не пишеше
+       кой акт я е отказал, екранът „Резервации“ не я показва (там са само
+       активните), а одитната следа при анулиране твърдеше „документите са върнати
+       във фонда“ — и нищо повече. Библиотекарката нямаше как да научи, че нечия
+       резервация е паднала, камо ли да реши дали да я поднови. Затова резервацията
+       носи номера на акта и снимка на предишното си състояние: при анулиране
+       следата КАЗВА колко резервации е отказал актът и че те остават отказани. */
+    const holdCols = db.prepare('PRAGMA table_info(holds)').all();
+    if (!holdCols.some(c => c.name === 'deaccession_act_id')) db.exec('ALTER TABLE holds ADD COLUMN deaccession_act_id INTEGER');
+    if (!holdCols.some(c => c.name === 'status_before')) db.exec('ALTER TABLE holds ADD COLUMN status_before TEXT');
     loanActColumnChecked = db;
   }
 
@@ -161,9 +181,12 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            фонда. Активните резервации ('чака','заделена' — виж handlers/holds.js:
            HOLD_ACTIVE) на всеки отчислен документ се отказват тук изрично, със
            същия статус 'отказана', който ползва holds:cancel. */
+        /* Запомня се И предишното състояние, и актът: „чака“ и „заделена“ не са
+           едно и също — заделената книга стои на рафта с името на читателя. */
         const cancelHolds = db.prepare(`
-          UPDATE holds SET status = 'отказана', resolved_at = datetime('now')
-          WHERE book_id = ? AND status IN ('чака','заделена')
+          UPDATE holds SET status = 'отказана', resolved_at = datetime('now'),
+            deaccession_act_id = @act, status_before = status
+          WHERE book_id = @book AND status IN ('чака','заделена')
         `);
         let cancelledHolds = 0;
         /* Отчетната бройка на всеки документ, с разграничение между „липсващ ред“
@@ -227,7 +250,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
           offStmt.run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
-          cancelledHolds += cancelHolds.run(b.id).changes;
+          cancelledHolds += cancelHolds.run({ act: actId, book: b.id }).changes;
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
@@ -266,6 +289,9 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
+      /* Каквото прозорецът трябва да КАЖЕ на библиотекарката след анулирането.
+         Стои извън транзакцията, защото се чете след нея. */
+      const revokeInfo = { droppedHolds: 0 };
       const tx = db.transaction(() => {
         /* Одит v2.4.24: актът не се проверяваше за съществуване — анулиране на вече
            анулиран (или изобщо несъществуващ) акт се връщаше с ok:true, прозорецът
@@ -292,14 +318,28 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            първия читател — а следата, че той я държи, е изчезнала. */
         const reopened = db.prepare('UPDATE loans SET date_in = NULL, deaccession_act_id = NULL WHERE deaccession_act_id = ?')
           .run(id).changes;
+        /* Резервациите, отказани от този акт, НЕ се възкресяват — виж дългата
+           бележка при ensureLoanActColumn. Но се БРОЯТ и се вписват в следата:
+           дотук те изчезваха безследно и анулирането твърдеше само „документите
+           са върнати във фонда“, от което библиотекарката нямаше как да разбере,
+           че нечия резервация е паднала по пътя и че трябва да я поднови ръчно. */
+        const droppedHolds = db.prepare(`SELECT COUNT(*) AS n FROM holds
+          WHERE deaccession_act_id = ? AND status = 'отказана'`).get(id).n;
         db.prepare('DELETE FROM deaccession_acts WHERE id = ?').run(id);
         // `id` е вътрешният rowid, а не номерът на акта — те съвпадат само в първата
         // година. Одит v2.4.24: следата сочеше несъществуващ акт.
         logAudit('Анулиране на акт', 'акт № ' + act.no + '/' + act.year + ' е анулиран, документите са върнати във фонда'
-          + (reopened ? ' (' + (reopened === 1 ? '1 заемане е отворено обратно' : reopened + ' заемания са отворени обратно') + ')' : ''));
+          + (reopened ? ' (' + (reopened === 1 ? '1 заемане е отворено обратно' : reopened + ' заемания са отворени обратно') + ')' : '')
+          + (droppedHolds
+              ? '; ' + (droppedHolds === 1
+                  ? '1 резервация, отказана с този акт, ОСТАВА отказана — подновете я ръчно, ако читателят още чака'
+                  : droppedHolds + ' резервации, отказани с този акт, ОСТАВАТ отказани — подновете ги ръчно, ако читателите още чакат')
+              : ''));
+        revokeInfo.droppedHolds = droppedHolds;
       });
       tx.immediate();
       scheduleCatalogWrite();
+      return revokeInfo;
     })
   );
 };

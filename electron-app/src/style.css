@@ -1,6 +1,18 @@
 :root{
   --paper:#F4F0E4; --paper2:#FBF9F3; --paper3:#EAE4D4;
   --rule:#D9D1BD; --rule2:#C4B99E;
+  /* --field (v2.4.54): РАМКАТА НА ПОЛЕТАТА за писане и избор.
+     WCAG 2.1, критерий 1.4.11 („Нетекстов контраст“) иска поне 3:1 за границата,
+     по която се разпознава един елемент за управление — иначе полето не се вижда
+     като поле. Измерено за всичките седем теми, --rule2 върху хартията дава между
+     1,34:1 и 2,30:1, тоест НИТО ЕДНА тема не покрива прага: полето за инвентарен
+     номер, падащото меню за отдел и кутийките за отметка се сливат с фона.
+     За библиотекар над 60 години (а това е основният потребител) ръбът просто
+     липсва. --rule2 остава за разделителни линии и рамки на карти, където няма
+     изискване; --field е само за истинските елементи за управление. Стойността
+     пази тона на темата, само е потъмнена, и е проверена срещу --paper, --paper2,
+     --paper3 и #fff в test/fixes-theme-contrast.test.js. */
+  --field:#89816E;
   /* --ink3 (v1.70.0): потъмнено от #8A8171 на #676054 — старата стойност
      даваше само ~2.9-3.4:1 контраст спрямо --paper/--paper3 във всичките
      6 теми (под изискването на WCAG AA от 4.5:1 за обикновен текст), а се
@@ -40,11 +52,13 @@ html[data-theme="2"]{ /* Наситено синьо */
   --paper:#EEF2F6; --paper2:#F8FAFC; --paper3:#E2E9EF; --rule:#CBD8E3; --rule2:#B3C4D4;
   --spine:#0F1B2E; --spine2:#15263D; --spine3:#22364F;
   --brass:#2C5C8F; --brassL:#6FA8DC; --brassD:#1B3E60;
+  --field:#7B8691;
 }
 html[data-theme="3"]{ /* Горско зелено */
   --paper:#EFF3EC; --paper2:#F9FBF7; --paper3:#E2E9DC; --rule:#CBDAC2; --rule2:#B2C7A5;
   --spine:#0E1F14; --spine2:#16301E; --spine3:#254A30;
   --brass:#2E6B45; --brassL:#75B48D; --brassD:#1D4A2E;
+  --field:#7A8871;
 }
 html[data-theme="4"]{ /* Бордо */
   --paper:#F5EDEC; --paper2:#FCF7F6; --paper3:#EBDEDC; --rule:#DCC2BE; --rule2:#C9A29C;
@@ -52,16 +66,19 @@ html[data-theme="4"]{ /* Бордо */
   /* --brassL беше #B85670: ::selection рисува --spine текст върху --brassL, а
      това даваше 4.13:1 — под WCAG AA. Изсветлен до 4.79:1. */
   --brass:#7A2036; --brassL:#C2627C; --brassD:#4E1322;
+  --field:#967974;
 }
 html[data-theme="5"]{ /* Графит */
   --paper:#EEF0F1; --paper2:#F9FAFA; --paper3:#E2E5E7; --rule:#C9CFD3; --rule2:#AFB8BD;
   --spine:#1C2126; --spine2:#262D34; --spine3:#3A4550;
   --brass:#536573; --brassL:#93A7B5; --brassD:#37454F;
+  --field:#7D8387;
 }
 html[data-theme="6"]{ /* Кафяво-теракота */
   --paper:#F3ECE3; --paper2:#FBF7F1; --paper3:#E9DECE; --rule:#D9C6AC; --rule2:#C6AC87;
   --spine:#22140A; --spine2:#301D0F; --spine3:#4A2E18;
   --brass:#A65A2E; --brassL:#D99461; --brassD:#7A3F1D;
+  --field:#8F7C61;
 }
 html[data-theme="7"]{ /* InvLib — новата визуална идентичност (Primary Navy/Teal).
   --spine и --paper са точните hex стойности от бранд спецификацията.
@@ -83,6 +100,7 @@ html[data-theme="7"]{ /* InvLib — новата визуална идентич
   --paper:#F8FAFC; --paper2:#FCFEFF; --paper3:#EAF1F7; --rule:#D7E3EF; --rule2:#C2D3E4;
   --spine:#1E3A8A; --spine2:#254398; --spine3:#3457B0;
   --brass:#0A8285; --brassL:#4DD0D2; --brassD:#065456;
+  --field:#808B96;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;height:100%}
@@ -312,7 +330,7 @@ body{
 .quickGrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:9px}
 .quickBtn{
   display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 8px;
-  background:var(--paper); border:1px solid var(--rule2); border-radius:5px;
+  background:var(--paper); border:1px solid var(--field); border-radius:5px;
   font-family:var(--sans); font-size:12.5px; color:var(--ink); cursor:pointer; text-align:center;
   transition:background .12s, border-color .12s, box-shadow .12s, transform .12s;
 }
@@ -498,7 +516,7 @@ table.ledger.ibTable td:nth-child(4){min-width:150px}
    таблица (измерено в Chromium: точно 14 px). display:none маха и полето. */
 .toolbar:empty{display:none}
 .toolbar input[type=text], .toolbar input[type=search]{
-  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--rule2); border-radius:4px;
+  flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--field); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
   transition:border-color .12s, box-shadow .12s;
 }
@@ -508,7 +526,7 @@ table.ledger.ibTable td:nth-child(4){min-width:150px}
    шрифт от текста до тях. Тук се изравняват с останалата програма. */
 button, select, textarea{font-family:var(--sans)}
 select, textarea{font-size:13px; color:var(--ink)}
-.toolbar select{padding:8px 10px; border:1px solid var(--rule2); border-radius:4px; background:#fff; min-height:36px}
+.toolbar select{padding:8px 10px; border:1px solid var(--field); border-radius:4px; background:#fff; min-height:36px}
 
 /* ---------- Парично поле: евро + лева (v2.4.51) ----------
    Записва се лявото (в евро); дясното е за суми по стар документ в лева и се
@@ -519,7 +537,7 @@ select, textarea{font-size:13px; color:var(--ink)}
    flex-basis 110px вторият ред падаше под първия и сумата изглеждаше като две
    отделни. nowrap го прави видимо, ако някога пак не се побере. */
 .mnyPair{display:flex; align-items:center; gap:5px; flex-wrap:nowrap}
-.mnyPair input{flex:1 1 0; min-width:0; padding:9px 8px; border:1px solid var(--rule2);
+.mnyPair input{flex:1 1 0; min-width:0; padding:9px 8px; border:1px solid var(--field);
   border-radius:4px; font-family:var(--mono); font-size:13px; background:#fff; text-align:right}
 .mnyPair input:focus{outline:2px solid var(--brass); outline-offset:1px}
 .mnyCur{flex:0 0 auto; color:var(--ink3); font-size:13px; font-weight:600}
@@ -538,7 +556,7 @@ select, textarea{font-size:13px; color:var(--ink)}
 
 /* ---------- Buttons ---------- */
 .btn{
-  border:1px solid var(--rule2); background:var(--paper2); color:var(--ink);
+  border:1px solid var(--field); background:var(--paper2); color:var(--ink);
   padding:8px 14px; border-radius:4px; font-size:13px; cursor:pointer;
   transition:background .12s, border-color .12s, box-shadow .12s;
 }
@@ -569,9 +587,9 @@ table.ledger tbody tr:hover{background:var(--paper3)}
    32px) важеше и за колоните .num на регистър, поставен В карта — датите и
    размерите на резервните копия и правилата по категория излизаха с 32px. */
 table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; color:inherit}
-.badge{padding:2px 8px; border-radius:10px; font-size:12px}
-.badge.ok{background:var(--greenL); color:var(--green)}
-.badge.warn{background:var(--redL); color:var(--red)}
+/* .badge е определен ЕДИН път — виж по-долу при .chk (v2.4.54). Тук стоеше втори,
+   непълен набор (без фон и цвят на текста), който правеше празния .badge прозрачен
+   до момента, в който по-долният го презапише. */
 
 /* Одитна следа — какви полета реално са се променили при редакция (action_logs.diff) */
 .diffList{margin-top:4px; padding-left:8px; border-left:2px solid var(--rule2); font-size:11.5px; color:var(--ink2)}
@@ -639,7 +657,7 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
    за окото и без ефект, защото формите не се предават по стандартния начин. */
 .field label .req{color:var(--red); margin-left:2px; font-weight:700}
 .field input, .field select, .field textarea{
-  width:100%; padding:8px 10px; border:1px solid var(--rule2); border-radius:4px;
+  width:100%; padding:8px 10px; border:1px solid var(--field); border-radius:4px;
   font-family:var(--sans); font-size:13px; background:#fff;
   transition:border-color .12s, box-shadow .12s;
 }
@@ -686,7 +704,7 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 
 /* ---------- Избор на УДК ---------- */
 .udkSearch{
-  width:100%; padding:9px 11px; border:1px solid var(--rule2); border-radius:3px;
+  width:100%; padding:9px 11px; border:1px solid var(--field); border-radius:3px;
   font-family:var(--sans); font-size:13px; margin-bottom:12px; background:#fff;
 }
 /* ---- Избор на УДК (v2.4.40): дърво + сглобяване на съставен код ---- */
@@ -737,7 +755,7 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .udkQuick{display:flex; gap:5px; flex-wrap:wrap; align-items:center; margin:0 0 8px;
   max-height:62px; overflow-y:auto; scroll-padding:2px}
 .udkQuickLbl{font-size:11.5px; color:var(--ink3); margin-right:3px}
-.udkQuick .udkItem.udkQ1{width:auto; border:1px solid var(--rule2); background:var(--paper);
+.udkQuick .udkItem.udkQ1{width:auto; border:1px solid var(--field); background:var(--paper);
   padding:2px 7px; font-size:11.5px; gap:6px}
 .udkQuick .udkQ1 .udkCode{font-size:11px}
 
@@ -784,14 +802,14 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .udkNode.udkHit > .udkRow .udkAlso{display:inline}
 .udkNode.udkHit > .udkRow{background:var(--paper3); box-shadow:inset 2px 0 0 var(--brass)}
 .udkPlus{
-  flex:0 0 auto; font-size:10.5px; color:var(--brassD); border:1px solid var(--rule2);
+  flex:0 0 auto; font-size:10.5px; color:var(--brassD); border:1px solid var(--field);
   border-radius:3px; padding:1px 5px; background:var(--paper); visibility:hidden;
 }
 .udkRow:hover .udkPlus{visibility:visible}
 
 .udkTabs{display:flex; gap:4px; flex-wrap:wrap; margin:0 0 8px}
 .udkTab{
-  font-size:12px; padding:4px 9px; border:1px solid var(--rule2); border-radius:999px;
+  font-size:12px; padding:4px 9px; border:1px solid var(--field); border-radius:999px;
   background:var(--paper); cursor:pointer; color:var(--ink2); font-family:var(--sans);
 }
 .udkTab:hover{border-color:var(--brass)}
@@ -822,7 +840,7 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .remBody{padding:12px 14px}
 .remText{
   width:100%; font-family:var(--mono); font-size:11.5px; line-height:1.5; padding:9px 11px;
-  border:1px solid var(--rule2); border-radius:3px; background:#fff; resize:vertical;
+  border:1px solid var(--field); border-radius:3px; background:#fff; resize:vertical;
 }
 .remMeta{font-size:12px; color:var(--ink2); margin-bottom:8px}
 .remMeta b{color:var(--ink)}
@@ -835,9 +853,23 @@ table.ledger .num{font-family:var(--mono); font-size:inherit; font-weight:400; c
 .isbnRow{display:flex; gap:6px}
 .isbnRow input{min-width:0}
 .isbnRow .btn{flex:0 0 auto; padding:8px 10px; font-size:12px}
-.grid.g2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-.grid.g3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px}
-.grid.g4{display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px}
+/* minmax(0,1fr), а НЕ голо 1fr (v2.4.54). „1fr“ е съкращение на minmax(AUTO,1fr):
+   долната граница е най-малката ширина, при която съдържанието още не се реже. Едно
+   дълго заглавие в картата („Записки по българските въстания. Том първи, дял втори…“)
+   вдига тази граница и РАЗТЕГЛЯ цялата колона — в „Справки и статистика“ третата карта
+   излизаше 393 px извън екрана при 1366 px и 479 px при 1280 px, тоест числата „Най-
+   търсени документи“ просто ги нямаше на екрана, а водоравна лента за плъзгане нямаше
+   (тя е на #view, а не на страницата). Същият дефект беше поправен точков за таблото
+   (.dashGrid по-горе); тук се затваря за всички решетки наведнъж, защото се повтаря
+   при всяка нова карта с текст от базата. minmax(0,1fr) позволява на колоната да се
+   свие под съдържанието си — и съдържанието само се реже с многоточие там, където е
+   казано (.rankTitle), вместо да избутва половината екран. */
+.grid.g2{display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px}
+.grid.g3{display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px}
+.grid.g4{display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px}
+/* Картата също трябва да може да се свие — иначе минималната ѝ ширина се връща
+   през задната врата (min-width:auto на grid-елемент). */
+.grid.g2 > .card, .grid.g3 > .card, .grid.g4 > .card{min-width:0}
 /* Редът „Том / част · ISBN / ISSN · Страници · Език“ във формата за документ.
    Равните четвъртинки на .g4 не му вършат работа: „Том/част“ и „Страници“
    побират по два-три знака, а полето за ISBN носи и двата бутона („Търси“ и
@@ -869,9 +901,27 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .savedIndicator{font-size:11px; color:var(--spineDim); margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}
 .savedIndicator .dot{width:6px; height:6px; border-radius:50%; background:var(--green); flex:0 0 auto}
 
-/* ---------- Checkbox полета ---------- */
-.chk{display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--ink2); margin:10px 0; cursor:pointer}
-.chk input{margin-top:2px}
+/* ---------- Checkbox полета ----------
+   ЕДНО определение (v2.4.54). Дотук .chk се задаваше на ДВЕ места в този файл —
+   тук и още веднъж към 70 реда по-надолу, с различен цвят (--ink2 срещу --ink),
+   различен margin и БЕЗ cursor:pointer. Побеждаваше второто, тоест написаното
+   тук нямаше никакво действие: отметките изглеждаха еднакво, но курсорът не се
+   променяше над тях и никой не разбираше защо. Двете са слети.
+   Размерът на самата кутийка: по подразбиране браузърът я чертае 13×13 px. WCAG
+   2.2, критерий 2.5.8 („Големина на целта“) иска поне 24×24 px за нещо, което се
+   натиска — при 13 px библиотекарката често уцелва текста вместо кутийката.
+   Увеличена е до 17 px (видимата кутийка) с 4 px отстояние, тоест 25 px обща
+   цел по височина, а етикетът така или иначе е част от целта, защото <label>
+   обхваща и двете. */
+.chk{
+  display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--ink);
+  margin:6px 0 2px; cursor:pointer;
+}
+.chk input{width:17px; height:17px; margin:2px 0 2px; flex:0 0 auto; accent-color:var(--brass); cursor:pointer}
+/* Същото и за отметките в РЕДОВЕТЕ на регистрите (избор за групова редакция или
+   за витрината) — те не са в <label class="chk">, но се натискат най-често от
+   всички. И те бяха 13×13 px. */
+table.ledger input[type=checkbox]{width:17px; height:17px; accent-color:var(--brass); cursor:pointer; vertical-align:middle}
 .fh{font-weight:400; color:var(--ink3); font-size:11px}
 
 /* ---------- Badge (статус/КПИ маркери) ---------- */
@@ -937,8 +987,6 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .cardPreview .rcard{
   width:var(--cw, 90mm); height:var(--ch, 60mm); border:1px solid var(--rule2); box-sizing:border-box;
 }
-.chk{display:flex; align-items:flex-start; gap:8px; font-size:12.5px; color:var(--ink); margin:6px 0 2px}
-.chk input{width:auto; margin-top:2px}
 
 /* Лого на организацията в заглавната част на документите за печат */
 .pheadRow{display:flex; align-items:center; gap:5mm; margin-bottom:4mm}
@@ -1016,6 +1064,40 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
   }
   #printArea .rcard{break-inside:avoid}
 }
+/* Нов лист ВЪТРЕ в един документ (v2.4.54) — широка таблица, разделена по
+   групите на собствените си колони (виж dnevnikPrintPages в views/dnevnik.js).
+   Правилото важи и за прегледа преди печат, и за самия печат: иначе прегледът
+   показва един безкраен лист, а принтерът — три, и човекът одобрява едно, а
+   получава друго. Празният <div> не заема място, затова не се вижда на екрана. */
+.pbreak{break-before:page; page-break-before:always; height:0; margin:0; border:0}
+/* В прегледа „листът“ е един елемент — прекъсването се показва като линия, за да
+   личи колко листа ще излязат от принтера. */
+#ppSheet .pbreak{
+  height:0; border-top:1px dashed var(--rule2); margin:7mm 0 5mm;
+  position:relative; break-before:auto; page-break-before:auto;
+}
+#ppSheet .pbreak::after{
+  content:'нов лист'; position:absolute; right:0; top:-9px; background:#fff;
+  padding:0 6px; font-size:8pt; color:var(--ink3); letter-spacing:.06em;
+}
+/* Дневникът и годишният отчет: 20 колони на лист пак излизаха 1137 px при 1063 px
+   полезна ширина, тоест последните две колони пак се режеха. Разделянето по листове
+   не може да го реши само — групите не се цепят по средата. Затова таблицата се
+   заковава ТОЧНО за листа (table-layout:fixed + width:100% + colgroup), а дългите
+   заглавия на колоните се пренасят вътре в клетката. Така отпечатаното НИКОГА не
+   излиза извън хартията, независимо колко колони е събрал листът. */
+table.dnvPrint{
+  table-layout:fixed; width:100%; font-size:7.5pt;
+}
+/* overflow-wrap:anywhere, а НЕ word-break:break-all — второто реже и там, където
+   думата би се събрала (заглавието „Деца<14“ излизаше „Деца<1 / 4“). */
+table.dnvPrint th, table.dnvPrint td{
+  overflow-wrap:anywhere; hyphens:auto; padding:2px 1px;
+}
+table.dnvPrint th{font-size:7pt; line-height:1.15}
+/* Бележката под таблицата носи пояснението, което не се събира в заглавието на
+   групата (виж dnevnikNotesHtml). Стои на СЪЩИЯ лист, до същата таблица. */
+.pnote{font-size:7pt; color:#000; margin:2mm 0 0; line-height:1.3}
 
 /* ---------- Toasts (v1.69.0: по-големи, с икона, брояч на време и бутон ×) ----------
    Два контейнера: #toasts (долу вдясно — успехи и неутрални съобщения) и
@@ -1250,7 +1332,7 @@ tr.rowFlash td{animation:rowFlash 1.3s ease-out}
 }
 .setupNav #setupSearch{
   width:100%; box-sizing:border-box; margin:0 0 10px; padding:7px 10px; font:inherit; font-size:13px;
-  border:1px solid var(--rule2); border-radius:5px; background:var(--paper2); color:var(--ink);
+  border:1px solid var(--field); border-radius:5px; background:var(--paper2); color:var(--ink);
 }
 .setupNav a{
   display:block; padding:7px 10px 7px 12px; border-left:3px solid transparent; border-radius:0 5px 5px 0;
