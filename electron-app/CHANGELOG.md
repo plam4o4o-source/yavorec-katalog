@@ -11,6 +11,75 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.55
+
+**BG:** Преглед на v2.4.54 (документите, които програмата издава) — два
+пропуска в тестовете, намерени от собствената мутационна проверка на този
+кръг. Реалният код на v2.4.54 е верен — проверих директно — но мутация в него
+можеше да мине незабелязана от целия тестов пакет.
+
+**Разделянето на листове по колонни групи нямаше опъвка срещу бъдеща
+свръхширока група.** `dnevnikPrintPages()` дели широката таблица по границите
+на собствените си колонни групи и никога не реже група по средата — правилно,
+но нищо не пазеше, че всяка ДЕЙСТВИТЕЛНА група остава под тавана от 20 колони
+на лист. Най-широката днес е 18 („По съдържание (УДК)“) — с малък резерв, не
+случайно. Добавен е регресионен тест: утрешна по-широка група пада ВЕДНАГА при
+писането на промяната, не при следващото измерване на разпечатан лист. Добавен
+е и тест, който заковава самото поведение при пробив на тавана — свръхширока
+група излиза на собствен, по-широк лист, цяла, а не срязана или изгубена: това
+е съзнателна отстъпка (групите не се режат по средата), не грешка за поправяне.
+
+**Тестовете за анулиране на акт не различаваха верния от разменения ред на
+параметрите.** `handlers/deaccession-acts.js` отказва резервациите на
+отчислените документи с `cancelHolds.run({ act: actId, book: b.id })` —
+верният код. И трите фикстури в `test/docs-v2454.test.js` обаче вмъкват
+книгата и акта на едно и също поредно място в свежа база, затова id-тата им
+случайно съвпадат: мутация, която размества `act`/`book` в извикването, минава
+НЕЗАСЕЧЕНА от всичките 16 теста, защото размяна на две равни числа не променя
+нищо. Проверено директно (извън тестовете): при различни id-та размяната
+оставя резервацията „чака“ — читателят остава на опашка за документ, който
+току-що е отчислен. Новият тест вмъква пет запълващи книги предварително, за
+да гарантира различни id-та, и заключва точно тази разлика.
+
+Проверки: 3 нови теста (test/docs-v2455.test.js), 2 мутации на реалния код,
+всяка с връщане и повторно пускане (размяна на act/book в cancelHolds,
+разширяване на действителна колонна група до тавана) — и двете уловени.
+Пълната поредица: 1478 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8
+сценария + всички проверки при 15 002 записа.
+
+**EN:** Review of v2.4.54 (the documents the program issues) — two test-suite
+gaps found by this round's own mutation testing. v2.4.54's actual code is
+correct — verified directly — but a mutation in it could slip past the entire
+test suite unnoticed.
+
+**Splitting the print table by column groups had no tripwire against a future
+oversized group.** `dnevnikPrintPages()` splits the wide table along its own
+column-group boundaries and never cuts a group in half — correct, but nothing
+guarded that every ACTUAL group stays under the 20-column-per-sheet cap. The
+widest today is 18 ("by subject (UDC)") — a margin, not a coincidence. A
+regression test now fails IMMEDIATELY when a future group grows too wide,
+rather than at the next print measurement. A second test locks in the intended
+behaviour when the cap is breached: an oversized group gets its own, wider
+sheet, whole, rather than being cut or lost — a deliberate trade-off (groups
+are never split), not a bug to fix.
+
+**The deaccession-act revocation tests could not tell correct parameter order
+from swapped.** `handlers/deaccession-acts.js` cancels reservations on
+deaccessioned documents with `cancelHolds.run({ act: actId, book: b.id })` —
+the correct code. But all three fixtures in `test/docs-v2454.test.js` insert
+the book and the act at the same ordinal position in a fresh database, so
+their ids coincidentally match: a mutation swapping `act`/`book` in the call
+passes UNDETECTED by all 16 tests, because swapping two equal numbers changes
+nothing. Verified directly (outside the tests): with differing ids the swap
+leaves the reservation "waiting" — the reader stays queued for a document that
+was just deaccessioned. The new test inserts five filler books first to
+guarantee differing ids, and locks in exactly that difference.
+
+Checks: 3 new tests (test/docs-v2455.test.js), 2 mutations of the real code,
+each reverted and re-run (the act/book swap in cancelHolds, widening a real
+column group to the cap) — both caught. Full suite: 1,478 passing, 0 failing
+(UTC and Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
+
 ## v2.4.54
 
 **BG:** Кръг върху ДОКУМЕНТИТЕ, които програмата издава — и оказа се, че двата
