@@ -86,7 +86,11 @@ async function boot() {
     for (const daysAgo of [84, 83, 0]) {
       const id = insB.run(1000 + b, 'Книга ' + b, dayOff(400)).lastInsertRowid;
       insI.run(id);
-      insL.run(1, id, dayOff(daysAgo), dayOff(daysAgo - 30), dayOff(daysAgo - 1 >= 0 ? daysAgo - 1 : null));
+      /* dayOff(null) НЕ дава null — JS смята null като 0 в изваждането вътре в
+         dayOff() и връща днешна дата вместо отворено (незавършено) заемане.
+         За най-пресния запис (daysAgo=0) искаме точно отворено заемане, затова
+         null се подава директно, без да минава през dayOff(). */
+      insL.run(1, id, dayOff(daysAgo), dayOff(daysAgo - 30), daysAgo - 1 >= 0 ? dayOff(daysAgo - 1) : null);
       b++;
     }
   })();

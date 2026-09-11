@@ -11,6 +11,70 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.53
+
+**BG:** Преглед на таблото от v2.4.52 — една истинска грешка, намерена с
+мутационна проверка, и два пропуска в собствените тестове на v2.4.52, всичките
+извън обхвата на самия патч.
+
+**Заемане от точно преди 84 дни изчезваше от седмичната графика.** Заявката за
+последните дванайсет седмици сравняваше `date_out >= date('now', '-84 days')`.
+`julianday('now')` носи часа на деня, затова разликата за заемане от ТОЧНО преди
+84 дни винаги излиза малко над 84,0 — закръгленото деление на седмица давaше
+w=12, а дванайсетелементният масив няма такъв индекс: `loansWeeks[11-12]` е
+`loansWeeks[-1]`, странично свойство, което `.reduce()` и графиката никога не
+виждат. Заемането изчезваше тихо от спарк-графиката, от седмичния текст и от
+сбора — не при рядък ръб, а на ВСЕКИ ден, в който има такова заемане. Границата
+е сменена на строго `>`. Възпроизведено директно с better-sqlite3, преди да се
+пипне кодът; **самата сума от `.reduce()` не различаваше буболечната версия от
+поправената** (двете дават 2 в тестовата фикстура) — хванато едва с изрична
+проверка за страничното свойство "-1", добавена при собствената мутационна
+проверка на този кръг.
+
+Покрай това — два пропуска в тестовете на v2.4.52, потвърдени с мутация върху
+непроменения екран: лентата по тежест (`.sevBar`) проверяваше само сборa на
+трите дяла, не и коя стойност отговаря на кой цвят/ширина — размяна на d7/d30
+би минала невидяна; темпото „N документа на месец“ по чл. 40 се сверяваше само
+по формàта на изречението, не по самото число — грешка в закръглянето (ceil
+вместо floor) би минала невидяна.
+
+Проверки: 5 нови теста (test/dash-v2453.test.js), 3 мутации на реалния код,
+всяка с връщане и повторно пускане (буболечната `>=` граница, размяна на
+d7/d30 в лентата, ceil→floor в темпото) — и трите уловени. Пълната поредица:
+1459 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария + всички
+проверки при 15 002 записа.
+
+**EN:** Review of the v2.4.52 dashboard patch — one real bug found by mutation
+testing, and two coverage gaps in v2.4.52's own tests, both outside that
+patch's scope.
+
+**A loan taken out exactly 84 days ago silently vanished from the weekly
+chart.** The twelve-week query compared `date_out >= date('now', '-84
+days')`. `julianday('now')` carries the time of day, so the difference for a
+loan from EXACTLY 84 days ago is always just over 84.0 — the rounded
+week-bucket division gave w=12, and the 12-element array has no such index:
+`loansWeeks[11-12]` is `loansWeeks[-1]`, a stray property `.reduce()` and the
+chart never see. The loan disappeared silently from the sparkline, the weekly
+text, and the total — on EVERY day such a loan exists, not a rare edge.
+Boundary changed to strict `>`. Reproduced directly with better-sqlite3
+before touching the code; **the `.reduce()` sum itself did not distinguish
+the buggy version from the fixed one** (both give 2 in the test fixture) —
+only caught by an explicit check for the stray "-1" property, added during
+this round's own mutation testing.
+
+Also, two test-coverage gaps in v2.4.52 confirmed by mutation against the
+unchanged screen code: the severity bar (`.sevBar`) only checked the sum of
+its three segments, not which value maps to which color/width — a d7/d30 swap
+would have gone unnoticed; the Article 40 pace text "N documents a month" was
+checked only against the sentence's format, not the number itself — a
+rounding-direction bug (ceil vs. floor) would have gone unnoticed.
+
+Checks: 5 new tests (test/dash-v2453.test.js), 3 mutations against the real
+code, each reverted and re-run (the buggy `>=` boundary, a d7/d30 swap in the
+bar, ceil→floor in the pace text) — all three caught. Full suite: 1,459
+passing, 0 failing (UTC and Europe/Sofia); site: 8 scenarios + all checks at
+15,002 records.
+
 ## v2.4.52
 
 **BG:** Таблото. И трите промени са намерени с ИЗМЕРВАНЕ на екрана в истински
