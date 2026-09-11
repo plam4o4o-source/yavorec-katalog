@@ -92,11 +92,58 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         JOIN inventory_sessions s ON s.id = sc.session_id
         WHERE substr(s.date,1,4) = ?
       `).get(y).n;
+      /* ПРОЗОРЕЦ, а не целият списък (v2.4.52). Дотук тук нямаше лимит — за разлика
+         от `overdueRows` точно отгоре, което си има LIMIT 7 — и таблото рисуваше по
+         един ред на всяко предстоящо връщане. Измерено при истински фонд със 160
+         предстоящи: таблото ставаше 9 830 px високо при екран от 768, тоест над
+         девет екрана превъртане, а картата с връщанията сама разтягаше съседките си
+         в същия ред. Изгледът показва първите няколко, групирани по ден; общият брой
+         идва отделно, за да не лъже нито показателят горе, нито бутонът „Всички“. */
+      const UPCOMING_WINDOW = 40;
+      const upcomingWhere = `l.date_in IS NULL AND l.date_due IS NOT NULL
+        AND l.date_due >= date('now') AND julianday(l.date_due) - julianday('now') <= 3`;
       const upcoming = db.prepare(`
-        ${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL
-        AND l.date_due >= date('now') AND julianday(l.date_due) - julianday('now') <= 3
-        ORDER BY l.date_due
+        ${LOAN_SELECT} WHERE ${upcomingWhere} ORDER BY l.date_due LIMIT ${UPCOMING_WINDOW}
       `).all();
+      const upcomingCount = db.prepare(`SELECT COUNT(*) AS n FROM loans l WHERE ${upcomingWhere}`).get().n;
+      /* Броят ПО ДНИ идва от базата, а не от преброяване на показаните редове:
+         прозорецът отрязва списъка, тоест броенето в изгледа би дало „Днес · 40“
+         при 154 действителни. Дните са най-много четири (днес + три напред), затова
+         това е едно евтино групиране, а не още един списък. */
+      const upcomingByDay = db.prepare(`
+        SELECT l.date_due AS date, COUNT(*) AS n FROM loans l WHERE ${upcomingWhere}
+        GROUP BY l.date_due ORDER BY l.date_due
+      `).all();
+      /* Просрочията ПО ТЕЖЕСТ. „240 просрочени“ не казва какво да се направи, а
+         разликата между три дни и три месеца е разликата между напомняне и акт по
+         чл. 30. Броенето е в SQL по същото условие като `overdueCount` — по
+         КАЛЕНДАРНИ дни, защото е групиране на едро; точните дни забава (с
+         приспаднати затворени дни) стоят на реда във всеки от седемте показани. */
+      const overdueBuckets = db.prepare(`
+        SELECT
+          SUM(CASE WHEN julianday('now') - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+          SUM(CASE WHEN julianday('now') - julianday(date_due) > 7
+                    AND julianday('now') - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+          SUM(CASE WHEN julianday('now') - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+        FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')
+      `).get();
+      for (const k of ['d7', 'd30', 'more']) overdueBuckets[k] = overdueBuckets[k] || 0;
+      /* Заеманията по седмици за последните 12 седмици — посоката, която едно число
+         („400 заети“) не носи. Едно групиране по индекса idx_loans_date_out, а не 12
+         отделни заявки; седмица 0 е текущата. Масивът е винаги с дължина 12, с нули
+         за седмиците без заемания, за да не се налага изгледът да ги допълва. */
+      const weekRows = db.prepare(`
+        SELECT CAST((julianday('now') - julianday(date_out)) / 7 AS INTEGER) AS w, COUNT(*) AS n
+        FROM loans WHERE date_out >= date('now', '-84 days') AND date_out <= date('now')
+        GROUP BY w
+      `).all();
+      /* Прозорецът е определен на ЕДНО място — в условието на заявката. Тук стоеше и
+         втора проверка (`w >= 0 && w < 12`), но при вече отрязани от SQL редове тя не
+         може да се задейства: мутационната проверка показа, че премахването ѝ не
+         променя нищо. Два предпазителя за едно и също правят и двата непроверими —
+         остава този, който освен това пази и от пълно сканиране на таблицата. */
+      const loansWeeks = new Array(12).fill(0);
+      for (const row of weekRows) loansWeeks[11 - row.w] = row.n;
       const holdsReady = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'заделена'").get().n;
       const holdsWaiting = db.prepare("SELECT COUNT(*) AS n FROM holds WHERE status = 'чака'").get().n;
       /* „За днес" — работният списък на библиотекаря (десктоп-аналог на cron задачите
@@ -143,9 +190,10 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const dnevnikFilled = !!db.prepare('SELECT 1 FROM dnevnik_days WHERE date = ?').get(today());
       return {
         fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
+        overdueBuckets, loansWeeks,
         year: y, acquiredYear, deaccessionedYear, loansYear, readersYear,
         inventoryTarget: target, inventoryScannedYear: scannedYear, inventoryPct: pct,
-        upcoming, holdsReady, holdsWaiting,
+        upcoming, upcomingCount, upcomingByDay, holdsReady, holdsWaiting,
         today: { reregDue, longOverdue, anonCandidates, suspendedNow, isTodayOpen, dueReminders, overduePeriodicals, dnevnikFilled }
       };
     })

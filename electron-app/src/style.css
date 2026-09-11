@@ -24,7 +24,10 @@
   --red:#A32B22; --redL:#F0DEDA;
   --green:#3E6B4A; --greenL:#DFE9E0;
   /* Кехлибарено за предупреждения (v2.4.33: toast 'warn', askConfirm 'warn', .note.w
-     иконата). Еднакво във всички теми — хартията е светла навсякъде; 5.6:1 върху --paper2. */
+     иконата). Еднакво във всички теми — хартията е светла навсякъде; 5.6:1 върху --paper2.
+     v2.4.52: същото кехлибарено пое и средното ниво в лентите (просрочие 8–30 дни,
+     .bar-fill.near) — дотук там стоеше зашито #C98A2E, тоест втори кехлибарен цвят,
+     който никой не беше мерил. */
   --amber:#8A5A0B; --amberL:#F3E6C8;
   --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
   --mono:'Consolas','Courier New',monospace;
@@ -303,7 +306,7 @@ body{
 .bar{height:8px; background:var(--paper3); border-radius:4px; overflow:hidden}
 .bar-fill{height:100%; background:var(--brass); border-radius:4px; transition:width .3s}
 .bar-fill.done{background:var(--green)}
-.bar-fill.near{background:#C98A2E}
+.bar-fill.near{background:var(--amber)}
 .bar-fill.full{background:var(--red)}
 
 .quickGrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:9px}
@@ -318,8 +321,76 @@ body{
 .quickBtn:hover{background:var(--paper3); border-color:var(--brass); box-shadow:var(--sh); transform:translateY(-1px)}
 .quickBtn:active{transform:none; box-shadow:none}
 
-.upcomingRow{display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--rule)}
-.upcomingRow:last-child{border-bottom:0}
+/* ---------- Предстоящи връщания: групи по ден (v2.4.52) ----------
+   Дотук всеки ред носеше и собствената си дата с най-едрия шрифт на таблото, при
+   положение че всички дати са в рамките на три дни. Денят стана заглавие на
+   групата, заглавието на документа — главното на реда, а списъкът е прозорец с
+   бутон за останалите (виж бележката при .upMore). */
+.upList{margin-top:2px}
+.upDay{display:flex; align-items:baseline; gap:8px; margin:10px 0 4px; padding-bottom:3px;
+  border-bottom:1px solid var(--rule)}
+.upDay:first-child{margin-top:0}
+.upDayName{font-size:11px; text-transform:uppercase; letter-spacing:.12em; font-weight:700; color:var(--brassD)}
+.upDayDate{font-size:11px; color:var(--ink3); font-family:var(--mono)}
+.upDayN{margin-left:auto; font-size:11px; color:var(--ink2); background:var(--paper3);
+  border-radius:9px; padding:1px 7px}
+.upRow2{display:flex; gap:10px; align-items:baseline; padding:4px 0}
+/* Заглавието се съкращава с многоточие, а не пренася: редовете трябва да са с
+   еднаква височина, за да се брои списъкът с поглед. Пълното стои в title. */
+.upTitle{flex:1; min-width:0; font-size:13.5px; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.upWho{flex:0 0 auto; font-size:12px; color:var(--ink3)}
+/* Пунктирът казва „има още“, без да прилича на главното действие в картата. */
+.upMore{display:block; width:100%; margin-top:10px; padding:7px; font-size:12.5px;
+  background:transparent; border:1px dashed var(--rule2); border-radius:5px;
+  color:var(--ink2); cursor:pointer}
+.upMore:hover{background:var(--paper3); color:var(--ink); border-color:var(--brass)}
+
+/* ---------- Показатели: посока и тежест (v2.4.52) ----------
+   Микрографиката и лентата по тежест НЕ носят информация сами: числата стоят и
+   като текст до тях (виж dashSpark/dashOverdueBars). Така работят и при монохромен
+   екран, при далтонизъм и с екранен четец. */
+.spark{display:block; margin-top:7px}
+.kpiFoot{display:block; font-size:11.5px; color:var(--ink3); margin-top:3px}
+.sevBar{display:flex; height:7px; border-radius:4px; overflow:hidden; margin-top:8px; background:var(--paper3)}
+.sevBar span{display:block; height:100%}
+.sevLeg{display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--ink3); margin-top:5px}
+.sevLeg span{display:inline-flex; align-items:center; gap:4px; white-space:nowrap}
+.sevLeg i{width:8px; height:8px; border-radius:2px; display:inline-block; flex:0 0 auto}
+
+/* ---------- Редовете на таблото делят ширината поравно (v2.4.52) ----------
+   „1fr“ значи minmax(AUTO, 1fr): колона с дълго съдържание расте над своя дял и
+   изяжда съседките. Измерено при истински фонд: долният ред излизаше 116 / 254 /
+   253 px вместо три по 338, а картата „Бързи действия“ се смачкваше до две колони
+   от по 34 px с настъпващи един върху друг надписи. Само тук, а не върху общия
+   .grid.g3 — той се ползва и във формулярите, където полетата имат собствена
+   най-малка ширина и заковаването ѝ до нула би ги накарало да преливат. */
+/* Собствено `display:grid` и по-висока тежест от .grid.g3 — иначе правилото е
+   безсилно: .grid.g3 е с два класа, .dashGrid с един, тоест „1fr 1fr 1fr“ печели
+   и минимумът никога не влиза в сила. (Проверката в test/views-regressions.test.js
+   изисква всеки клас за решетка да носи и собствено display:grid — без него редът
+   се разпада на вертикална колона, ако някога загуби g3.) */
+.grid.dashGrid{display:grid; gap:10px}
+.grid.g3.dashGrid{grid-template-columns:repeat(3, minmax(0, 1fr))}
+.grid.dashGrid > .card{min-width:0}
+
+/* ---------- Нормативният срок по чл. 40 (v2.4.52) ---------- */
+.normCard{display:flex; align-items:center; gap:18px; margin-top:16px; padding:14px 18px}
+.normCard .ringOnly{flex:0 0 auto}
+.ringOnly .ringSvg{width:72px; height:72px}
+.normBody{flex:1; min-width:0}
+.normBody h3{margin:0 0 4px; font-size:15px; display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.normNum{font-size:13.5px; color:var(--ink2)}
+.normNum b{color:var(--ink); font-family:var(--mono)}
+.normPace{font-size:12.5px; color:var(--ink3); margin-top:4px}
+.normPace b{color:var(--ink2)}
+.normBtn{flex:0 0 auto}
+/* Изоставането се вижда и по ръба, не само по цвета на пръстена. */
+.normCard.behind{border-left:3px solid var(--red)}
+@media (max-width:860px){
+  .normCard{flex-wrap:wrap}
+  .normBtn{width:100%}
+}
 
 /* Инвентарна книга — отчислените се маркират, но остават четими (чл. 39) */
 /* Специфичността е нарочно table.ledger.X — правилата на table.ledger th/td иначе печелят. */
