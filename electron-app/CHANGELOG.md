@@ -11,6 +11,185 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.54
+
+**BG:** Кръг върху ДОКУМЕНТИТЕ, които програмата издава — и оказа се, че двата
+документа, които напускат сградата и се показват на проверяващия, излизаха от
+принтера непълни.
+
+**Близо половината от Дневника на библиотеката и от Годишния статистически
+отчет се режеше от принтера.** Измерено в истински браузър на А4 пейзаж:
+Дневникът, Раздел А/Б, има полезна ширина 1063 px, а таблицата излиза 2099 px —
+868 px, тоест 45 %, остават извън хартията. Годишният отчет (Раздел А и Б):
+1047 px полезни срещу 2073 px, 987 px (47 %) отрязани. Отрязаното НЕ се
+появяваше никъде — нито на втори лист, нито в прегледа преди печат, който
+показваше същия отрязан лист и затова изглеждаше наред. Свиване до листа не
+помага: 1063/2099 значи мащаб 0,50, тоест шрифт 3,75 pt.
+
+Поправката е на две части. Първо, таблицата се РАЗДЕЛЯ на листове по границите
+на собствените си групи колони („По възраст“, „По образование“, „По занятие“,
+„По съдържание (УДК)“ …), както се разгъва хартиена тетрадка: групите никога не
+се режат по средата, за да стои отпечатаното „Всичко“ до разбивката, чийто сбор
+е. Колоната „Число“ се повтаря на всеки лист, а заглавието носи „лист N от M“ и
+имената на групите на този лист. Второ, всеки лист се ЗАКОВАВА за хартията
+(`table-layout:fixed` + `colgroup`), защото само разделянето не стигаше — 20
+колони пак излизаха 1137 px при 1063 px полезни. Сега ширината не зависи от
+съдържанието и никой бъдещ по-дълъг етикет не може да избута колона навън.
+Дългото пояснение „от които ползвани в читалня (не влиза в горните сборове)“ е
+група от ЕДНА колона и при заковани ширини заглавието ѝ ставаше десет реда
+високо — на хартия остава само името на групата, а пояснението слиза под
+таблицата като бележка. На екрана пълният етикет остава както си беше. Между
+листовете стои маркер, който в прегледа се вижда като линия с надпис „нов лист“
+— човекът одобрява точно това, което ще получи. Крайно измерване: 0 px извън
+листа и за двата документа.
+
+**Третата карта в „Справки и статистика“ излизаше 393 px извън екрана.** Едно
+дълго заглавие от базата („Записки по българските въстания. Том първи, дял
+втори…“) разтягаше колоната си и изнасяше числата на „Най-търсени документи“
+извън видимото, при това без водоравна лента за плъзгане (тя е на `#view`, а не
+на страницата). При 1280 px — 479 px. Причината е, че `1fr` в CSS е съкращение
+на `minmax(auto, 1fr)`: долната граница е ширината, при която съдържанието още
+не се реже. Същият дефект беше поправен точково за таблото в v2.4.52; сега е
+затворен за всички решетки наведнъж (`.grid.g2/.g3/.g4` + `min-width:0` на
+картите), защото се повтаря при всяка нова карта с текст от базата. Проверено с
+истинските полета във формуляра за документ при 1366 px — нито едно поле не се
+свива под 60 px.
+
+**Просрочията в таблото се броят в цели дни.** `julianday('now')` носи и часа,
+затова заем с падеж отпреди ТОЧНО 7 дни даваше 7,6 дни разлика и попадаше в
+групата „8–30 дни“ — група, чийто етикет твърди, че закъснението е поне осем
+дни. Същото на 30 и на 60 („Просрочени над 60 дни“ броеше и заем на точно 60).
+При това касата брои ЦЕЛИ дни (`effectiveDaysLate`), тоест таблото и касата
+даваха два различни отговора за един и същи заем. Сравнява се дата с дата.
+
+**Анулиран акт за отчисляване вече казва какво остава непоправено.** При
+съставяне на акта активните резервации на отчислените документи се отказват —
+това е вярно. При анулиране те НЕ се възкресяват и това остава нарочно (решено
+в по-ранен кръг: анулирането поправя регистъра, а не връща времето в читалнята;
+читател, на когото е казано, че книгата я няма, не бива да се озове пак на
+опашка, която не е поставял). Счупеното беше друго: резервацията изчезваше
+БЕЗСЛЕДНО. Нищо не помнеше кой акт я е отказал, екранът „Резервации“ показва
+само активните, а одитната следа при анулиране казваше единствено „документите
+са върнати във фонда“ — библиотекарката научаваше чак ако читателят дойде да
+пита. Сега резервацията носи номера на акта и снимка на предишното си състояние,
+следата казва колко резервации е отказал актът и че те ОСТАВАТ отказани, а
+прозорецът показва жълто предупреждение (не зелено „готово“) с указание да ги
+поднови ръчно.
+
+**Рамката на всяко поле за писане и избор вече се вижда.** WCAG 2.1, критерий
+1.4.11 иска поне 3:1 за границата, по която се разпознава елемент за
+управление. Измерено, `--rule2` върху хартията дава между 1,34:1 и 2,30:1 —
+нито една от седемте теми не покриваше прага: полето за инвентарен номер,
+падащото меню за отдел и бутоните се сливаха с фона. Въведен е отделен знак
+`--field` само за истинските елементи за управление (полета, падащи менюта,
+бутони, етикети за УДК), с тон на съответната тема и проверен контраст срещу
+`--paper`, `--paper2`, `--paper3` и бяло. `--rule2` остава за разделителни линии
+и рамки на карти, където изискване няма.
+
+**Дребни, но истински:** кутийките за отметка бяха 13×13 px (по подразбиране на
+браузъра) при 24 px цел по WCAG 2.5.8 — сега са 17 px с отстояние и курсор, който
+казва, че се натискат, включително отметките в редовете на регистрите (изборът за
+групова редакция и за витрината), които се натискат най-често от всички. `.chk` се задаваше на ДВЕ места в style.css с различен
+цвят и без `cursor:pointer`, а `.badge` — на две места, като първото беше без
+фон и цвят на текста; побеждаваше второто, тоест първите бяха мъртъв код, който
+чакаше някой да размени реда им. И двете са слети в по едно правило. Тестът,
+който „пазеше“ дублирането на `.badge`, е поправен да изисква едно правило.
+
+Проверки: 16 нови теста (test/docs-v2454.test.js), 35 мутации на реалния код,
+всяка с връщане и повторно пускане — всичките уловени от именуван тест; плюс
+контролна мутация, която трябва да мине, и минава. Документите са прерисувани в
+истински Chromium и премерени наново: 0 px извън листа. Пълната поредица: 1475
+успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария + всички проверки
+при 15 002 записа.
+
+**EN:** A round on the DOCUMENTS the program issues — and it turned out the two
+documents that leave the building and are shown to an inspector were coming out
+of the printer incomplete.
+
+**Almost half of the library Дневник and of the annual statistical report was
+being cut off by the printer.** Measured in a real browser on A4 landscape: the
+Дневник, Section A/B, has 1063 px of usable width while the table renders 2099
+px — 868 px, i.e. 45 %, falls off the paper. The annual report (Sections A and
+B): 1047 px usable against 2073 px, 987 px (47 %) cut. None of it appeared
+anywhere — not on a second sheet, not in the print preview, which showed the
+same truncated sheet and therefore looked fine. Scaling to fit does not help:
+1063/2099 is a 0.50 scale, i.e. a 3.75 pt font.
+
+The fix has two parts. First, the table is SPLIT across sheets along the
+boundaries of its own column groups ("by age", "by education", "by occupation",
+"by subject (UDC)" …), the way a paper ledger unfolds: groups are never cut in
+half, so a printed "Total" always sits next to the breakdown it sums. The "Day"
+column repeats on every sheet, and the heading carries "sheet N of M" plus the
+names of that sheet's groups. Second, every sheet is PINNED to the paper
+(`table-layout:fixed` + `colgroup`), because splitting alone was not enough — 20
+columns still came to 1137 px against 1063 px usable. Width no longer depends on
+content, so no future longer label can push a column off the page. The long note
+"of which used in the reading room (not included in the totals above)" is a
+ONE-column group whose heading became ten lines tall under pinned widths — on
+paper only the group name remains and the note moves below the table. On screen
+the full label is unchanged. A marker sits between sheets, shown in the preview
+as a line labelled "нов лист", so what is approved is what is printed. Final
+measurement: 0 px off the sheet for both documents.
+
+**The third card in "Reports and statistics" ran 393 px off screen.** One long
+title from the database stretched its column and pushed the numbers of "Most
+requested documents" out of view, with no horizontal scrollbar (it lives on
+`#view`, not the page). At 1280 px it was 479 px. The cause: `1fr` in CSS is
+shorthand for `minmax(auto, 1fr)`, whose lower bound is the width at which
+content stops being clipped. The same defect was patched for the dashboard alone
+in v2.4.52; it is now closed for every grid at once (`.grid.g2/.g3/.g4` plus
+`min-width:0` on the cards), because it recurs with every new card that shows
+text from the database. Verified against the real document form at 1366 px — no
+field shrinks below 60 px.
+
+**Overdue buckets on the dashboard now count whole days.** `julianday('now')`
+carries the time of day, so a loan due EXACTLY 7 days ago produced a difference
+of 7.6 days and fell into the "8–30 days" bucket — a bucket whose label claims
+at least eight days late. Same at 30 and at 60 ("Overdue over 60 days" counted a
+loan exactly 60 days late). Meanwhile the fines desk counts WHOLE days
+(`effectiveDaysLate`), so the dashboard and the desk gave two different answers
+for the same loan. Dates are now compared with dates.
+
+**Revoking a deaccession act now says what it does not undo.** Creating an act
+cancels active reservations on the deaccessioned documents — that is correct.
+Revoking it does NOT resurrect them, and that stays deliberate (decided in an
+earlier round: revoking corrects the register, it does not turn back time in the
+reading room; a reader told the book is gone should not find themselves back in
+a queue they did not join). What was broken was different: the reservation
+vanished WITHOUT TRACE. Nothing recorded which act had cancelled it, the
+"Reservations" screen shows only active ones, and the audit entry on revocation
+said only "documents returned to the fund" — the librarian found out only if the
+reader came asking. Now the reservation carries the act's id and a snapshot of
+its previous state, the audit entry states how many reservations the act
+cancelled and that they REMAIN cancelled, and the window shows an amber warning
+(not a green "done") telling the librarian to reinstate them by hand.
+
+**The border of every input and dropdown is now visible.** WCAG 2.1 SC 1.4.11
+requires at least 3:1 for the boundary by which a control is recognised.
+Measured, `--rule2` on paper gives between 1.34:1 and 2.30:1 — not one of the
+seven themes met the threshold: the inventory-number field, the department
+dropdown and the buttons blended into the background. A separate `--field` token
+was introduced for genuine controls only (inputs, selects, buttons, UDC chips),
+in each theme's own hue and with contrast verified against `--paper`, `--paper2`,
+`--paper3` and white. `--rule2` stays for dividers and card borders, where no
+requirement applies.
+
+**Small but real:** checkboxes were 13×13 px (the browser default) against the
+24 px target of WCAG 2.5.8 — now 17 px with spacing and a cursor that says they
+are clickable, including the row checkboxes in the registers (bulk-edit and
+showcase selection), the most frequently clicked of all. `.chk` was defined in TWO places in style.css with different
+colours and without `cursor:pointer`, and `.badge` in two places, the first
+without background or text colour; the later rule won, so the earlier ones were
+dead code waiting for someone to swap their order. Both are merged into one rule
+each. The test that "protected" the `.badge` duplication was corrected to require
+a single rule.
+
+Checks: 16 new tests (test/docs-v2454.test.js), 35 mutations of the real code,
+each reverted and re-run — all caught by a named test; plus a control mutation
+that must pass, and does. The documents were re-rendered in a real Chromium and
+re-measured: 0 px off the sheet. Full suite: 1,475 passing, 0 failing (UTC and
+Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
+
 ## v2.4.53
 
 **BG:** Преглед на таблото от v2.4.52 — една истинска грешка, намерена с

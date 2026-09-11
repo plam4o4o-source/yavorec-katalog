@@ -142,19 +142,27 @@ function prTable(headers, rows, valCol) {
 }
 function reportPrintHtml(r) {
   if (r.id === 'annual_ab') {
+    /* Същите колони като в Дневника — и същото разделяне по листове. Измерено:
+       на А4 пейзаж с поле 10 mm полезната ширина е 1047 px, а таблицата излиза
+       2073 px, тоест 987 px (47 %) от ГОДИШНИЯ СТАТИСТИЧЕСКИ ОТЧЕТ се режеха от
+       принтера. Виж бележката при dnevnikPrintPages() в dnevnik.js. */
     const rowHtml = (cols) => `<tr><td>За ${r.year} г.</td>${cols.map(([k]) => `<td>${dnevnikCell(r.totals, k)}</td>`).join('')}</tr>`;
+    const section = (title, cols, firstSection) => {
+      const pages = dnevnikPrintPages(cols);
+      return pages.map((page, i) => `
+        ${(firstSection && !i) ? '' : '<div class="pbreak"></div>'}
+        <div class="pmeta"><b>${esc(title)}</b>${pages.length > 1
+          ? ` · лист ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
+        <table class="dnvPrint"><colgroup><col style="width:11%">${
+          page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
+        ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
+        <tr><th></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups)}`).join('');
+    };
     return `
       <div class="pmeta">${reportCoverageNote(r)}</div>
-      <div class="pmeta"><b>А. РЕГИСТРИРАНЕ НА ЧИТАТЕЛИТЕ И ПОСЕЩЕНИЯТА</b></div>
-      <table style="font-size:7.5pt"><thead>
-      ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS)}
-      <tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
-      <tbody>${rowHtml(DNEVNIK_A_COLS)}</tbody></table>
-      <div class="pmeta" style="margin-top:6mm"><b>Б. РЕГИСТРИРАНЕ НА ЗАЕТИТЕ КНИГИ, ПЕРИОДИЧНИ ИЗДАНИЯ И ДРУГИ МАТЕРИАЛИ</b></div>
-      <table style="font-size:7.5pt"><thead>
-      ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
-      <tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
-      <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table>`;
+      ${section('А. РЕГИСТРИРАНЕ НА ЧИТАТЕЛИТЕ И ПОСЕЩЕНИЯТА', DNEVNIK_A_COLS, true)}
+      ${section('Б. РЕГИСТРИРАНЕ НА ЗАЕТИТЕ КНИГИ, ПЕРИОДИЧНИ ИЗДАНИЯ И ДРУГИ МАТЕРИАЛИ', DNEVNIK_B_COLS, false)}`;
   }
   if (r.id === 'fund_breakdown') {
     return `

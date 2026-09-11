@@ -118,13 +118,22 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          разликата между три дни и три месеца е разликата между напомняне и акт по
          чл. 30. Броенето е в SQL по същото условие като `overdueCount` — по
          КАЛЕНДАРНИ дни, защото е групиране на едро; точните дни забава (с
-         приспаднати затворени дни) стоят на реда във всеки от седемте показани. */
+         приспаднати затворени дни) стоят на реда във всеки от седемте показани.
+
+         ДЕНЯТ СЕ БРОИ ОТ ПОЛУНОЩ ДО ПОЛУНОЩ: `julianday('now')` носи и ЧАСА, а
+         `julianday(date_due)` е полунощ, тоест разликата за срок отпреди точно
+         седем дни е 7,6 в шест вечерта и никога не е равна на 7. Така граничният
+         случай всеки ден попадаше в ПО-ТЕЖКАТА група: книга с точно седем дни
+         забава се броеше в „8–30“, а с точно трийсет — в червеното „над 30“,
+         откъдето се тръгва към акт по чл. 30. Затова се вади цялата дата
+         (`julianday(date('now'))`), а не моментът. Същият клас грешка беше
+         поправен в заеманията по седмици при прегледа на v2.4.52. */
       const overdueBuckets = db.prepare(`
         SELECT
-          SUM(CASE WHEN julianday('now') - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
-          SUM(CASE WHEN julianday('now') - julianday(date_due) > 7
-                    AND julianday('now') - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
-          SUM(CASE WHEN julianday('now') - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 7
+                    AND julianday(date('now')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
         FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')
       `).get();
       for (const k of ['d7', 'd30', 'more']) overdueBuckets[k] = overdueBuckets[k] || 0;
@@ -167,9 +176,14 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         WHERE status = 'активен' AND name != ?
           AND date(COALESCE(re_registered_at, registered_at), '+1 year') <= date('now', '+14 days')
       `).get(ANON_READER_NAME).n;
+      /* Пак от полунощ до полунощ — виж бележката при overdueBuckets. Дотук
+         „Просрочие над 60 дни — преценете «липсваща»“ броеше и заемането с точно
+         60 дни забава, тоест подканваше да се отпише документ един ден по-рано,
+         отколкото самият праг казва. */
       const longOverdue = db.prepare(`
         SELECT COUNT(*) AS n FROM loans
-        WHERE date_in IS NULL AND date_due IS NOT NULL AND julianday('now') - julianday(date_due) > 60
+        WHERE date_in IS NULL AND date_due IS NOT NULL
+          AND julianday(date('now')) - julianday(date_due) > 60
       `).get().n;
       const sAnon = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
       const anonYears = parseInt(sAnon.anonymize_years, 10) || 0;

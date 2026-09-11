@@ -125,18 +125,28 @@ test('просрочията се разделят на три взаимно и
   const d = (await app.invoke('dashboard:full')).data;
   const b = d.overdueBuckets;
   const indep = db.prepare(`SELECT
-      SUM(CASE WHEN julianday('now') - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
-      SUM(CASE WHEN julianday('now') - julianday(date_due) > 7
-                AND julianday('now') - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
-      SUM(CASE WHEN julianday('now') - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 7
+                AND julianday(date('now')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
     FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get();
   assert.deepEqual([b.d7, b.d30, b.more], [indep.d7, indep.d30, indep.more]);
-  /* [3, 7, 4], а не [4, 7, 3]: срок отпреди точно 7 дни дава 7,оо дни разлика,
-     защото julianday('now') носи и часа — тоест минава в следващата група. Това е
-     ВЯРНОТО поведение (закъснението е повече от седем цели дни) и тук се заковава
-     нарочно, за да не се промени мълчаливо при следващо пипане на условието. */
-  assert.deepEqual([b.d7, b.d30, b.more], [3, 7, 4],
+  /* ПОПРАВЕНО В v2.4.54 — тук стоеше [3, 7, 4] и обяснение, че така е вярно.
+     Не е. julianday('now') носи и ЧАСА, затова срок отпреди точно 7 дни даваше
+     7,6 дни разлика и попадаше в групата „8–30 дни“ — група, чийто етикет
+     твърди, че закъснението е поне осем дни. Просрочие от точно 7 дни е 7 дни,
+     не 8; същото и на границите 30 и 60. Освен това касата брои ЦЕЛИ дни
+     (effectiveDaysLate в handlers/loans.js), тоест таблото и касата даваха два
+     различни отговора за един и същи заем. date('now') маха часа и двете вече
+     съвпадат. Сега [4, 7, 3]: заемът точно на 7 дни е в първата група. */
+  assert.deepEqual([b.d7, b.d30, b.more], [4, 7, 3],
     'фикстурата дава точно тези три групи, при това с попадения на самите граници');
+  // Границата се проверява и поотделно, не само през общата сума: заем с падеж
+  // отпреди РОВНО 7 дни трябва да е в „до 7 дни“, независимо в колко часа
+  // библиотекарката е отворила таблото.
+  const exactly7 = db.prepare(`SELECT COUNT(*) AS n FROM loans
+    WHERE date_in IS NULL AND date_due = date('now','-7 days')`).get().n;
+  assert.ok(exactly7 > 0, 'фикстурата трябва да съдържа заем точно на границата');
   assert.equal(b.d7 + b.d30 + b.more, d.overdueCount,
     'трите групи трябва да се събират до общия брой — иначе показателят си противоречи');
 });
@@ -346,9 +356,18 @@ test('колоните на таблото делят ширината пора�
     'всеки клас за решетка носи собствено display:grid — иначе редът се разпада вертикално');
   assert.match(CSS, /\.grid\.dashGrid > \.card\{min-width:0\}/,
     'елементът на решетка е с min-width:auto по подразбиране — иначе minmax(0,1fr) не помага');
-  // Общият .grid.g3 НЕ е пипан: ползва се и във формулярите, където полетата имат
-  // собствена най-малка ширина.
-  assert.match(CSS, /\.grid\.g3\{display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px\}/);
+  /* v2.4.54: общият .grid.g3 ВЕЧЕ Е ПИПАН — и това е нарочно. В v2.4.52 тук стоеше
+     обратното („не е пипан, защото се ползва и във формулярите“), но точно същият
+     дефект изскочи пак на следващия екран: в „Справки и статистика“ едно дълго
+     заглавие от базата избутваше третата карта 393 px извън екрана при 1366 px.
+     Проверено с истински полета във формуляра за документ при 1366 px — нито едно
+     поле не пада под 60 px, защото полетата и без това са width:100%. */
+  assert.match(CSS, /\.grid\.g3\{display:grid; grid-template-columns:repeat\(3, minmax\(0, 1fr\)\); gap:10px\}/,
+    'общата решетка също не бива да се разтяга от съдържанието си');
+  assert.match(CSS, /\.grid\.g2\{display:grid; grid-template-columns:repeat\(2, minmax\(0, 1fr\)\); gap:10px\}/);
+  assert.match(CSS, /\.grid\.g4\{display:grid; grid-template-columns:repeat\(4, minmax\(0, 1fr\)\); gap:10px\}/);
+  assert.match(CSS, /\.grid\.g2 > \.card, \.grid\.g3 > \.card, \.grid\.g4 > \.card\{min-width:0\}/,
+    'без min-width:0 на картата minmax(0,1fr) пак не помага');
 });
 
 test('заглавието на реда се съкращава с многоточие, а пълното остава в подсказката', async () => {
