@@ -229,7 +229,18 @@ test('криптираното копие не оставя некриптира
      папката с резервните копия, която по документиран сценарий е мрежов дял, и
      съдържа ЕГН и № на лична карта на всички читатели в чист вид. */
   const src = fs.readFileSync(path.join(__dirname, '..', 'handlers', 'backup.js'), 'utf8');
-  const doBackup = src.slice(src.indexOf('function doBackupTo'), src.indexOf('function pruneOldAutoBackups'));
+  /* Границите на откъса се промениха, а проверяваното поведение — не. Самият
+     запис на копието вече живее в writeRawBackupTo(): над него застана
+     doBackupTo(), което пише настрани, ПРОВЕРЯВА файла (SQLite integrity_check)
+     и чак тогава го преименува на крайното име — вече и за НЕкриптираните
+     копия, не само за криптираните. Старият откъс „function doBackupTo …
+     function pruneOldAutoBackups“ днес хваща само тази обвивка, в която
+     наистина няма нито ред за временния файл, тоест тестът щеше да се скъса за
+     поправка, която не е нарушил никой. Затова откъсът обхваща и двете функции;
+     същината е непроменена: некриптираната снимка с ЕГН-тата на читателите не
+     бива да се пише в папката с копията (често мрежов дял), а в локалната
+     временна папка. */
+  const doBackup = src.slice(src.indexOf('function writeRawBackupTo'), src.indexOf('function parseAutoName'));
   assert.ok(!/destPath \+ '\.plain-tmp'/.test(doBackup),
     'некриптираната снимка не бива да се пише до крайната цел');
   assert.match(doBackup, /app\.getPath\('temp'\)/, 'временният файл отива в локалната временна папка');
