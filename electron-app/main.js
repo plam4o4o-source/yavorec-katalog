@@ -1021,6 +1021,59 @@ ipcMain.handle('app:checkForUpdates', () =>
 );
 ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall(); }));
 
+/* ---------------- Анонимно отчитане на инсталацията (v2.4.56) ----------------
+   Целият механизъм, заедно с изчерпателния списък какво се изпраща и какво
+   НЕ се изпраща, е в install-report.js. Тук стои само свързването:
+
+   • Върви САМО в инсталираната програма — както при автообновяването. При
+     `npm start` и в тестовете (които зареждат истинския main.js) не се пуска
+     нищо; иначе броячът щеше да отчита разработката и CI като библиотеки.
+   • Не се чака: викa се БЕЗ await, след като прозорецът вече е създаден.
+     Стартирането не зависи по никакъв начин от изхода.
+   • Не хвърля навън НИЩО, дори синхронно. Цялото тяло е в try/catch, а не
+     само обещанието: докато install-report.js липсваше в `build.files`,
+     require() хвърляше — но ЕДИНСТВЕНО в инсталираната програма, тоест
+     точно там, където никой разработчик не гледа. Оттам грешката влизаше в
+     общия .catch на whenReady и показваше „Стартирането пропадна“:
+     отчитането на инсталации щеше да СПРЕ програмата на всяка библиотека.
+     Хванато от test/build-files-coverage.test.js; тук стои и вторият пояс,
+     защото нищо в този модул не бива да е условие за стартиране.
+   • Изключване: ред `"installReporting": false` в config.json на машината. */
+function initInstallReport() {
+  if (!app.isPackaged) return;
+  /* setImmediate, а не направо: преди първия `await` в модула има синхронна
+     работа — require(), четене на config.json, а при първо пускане и запис на
+     файл. Милисекунди са, но нямат работа в тика, който показва прозореца:
+     „не блокира стартирането“ трябва да е вярно буквално, не приблизително. */
+  setImmediate(() => {
+    try {
+      initInstallReportUnsafe();
+    } catch (err) {
+      console.warn('Отчитане на инсталацията не се пусна:', err && err.message);
+    }
+  });
+}
+function initInstallReportUnsafe() {
+  const installReport = require('./install-report');
+  const os = require('os');
+  const crypto = require('crypto');
+  installReport.reportInstall({
+    fs, path,
+    userDataDir: app.getPath('userData'),
+    version: app.getVersion(),
+    platform: process.platform,
+    release: os.release(),
+    randomUUID: () => crypto.randomUUID(),
+    fetch: (net && typeof net.fetch === 'function') ? net.fetch.bind(net) : undefined,
+    enabled: readConfig().installReporting !== false,
+    log: (level, msg) => (level === 'warn' ? console.warn(msg) : console.error(msg))
+  }).then((code) => {
+    if (code === 'registered' || code === 'sent') logToFile('info', 'Отчитане на инсталацията: ' + code);
+  }).catch((err) => {
+    console.warn('Отчитане на инсталацията пропадна:', err && err.message);
+  });
+}
+
 let mainWindow;
 
 /* Само едно копие на програмата наведнъж. Без това всяко следващо щракване върху
@@ -1092,6 +1145,10 @@ app.whenReady().then(() => {
   startAutoPushTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
+  /* Последно в реда нарочно: прозорецът вече е създаден, базата — отворена.
+     Нищо по-долу не зависи от изхода, а самата функция не хвърля (виж
+     initInstallReport по-горе). */
+  initInstallReport();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });
