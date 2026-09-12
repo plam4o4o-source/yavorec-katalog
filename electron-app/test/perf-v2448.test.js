@@ -147,7 +147,7 @@ test('акт за много документи се съставя и анул�
   assert.equal(off, ids.length, 'всички трябва да са отчислени');
 
   const t1 = Date.now();
-  const rv = await app.invoke('deaccessionActs:revoke', actId);
+  const rv = await app.invoke('deaccessionActs:revoke', actId, { reason: 'сгрешен акт (тест)' });
   const msRevoke = Date.now() - t1;
   assert.equal(rv.ok, true, rv.error);
 
@@ -158,7 +158,12 @@ test('акт за много документи се съставя и анул�
     assert.equal(b.deaccession_act_id, null);
     assert.equal(b.deaccession_date, null);
   }
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM deaccession_acts WHERE id = ?').get(actId).n, 0);
+  /* v2.4.56: актът НЕ се трие при анулиране — той е документ по чл. 39, а и
+     номерът му не бива да отива на друг акт (чл. 35). Редът остава, отбелязан
+     като анулиран, а всяко броене на отчислени го подминава. */
+  const revokedAct = db.prepare('SELECT revoked_at, no FROM deaccession_acts WHERE id = ?').get(actId);
+  assert.ok(revokedAct, 'редът на акта остава');
+  assert.ok(revokedAct.revoked_at, 'и носи дата на анулиране');
 
   /* Измерено при 2 000 документа преди поправката: 223 ms за съставянето и
      212 ms за анулирането; след нея — 126 ms и 45 ms. При тези 1 200 праговете

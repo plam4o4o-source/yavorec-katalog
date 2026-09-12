@@ -151,7 +151,15 @@ async function renderReaders() {
       <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
     <div class="wrap"><table class="ledger readersTable">
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th></th></tr></thead>
+      ${/* Заглавната клетка на колоната с действията носи същия клас `actsCell`
+            като клетките под нея (одит v2.4.56). Без него тя е обикновена <th>:
+            когато таблицата все пак се превърти настрани, залепените клетки с
+            копчетата стоят на място, а празната заглавна клетка над тях отплува
+            вляво и горният ред се разминава с тялото. Класът е и мястото, от
+            което style.css хваща `th.actsCell` за фона и слоя (z-index) —
+            заглавният ред трябва да е НАД тялото, иначе първият ред минава
+            върху него при вертикално превъртане. */''}
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th class="actsCell"></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, total)}</div>
@@ -247,6 +255,8 @@ async function readerForm(id) {
   if (id) {
     const f = $('#readerF');
     f.dataset.id = id;
+    // Отпечатъкът на реда към момента на отварянето — виж saveReader по-долу.
+    if (r && r._rev) f.dataset.rev = r._rev;
     f.dataset.snapshot = JSON.stringify(formData('#readerF'));
   }
 }
@@ -280,6 +290,11 @@ async function saveReader(id) {
     return toast('За читател под 14 г. посочете родител/настойник (гарант).', 'err');
   }
   d.id = id;
+  /* Отпечатъкът от отварянето (v2.4.56) — виж assertUnchanged в
+     security-utils.js. Без него записът заличаваше мълчаливо промяна, направена
+     междувременно от другото работно място. */
+  const rf = $('#readerF');
+  if (rf && rf.dataset.rev) d._rev = rf.dataset.rev;
   // readers:create връща id на новия запис — редът му светва след пререндирането
   // (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
   // v2.2.0: прозорецът се затваря САМО при успех — иначе отхвърлен запис

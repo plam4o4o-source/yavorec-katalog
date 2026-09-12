@@ -101,11 +101,28 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
        пауза при писане. */
     let s;
     if (!offset && page.summary !== false) {
+      /* ---- Документи БЕЗ дата на вписване (одит v2.4.56) ---------------------
+         Инвентарната книга брои фонда по СЪСТОЯНИЕТО (status != 'отчислен'), а
+         КДБФ (handlers/kdbf.js, stockAt/acquiredYear) — по ДАТИТЕ: register_date
+         до 31.12 и deaccession_date. Документ без дата на вписване влиза в първото
+         число и изпада от второто: NULL не изпълнява `register_date <= ?`, а
+         substr('',1,4) не е година. Тоест двата екрана показват различен „фонд“ и
+         дотук само КДБФ казваше защо (виж kdbfUndatedNote в src/views/kdbf.js) —
+         инвентарната книга мълчеше и в главата ѝ стоеше просто „Фонд по
+         инвентарната книга: N документа“. Библиотекар, който съгласува двете
+         числа преди годишния отчет, нямаше откъде да разбере откъде идва
+         разликата; при проверка разминаването изглежда като сгрешена справка.
+         Числото НЕ се променя — само се обявява, точно както в КДБФ.
+         Броят се редовете, които участват в ГОРНОТО число (неотчислените): за
+         отчислените датата на вписване вече не мести нито един сбор. */
+      const UNDATED_ACTIVE = "(b.register_date IS NULL OR b.register_date = '') AND (b.status != 'отчислен' OR b.status IS NULL)";
       s = db.prepare(`
         SELECT COUNT(*) AS rows,
                COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS activeCopies,
                COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(b.price, 0) * COALESCE(i.quantity, 1) ELSE 0 END), 0) AS value,
-               COALESCE(SUM(CASE WHEN b.status = 'отчислен' THEN 1 ELSE 0 END), 0) AS deacc
+               COALESCE(SUM(CASE WHEN b.status = 'отчислен' THEN 1 ELSE 0 END), 0) AS deacc,
+               COALESCE(SUM(CASE WHEN ${UNDATED_ACTIVE} THEN 1 ELSE 0 END), 0) AS undatedRows,
+               COALESCE(SUM(CASE WHEN ${UNDATED_ACTIVE} THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS undatedCopies
         FROM books b LEFT JOIN inventory i ON i.book_id = b.id`).get();
       s.checked = db.prepare('SELECT COUNT(DISTINCT book_id) AS n FROM inventory_checks').get().n;
     }

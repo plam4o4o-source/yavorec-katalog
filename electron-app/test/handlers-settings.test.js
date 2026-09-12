@@ -48,7 +48,12 @@ function fullSettingsPayload(overrides = {}) {
     fine_per_day: 0.05, annual_fee: 0, free_access_pct: 60,
     next_inv_number: 1, committee1: null, committee2: null, committee3: null,
     sru_endpoint: null, suspend_per_day: 0, suspend_max: 90,
-    remind2_days: 14, remind3_days: 30, anonymize_years: 0
+    remind2_days: 14, remind3_days: 30, anonymize_years: 0,
+    /* v2.4.56: обезщетението за изгубен документ. better-sqlite3 изисква ВСИЧКИ
+       именувани параметри на UPDATE-а да присъстват в подадения обект — затова
+       новото поле в handlers/settings.js трябва да се появи и тук, иначе тестът
+       пада с „Missing named parameter“, а не защото нещо е сбъркано. */
+    lost_price_multiplier: null, lost_fallback_amount: null
   }, overrides);
 }
 

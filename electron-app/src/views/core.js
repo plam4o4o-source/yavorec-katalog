@@ -802,7 +802,12 @@ function fld(label, name, opts) {
   return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
       ${opts.min != null ? 'min="' + esc(String(opts.min)) + '"' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''} ${opts.onkey ? `onkeydown="${opts.onkey}"` : ''}
-      ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''} value="${esc(val)}"></div>`;
+      ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''}
+      ${/* readonly, а НЕ disabled (v2.4.56): disabled полето не влиза във formData(),
+           тоест стойността просто изчезва от записа. readonly го показва, не го
+           дава за редакция и пак го изпраща — точно каквото трябва на номера на
+           вече вписана партида. */''}
+      ${opts.ro ? 'readonly' : ''} value="${esc(val)}"></div>`;
 }
 
 /* ---------------- Проверка на задължителните полета преди запис ----------------

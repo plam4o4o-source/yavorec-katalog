@@ -5,6 +5,9 @@
 // сменят видимостта на документи в онлайн каталога, затова насрочват
 // запис на katalog.json, точно както shelves.js).
 const { isValidIsoDate, parseRegisterNo, resolveScannedBook } = require('../security-utils');
+/* Покритието на начислението за изгубен документ се смята на ЕДНО място — в
+   handlers/account.js, където живее и правилото „най-старото задължение първо“. */
+const { chargeCoverage } = require('./account');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
@@ -53,13 +56,110 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     const holdCols = db.prepare('PRAGMA table_info(holds)').all();
     if (!holdCols.some(c => c.name === 'deaccession_act_id')) db.exec('ALTER TABLE holds ADD COLUMN deaccession_act_id INTEGER');
     if (!holdCols.some(c => c.name === 'status_before')) db.exec('ALTER TABLE holds ADD COLUMN status_before TEXT');
+    /* АКТЪТ Е ДОКУМЕНТ, НЕ ЗАПИС В ПРОГРАМАТА (v2.4.56).
+       =================================================================
+       Дотук „анулиране“ означаваше DELETE FROM deaccession_acts, а редовете на
+       акта падаха след него по ON DELETE CASCADE. Това противоречи на Наредба
+       № 3 в три отделни точки наведнъж:
+
+         чл. 35 — актът се съставя от комисия (библиотекар и счетоводител), в ДВА
+           екземпляра, и се УТВЪРЖДАВА от ръководителя. Подписаният екземпляр е в
+           счетоводството и никакво действие в програмата не може да го отмени;
+         чл. 35 — „актовете се номерират, като започват всяка календарна година
+           от номер едно“. След триене nextNo (MAX(no)+1) връщаше освободения
+           номер на СЪВСЕМ ДРУГ акт — два различни подписани акта № 9/2026;
+         чл. 39 — документацията по отчисляването се съхранява. А тук тя се
+           изтриваше, при това заедно със снимката по чл. 35, ал. 2.
+
+       Практическата последица: КДБФ Приложение № 3 за минала година, вече
+       отпечатано и подписано, при следващ печат излизаше различно.
+
+       Оттук нататък актът НЕ се трие никога. Анулирането само го отбелязва:
+       редът остава, номерът остава зает, редовете (снимката) остават, а КДБФ
+       Част № 3 го показва зачертан, с бележка и с нула в сборовете.
+
+       Другата половина на поправката е ПРОЕКТЪТ (виж deaccession_drafts
+       по-долу): щом актът е вечен, трябва да има къде да се сгреши, преди да
+       стане документ. Дотук нямаше — един клик върху „Утвърди акта и отчисли“
+       и сгрешеният акт вече беше съставен, тоест триенето беше ЕДИНСТВЕНАТА
+       поправка. Затова точно то се е ползвало. */
+    const actCols = db.prepare('PRAGMA table_info(deaccession_acts)').all();
+    if (!actCols.some(c => c.name === 'revoked_at')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoked_at TEXT');
+    if (!actCols.some(c => c.name === 'revoke_reason')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoke_reason TEXT');
+    if (!actCols.some(c => c.name === 'revoked_by')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoked_by TEXT');
+    /* Проектът живее в СВОЯ таблица, не като ред в deaccession_acts с празен
+       номер. Причината е практична: „акт“ се чете от шест места (КДБФ, таблото,
+       статистиката, инвентарната книга, справките), а deaccession_acts.no е
+       NOT NULL в схемата и не може да стане NULL без пренаписване на таблицата
+       в бази, които вече работят. Отделната таблица оставя всичките шест места
+       непокътнати: проект просто не съществува за тях — както и в живота.
+       Снимката по чл. 35, ал. 2 се прави в мига на УТВЪРЖДАВАНЕТО, не по-рано:
+       дотогава документите са си във фонда и могат да се променят. */
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS deaccession_drafts (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        date        TEXT,
+        order_no    TEXT,
+        reason_code INTEGER,
+        reason_text TEXT,
+        disposal    TEXT,
+        attach      TEXT,
+        committee1  TEXT,
+        committee2  TEXT,
+        committee3  TEXT,
+        note        TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS deaccession_draft_items (
+        draft_id INTEGER NOT NULL REFERENCES deaccession_drafts(id) ON DELETE CASCADE,
+        book_id  INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+        PRIMARY KEY (draft_id, book_id)
+      );
+    `);
     loanActColumnChecked = db;
   }
+
+  /* Утвърден и НЕанулиран — това и само това е „акт“ за всички сборове.
+     Условието „revoked_at IS NULL“ е дублирано (нарочно, не по грешка) в
+     handlers/kdbf.js, handlers/stats.js (два пъти) и handlers/dashboard.js —
+     всяко от тях държи собствена SQL заявка и не internal-import-ва оттук.
+     (По-рано тук стоеше неизползвана локална константа ACT_LIVE с коментар,
+     който твърдеше обратното — премахната при прегледа за v2.4.57.) */
 
   /* „Отчислен с акт“ = има акт или дата на отчисляване. Самият статус не стига:
      редове със status='отчислен' без акт идват от внос на стара таблица и по
      чл. 35, ал. 2 НЕ са отчислени — тепърва им трябва акт. */
   const deaccessionedByAct = (b) => b.deaccession_act_id != null || b.deaccession_date != null;
+
+  /* Последното приключено като „изгубен“ заемане на този документ, заедно с
+     покритието на начислението. Чете се през handlers/account.js, защото там
+     живее правилото „най-старото задължение се плаща първо“ — второ копие тук
+     би се разминало с касата при първата промяна. Колоните може да липсват в
+     база, която още не е минала през handlers/loans.js, затова проверката е
+     защитена и при липса просто не се показва нищо. */
+  function lostInfo(db, bookId) {
+    try {
+      const cols = db.prepare('PRAGMA table_info(loans)').all();
+      if (!cols.some(c => c.name === 'lost')) return null;
+      const row = db.prepare(`
+        SELECT l.lost_date, l.lost_resolution, l.lost_amount, l.lost_account_line_id,
+               l.lost_replacement_note, r.name AS reader_name
+        FROM loans l LEFT JOIN readers r ON r.id = l.reader_id
+        WHERE l.book_id = ? AND COALESCE(l.lost,0) = 1
+        ORDER BY l.lost_date DESC, l.id DESC LIMIT 1`).get(bookId);
+      if (!row) return null;
+      if (row.lost_account_line_id && chargeCoverage) {
+        row.charge = chargeCoverage(db, row.lost_account_line_id);
+      }
+      return row;
+    } catch (err) {
+      /* Не бива да блокира съставянето на акт: без тази допълнителна бележка
+         актът е верен, просто по-беден. Следата казва защо липсва. */
+      logAudit('Отчисляване', 'ВНИМАНИЕ: данните за изгубения документ не можаха да се прочетат: ' + err.message);
+      return null;
+    }
+  }
 
   ipcMain.handle('deaccessionActs:list', () =>
     run(() => getDb().prepare(`
@@ -115,12 +215,19 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     if (!b || deaccessionedByAct(b)) return undefined;
     const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
     b.fund_qty = q ? q.quantity : null;
+    /* Ако документът е приключен като ИЗГУБЕН (v2.4.56), актът по чл. 30, т. 5
+       трябва да носи и това: кой читател го е изгубил, какво е уредено (пари или
+       замяна) и дали обезщетението е СЪБРАНО. Дотук трите неща се правеха като
+       три несвързани действия и никъде не оставаше, че този акт е покрит с
+       обезщетение — а точно това пита счетоводството, когато приеме акта. */
+    b.lost = lostInfo(db, b.id);
     return b;
   }));
-  ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
-    run(() => {
-      const db = getDb();
-      ensureLoanActColumn(db);
+  /* Съставянето е ИЗНЕСЕНО във функция (v2.4.56), за да може утвърждаването на
+     проект да мине през ТОЧНО същия код — същите проверки, същата снимка по
+     чл. 35, ал. 2, същият номер, същата следа. Втора, „почти същата“ пътека за
+     утвърждаване е най-сигурният начин двата пътя да се разминат след година. */
+  function createActCore(db, act, bookIds) {
       /* Реадит след v2.4.0 (доп. находка): act.date влизаше НЕВАЛИДИРАНА право в
          loans.date_in, books.status_date и books.deaccession_date — точно
          същата дупка, която isValidIsoDate() (security-utils.js, одит v2.3.1)
@@ -256,14 +363,33 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
         // `no`, а не `act.no`: parseRegisterNo() вече е нормализирал „007“ до 7 —
         // следата трябва да сочи номера, който Е ВПИСАН в регистъра.
+        /* Изгубените документи в акта се назовават поименно в следата (v2.4.56):
+           „акт по чл. 30, т. 5“ и „има начислено обезщетение, събрано/несъбрано“
+           са двете страни на едно и също събитие и дотук не се срещаха никъде. */
+        const lostLines = bookIds.map(id => lostInfo(db, id)).filter(Boolean);
+        const lostNote = lostLines.length
+          ? '; изгубени от читатели: ' + lostLines.length + ' — ' + lostLines.map(l =>
+              (l.reader_name || 'читател') + ': ' + (l.lost_resolution || 'уреждане неотбелязано')
+              + (l.charge
+                  ? ' (начислено ' + (l.charge.charged || 0).toFixed(2) + ' €, събрано '
+                    + (l.charge.covered || 0).toFixed(2) + ' €)'
+                  : (l.lost_amount ? ' (начислението е изтрито от сметката)' : ''))).join('; ')
+          : '';
         logAudit('Отчисляване', 'акт № ' + no + '/' + year + ' — ' + docCount + (docCount === 1 ? ' документ' : ' документа')
           + (docCount !== bookIds.length ? ' (' + bookIds.length + ' заглавия)' : '')
           + ', причина: ' + act.reason_text
-          + (cancelledHolds ? (' (' + (cancelledHolds === 1 ? 'отказана 1 резервация' : 'отказани ' + cancelledHolds + ' резервации') + ' на отчислените документи)') : ''));
+          + (cancelledHolds ? (' (' + (cancelledHolds === 1 ? 'отказана 1 резервация' : 'отказани ' + cancelledHolds + ' резервации') + ' на отчислените документи)') : '')
+          + lostNote);
         return actId;
       });
-      // .immediate() — виж проверката на номера в транзакцията по-горе.
-      const actId = tx.immediate();
+      // .immediate() — виж проверката на номера в транзакцията по-горе. Когато
+      // createActCore се вика ОТВЪТРЕ в чужда транзакция (утвърждаване на проект),
+      // better-sqlite3 я превръща в savepoint и режимът се пренебрегва — точно
+      // каквото е нужно: актът и изтриването на проекта падат или минават заедно.
+      return tx.immediate();
+  }
+  /* Записът на каталога след съставяне на акт — общ за двата пътя. */
+  function afterActWritten(act) {
       /* Одит v2.3.1 №26: библиотека с точно 1 (последна) книга — отчисляването ѝ
          прави фонда празен, а предпазната мярка в main.js (writeCatalogIfConfigured:
          "не презаписвай непразен публикуван каталог с празен") коректно отказва
@@ -282,23 +408,164 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
           + ' не успя' + (w.error ? ': ' + w.error : '.') + ' Проверете папката за онлайн каталога в „Настройки“.');
       }
+  }
+  ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      const actId = createActCore(db, act, bookIds);
+      afterActWritten(act);
       return actId;
     })
   );
-  ipcMain.handle('deaccessionActs:revoke', (e, id) =>
+  /* ---------- ПРОЕКТ НА АКТ (v2.4.56) ----------
+     Проектът НЕ е документ: няма номер, нищо не е отчислено, документите стоят
+     във фонда и се заемат нормално. Може да се поправя и да се изтрива свободно,
+     защото нищо не е излизало от библиотеката. Става акт едва при „Утвърди“ —
+     тогава и само тогава се взима номер и се прави снимката по чл. 35, ал. 2.
+     Това е половината от поправката „актът не се трие“: щом актът е вечен,
+     грешките трябва да имат къде да се случат преди него. */
+  const DRAFT_FIELDS = ['date', 'order_no', 'reason_code', 'reason_text', 'disposal',
+    'attach', 'committee1', 'committee2', 'committee3', 'note'];
+  ipcMain.handle('deaccessionActs:drafts', () =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      return db.prepare(`
+        SELECT d.*, (SELECT COUNT(*) FROM deaccession_draft_items i WHERE i.draft_id = d.id) AS title_count
+        FROM deaccession_drafts d ORDER BY d.updated_at DESC
+      `).all();
+    })
+  );
+  ipcMain.handle('deaccessionActs:getDraft', (e, id) =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      const d = db.prepare('SELECT * FROM deaccession_drafts WHERE id = ?').get(id);
+      if (!d) return null;
+      /* Документите се четат ЖИВО от фонда, не от снимка — проектът още не е
+         документ и трябва да показва днешното състояние. Ако междувременно
+         някой е отчислил документ с друг акт, редът изчезва оттук сам. */
+      d.items = db.prepare(`
+        SELECT b.* FROM deaccession_draft_items i JOIN (${BOOK_SELECT}) b ON b.id = i.book_id
+        WHERE i.draft_id = ? ORDER BY b.inv_number
+      `).all(id).filter(b => !deaccessionedByAct(b));
+      return d;
+    })
+  );
+  ipcMain.handle('deaccessionActs:saveDraft', (e, { id, draft, bookIds }) =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      const ids = Array.isArray(bookIds) ? bookIds : [];
+      /* Проектът се записва и НЕПЪЛЕН — това му е работата. Проверките по
+         чл. 30 и чл. 35 (дата, причина, номер) се правят при утвърждаването. */
+      const vals = {};
+      DRAFT_FIELDS.forEach(k => { vals[k] = (draft && draft[k] !== undefined && draft[k] !== '') ? draft[k] : null; });
+      const tx = db.transaction(() => {
+        let draftId = id;
+        if (draftId) {
+          const ok = db.prepare(`UPDATE deaccession_drafts SET
+            date=@date, order_no=@order_no, reason_code=@reason_code, reason_text=@reason_text,
+            disposal=@disposal, attach=@attach, committee1=@committee1, committee2=@committee2,
+            committee3=@committee3, note=@note, updated_at=datetime('now') WHERE id=@id`)
+            .run(Object.assign({ id: draftId }, vals)).changes;
+          if (!ok) throw new Error('Проектът вече не съществува — вероятно е утвърден или изтрит от друго работно място.');
+          db.prepare('DELETE FROM deaccession_draft_items WHERE draft_id = ?').run(draftId);
+        } else {
+          draftId = db.prepare(`INSERT INTO deaccession_drafts
+            (date, order_no, reason_code, reason_text, disposal, attach, committee1, committee2, committee3, note)
+            VALUES (@date, @order_no, @reason_code, @reason_text, @disposal, @attach, @committee1, @committee2, @committee3, @note)`)
+            .run(vals).lastInsertRowid;
+        }
+        const ins = db.prepare('INSERT OR IGNORE INTO deaccession_draft_items (draft_id, book_id) VALUES (?, ?)');
+        ids.forEach(b => ins.run(draftId, b));
+        return draftId;
+      });
+      const draftId = tx.immediate();
+      logAudit('Проект за отчисляване', (id ? 'поправен' : 'записан') + ' проект № ' + draftId
+        + ' — ' + ids.length + (ids.length === 1 ? ' заглавие' : ' заглавия')
+        + (vals.reason_text ? ', причина: ' + vals.reason_text : ', без избрана причина')
+        + ' (проектът НЕ отчислява нищо — документите остават във фонда)');
+      return draftId;
+    })
+  );
+  ipcMain.handle('deaccessionActs:deleteDraft', (e, id) =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      /* Проект СЕ трие — за разлика от акта. Не е излизал от библиотеката, не е
+         подписван и не е вписан в КДБФ. Следа пак остава: иначе изчезването на
+         подготвена комисийна работа е необяснимо. */
+      const d = db.prepare('SELECT id FROM deaccession_drafts WHERE id = ?').get(id);
+      if (!d) throw new Error('Проектът не е намерен — вероятно вече е изтрит или утвърден.');
+      const n = db.prepare('SELECT COUNT(*) AS n FROM deaccession_draft_items WHERE draft_id = ?').get(id).n;
+      db.prepare('DELETE FROM deaccession_drafts WHERE id = ?').run(id);
+      logAudit('Проект за отчисляване', 'изтрит проект № ' + id + ' с ' + n
+        + (n === 1 ? ' заглавие' : ' заглавия') + ' — нищо не е отчислявано');
+      return true;
+    })
+  );
+  ipcMain.handle('deaccessionActs:approveDraft', (e, { id, no }) =>
+    run(() => {
+      const db = getDb();
+      ensureLoanActColumn(db);
+      const d = db.prepare('SELECT * FROM deaccession_drafts WHERE id = ?').get(id);
+      if (!d) throw new Error('Проектът не е намерен — вероятно вече е утвърден от друго работно място.');
+      const rows = db.prepare(`
+        SELECT b.* FROM deaccession_draft_items i JOIN (${BOOK_SELECT}) b ON b.id = i.book_id
+        WHERE i.draft_id = ?`).all(id);
+      const live = rows.filter(b => !deaccessionedByAct(b));
+      if (!live.length) {
+        throw new Error('Проектът няма нито един документ за отчисляване — или списъкът е празен, '
+          + 'или всички документи вече са отчислени с друг акт.');
+      }
+      const act = Object.assign({}, d, { no: no != null ? no : undefined });
+      if (act.no === undefined) {
+        const y = yearOf(d.date);
+        act.no = (db.prepare('SELECT MAX(no) AS m FROM deaccession_acts WHERE year = ?').get(y).m || 0) + 1;
+      }
+      /* Актът и изтриването на проекта падат или минават ЗАЕДНО. Иначе прекъсване
+         между двете оставя утвърден акт и жив проект — и второ утвърждаване
+         съставя втори акт за същите документи. */
+      const tx = db.transaction(() => {
+        const actId = createActCore(db, act, live.map(b => b.id));
+        db.prepare('DELETE FROM deaccession_drafts WHERE id = ?').run(id);
+        return actId;
+      });
+      const actId = tx.immediate();
+      afterActWritten(act);
+      logAudit('Проект за отчисляване', 'проект № ' + id + ' е утвърден като акт № '
+        + act.no + '/' + yearOf(d.date)
+        + (live.length !== rows.length
+            ? ' (' + (rows.length - live.length) + ' от заглавията вече са били отчислени с друг акт и отпаднаха)' : ''));
+      return actId;
+    })
+  );
+  ipcMain.handle('deaccessionActs:revoke', (e, id, opts) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
       /* Каквото прозорецът трябва да КАЖЕ на библиотекарката след анулирането.
          Стои извън транзакцията, защото се чете след нея. */
       const revokeInfo = { droppedHolds: 0 };
+      /* Основанието за анулиране е ЗАДЪЛЖИТЕЛНО (v2.4.56). Актът остава в
+         документацията завинаги; щом остава, до него трябва да пише ЗАЩО е
+         отпаднал — иначе след година никой, включително проверяващият, не може
+         да различи „сгрешен номер“ от „комисията размисли“. */
+      const reason = String((opts && opts.reason) || '').trim();
+      if (!reason) throw new Error('Анулирането изисква основание — напишете защо актът отпада (например „сгрешен инвентарен номер“).');
       const tx = db.transaction(() => {
         /* Одит v2.4.24: актът не се проверяваше за съществуване — анулиране на вече
            анулиран (или изобщо несъществуващ) акт се връщаше с ok:true, прозорецът
            обявяваше „Актът е анулиран“, а в дневника се вписваше събитие за акт,
            който никога не е бил съставен. */
-        const act = db.prepare('SELECT no, year FROM deaccession_acts WHERE id = ?').get(id);
-        if (!act) throw new Error('Актът не е намерен — вероятно вече е анулиран, включително от друго работно място.');
+        const act = db.prepare('SELECT no, year, revoked_at FROM deaccession_acts WHERE id = ?').get(id);
+        if (!act) throw new Error('Актът не е намерен.');
+        if (act.revoked_at) {
+          throw new Error('Акт № ' + act.no + '/' + act.year + ' вече е анулиран на '
+            + String(act.revoked_at).slice(0, 10) + ' г. — вторично анулиране няма смисъл.');
+        }
         const items = db.prepare('SELECT book_id, status_before FROM deaccession_items WHERE act_id = ?').all(id);
         // Сглобена веднъж, извън обхождането — по същата причина като при съставянето.
         const backStmt = db.prepare(`UPDATE books SET status=?, status_date=date('now'),
@@ -325,10 +592,17 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            че нечия резервация е паднала по пътя и че трябва да я поднови ръчно. */
         const droppedHolds = db.prepare(`SELECT COUNT(*) AS n FROM holds
           WHERE deaccession_act_id = ? AND status = 'отказана'`).get(id).n;
-        db.prepare('DELETE FROM deaccession_acts WHERE id = ?').run(id);
+        /* НЕ се трие (v2.4.56 — виж дългата бележка при ensureLoanActColumn).
+           Редът остава, номерът остава зает завинаги, редовете на акта остават
+           като снимка по чл. 35, ал. 2, а КДБФ Част № 3 показва акта зачертан,
+           с основанието, и с нула в сборовете. */
+        db.prepare(`UPDATE deaccession_acts
+          SET revoked_at = datetime('now'), revoke_reason = ?, revoked_by = ?
+          WHERE id = ?`).run(reason, (opts && opts.by) ? String(opts.by).trim() : null, id);
         // `id` е вътрешният rowid, а не номерът на акта — те съвпадат само в първата
         // година. Одит v2.4.24: следата сочеше несъществуващ акт.
-        logAudit('Анулиране на акт', 'акт № ' + act.no + '/' + act.year + ' е анулиран, документите са върнати във фонда'
+        logAudit('Анулиране на акт', 'акт № ' + act.no + '/' + act.year + ' е анулиран (' + reason
+          + '); номерът остава зает и актът остава в документацията по чл. 39, а документите са върнати във фонда'
           + (reopened ? ' (' + (reopened === 1 ? '1 заемане е отворено обратно' : reopened + ' заемания са отворени обратно') + ')' : '')
           + (droppedHolds
               ? '; ' + (droppedHolds === 1

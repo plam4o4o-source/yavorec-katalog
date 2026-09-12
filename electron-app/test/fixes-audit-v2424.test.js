@@ -391,7 +391,7 @@ test('анулирането връща предишното състояние,
   assert.equal(created.ok, true, created.error);
   const actId = created.data;
 
-  const rev = await ipcMain.invoke('deaccessionActs:revoke', actId);
+  const rev = await ipcMain.invoke('deaccessionActs:revoke', actId, { reason: 'сгрешен акт (тест)' });
   assert.equal(rev.ok, true, rev.error);
   assert.equal(db.prepare('SELECT status FROM books WHERE id = ?').get(b).status, 'липсващ',
     'книгата физически я няма — анулирането на сгрешен акт не я намира');
@@ -401,7 +401,7 @@ test('анулирането връща предишното състояние,
 
 test('анулиране на несъществуващ акт се отказва, вместо да върне „готово“', async () => {
   const { ipcMain, auditLog } = actsSetup('v2424-act-revoke-none-');
-  const res = await ipcMain.invoke('deaccessionActs:revoke', 999);
+  const res = await ipcMain.invoke('deaccessionActs:revoke', 999, { reason: 'сгрешен акт (тест)' });
   assert.equal(res.ok, false);
   assert.match(res.error, /не е намерен/);
   assert.equal(auditLog.length, 0, 'няма следа за акт, който никога не е съществувал');

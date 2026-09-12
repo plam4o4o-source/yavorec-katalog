@@ -189,6 +189,192 @@ server, a restart after a version upgrade (same number, new version), and with
 the module deliberately missing. Full suite: 1,504 passing, 0 failing (UTC and
 Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
 
+## v2.4.57
+
+**BG:** Най-големият кръг досега — поправени са всичките двайсет и три находки от
+двата одита след v2.4.54, а актът за отчисляване е преправен по Наредба № 3.
+
+**АКТЪТ ЗА ОТЧИСЛЯВАНЕ Е ДОКУМЕНТ, А НЕ ЗАПИС В ПРОГРАМАТА.** Дотук „Анулирай“
+изпълняваше `DELETE FROM deaccession_acts`, а редовете на акта падаха след него по
+каскада. Това противоречеше на Наредбата на три места наведнъж: подписаният
+екземпляр в счетоводството остава да съществува (чл. 35 — актът се съставя от
+комисия в два екземпляра и се утвърждава от ръководителя); освободеният номер
+отиваше на **съвсем друг** акт, тоест се появяваха два различни подписани акта
+№ 9/2026, макар чл. 35 да изисква номерата да текат последователно от едно всяка
+календарна година; а документацията по отчисляването се съхранява (чл. 39).
+Практическата последица беше най-лоша: КДБФ Приложение № 3 за минала година, вече
+отпечатано и подписано, при следващ печат излизаше различно. Оттук нататък актът
+**не се трие никога** — анулирането само го отбелязва, номерът остава зает
+завинаги, снимката по чл. 35, ал. 2 остава, а Приложение № 3 го показва зачертан,
+с основанието и с нула в сборовете. Анулирането иска **задължително основание** и
+име на анулиралия, защото този текст стои до реда в регистъра и се чете от
+проверяващ. Всички шест места, които броят отчислени (КДБФ, таблото,
+статистиката два пъти, справките), минават през `revoked_at IS NULL`.
+
+**И затова се появява ПРОЕКТЪТ.** Щом актът е вечен, грешките трябва да имат къде
+да се случат преди него — дотук нямаше: един клик върху „Утвърди акта и отчисли“
+и сгрешеният акт беше съставен, тоест триенето беше **единствената** поправка, и
+точно то се е ползвало. Проектът няма номер, не отчислява нищо, документите
+остават във фонда и се заемат нормално; поправя се и се трие свободно. Става акт
+при „Утвърди“ — тогава и само тогава се взима номер и се прави снимката.
+Утвърждаването и изтриването на проекта падат или минават заедно, за да не остане
+утвърден акт и жив проект, от който да се съставѝ втори акт за същите документи.
+Липсите от инвентаризация се пренасят в проект с един бутон („Проект за акт от
+липсите“, с препратка към протокола) — дотук там пишеше само „Отчислете ги с акт
+по чл. 30, т. 6“ и инвентарните номера се въвеждаха наново, един по един.
+
+**Библиотеката можеше да загуби седмица работа и да не разбере.** Автоматичното
+копие се правеше **само при пускане на програмата** (едно-единствено извикване в
+`main.js`), а в читалището компютърът стои включен, а програмата — отворена:
+пусната в понеделник и оставена до петък, единственото копие беше от понеделник
+сутрин. Сега копие се прави и по таймер (на 3 часа, само ако базата е пипана —
+проверява се и `library.db-wal`, защото при WAL записите с часове не докосват
+самия файл) и при затваряне. Провалът на самото **писане** на копие отиваше в
+конзолата и екранът показваше зелено; сега се записва, показва се червено
+предупреждение в „Настройки“ заедно с възрастта на най-новото копие, и се
+известява прозорецът. В целия код нямаше **нито едно** `PRAGMA integrity_check`:
+при работа по мрежов дял тихата повреда е класическата повреда и се копираше в
+всяко следващо дневно копие, докато здравите падаха от 30-дневната ротация.
+Сега се проверява при стартиране и върху всяко прясно записано копие.
+Възстановяването слагаше върху базата **какъвто и да е файл** — без проверка на
+заглавието, без пробно отваряне, без сравнение на схемата, а диалогът предлагаше
+и филтър „Всички файлове“: едно грешно щракване изваждаше програмата от строя, а
+екранът за възстановяване вече беше недостъпен. Сега всичко това се проверява
+преди подмяната. Некриптираното копие се пишеше направо върху крайното име
+(криптираното — не), тоест прекъснат запис оставяше отрязан файл, изглеждащ като
+нормално копие; сега и то минава през временен файл с проверка. Добавени са:
+незадължителна **втора папка** за копие (USB или друг диск — дотук всичките 30
+копия седяха до самата база и един изгорял диск отнасяше всичко), **степенувано
+пазене** (дневни 30 дни, седмични 3 месеца, месечни 2 години) и **авариен
+прозорец** със списък на копията, когато базата не се отваря — дотук съобщението
+искаше от библиотекарката да намери `%APPDATA%\InvLib` и да преименува файл.
+Преместването на базата пренася и папката с копията.
+
+**Периодиката влиза във фонда.** Периодичните издания нямаха инвентарен номер и
+не влизаха никъде в КДБФ или статистиката — а отпечатаното заглавие на Част № 1
+гласи „…книги, **периодични издания** и други материали“, Дневникът Раздел Б има
+ред „Периодични издания“, и Наредбата ги брои като библиотечни документи.
+Постъпленията и стойността на фонда бяха системно занижени. Сега годишният
+комплект се инвентира като един библиотечен документ с един инвентарен номер от
+общата поредица, влиза в КДБФ Част № 1 през партида за абонамента, в наличността
+и в статистиката. Нищо не се прави със задна дата — инвентирането е изрично
+действие за избрана година, иначе хиляди стари броя биха се появили като
+постъпления за текущата година.
+
+**Изгубен или невърнат документ — ежедневният случай, който нямаше ход.**
+Обезщетение се смяташе единствено по дни просрочие; нямаше замяна, нямаше кратен
+размер и нямаше никаква връзка „акт по чл. 30, т. 5 → начисление в читателската
+сметка“. Сега заемането се приключва като изгубено с три изхода (обезщетение,
+замяна с идентичен, замяна с равностоен), документът получава статус „изгубен“,
+начислението влиза в сметката като **отделен вид**, а статистиката спря да брои
+изгубеното като върнато. Размерът е **настройка на библиотеката** (кратност
+спрямо цената по инвентарната книга; сума за документ без вписана цена): чл. 43,
+ал. 2 задължава обезщетяването, но размера го определя настоятелството, не
+наредбата — и това пише на екрана. При съставяне на акт по чл. 30, т. 5 се вижда
+кой е изгубил документа, какво е уредено и дали обезщетението е събрано.
+
+**Регистрите.** Изтриването от инвентарната книга оставяше следа **само** ако
+документът е имал заемания — иначе вписан инвентарен номер изчезваше безследно и
+оставяше дупка в регистъра; сега следа се пише винаги, а за вписан документ се
+иска второ потвърждение с текст, че такъв ред нормално се маха с акт. Вносът
+слагаше днешна дата на вписване мълчаливо — внос на 4 000 стари книги правеше
+КДБФ да обяви 4 000 постъпили през текущата година; сега се брои, предупреждава и
+има поле за ретро-дата. Инвентарната книга обявява документите без дата на
+вписване (както прави КДБФ) и се печата по диапазон вместо винаги цялата.
+Читателският картон носеше подпис, но не и декларацията над него — сега е там, с
+чл. 47, ал. 2, съгласието по ОРЗД и датата му. КДБФ Част № 2 получи разбивка по
+видове документи, Част № 3 — колоната за начина на разпореждане по чл. 36
+(полето се въвеждаше и печаташе в акта, но не стигаше до регистъра). Вписана
+партида вече може да се поправя, с поименна следа за всяко променено поле.
+
+**Работа и екран.** При две работни места към обща база записът беше „последният
+печели“, мълчаливо: първото добавя телефон, второто, с отворена стара форма,
+записва адрес — телефонът изчезваше без нищо на екрана. Сега формата получава
+отпечатък на реда при отварянето и записът се **отказва** с обяснение, ако
+междувременно някой е пипнал същия ред. Нов **„Пълен износ на данните“** — всяка
+таблица като CSV в един ZIP, с `PROCHETI-ME.txt`; заемания, актове, постъпления,
+периодика, инвентаризации и резервации дотук нямаха никакъв износ, тоест изход
+извън програмата нямаше. ЕГН и номерът на личната карта не излизат никога, а при
+заключена защита са скрити и адресът, телефонът, имейлът и данните на гаранта.
+Действията на реда в списъците се залепват за десния ръб (при 1366 px бутонът „⋯“
+в „Читатели“ излизаше 39 px извън таблицата), а страничната лента получи собствено
+превъртане със закотвени рамка и подпис — при 768 px и 125 % увеличение ѝ трябваха
+1146 px в 614 px налични и 12 раздела изпадаха; покрай това се откри, че блокът
+`@media (max-height:780px)` беше **мъртъв** заради реда на правилата. Отделно се
+откри стар пропуск (от v2.1.0): линкът към сайта на разработчика в „Настройки“ →
+„Помощ и обратна връзка“ не отваряше нищо — прозорецът отказваше всеки външен
+адрес без изключение. Сега се пропуска към системния браузър САМО този един,
+изрично изброен адрес.
+
+Проверки: 78 нови теста в четири файла, 59 мутации на реалния код, всяка с връщане
+и повторно пускане — всичките уловени от именуван тест (четири излязоха живи и за
+всяка е добавен тест, докато не падне); плюс контролна мутация, която трябва да
+мине, и минава. Пълната поредица: 1584 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария +
+всички проверки при 15 002 записа.
+
+**EN:** The largest round so far — all twenty-three findings from the two audits
+after v2.4.54 are fixed, and the deaccession act has been rebuilt to follow
+Наредба № 3.
+
+**THE DEACCESSION ACT IS A DOCUMENT, NOT A DATABASE ROW.** "Revoke" used to run
+`DELETE FROM deaccession_acts`. That contradicted the regulation in three places
+at once: the signed copy in accounting still exists (art. 35 — the act is drawn
+up by a commission in two copies and approved by the director); the freed number
+went to a *different* act, producing two distinct signed acts No. 9/2026 even
+though art. 35 requires numbers to run consecutively from one each calendar year;
+and deaccession documentation must be preserved (art. 39). The practical
+consequence was the worst part: КДБФ Appendix No. 3 for a past year, already
+printed and signed, came out different on the next print. From now on the act is
+never deleted — revoking only marks it, the number stays taken forever, the art.
+35(2) snapshot stays, and Appendix No. 3 shows it struck through, with the
+reason, counting zero. Revoking now requires a reason and the name of whoever
+revoked it. All six places that count deaccessions go through `revoked_at IS NULL`.
+
+**Hence the DRAFT.** If the act is permanent, mistakes need somewhere to happen
+before it — and there was nowhere: one click on "Approve and deaccession" and the
+faulty act existed, which made deletion the *only* correction, which is exactly
+why it was used. A draft has no number, deaccessions nothing, and can be edited
+and deleted freely. Approval and draft deletion commit together. Shortfalls found
+during an inventory carry into a draft with one button.
+
+**The library could lose a week's work without noticing.** The automatic backup
+ran *only at program start* — in a reading room the computer stays on, so a
+program started Monday and left until Friday had one backup, from Monday morning.
+Backups now also run on a 3-hour timer (only if the database changed — including
+`library.db-wal`, since under WAL hours of writes never touch the file itself) and
+on close. A failed *write* went to the console while the screen stayed green; it
+is now recorded and shown in red along with the age of the newest backup. There
+was not a single `PRAGMA integrity_check` anywhere: over a network share silent
+corruption is the classic failure and was copied into every subsequent daily
+backup while healthy ones aged out of the 30-day rotation. Restore accepted *any*
+file — no header check, no trial open, no schema comparison, and the dialog even
+offered an "All files" filter, so one wrong click took the program out of service
+with the restore screen no longer reachable. Added: an optional second backup
+folder, tiered retention (30 days daily, 3 months weekly, 2 years monthly), and an
+emergency restore window when the database will not open.
+
+**Periodicals now enter the fund**, as one inventoried annual volume per title and
+year, entering КДБФ Part 1 through a subscription batch. **Lost or unreturned
+documents** finally have a flow, with compensation as a library setting (art.
+43(2) requires compensation but leaves the amount to the library). **Registers**:
+deleting from the inventory book always leaves a trace; imports say how many rows
+got today's date; the inventory book declares undated documents and prints by
+range; the reader card carries the declaration above the signature; Part 2 gained
+a breakdown by document type and Part 3 the disposal column; a recorded batch can
+be corrected with a per-field trace. **Concurrent editing** from two workstations
+is now refused with an explanation instead of silently overwriting, there is a
+**full CSV-in-ZIP export**, row actions stick to the right edge, and the sidebar
+scrolls on its own. Separately, an old gap (from v2.1.0) surfaced: the link to
+the developer's website in Settings → Help & feedback opened nothing — the
+window rejected every external address without exception. Now only that one,
+explicitly listed address is passed through to the system browser.
+
+Checks: 78 new tests in four files, 59 mutations of the real code, each reverted
+and re-run — all caught by a named test (four survived at first and got a test
+each until they failed); plus a control mutation that must pass, and does. Full
+suite: 1584 passing, 0 failing (UTC and Europe/Sofia); the site: 8 scenarios and all checks at 15 002
+records.
+
 ## v2.4.55
 
 **BG:** Преглед на v2.4.54 (документите, които програмата издава) — два

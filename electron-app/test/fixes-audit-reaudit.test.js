@@ -97,10 +97,18 @@ test('стара база без loans.deaccession_act_id получава ко�
   assert.ok(!before.includes('deaccession_act_id'),
     'самата схема НЕ добавя колона към съществуваща таблица — точно затова трябва миграция');
 
-  // Същата стъпка, която main.js изпълнява при стартиране (ensureColumns).
+  /* Същите стъпки, които main.js изпълнява при стартиране (ensureColumns).
+     v2.4.56: и колоната `lost` — по същата причина, по която тук стои и
+     deaccession_act_id. Статистиката изважда „спазени срокове“ през
+     COALESCE(lost,0) = 0, защото заемане, приключено като ИЗГУБЕНО, се затваря с
+     date_in, но книгата никога не се е върнала. Ако колоната се появяваше едва
+     при първото такова приключване, справката щеше да гърми на всяка стара база,
+     в която още няма изгубен документ — точно дефектът, който този тест пази. */
   db.exec('ALTER TABLE loans ADD COLUMN deaccession_act_id INTEGER');
+  db.exec('ALTER TABLE loans ADD COLUMN lost INTEGER');
   const after = db.prepare('PRAGMA table_info(loans)').all().map(c => c.name);
   assert.ok(after.includes('deaccession_act_id'));
+  assert.ok(after.includes('lost'));
 
   // И най-важното: справката вече минава.
   const stats = api('../handlers/stats', {
@@ -117,6 +125,7 @@ test('main.js мигрира deaccession_act_id, а не разчита само
   // ensureColumns('loans', …) се среща повече от веднъж — търси се във всички.
   const blocks = [...main.matchAll(/ensureColumns\('loans',\s*\{([\s\S]*?)\}\)/g)].map(x => x[1]);
   assert.ok(blocks.length, 'очаква се ensureColumns за loans в main.js');
+  assert.match(blocks.join('\n'), /lost:/, 'и колоните за изгубен документ минават през main.js, не само през handlers/loans.js');
   assert.match(blocks.join('\n'), /deaccession_act_id/,
     'колоната се ползва от stats.js при всяко отваряне на „Справки", а лениво се '
     + 'създаваше само след съставяне на акт за отчисляване');

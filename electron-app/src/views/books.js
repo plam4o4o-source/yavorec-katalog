@@ -261,7 +261,12 @@ async function renderBooks() {
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
         ${!BOOKS_WINDOWED && filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
-        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th><th style="width:90px"></th></tr></thead>
+        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th>
+        ${/* class="actsCell" (v2.4.56): клетката с действията се залепва за десния
+             ръб при хоризонтално превъртане (виж table.ledger td.actsCell в
+             style.css). Без същия клас върху ЗАГЛАВНАТА клетка горният ред се
+             разминава с тялото — тялото се залепва, заглавието бяга. */''}
+        <th class="actsCell" style="width:90px"></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, total)}</div>
@@ -313,7 +318,11 @@ function updateBulkBar() {
    акт, вж. main.js) и всяко поле показва само собствените си опции. */
 const BULK_EDIT_FIELDS = [
   ['department', 'Отдел / местонахождение', OTDELI.map(v => ({ v, t: v }))],
-  ['status', 'Състояние', ['наличен', 'липсващ', 'за реставрация'].map(v => ({ v, t: v }))],
+  /* „изгубен“ (v2.4.56) — статусът, който слага приключването на заемане като
+     изгубен документ. Без него библиотекарят вижда документа като изгубен, но не
+     може да го върне на „наличен“, ако книгата се намери в дъното на рафта —
+     а точно това се случва достатъчно често, за да има значение. */
+  ['status', 'Състояние', ['наличен', 'липсващ', 'изгубен', 'за реставрация'].map(v => ({ v, t: v }))],
   ['language', 'Език', EZICI.map(v => ({ v, t: v }))],
   ['category_id', 'Вид документ (категория)', null] // опциите се вземат от window._CATS при отваряне
 ];
@@ -510,7 +519,7 @@ async function bookForm(id, presetAcqId, prefill) {
               <input type="hidden" name="status" value="отчислен">
               <input type="text" value="отчислен${v.status_date ? ' — от ' + bg(v.status_date) : ''}" disabled>
               <span class="fh">Връщане във фонда става само с анулиране на акта: „Отчисляване“ → отваряте акта → „Анулирай акта“.</span></div>`
-          : fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'за реставрация'], val: v.status, allowEmpty: false,
+          : fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'изгубен', 'за реставрация'], val: v.status, allowEmpty: false,
               hint: v.status_date ? 'от ' + bg(v.status_date) : '' })}
         ${fld('Забележка', 'description', { val: v.description || '', hint: 'поправки не се допускат — чл. 17, ал. 2' })}
         ${fld('Анотация', 'annotation', { type: 'textarea', val: v.annotation || '', rows: 2 })}
@@ -525,6 +534,8 @@ async function bookForm(id, presetAcqId, prefill) {
         title="Записва и отваря нова форма със същата партида, дата на вписване, отдел, вид документ, издателство, място и език и следващия инвентарен номер">Запиши и нов</button>` : ''}
      <button class="btn pri" onclick="saveBook(${id || 'null'})">Запиши</button>`);
   if (id) $('#bookF').dataset.id = id;
+  // Отпечатъкът на реда към момента на отварянето — виж saveBook по-долу.
+  if (id && b && b._rev) $('#bookF').dataset.rev = b._rev;
 }
 window.bookForm = bookForm;
 /* „+ Още екземпляр“ — вторият екземпляр от едно заглавие е ВТОРИ ЗАПИС със свой
@@ -880,6 +891,12 @@ async function saveBook(id, andNew) {
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#bookF');
   d.id = id;
+  /* Отпечатъкът, получен при отварянето (v2.4.56). Ако междувременно друго
+     работно място е пипнало същия документ, записът се отказва с обяснение,
+     вместо да залича чуждата промяна мълчаливо. Държи се в data-атрибут на
+     формата, за да преживее преизчертаванията ѝ. */
+  const bf = $('#bookF');
+  if (bf && bf.dataset.rev) d._rev = bf.dataset.rev;
   // books:create връща id на новия запис — пази се, за да светне редът му след
   // пререндирането (flashRow, v1.69.0). При неуспех call() връща null → без открояване.
   // v2.2.0: формата се затваря САМО при успех (модел от saveAcq/saveAct/savePayment).

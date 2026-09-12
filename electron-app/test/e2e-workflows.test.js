@@ -463,16 +463,28 @@ test('8. акт за отчисляване чрез сканиране → до
   await h.waitFor(() => /Акт за отчисляване № 1/.test(h.modal()), 'акта');
   assert.match(h.modal(), /103 Неизвестен\. Стара книга 3\.00 €.*ОБЩО 1 3\.00 €/);
   n = h.toasts.length;
+  /* v2.4.56: анулирането минава през формуляр, а не през едно „Да продължа?“.
+     Причината е, че то вече не МАХА акта: редът остава в регистъра и до него
+     трябва да пише ЗАЩО е отпаднал — този текст влиза в КДБФ Приложение № 3 и
+     се чете от проверяващ, тоест не може да е по избор. */
   await h.clickButton('Анулирай акта', '#modal footer');
-  assert.match(h.hooks.confirms[h.hooks.confirms.length - 1], /Анулиране на акта/);
-  assert.ok(h.toastsSince(n).some(t => t.msg === 'Актът е анулиран.'), JSON.stringify(h.toastsSince(n)));
+  await h.waitFor(() => h.$('#revF'), 'формата за анулиране');
+  assert.match(h.modal(), /не се изтрива/, 'прозорецът казва, че актът остава');
+  h.type('#revF [name=reason]', 'сгрешен инвентарен номер');
+  await h.clickButton('Анулирай акта', '#modal footer');
+  assert.ok(h.toastsSince(n).some(t => /Актът е анулиран/.test(t.msg)), JSON.stringify(h.toastsSince(n)));
   const b2 = q('SELECT * FROM books WHERE id = ?', bookId);
   assert.equal(b2.status, 'наличен');
   assert.equal(b2.deaccession_act_id, null);
   assert.equal(b2.deaccession_date, null);
-  assert.equal(q('SELECT COUNT(*) AS n FROM deaccession_acts').n, 0);
-  assert.match(h.viewText(), /Няма съставени актове/);
-  assert.match(q("SELECT detail FROM audit_log WHERE action = 'Анулиране на акт'").detail, /акт № 1\/\d{4} е анулиран, документите са върнати във фонда \(1 заемане е отворено обратно\)/);
+  /* v2.4.56: актът НЕ се трие при анулиране — той е документ по чл. 39, а и
+     номерът му не бива да отива на друг акт (чл. 35). Редът остава, отбелязан
+     като анулиран, а всяко броене на отчислени го подминава. */
+  assert.equal(q('SELECT COUNT(*) AS n FROM deaccession_acts').n, 1, 'редът остава');
+  assert.ok(q('SELECT revoked_at FROM deaccession_acts').revoked_at, 'отбелязан като анулиран');
+  assert.match(h.viewText(), /АНУЛИРАН/, 'и се вижда като анулиран в списъка, вместо да изчезне');
+  assert.match(q("SELECT detail FROM audit_log WHERE action = 'Анулиране на акт'").detail,
+    /акт № 1\/\d{4} е анулиран \(.+\); номерът остава зает.+1 заемане е отворено обратно/);
   const reopened = q('SELECT * FROM loans WHERE id = ?', lent.id);
   assert.equal(reopened.date_in, null, 'заемането, закрито от акта, не е отворено обратно');
   assert.equal(reopened.deaccession_act_id, null);

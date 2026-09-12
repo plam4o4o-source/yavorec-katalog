@@ -73,6 +73,63 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
             + 'и програмата продължава да работи с текущата база. Грешка: ' + err.message };
         }
       }
+      /* И РЕЗЕРВНИТЕ КОПИЯ. Дотук се пренасяше само library.db, а подпапката
+         backups/ оставаше до старото място — при това мълчаливо. Програмата
+         веднага след рестарта започва да чете и пише копия в НОВАТА папка
+         (backupsDir() е „backups“ до текущата база), тоест списъкът в
+         „Настройки“ → „Резервни копия“ осъмва празен, а тридесетдневната
+         история виси в стара папка, за която никой не знае. Точно в случая, за
+         който смяната на папката е измислена — преместване на базата на нов
+         компютър или на мрежов диск, преди старият да бъде изхвърлен — това
+         означава изтрита история на копията.
+         Копира се (не се мести): старите файлове остават, докато човек сам не
+         реши да ги изтрие. Провалът тук НЕ отменя преместването на базата —
+         казва се къде са останали копията, което е по-полезно от отказ. */
+      const oldBackups = path.join(path.dirname(oldPath), 'backups');
+      const newBackups = path.join(newDir, 'backups');
+      let movedBackups = 0;
+      const failedBackups = [];
+      /* Само когато базата наистина се ПРЕНАСЯ. При „Ползвай съществуващата база
+         от тази папка“ в целевата папка живее ДРУГА библиотека — копия от нашата
+         там само биха подвели кой какво възстановява. */
+      if (doCopy && fs.existsSync(oldBackups) && path.resolve(oldBackups) !== path.resolve(newBackups)) {
+        try {
+          fs.mkdirSync(newBackups, { recursive: true });
+          for (const f of fs.readdirSync(oldBackups)) {
+            if (!/\.(db|invbak)$/.test(f)) continue; // .tmp огризки не се пренасят
+            const dest = path.join(newBackups, f);
+            try {
+              if (fs.existsSync(dest)) continue; // вече е там (споделена папка от друг компютър)
+              const staged = dest + '.copy-tmp';
+              fs.copyFileSync(path.join(oldBackups, f), staged);
+              fs.renameSync(staged, dest);
+              movedBackups++;
+            } catch (e) {
+              failedBackups.push(f);
+              try { if (fs.existsSync(dest + '.copy-tmp')) fs.unlinkSync(dest + '.copy-tmp'); } catch (e2) { /* нищо за чистене */ }
+            }
+          }
+        } catch (err) {
+          failedBackups.push('(папката не можа да бъде създадена: ' + err.message + ')');
+        }
+        if (failedBackups.length && typeof dialog.showMessageBox === 'function') {
+          /* Показва се ПРЕДИ рестарта — след app.exit(0) няма кой да го каже.
+             Съобщението дава точния път, а не общо „някои файлове не се копираха“:
+             копията са единственият изход при повреда и човек трябва да знае къде
+             са останали. */
+          await dialog.showMessageBox(getMainWindow(), {
+            type: 'warning',
+            buttons: ['Разбрах'],
+            title: 'Част от резервните копия останаха на старото място',
+            message: movedBackups + ' от резервните копия бяха пренесени, но ' + failedBackups.length
+              + ' не можаха да бъдат копирани.',
+            detail: 'Базата данни е преместена успешно и програмата ще се стартира наново.\n\n'
+              + 'Останалите копия са в папката:\n' + oldBackups + '\n\n'
+              + 'Пренесете ги ръчно в:\n' + newBackups + '\n\n'
+              + 'Непренесени файлове: ' + failedBackups.join(', ')
+          });
+        }
+      }
       /* Настройката се записва ПРЕДИ базата да бъде затворена. Обратният ред е
          капан: `updateConfig` се проваля точно в случая, за който е писан —
          нечетим config.json, защото антивирусна програма държи файла — а дотогава

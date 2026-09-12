@@ -134,7 +134,7 @@ test('deaccessionActs:nextNo returns max(no)+1 per year', async () => {
   assert.equal(next.data, 5);
 });
 
-test('deaccessionActs:revoke restores books to наличен and removes the act', async () => {
+test('deaccessionActs:revoke restores books to наличен and MARKS the act revoked (never deletes it)', async () => {
   const { db, ipcMain, scheduleCalls } = setup();
   const bookId = insertBook(db, { inv_number: 20 });
   const created = await ipcMain.invoke('deaccessionActs:create', {
@@ -142,7 +142,7 @@ test('deaccessionActs:revoke restores books to наличен and removes the ac
     bookIds: [bookId]
   });
   scheduleCalls.length = 0;
-  const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data);
+  const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(revoked.ok, true);
   assert.equal(scheduleCalls.length, 1);
 
@@ -150,6 +150,17 @@ test('deaccessionActs:revoke restores books to наличен and removes the ac
   assert.equal(book.status, 'наличен');
   assert.equal(book.deaccession_act_id, null);
 
+  /* v2.4.56: ТУК се очакваше редът на акта да е изтрит — и точно това беше
+     дефектът. Актът е документ по Наредба № 3: съставя се от комисия, утвърждава
+     се от ръководителя, подписва се в два екземпляра и се съхранява (чл. 35,
+     чл. 39). Триенето му означаваше, че КДБФ Приложение № 3 за минала година се
+     променя със задна дата, а освободеният номер отива на съвсем друг акт —
+     два различни подписани акта с един номер. Анулирането само го отбелязва. */
   const act = db.prepare('SELECT * FROM deaccession_acts WHERE id=?').get(created.data);
-  assert.equal(act, undefined, 'the act row itself should be deleted');
+  assert.ok(act, 'редът на акта ОСТАВА — актът е документ, не запис');
+  assert.ok(act.revoked_at, 'и носи дата на анулиране');
+  assert.equal(act.revoke_reason, 'сгрешен акт (тест)', 'заедно с основанието, което се чете от проверяващ');
+  assert.equal(act.no, 1, 'номерът остава зает');
+  const next = await ipcMain.invoke('deaccessionActs:nextNo', '2026');
+  assert.equal(next.data, 2, 'номерът на анулирания акт НЕ се дава на следващия — чл. 35');
 });

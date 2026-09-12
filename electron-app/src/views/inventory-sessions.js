@@ -284,11 +284,49 @@ async function doCloseInvent() {
       ? `<p style="font-size:13px">Липсващите документи са отбелязани със статус „липсващ“. Отчислете ги с акт по
          <b>чл. 30, т. 6</b>, ако е приложимо.</p>`
       : ''}`,
-    `<button class="btn" onclick="closeModal();printInventProtocol(${doneId})">Печат на протокола / PDF</button>
+    /* Бутонът „Проект за акт от липсите“ (v2.4.56). Дотук тук пишеше само
+       „Отчислете ги с акт по чл. 30, т. 6“ и с това връзката свършваше:
+       инвентарните номера се въвеждаха или сканираха НАНОВО, един по един, при
+       това често стотици. Това е най-честият път по чл. 30 и точно на него
+       протоколът и актът се разделяха — а актът не носеше и препратка към
+       протокола, тоест проверяващият няма как да ги свърже. Прави се ПРОЕКТ,
+       не акт: комисията първо преглежда списъка. */
+    `${(r.mode === 'full' && r.missing) ? `<button class="btn l" onclick="draftFromMissing(${doneId})">Проект за акт от липсите</button>` : ''}
+     <button class="btn" onclick="closeModal();printInventProtocol(${doneId})">Печат на протокола / PDF</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
   renderInvent();
 }
 window.doCloseInvent = doCloseInvent;
+
+/* Пренос на установените липси в проект за акт по чл. 30, т. 6 (v2.4.56).
+   Проектът носи и номера на протокола в „Заповед №“-полето като препратка —
+   иначе актът и протоколът стоят като два несвързани документа. */
+async function draftFromMissing(sessionId) {
+  const s = await call(window.api.inventorySessions.get(sessionId));
+  if (!s) return;
+  const miss = (s.missing || []).filter(m => m.book_id);
+  if (!miss.length) return toast('В този протокол няма установени липси.', 'err');
+  const id = await call(window.api.deaccessionActs.saveDraft({
+    draft: {
+      date: today(), reason_code: 6,
+      reason_text: (PRICHINI.find(p => p.k == 6) || {}).t || 'липсващи при инвентаризация',
+      order_no: s.order_no || null,
+      note: 'Съставен от протокол за инвентаризация № ' + sessionId
+        + (s.date_end ? ' от ' + bg(s.date_end) + ' г.' : ''),
+      committee1: s.committee1 || null, committee2: s.committee2 || null, committee3: s.committee3 || null
+    },
+    bookIds: miss.map(m => m.book_id)
+  }));
+  if (id) {
+    closeModal(); markSaved();
+    toast('Проект № ' + id + ' е съставен от ' + miss.length
+      + (miss.length === 1 ? ' липсващ документ' : ' липсващи документа')
+      + '. Прегледайте го в „Отчисляване“ и го утвърдете там.', 'ok');
+    go('acts');
+  }
+}
+window.draftFromMissing = draftFromMissing;
+
 
 /* ПРОТОКОЛ ОТ ИНВЕНТАРИЗАЦИЯ (чл. 40).
 

@@ -38,14 +38,46 @@ function invBookSummaryOf(rows) {
      числа на другите два екрана. Самата таблица си остава по редове: един ред =
      един инвентарен номер, точно както е в Приложение № 4. */
   const qtyOf = (r) => (r.quantity == null ? 1 : Number(r.quantity) || 0);
+  /* Същото броене като в handlers/inv-book.js (UNDATED_ACTIVE) — двата пътя
+     (пълен списък в паметта и порции от базата) трябва да дават едно и също
+     число, иначе бележката под главата казва различно нещо според това дали
+     изгледът е в прозоречен режим. */
+  const undated = active.filter(r => !r.register_date);
   return {
     rows: rows.length, activeRows: active.length,
     activeCopies: active.reduce((s, r) => s + qtyOf(r), 0),
     value: active.reduce((s, r) => s + (r.price || 0) * qtyOf(r), 0),
     deacc: rows.length - active.length,
-    checked: rows.filter(r => (r.checks || []).length).length
+    checked: rows.filter(r => (r.checks || []).length).length,
+    undatedRows: undated.length,
+    undatedCopies: undated.reduce((s, r) => s + qtyOf(r), 0)
   };
 }
+/* ---- Бележка: инвентарната книга брои различно от КДБФ (одит v2.4.56) --------
+   Инвентарната книга смята фонда по СЪСТОЯНИЕТО (всичко, което не е отчислено),
+   а КДБФ — по ДАТИТЕ (дата на вписване до 31.12 и дата на отчисляване). Документ
+   без попълнена дата на вписване влиза в първото число и изпада от второто.
+   Дотук КДБФ го обявяваше (kdbfUndatedNote в src/views/kdbf.js), а инвентарната
+   книга — не: и на екрана, и в разпечатката стоеше само „Фонд по инвентарната
+   книга: N документа“. Библиотекар, който сравнява двата екрана преди годишния
+   отчет, виждаше две различни числа за един и същ фонд без нито дума защо; при
+   проверка същото разминаване изглежда като сгрешена справка. Числото не се
+   променя — казва се. Текстът е един и същ на екрана и на разпечатката, за да не
+   се окаже, че отпечатаният документ обяснява по-малко от екрана. */
+function invBookUndatedNote(sum) {
+  const s = sum || {};
+  const rowsN = s.undatedRows || 0;
+  if (!rowsN) return '';
+  const copies = s.undatedCopies || rowsN;
+  const doc = (n) => n + (n === 1 ? ' документ' : ' документа');
+  return `<b>Внимание — ${rowsN === 1 ? 'един запис няма' : rowsN + ' записа нямат'} попълнена дата на вписване.</b>
+    Фондът тук се брои по състоянието на записа, а „Книга за движение на библиотечния фонд“ (КДБФ) и годишният
+    отчет — по датата на вписване и датата на отчисляване. Затова ${doc(copies)} от числото по-горе
+    ${copies === 1 ? 'не участва' : 'не участват'} в КДБФ нито като постъпление за някоя година, нито в наличността
+    към 31.12 — двете справки ще покажат различен фонд точно с това число, докато датите не бъдат попълнени.
+    Поправя се в „Редакция“ на записа → полето „Дата на вписване“.`;
+}
+window.invBookUndatedNote = invBookUndatedNote;
 async function invBookFetch(offset, limit, withSummary) {
   const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset,
     limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000), summary: !!withSummary }));
@@ -68,6 +100,7 @@ async function renderInvBook() {
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
     Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>
+    ${invBookUndatedNote(sum) ? `<div class="note w">${invBookUndatedNote(sum)}</div>` : ''}
 
     <div class="kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="kpi-ico">${KPI_ICONS.fund}</div><div class="kpi-body">
@@ -96,7 +129,9 @@ async function renderInvBook() {
       <input type="search" id="ibSearch" placeholder="Търсене по инв. №, автор, заглавие или сигнатура…"
         value="${esc(INVBOOK_QUERY)}">
       <button class="btn pri" onclick="bookForm()">+ Нов документ</button>
-      <button class="btn" onclick="printInvBookDoc()">Печат на инвентарната книга / PDF</button>
+      ${/* Одит v2.4.56: копчето вече не праща направо на принтера цялата книга
+            (виж invBookPrintDialog по-долу) — пита какъв диапазон да отпечата. */''}
+      <button class="btn" onclick="invBookPrintDialog()">Печат на инвентарната книга / PDF</button>
     </div>
     <div class="wrap"><table class="ledger ibTable">
       <thead><tr><th class="nowrap">Дата</th><th class="nowrap">Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
@@ -227,7 +262,7 @@ function paintInvBookRows(append) {
       return more > 0
         ? `<button class="btn" onclick="invBookMore()">Покажи още (${more} от общо ${total})</button>`
         : (total > INVBOOK_PAGE_SIZE
-          ? `<span class="hint">Показани са всички ${total} реда. Печатът винаги съдържа цялата книга.</span>` : '');
+          ? `<span class="hint">Показани са всички ${total} реда. Печатът пита за диапазон — по подразбиране предлага показаното тук.</span>` : '');
     }
   });
 }
@@ -241,9 +276,115 @@ function invBookFilter(q) {
   paintInvBookRows();
 }
 window.invBookFilter = invBookFilter;
-async function printInvBookDoc() {
-  // Разпечатката е ЦЯЛАТА книга — в прозоречен режим се тегли пълният списък.
-  const rows = INVBOOK_WINDOWED ? (await call(window.api.invBook.list()) || []) : (window._INVBOOK_ROWS || []);
+/* ---- Избор на диапазон преди печат (одит v2.4.56) ----------------------------
+   Дотук копчето „Печат“ печаташе БЕЗУСЛОВНО цялата книга. При фонд от 15 000
+   документа това са към 15 000 реда и стотици листа — а най-честият повод за
+   печат е съвсем друг: 200-те нови записа от последната партида, или редовете за
+   една година, които трябва да се прошнуроват и заверят. Библиотекарят или
+   изчакваше огромна разпечатка, за да извади няколко листа от нея, или (по-често)
+   не печаташе изобщо. Затова печатът вече пита какъв диапазон: от – до инвентарен
+   номер и/или период на вписване, а по подразбиране предлага това, което е
+   филтрирано на екрана. Самата разпечатка НОСИ означението какъв диапазон е
+   отпечатан — иначе прошнурован лист с 200 реда е неотличим от фалшива „цяла“
+   инвентарна книга, а точно този лист се заверява с подпис по чл. 26, ал. 2.
+   „Цялата книга“ остава на едно натискане — поведението не се отнема, само спира
+   да е единственото. */
+function invBookRowMatchesText(r, t) {
+  if (!t) return true;
+  return String(r.inv_number ?? '').includes(t)
+    || (r.author || '').toLowerCase().includes(t)
+    || (r.title || '').toLowerCase().includes(t)
+    || (r.call_number || '').toLowerCase().includes(t);
+}
+/* Връща { rows, label, limited } — редовете за печат, човешкото описание на
+   диапазона и дали изобщо е ограничаван. Празно/непопълнено поле не ограничава
+   нищо: диапазон „от 1 до празно“ значи „от 1 нататък“, не „нищо“. */
+function invBookSelectRange(all, range) {
+  const q = range && range.q != null ? String(range.q).trim() : '';
+  const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+  const date = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+  const from = num(range && range.from), to = num(range && range.to);
+  const dFrom = date(range && range.dateFrom), dTo = date(range && range.dateTo);
+  const parts = [];
+  let rows = all;
+  if (from != null || to != null) {
+    rows = rows.filter(r => {
+      const n = r.inv_number == null ? null : Number(r.inv_number);
+      if (n == null || !Number.isFinite(n)) return false; // без номер не е в никакъв числов диапазон
+      return (from == null || n >= from) && (to == null || n <= to);
+    });
+    parts.push(from != null && to != null ? `инв. № ${from} – ${to}`
+      : from != null ? `инв. № от ${from} нататък` : `инв. № до ${to}`);
+  }
+  if (dFrom || dTo) {
+    rows = rows.filter(r => {
+      const d = r.register_date || '';
+      if (!d) return false; // без дата на вписване редът не попада в никакъв период
+      return (!dFrom || d >= dFrom) && (!dTo || d <= dTo);
+    });
+    parts.push(dFrom && dTo ? `вписани от ${bg(dFrom)} до ${bg(dTo)} г.`
+      : dFrom ? `вписани от ${bg(dFrom)} г. нататък` : `вписани до ${bg(dTo)} г.`);
+  }
+  if (q) {
+    const t = q.toLowerCase();
+    rows = rows.filter(r => invBookRowMatchesText(r, t));
+    parts.push(`отговарящи на търсенето „${q}“`);
+  }
+  return { rows, label: parts.join('; '), limited: parts.length > 0 };
+}
+window.invBookSelectRange = invBookSelectRange;
+function invBookPrintDialog() {
+  const q = INVBOOK_QUERY.trim();
+  modal('Печат на инвентарната книга — кой диапазон', `
+    <div class="note">Инвентарната книга се печата на листа, които се прошнуроват, номерират и заверяват с
+      подпис (чл. 26, ал. 2). Затова изберете какво точно да съдържа тази разпечатка — диапазонът се изписва
+      и върху самия лист. Празно поле не ограничава нищо.</div>
+    <form id="ibPrintF" onsubmit="return false">
+      <div class="grid g2">
+        ${fld('От инвентарен №', 'from', { type: 'number', min: 1 })}
+        ${fld('До инвентарен №', 'to', { type: 'number', min: 1 })}
+        ${fld('Вписани от дата', 'dateFrom', { type: 'date' })}
+        ${fld('Вписани до дата', 'dateTo', { type: 'date' })}
+      </div>
+      ${/* По подразбиране — това, което е филтрирано на екрана: ако в полето за
+            търсене стои нещо, отметката е сложена и разпечатката излиза точно
+            с видяното. Ако търсене няма, отметка няма и няма какво да обърква. */''}
+      ${q ? `<label class="chk"><input type="checkbox" name="useQuery" checked>
+        <span>Само редовете, които отговарят на търсенето на екрана — „${esc(q)}“</span></label>` : ''}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn" onclick="closeModal();printInvBookDoc()">Цялата книга</button>
+     <button class="btn pri" onclick="invBookPrintRange()">Печат на диапазона</button>`);
+}
+window.invBookPrintDialog = invBookPrintDialog;
+async function invBookPrintRange() {
+  const d = formData('#ibPrintF');
+  if (d.from && d.to && parseInt(d.to, 10) < parseInt(d.from, 10)) {
+    return toast('Началният инвентарен номер е по-голям от крайния — разменете ги.', 'err');
+  }
+  if (d.dateFrom && d.dateTo && d.dateTo < d.dateFrom) {
+    return toast('Началната дата е след крайната — разменете ги.', 'err');
+  }
+  closeModal();
+  return printInvBookDoc({ from: d.from, to: d.to, dateFrom: d.dateFrom, dateTo: d.dateTo,
+    q: d.useQuery ? INVBOOK_QUERY : '' });
+}
+window.invBookPrintRange = invBookPrintRange;
+async function printInvBookDoc(range) {
+  // Пълният списък се тегли винаги (в прозоречен режим — от базата); диапазонът
+  // се прилага след това, за да е сигурно, че печатът никога не зависи от това
+  // колко реда са изчертани на екрана в момента.
+  const all = INVBOOK_WINDOWED ? (await call(window.api.invBook.list()) || []) : (window._INVBOOK_ROWS || []);
+  const sel = invBookSelectRange(all, range);
+  const rows = sel.rows;
+  /* Само при ИЗБРАН диапазон: празният резултат тук е сгрешена граница, а не
+     празна книга, и мълчаливо отпечатан лист с нула реда, но с пълната глава на
+     инвентарната книга, е точно документът, който после никой не може да обясни.
+     Печатът на цялата (все още празна) книга остава възможен както досега. */
+  if (sel.limited && !rows.length) {
+    return toast('В избрания диапазон няма нито един запис — разпечатката би излязла празна. '
+      + 'Проверете границите на диапазона.', 'err');
+  }
   /* Разпечатката е меродавният документ по чл. 26 и се прошнурова и заверява с
      подпис — тя трябва да казва сама какво съдържа. Дотук в главата ѝ стоеше
      единствено „записи: N", където N са РЕДОВЕТЕ, отчислените включително: числото
@@ -265,12 +406,25 @@ async function printInvBookDoc() {
   const byStatus = {};
   active.forEach(r => { const k = r.status || 'без състояние'; byStatus[k] = (byStatus[k] || 0) + qtyOf(r); });
   const notOnShelf = Object.entries(byStatus).filter(([k]) => k !== 'наличен');
+  /* Бележката за документите без дата на вписване е СЪЩАТА, която стои и на
+     екрана (invBookUndatedNote) — и се смята върху точно отпечатаните редове,
+     не върху целия регистър: иначе листът би обявявал число, което в него го
+     няма. Виж обяснението при самата функция: инвентарната книга и КДБФ броят
+     по различен ключ и разликата трябва да е написана на меродавния документ. */
+  const undatedNote = invBookUndatedNote(invBookSummaryOf(rows));
   setPrintPage({ name: `Инвентарна книга — ${bg(today())}`, landscape: true, margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ИНВЕНТАРНА КНИГА</h2>
     <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
-    Разпечатано на ${bg(today())} г. · <b>${rows.length}</b> вписвания (инвентарни номера) от началото на книгата,
-    от които <b>${active.length}</b> неотчислени и <b>${deacc}</b> отчислени.<br>
+    ${/* Одит v2.4.56: когато е отпечатан ДИАПАЗОН, главата казва това с първото си
+          изречение и назовава границите — а също и колко е цялата книга, за да е
+          явно, че листът е част от нея, а не самата тя. Печатът на цялата книга
+          пише същото, каквото пишеше и досега. */''}
+    Разпечатано на ${bg(today())} г. · <b>${rows.length}</b> вписвания (инвентарни номера) ${
+      sel.limited ? 'в отпечатания диапазон' : 'от началото на книгата'},
+    от които <b>${active.length}</b> неотчислени и <b>${deacc}</b> отчислени.<br>${
+      sel.limited ? `<b>Отпечатан диапазон:</b> ${esc(sel.label)} — част от инвентарната книга,
+      която към ${bg(today())} г. съдържа общо ${all.length} вписвания.<br>` : ''}
     ${/* Един инвентарен номер = един екземпляр, тоест вписванията и документите са
           едно и също число. Второто изречение излиза САМО ако базата все още носи
           стар запис с друга бройка — тогава мълчанието би било по-лошо от
@@ -281,6 +435,7 @@ async function printInvBookDoc() {
       notOnShelf.length ? `<br>От тях със състояние, различно от „наличен“: ${
         notOnShelf.map(([k, n]) => esc(k) + ' — ' + n).join(', ')}.` : ''}
     Отчислените се отбелязват, но не се заличават (чл. 39).</div>
+    ${undatedNote ? `<div class="pmeta">${undatedNote}</div>` : ''}
     <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Бр.</th><th>Цена</th>
     <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th>Забележка</th></tr></thead><tbody>
     ${rows.map(r => `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
@@ -291,7 +446,9 @@ async function printInvBookDoc() {
       <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td>
       <td>${esc(r.status || '')}</td><td>${esc(r.description || '')}</td></tr>`).join('')}
     </tbody></table>
-    <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} вписвания. Листовете се прошнуроват, номерират, подпечатват и
+    <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} вписвания${
+      sel.limited ? ` от избрания диапазон (${esc(sel.label)}) и НЕ е пълната инвентарна книга` : ''}.
+    Листовете се прошнуроват, номерират, подпечатват и
     заверяват с подписа на ръководителя (чл. 26, ал. 2).</div>
     ${ssig(['Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………'), esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': ' + esc((SETTINGS_CACHE || {}).director || '…………………')])}</div>`);
 }

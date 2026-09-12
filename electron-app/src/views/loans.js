@@ -114,13 +114,19 @@ async function renderCirc() {
     if (openMine.length) {
       table += `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Заети от този читател</h3>
         <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th>Продължения</th><th style="width:160px"></th></tr></thead><tbody>
+        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th>Продължения</th><th style="width:250px"></th></tr></thead><tbody>
         ${openMine.map(l => `<tr><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
           <td class="num">${bg(l.date_out)}</td>
           <td class="num ${l.date_due && l.date_due < today() ? 'warn' : ''}">${bg(l.date_due) || '—'}</td>
           <td class="num">${l.renewals || 0}${maxRenew ? ' / ' + maxRenew : ''}</td>
           <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
-              <button class="btn sm" onclick="extendLoan(${l.id})"${maxRenew && (l.renewals || 0) >= maxRenew ? ' disabled title="Достигнат лимит на продълженията"' : ''}>Продължи</button></td></tr>`).join('')}
+              <button class="btn sm" onclick="extendLoan(${l.id})"${maxRenew && (l.renewals || 0) >= maxRenew ? ' disabled title="Достигнат лимит на продълженията"' : ''}>Продължи</button>
+              ${/* v2.4.56: третият изход на едно заемане. Дотук ги имаше само два —
+                    „Приеми“ и „Продължи“ — и когато читателят кажеше „загубих я“,
+                    библиотекарката натискаше „Приеми“, защото друго копче нямаше.
+                    Оттам нататък книгата се водеше върната и на рафта. */''}
+              <button class="btn sm" onclick="lostLoanDialog(${l.id})"
+                title="Документът не е върнат от читателя — приключване с обезщетение или замяна">Изгубена</button></td></tr>`).join('')}
         </tbody></table></div></div>`;
     }
   } else {
@@ -249,6 +255,164 @@ async function returnBook(id) {
   if (VIEW === 'over') renderOver(true); else if (VIEW === 'circ') renderCirc(); else if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.returnBook = returnBook;
+
+/* ================================================================
+   ДОКУМЕНТЪТ Е ИЗГУБЕН ИЛИ НЕВЪРНАТ ОТ ЧИТАТЕЛЯ (v2.4.56)
+   ================================================================
+   КАКВО СТАВАШЕ ДОТУК. Екранът предлагаше само „Приеми“ и „Продължи“. Читател,
+   който съобщи, че е загубил книгата (или който просто не се появява повече), не
+   се вписваше никъде: библиотекарката натискаше „Приеми“, за да слезе редът от
+   списъка — тоест програмата записваше, че книгата е върната и стои на рафта, —
+   после отваряше „Книги“ и сменяше състоянието на ръка, после отваряше картона и
+   вписваше начисление „друго“. Трите действия не бяха свързани с нищо: месеци
+   по-късно, когато се съставяше акт по чл. 30, т. 5, в него не личеше нито че за
+   този документ има начислено обезщетение, нито дали е събрано.
+
+   КАКВО ПРАВИ ТОЗИ ПРОЗОРЕЦ. Едно действие вместо три: приключва заемането с
+   изрична отметка, че документът НЕ е върнат, слага му състояние „изгубен“ и
+   записва кой от трите изхода е избран — обезщетение в пари, замяна с идентичен
+   документ или замяна с равностоен документ.
+
+   ЗА РАЗМЕРА — и защо е написано точно така в прозореца. Чл. 43, ал. 2 от
+   Наредба № 3 урежда обезщетяването, но НЕ определя размера му; размерът е
+   решение на библиотеката. Затова прозорецът казва с думи, че предложената сума
+   идва от правило на библиотеката, показва самото правило (кратност × цена по
+   инвентарната книга), позволява сумата да се смени на ръка и дава как да се
+   промени правилото. Ако числото стоеше голо, след време щеше да се чете като
+   изискване на наредбата — а то не е. */
+async function lostLoanDialog(id) {
+  const q = await call(window.api.loans.lostQuote({ id }));
+  if (!q) return;
+  window._LOST_Q = q;
+  const p = q.policy || {};
+  const basisText = q.basis === 'цена'
+    ? `${p.multiplier} × цена по инвентарната книга (${mny(q.price)}) = <b>${mny(q.suggested)}</b>`
+    : `документът е без вписана цена — предлага се сумата от правилото за такива случаи: <b>${mny(q.suggested)}</b>`;
+  modal('Документът е изгубен — инв. № ' + (q.inv_number ?? '—'), `
+    <div class="note d" style="margin-top:0">
+      <b>${esc(q.title)}</b>${q.author ? ' · ' + esc(q.author) : ''} (инв. № ${q.inv_number ?? '—'})<br>
+      Читател: <b>${esc(q.reader_name)}</b>${q.card_no ? ' (карта ' + esc(q.card_no) + ')' : ''} ·
+      зает на ${bg(q.date_out)} · срок ${bg(q.date_due) || '—'}
+      ${q.daysLate ? `<br>Забава <b>${dni(q.daysLate)}</b> — начислява се отделно
+        ${q.fineToAdd ? '<b>' + mny(q.fineToAdd) + '</b>' : ''} за просрочие
+        ${q.fineAccrued ? ' (вече начислено по това заемане: ' + mny(q.fineAccrued) + ')' : ''}` : ''}
+    </div>
+    <div class="note w">
+      <b>Чл. 43, ал. 2 от Наредба № 3</b> урежда обезщетяването при невърнат документ, но
+      <b>размерът се определя от библиотеката</b>, а не от наредбата. Сумата по-долу е
+      предложение по правилото на вашата библиотека и се променя на ръка.
+      <div class="hint" style="margin-top:4px">Правило: ${basisText}
+        <button class="btn sm" style="margin-left:8px" onclick="lostPolicyDialog()">Промени правилото…</button></div>
+    </div>
+    <form id="lostF" onsubmit="return false">
+      ${fld('Как се урежда случаят', 'resolution', {
+        type: 'select', req: 1, allowEmpty: false, val: 'обезщетение',
+        opts: (p.resolutions || ['обезщетение']).map(v => ({ v, t: v === 'обезщетение' ? 'Обезщетение в пари' : v.charAt(0).toUpperCase() + v.slice(1) })),
+        onchange: 'lostFormToggle()'
+      })}
+      <div id="lostMoney">
+        ${mnyField('Размер на обезщетението', 'amount', { req: 1, min: 0, val: q.suggested })}
+        <div class="hint">Влиза в читателската сметка като отделно начисление
+          „обезщетение за изгубен документ“ — различно от обезщетението за просрочие.</div>
+      </div>
+      <div id="lostRepl" hidden>
+        ${fld('Инв. № / баркод на приетия вместо него документ', 'replacement_code', { hint: 'ако вече е вписан в „Книги“' })}
+        ${fld('Описание на приетия документ', 'replacement_note', { hint: 'ако още няма инвентарен номер' })}
+        <div class="hint">Приетият вместо изгубения документ е ново постъпление и се инвентира
+          по общия ред (партида в „Постъпления“ и собствен инвентарен номер). Тук се записва само
+          връзката, за да остане в следата кое е заместило кое.</div>
+      </div>
+      ${fld('Бележка', 'note', { type: 'textarea', rows: 2, val: '' })}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn dgr" onclick="saveLostLoan(${id})">Приключи като изгубен</button>`);
+  lostFormToggle();
+}
+window.lostLoanDialog = lostLoanDialog;
+/* Полетата се СКРИВАТ, а не се изтриват и пресъздават: скритото поле пази
+   написаното, ако библиотекарят превключи между „обезщетение“ и „замяна“ и се
+   върне обратно. `el.hidden`, не style.display — така и четците на екран го
+   пропускат. */
+function lostFormToggle() {
+  const f = $('#lostF'); if (!f) return;
+  const sel = f.querySelector('[name="resolution"]');
+  const money = $('#lostMoney'), repl = $('#lostRepl');
+  const isMoney = !sel || sel.value === 'обезщетение';
+  if (money) money.hidden = !isMoney;
+  if (repl) repl.hidden = isMoney;
+  /* Задължителността се мести заедно с видимостта: скрито поле с required не
+     може да бъде попълнено, а спираше запазването — същият капан, заради който
+     firstMissingRequired() в core.js изобщо съществува. */
+  const amt = f.querySelector('[name="amount"]');
+  if (amt) { if (isMoney) amt.setAttribute('required', 'required'); else amt.removeAttribute('required'); }
+}
+window.lostFormToggle = lostFormToggle;
+async function saveLostLoan(id) {
+  const d = formData('#lostF');
+  if (d.resolution === 'обезщетение' && (!d.amount || Number(d.amount) <= 0)) {
+    return toast('Въведете размер на обезщетението или изберете замяна с документ.', 'err');
+  }
+  if (d.resolution !== 'обезщетение' && !String(d.replacement_code || '').trim() && !String(d.replacement_note || '').trim()) {
+    return toast('Запишете кой документ е приет вместо изгубения — инв. № или описание.', 'err');
+  }
+  const q = window._LOST_Q || {};
+  const what = d.resolution === 'обезщетение'
+    ? 'ще бъдат начислени ' + mny(d.amount) + ' в сметката на ' + (q.reader_name || 'читателя')
+    : 'ще се запише ' + d.resolution;
+  if (!await askConfirm('Инв. № ' + (q.inv_number ?? '—') + ' се приключва като НЕВЪРНАТ от читателя — '
+    + what + '. Документът получава състояние „изгубен“ и подлежи на отчисляване с акт по чл. 30, т. 5.',
+    { kind: 'danger', okLabel: 'Приключи' })) return;
+  const res = await call(window.api.loans.markLost({
+    id, resolution: d.resolution, amount: d.amount,
+    replacement_code: d.replacement_code, replacement_note: d.replacement_note,
+    note: d.note, date: today()
+  }));
+  if (!res) return;
+  closeModal();
+  markSaved();
+  toast('Инв. № ' + (res.inv_number ?? '—') + ' е приключен като изгубен'
+    + (res.amount ? ' — начислени ' + mny(res.amount) + ' на ' + res.reader_name : '')
+    + (res.replacement ? ' — прието вместо него: инв. № ' + (res.replacement.inv_number ?? '—') : '')
+    + '.', 'err');
+  if (res.suspendedUntil) toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(res.suspendedUntil) + '.', 'err');
+  toast('Отчислете документа с акт по чл. 30, т. 5 от раздел „Отчисляване“.', 'ok');
+  if (VIEW === 'over') renderOver(true); else if (VIEW === 'circ') renderCirc(); else if (RENDERERS[VIEW]) RENDERERS[VIEW]();
+}
+window.saveLostLoan = saveLostLoan;
+/* Правилото се редактира от мястото, на което се прилага. Истинското му място е
+   „Настройки“ (виж доклада — там трябва да се добави поле), но дотогава
+   библиотекарят не бива да е заключен с число, което не може да промени: точно
+   това би превърнало предложението в „изискване на програмата“. */
+function lostPolicyDialog() {
+  const p = (window._LOST_Q && window._LOST_Q.policy) || {};
+  const def = p.defaults || {};
+  modal2('Правило за обезщетение при изгубен документ', `
+    <div class="note w" style="margin-top:0">Размерът на обезщетението се определя от библиотеката
+      (вътрешни правила по чл. 43, ал. 2 от Наредба № 3). Наредбата не задава число — тук се записва
+      решението на вашата библиотека и то се използва само като предложение.</div>
+    <form id="lostPolF" onsubmit="return false">
+      ${fld('Кратност спрямо цената по инвентарната книга', 'multiplier', {
+        type: 'number', step: '0.1', min: 0, req: 1, val: p.multiplier ?? def.multiplier,
+        hint: 'например 3 = троен размер на цената' })}
+      ${mnyField('За документ без вписана цена', 'fallback', { req: 1, min: 0, val: p.fallback ?? def.fallback })}
+    </form>`,
+    `<button class="btn" onclick="closeModal2()">Отказ</button>
+     <button class="btn pri" onclick="saveLostPolicy()">Запази правилото</button>`);
+}
+window.lostPolicyDialog = lostPolicyDialog;
+async function saveLostPolicy() {
+  const d = formData('#lostPolF');
+  const p = await call(window.api.loans.lostPolicySave({ multiplier: d.multiplier, fallback: d.fallback }), 'Правилото е записано.');
+  if (!p) return;
+  closeModal2();
+  /* Отвореният отдолу прозорец носи ПРЕДЛОЖЕНА сума по старото правило — ако
+     остане, библиотекарят ще начисли по правило, което току-що е сменил.
+     Затова се пресъздава от нулата със същото заемане. */
+  const q = window._LOST_Q;
+  if (q && q.loan_id) lostLoanDialog(q.loan_id);
+}
+window.saveLostPolicy = saveLostPolicy;
+
 /* Брояч „читалня" — едно натискане = едно ползване на място. Влиза в потока от
    събития и оттам в предложенията за дневника (a_visit_reading). */
 async function logLocaluse() {

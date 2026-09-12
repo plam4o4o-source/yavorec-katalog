@@ -138,11 +138,36 @@ test('books:delete отказва и когато има само затворе
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loans').get().n, 1);
 });
 
-test('books:delete продължава да трие документ без нито едно заемане', async () => {
+/* Одит v2.4.56: тестът заковаваше „вписан документ без заемания се трие на ЕДНО
+   натискане“ — а точно това беше дефектът. Инв. № 3 значи ред в инвентарната книга
+   (чл. 16, ал. 1), която се води безсрочно (чл. 26, ал. 1) и в която отчислените
+   редове се отбелязват, а не се заличават (чл. 39); след триене номерът остава
+   празно място в поредицата и при проверка няма с какво да се обясни. Старото
+   очакване беше грешно не защото триене изобщо не бива да е възможно (сгрешен
+   запис, който никога не е трябвало да бъде вписан, съществува), а защото ставаше
+   БЕЗ ВЪПРОС и без следа. Сега първото натискане обяснява и сочи акта за
+   отчисляване, второто изтрива — същият похват, който отдавна пази документа с
+   история. Документ БЕЗ инвентарен номер (още невписан) продължава да си отива
+   наведнъж — виж теста веднага след този. */
+test('books:delete иска второ натискане за ВПИСАН документ дори без нито едно заемане', async () => {
   const { db, ipcMain } = setupBooks();
   const bookId = (await ipcMain.invoke('books:create', { title: 'Никога незаемана', inv_number: 3 })).data;
+  const first = await ipcMain.invoke('books:delete', bookId);
+  assert.equal(first.ok, false, 'вписаният ред не си отива на един клик');
+  assert.match(first.error, /акт за отчисляване/, 'казва кой е нормалният път');
+  assert.match(first.error, /още веднъж/, 'но изходът е показан');
+  assert.ok(db.prepare('SELECT 1 FROM books WHERE id=?').get(bookId), 'документът остава след първото натискане');
+
+  const second = await ipcMain.invoke('books:delete', bookId);
+  assert.equal(second.ok, true);
+  assert.equal(db.prepare('SELECT 1 FROM books WHERE id=?').get(bookId), undefined);
+});
+
+test('books:delete трие невписан документ (без инвентарен номер) наведнъж', async () => {
+  const { db, ipcMain } = setupBooks();
+  const bookId = (await ipcMain.invoke('books:create', { title: 'Още невписана' })).data;
   const result = await ipcMain.invoke('books:delete', bookId);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, 'без номер в регистъра няма и дупка в него');
   assert.equal(db.prepare('SELECT 1 FROM books WHERE id=?').get(bookId), undefined);
 });
 
@@ -564,7 +589,7 @@ test('анулирането на акт отваря обратно заема�
   assert.equal(created.ok, true);
   assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId).date_in, '2026-06-01');
 
-  const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data);
+  const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(revoked.ok, true);
   const loan = db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId);
   assert.equal(loan.date_in, null, 'заемът трябва да е отворен обратно — книгата реално е у читателя');
@@ -581,7 +606,7 @@ test('анулирането не отваря заемане, което е б�
   const created = await ipcMain.invoke('deaccessionActs:create', {
     act: { no: 2, date: '2026-06-01', reason_code: 3, reason_text: 'износени' }, bookIds: [bookId]
   });
-  await ipcMain.invoke('deaccessionActs:revoke', created.data);
+  await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(returnedLoan).date_in, '2026-06-01',
     'нормално върнат документ не бива да се „отзаема“ обратно');
 });

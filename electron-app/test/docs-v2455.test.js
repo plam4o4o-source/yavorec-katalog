@@ -151,7 +151,7 @@ test('резервацията се отказва правилно дори к�
   assert.equal(h1.deaccession_act_id, created.data, 'записаният акт трябва да е ИСТИНСКИЯТ act_id, не book_id');
   assert.equal(h1.status_before, 'чака');
 
-  const revoked = ipc.invoke('deaccessionActs:revoke', created.data);
+  const revoked = ipc.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
   assert.ok(revoked.ok, revoked.error);
   assert.equal(revoked.data.droppedHolds, 1, 'анулирането трябва да преброи точно тази резервация');
   assert.equal(db.prepare('SELECT status FROM holds WHERE book_id=?').get(bid).status, 'отказана',
