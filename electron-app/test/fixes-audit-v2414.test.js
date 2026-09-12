@@ -639,12 +639,50 @@ test('инсталаторът не може да поеме живата баз
   }
 });
 
-test('прозорецът не пропуска външни адреси към браузъра', () => {
+test('прозорецът не пропуска ПРОИЗВОЛНИ външни адреси към браузъра — само изрично изброените (v2.4.57)', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  const h = main.slice(main.indexOf('setWindowOpenHandler'), main.indexOf('will-navigate'));
-  assert.ok(!/shell\.openExternal/.test(h),
-    'в програмата няма нито една връзка с target="_blank" — този клон оставяше само изходен канал');
-  assert.match(h, /action: 'deny'/);
+  const h = main.slice(main.indexOf('ALLOWED_EXTERNAL_URLS'), main.indexOf('will-navigate'));
+  // Никакъв нов прозорец на ПРИЛОЖЕНИЕТО не се разрешава — нито за списъка, нито извън него.
+  assert.ok(!/action:\s*'allow'/.test(h), 'никой адрес не отваря нов прозорец на самото приложение');
+  // Пропускането към браузъра минава ЕДИНСТВЕНО през изричния списък (Set с точни адреси),
+  // не през общо правило за http(s) или префикс/поддомейн проверка.
+  assert.match(h, /ALLOWED_EXTERNAL_URLS\.has\(url\)/,
+    'shell.openExternal се вика само след точно съвпадение с изричния списък');
+  assert.match(h, /shell\.openExternal\(url\)/);
+  const listMatch = main.match(/const ALLOWED_EXTERNAL_URLS = new Set\(\[([^\]]*)\]\)/);
+  assert.ok(listMatch, 'списъкът с разрешени адреси съществува и е Set с литерали');
+  const urls = [...listMatch[1].matchAll(/'([^']*)'/g)].map(m => m[1]);
+  assert.ok(urls.length >= 1, 'списъкът не е празен — иначе линкът в Настройки пак не отваря нищо');
+  for (const u of urls) assert.match(u, /^https:\/\//, 'само https, никога http');
+});
+
+test('setWindowOpenHandler през истинския main.js: разрешеният адрес се праща на shell.openExternal, произволен — не (v2.4.57)', async () => {
+  // Поправя реалната жалба: линкът към сайта на разработчика в „Настройки“ →
+  // „Помощ и обратна връзка“ не отваряше нищо, защото handler-ът винаги
+  // отказваше, без изключение. Тук се вика РЕАЛНАТА функция от main.js
+  // (през startMainApp), не текстово претърсване.
+  const { startMainApp } = require('./helpers/main-app');
+  const app = startMainApp();
+  test.after(() => app.stop());
+  await app.ready();
+  const handler = app.windowOpenHandler;
+  assert.equal(typeof handler, 'function', 'main.js трябва да е регистрирал setWindowOpenHandler');
+
+  const before = app.shellCalls.length;
+  const res1 = handler({ url: 'https://invlib.com/' });
+  assert.deepEqual(res1, { action: 'deny' }, 'никога не отваря нов прозорец на самото приложение');
+  assert.deepEqual(app.shellCalls.slice(before), ['https://invlib.com/'],
+    'разрешеният адрес трябва да стигне до shell.openExternal');
+
+  const before2 = app.shellCalls.length;
+  const res2 = handler({ url: 'https://evil.example.com/?d=' + encodeURIComponent('уж данни') });
+  assert.deepEqual(res2, { action: 'deny' });
+  assert.deepEqual(app.shellCalls.slice(before2), [], 'произволен адрес НЕ бива да стига до браузъра');
+
+  const before3 = app.shellCalls.length;
+  const res3 = handler({ url: 'https://invlib.com/../нещо' });
+  assert.deepEqual(res3, { action: 'deny' });
+  assert.deepEqual(app.shellCalls.slice(before3), [], 'дори близък до разрешения адрес, но не точно същия, се отказва');
 });
 
 test('внасянето приема само таблици, а не произволен файл от компютъра', () => {

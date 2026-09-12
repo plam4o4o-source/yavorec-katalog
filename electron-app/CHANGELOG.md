@@ -300,12 +300,16 @@ Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
 в „Читатели“ излизаше 39 px извън таблицата), а страничната лента получи собствено
 превъртане със закотвени рамка и подпис — при 768 px и 125 % увеличение ѝ трябваха
 1146 px в 614 px налични и 12 раздела изпадаха; покрай това се откри, че блокът
-`@media (max-height:780px)` беше **мъртъв** заради реда на правилата.
+`@media (max-height:780px)` беше **мъртъв** заради реда на правилата. Отделно се
+откри стар пропуск (от v2.1.0): линкът към сайта на разработчика в „Настройки“ →
+„Помощ и обратна връзка“ не отваряше нищо — прозорецът отказваше всеки външен
+адрес без изключение. Сега се пропуска към системния браузър САМО този един,
+изрично изброен адрес.
 
-Проверки: 73 нови теста в четири файла, 59 мутации на реалния код, всяка с връщане
+Проверки: 78 нови теста в четири файла, 59 мутации на реалния код, всяка с връщане
 и повторно пускане — всичките уловени от именуван тест (четири излязоха живи и за
 всяка е добавен тест, докато не падне); плюс контролна мутация, която трябва да
-мине, и минава. Пълната поредица: 1556 успешни, 0 неуспешни; сайтът: 8 сценария +
+мине, и минава. Пълната поредица: 1584 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария +
 всички проверки при 15 002 записа.
 
 **EN:** The largest round so far — all twenty-three findings from the two audits
@@ -360,12 +364,15 @@ a breakdown by document type and Part 3 the disposal column; a recorded batch ca
 be corrected with a per-field trace. **Concurrent editing** from two workstations
 is now refused with an explanation instead of silently overwriting, there is a
 **full CSV-in-ZIP export**, row actions stick to the right edge, and the sidebar
-scrolls on its own.
+scrolls on its own. Separately, an old gap (from v2.1.0) surfaced: the link to
+the developer's website in Settings → Help & feedback opened nothing — the
+window rejected every external address without exception. Now only that one,
+explicitly listed address is passed through to the system browser.
 
-Checks: 73 new tests in four files, 59 mutations of the real code, each reverted
+Checks: 78 new tests in four files, 59 mutations of the real code, each reverted
 and re-run — all caught by a named test (four survived at first and got a test
 each until they failed); plus a control mutation that must pass, and does. Full
-suite: 1556 passing, 0 failing; the site: 8 scenarios and all checks at 15 002
+suite: 1584 passing, 0 failing (UTC and Europe/Sofia); the site: 8 scenarios and all checks at 15 002
 records.
 
 ## v2.4.55

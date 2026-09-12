@@ -68,8 +68,9 @@ function startMainApp() {
   const readyPromise = new Promise((res) => { readyResolve = res; });
   let isReady = false;
 
+  let windowOpenHandler = null;        // функцията, подадена на setWindowOpenHandler(...)
   const fakeWebContents = {
-    setWindowOpenHandler: () => {},
+    setWindowOpenHandler: (fn) => { windowOpenHandler = fn; },
     on: () => {},
     send: (channel, data) => sent.push({ channel, data })
   };
@@ -151,6 +152,7 @@ function startMainApp() {
 
   started = {
     dir, userData, handlers, sent, dialogCalls, shellCalls, windows,
+    get windowOpenHandler() { return windowOpenHandler; },
     /* Изпълнява канала точно както го вика renderer-ът през preload.js. */
     invoke: (channel, ...args) => {
       const fn = handlers.get(channel);
