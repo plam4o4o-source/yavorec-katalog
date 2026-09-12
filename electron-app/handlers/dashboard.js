@@ -1,4 +1,11 @@
 // Табло — извадени от main.js в отделен модул (Фаза 4, стъпка 23). Чисто
+/* Условията за броене на фонда идват от db/fund-sql.js (v2.4.57) — едно място
+   за всички. Дотук всяко от дванайсетте места, които показват фондово число, ги
+   пишеше наново; две от тях бяха забравили NULL-безопасността на статуса, а
+   „Библиотечен фонд“ на таблото и „Библиотечен фонд“ в отчета се оказаха два
+   различни ключа под едно име. Виж дългата бележка там кой ключ на какъв въпрос
+   отговаря и защо са два. */
+const FUND = require('../db/fund-sql');
 // справочен домейн (2 read-only IPC канала), но чете от почти всяка
 // таблица във фонда — затова зависи от LOAN_SELECT (връщано от
 // handlers/loans.js), isWorkDay (връщано от handlers/calendar.js),
@@ -28,7 +35,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const db = getDb();
       return {
         // Бройки, не заглавия — виж бележката при QTY в handlers/kdbf.js.
-        books: db.prepare(`SELECT COALESCE(SUM(${QTY}),0) AS n FROM books b WHERE (b.status != 'отчислен' OR b.status IS NULL)`).get().n,
+        books: db.prepare(`SELECT COALESCE(SUM(${QTY}),0) AS n FROM books b WHERE ${FUND.fundByStatus}`).get().n,
         readers: db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n,
         loansOpen: db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n,
         overdue: db.prepare(`
@@ -44,7 +51,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const y = yearOf();
       const fund = db.prepare(
         `SELECT COALESCE(SUM(${QTYJ}),0) AS n, COALESCE(SUM(b.price * ${QTYJ}),0) AS v
-         ${BOOKS_INV} WHERE (b.status != 'отчислен' OR b.status IS NULL)`
+         ${BOOKS_INV} WHERE ${FUND.fundByStatus}`
       ).get();
       const activeReaders = db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n;
       const loansOpen = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n;
@@ -83,7 +90,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          се ползваше `fund.n` (вече бройки), Таблото щеше да показва една цел, а
          екранът „Инвентаризация“ — друга. Условието е дословно същото като там,
          включително NULL-безопасната проверка на статуса. */
-      const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
+      const active = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE ${FUND.fundByStatusPlain}`).get().n;
       const pct = pctRequired(active);
       const target = Math.ceil(active * pct / 100);
       /* COUNT(DISTINCT sc.book_id), не COUNT(*). Одит v2.4.14: нормата по

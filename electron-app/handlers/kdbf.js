@@ -1,4 +1,12 @@
 // КДБФ — книга за движение на фонда — извадено от main.js (Фаза 4, стъпка 16).
+/* Условията за броене на фонда идват от db/fund-sql.js (v2.4.57) — едно място
+   за всички. Дотук всяко от дванайсетте места, които показват фондово число, ги
+   пишеше наново; две от тях бяха забравили NULL-безопасността на статуса, а
+   „Библиотечен фонд“ на таблото и „Библиотечен фонд“ в отчета се оказаха два
+   различни ключа под едно име. Виж дългата бележка там кой ключ на какъв въпрос
+   отговаря и защо са два. */
+const FUND = require('../db/fund-sql');
+const { BAD_DATE } = FUND;
 // Единствен обобщаващ справочен handler: чете acquisitions/deaccession_acts/books
 // за дадена година, не пише нищо. Зависи само от getDb, run и yearOf (по стойност).
 module.exports = function registerKdbfHandlers(ipcMain, deps) {
@@ -47,7 +55,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
       const end = y + '-12-31';
       const stockAt = (d) => db.prepare(`
         SELECT COALESCE(SUM(${QTYJ}),0) AS n, COALESCE(SUM(b.price * ${QTYJ}),0) AS v ${BOOKS_INV}
-        WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        WHERE ${FUND.fundByDate('?')}
       `).get(d, d);
       const stockEnd = stockAt(end);
       const acquiredYear = db.prepare(
@@ -100,7 +108,15 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
                -- постъпленията, защото substr('',1,4) не е година.
                COALESCE(SUM(CASE WHEN b.register_date IS NULL THEN ${QTYJ} ELSE 0 END),0) AS missing_from_stock
         ${BOOKS_INV}
-        WHERE (b.register_date IS NULL OR b.register_date = '')
+        ${/* v2.4.57: условието идва от FUND.BAD_DATE и включва ТРЕТИЯ случай —
+              НЕРАЗПОЗНАВАЕМА дата („НЕВАЛИДНА-99-99“). Дотук тук стоеше само
+              „IS NULL или празно“ и точно този документ пропадаше и през този
+              брояч: измерено при три документа (10 €, 99 € със счупена дата,
+              50 €), КДБФ обявяваше наличност 60 € и „0 недатирани“ — тоест
+              собственият му ред твърдеше, че всичко е наред, докато 99 € ги
+              нямаше в наличността. Инвентарната книга и „Проверка на данните“
+              вече ги хващаха; самият документ, който се подписва — не. */''}
+        WHERE ${BAD_DATE}
           AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
       `).get(end);
       /* Разбивка по видове документи към края на годината (v2.4.56) — за
@@ -113,7 +129,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
         SELECT COALESCE(c.name, '— без вид —') AS kind,
                COALESCE(SUM(${QTYJ}),0) AS n, COALESCE(SUM(b.price * ${QTYJ}),0) AS v
         ${BOOKS_INV} LEFT JOIN categories c ON c.id = b.category_id
-        WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        WHERE ${FUND.fundByDate('?')}
         GROUP BY kind ORDER BY n DESC, kind
       `).all(end, end);
       const part1Sum = part1.reduce((s, a) => ({

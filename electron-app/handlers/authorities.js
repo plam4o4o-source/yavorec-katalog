@@ -6,6 +6,8 @@
 // бъдат слети. Изцяло самостоятелен: само getDb()/run/logAudit.
 module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
+  // Ключът „налично днес“ — виж db/fund-sql.js и бележката при authorityValues().
+  const { fundByStatusPlain } = require('../db/fund-sql');
 
   const AUTHORITY_FIELDS = {
     author: 'автор', publisher: 'издателство', city: 'място на издаване',
@@ -73,10 +75,31 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
     }
     return true;
   }
+  /* ЕДНО ЧИСЛО, ДВА ВЪПРОСА (v2.4.57).
+     =====================================================================
+     `n` брои ВСИЧКИ редове с тази стойност, включително отчислените. За
+     автодовършването това е вярно и не бива да се пипа: имената се предлагат,
+     за да се пише еднакво, а отчислената книга си остава описана с това име и
+     подредбата по честота няма да е вярна, ако половината фонд изпадне от
+     броенето. Инспекторът по чл. 39 също чете по име в отчислените актове.
+
+     На екрана обаче същото число стои под колона „Документи“ и се чете като
+     „толкова книги имаме от този автор“ — а това е друг въпрос и отговорът му е
+     друг. Библиотека, отчислила цялата стара поредица, продължаваше да чете
+     „Вазов, Иван — 12 документа“, докато на рафта няма нито един.
+
+     Затова числата са ДВЕ и всяко казва на какво отговаря: `n` (всички описани
+     документа) и `avail` (от тях в наличност). Условието за наличност идва от
+     db/fund-sql.js — ключът „налично днес“ — а не се преписва тук: същият ключ
+     брои фонда на таблото и пула за инвентаризация, и трите трябва да казват
+     едно и също за един и същ документ. NULL статус (стар внос) е В наличност —
+     виж дългата бележка там. */
   function authorityValues(field) {
     if (!(field in AUTHORITY_FIELDS)) throw new Error('Непознато поле: ' + field);
     return getDb().prepare(
-      `SELECT ${field} AS value, COUNT(*) AS n FROM books
+      `SELECT ${field} AS value, COUNT(*) AS n,
+              SUM(CASE WHEN ${fundByStatusPlain} THEN 1 ELSE 0 END) AS avail
+       FROM books
        WHERE ${field} IS NOT NULL AND TRIM(${field}) <> '' GROUP BY ${field} ORDER BY n DESC, ${field}`
     ).all();
   }
@@ -159,7 +182,10 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
       }
       return buckets
         .filter(g => g.length > 1)
-        .map(g => ({ items: g.sort((a, b) => b.n - a.n), total: g.reduce((s, r) => s + r.n, 0) }))
+        // `avail` се събира като `total` (виж authorityValues): групата казва не
+        // само колко документа засяга сливането, а и колко от тях реално са във фонда.
+        .map(g => ({ items: g.sort((a, b) => b.n - a.n), total: g.reduce((s, r) => s + r.n, 0),
+          avail: g.reduce((s, r) => s + (r.avail || 0), 0) }))
         .sort((a, b) => b.total - a.total);
     })
   );

@@ -1,4 +1,11 @@
 // Справки и статистика + Готови справки — извадени от main.js в отделен
+/* Условията за броене на фонда идват от db/fund-sql.js (v2.4.57) — едно място
+   за всички. Дотук всяко от дванайсетте места, които показват фондово число, ги
+   пишеше наново; две от тях бяха забравили NULL-безопасността на статуса, а
+   „Библиотечен фонд“ на таблото и „Библиотечен фонд“ в отчета се оказаха два
+   различни ключа под едно име. Виж дългата бележка там кой ключ на какъв въпрос
+   отговаря и защо са два. */
+const FUND = require('../db/fund-sql');
 // модул (Фаза 4, стъпка 29). Koha предлага споделена библиотека от стотици
 // готови отчети; тукашният аналог (reports:run) е малък и фиксиран набор от
 // справки, всяка от които съответства на нещо, което читалищна библиотека
@@ -25,7 +32,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          брой, стойност и разбивки по език/отдел — се смятат от SQLite за ~25 ms.
          Формулите са същите: COALESCE(quantity, 1) е един документ при липсващ
          ред в inventory, изрична нула си остава нула. */
-      const FUND_WHERE = '+b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)';
+      const FUND_WHERE = FUND.fundByDate('?');
       const fundAgg = db.prepare(`
         SELECT COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n,
                COALESCE(SUM(COALESCE(b.price, 0) * COALESCE(i.quantity, 1)), 0) AS v
@@ -192,7 +199,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         FROM books b
         LEFT JOIN categories c ON c.id=b.category_id
         LEFT JOIN inventory i ON i.book_id = b.id
-        WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        WHERE ${FUND.fundByDate('?')}
         GROUP BY k ORDER BY n DESC
       `).all(end, end).map(r => [r.k, r.n]);
       return {
@@ -262,7 +269,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         // Същото броене по екземпляри като в stats:report — двете справки показват
         // едно и също число за фонда и не бива да се разминават.
         // v2.4.31: сборовете в SQL (виж stats:report) — без 15 000 реда `b.*` в паметта.
-        const FUND_WHERE = '+b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)';
+        const FUND_WHERE = FUND.fundByDate('?');
         const agg = db.prepare(`
           SELECT COALESCE(SUM(COALESCE(i.quantity, 1)), 0) AS n,
                  COALESCE(SUM(COALESCE(b.price, 0) * COALESCE(i.quantity, 1)), 0) AS v
@@ -278,7 +285,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           FROM books b
           LEFT JOIN categories c ON c.id=b.category_id
           LEFT JOIN inventory i ON i.book_id = b.id
-          WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+          WHERE ${FUND.fundByDate('?')}
           GROUP BY k ORDER BY n DESC
         `).all(end, end).map(r => [r.k, r.n]);
         return {

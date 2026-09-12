@@ -4,6 +4,11 @@
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
   const { parseRegisterNo, resolveScannedBook, isValidIsoDate } = require('../security-utils');
+  /* Ключът „налично днес“ живее на едно място — db/fund-sql.js. Инвентаризацията
+     е точно неговият случай: въпросът по чл. 40 е „какво да проверя ФИЗИЧЕСКИ“,
+     а не „какво пише в регистъра към дата“. NULL статусът (стар внос) е във
+     фонда — това е и причината условието да не се пише на ръка тук. */
+  const { fundByStatus, fundByStatusPlain } = require('../db/fund-sql');
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -40,7 +45,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          фонд“ — същия, с който Таблото нарича броя екземпляри. Числата са две
          различни неща и не бива да носят едно име; поправено е в етикета
          (src/views/inventory-sessions.js), не в мярката. */
-      const active = db.prepare("SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL)").get().n;
+      const active = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE ${fundByStatusPlain}`).get().n;
       const s = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
       const pct = pctRequired(active);
       /* Напредъкът за ГОДИНАТА се смята тук, а не чрез сумиране на сесиите в
@@ -50,10 +55,30 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          (handlers/dashboard.js), но не и тук — класическото „поправено на едно
          от две места“. */
       const y = String(new Date().getFullYear());
+      /* ЕКРАНЪТ И ПРОТОКОЛЪТ БРОЯТ ЕДНО И СЪЩО (v2.4.57).
+         =================================================================
+         Дотук тази заявка броеше СУРОВИТЕ сканирания за годината, а
+         inventorySessions:close брои „проверени“ СРЕЩУ ОБХВАТА — тоест изважда
+         документите, излезли от обхвата, докато проверката е текла (виж
+         outOfScope там). Двете числа се разминават при най-обикновено събитие:
+         документ, сканиран от комисията и отчислен с акт СЪЩИЯ месец.
+
+         Измерено върху една книга и една сесия: екранът обявяваше нормата по
+         чл. 40 за изпълнена — „проверени 1 от 1“ — а подписаният протокол за
+         същата тази сесия гласеше „проверени 0“. Числото на екрана е това, по
+         което библиотекарката решава дали да продължи да проверява; протоколът
+         е това, което се подписва. Да се разминават е по-лошо от това и двете
+         да са приблизителни.
+
+         Условието е СЪЩОТО, което дава `active` два реда по-горе и `pool` в
+         close() — затова идва от db/fund-sql.js, а не се преписва: три копия на
+         едно правило са начинът, по който то се разпада. DISTINCT остава заради
+         пролетната и есенната сесия (виж бележката по-горе). */
       const scannedYear = db.prepare(`
         SELECT COUNT(DISTINCT sc.book_id) AS n FROM inventory_session_scans sc
         JOIN inventory_sessions s ON s.id = sc.session_id
-        WHERE substr(s.date,1,4) = ?
+        JOIN books b ON b.id = sc.book_id
+        WHERE substr(s.date,1,4) = ? AND ${fundByStatus}
       `).get(y).n;
       return { active, pct, target: Math.ceil(active * pct / 100), scannedYear,
         naturalLoss: naturalLoss(active, s.free_access_pct) };
@@ -68,7 +93,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       if (!isValidIsoDate(s && s.date)) throw new Error('Датата на проверката липсва или е невалидна.');
       const db = getDb();
       // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
-      const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = @department' : ''}`)
+      const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE ${fundByStatusPlain} ${s.department ? 'AND department = @department' : ''}`)
         .get(s.department ? { department: s.department } : {});
       /* Номер и година на протокола. Точно както при партидите (acquisitions:create):
          schema.sql няма UNIQUE(year, no) и не може да го получи наготово — съществуващи
@@ -221,7 +246,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            Измерено при 15 000 документа — 14 МБ прочетени и разпределени в
            паметта, за да се погледнат шест числа. */
         const pool = db.prepare(`SELECT id, inv_number, title, author, price, status FROM books
-          WHERE (status != 'отчислен' OR status IS NULL) ${s.department ? 'AND department = ?' : ''}`)
+          WHERE ${fundByStatusPlain} ${s.department ? 'AND department = ?' : ''}`)
           .all(...(s.department ? [s.department] : []));
         const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
         const scannedSet = new Set(scannedIds);
@@ -263,7 +288,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            това изключва отчислените, но е предпазна мярка и не се маха мимоходом. */
         if (missing.length) {
           db.prepare(`UPDATE books SET status='липсващ', status_date=date('now')
-            WHERE (status != 'отчислен' OR status IS NULL)
+            WHERE ${fundByStatusPlain}
               AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)`)
             .run(sessionId);
         }

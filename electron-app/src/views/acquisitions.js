@@ -14,7 +14,13 @@ function acqRowsHtml(rows) {
   return rows.length ? rows.map(a => `<tr><td class="num">${a.no} / ${a.year}</td><td class="num">${bg(a.date)}</td>
       <td>${esc(a.from_source || '')}</td><td>${esc(a.how || '')}</td>
       <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}</td>
-      <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
+      <td class="num">${a.total_count}</td><td class="num${
+        /* Същото, което картата вече казва с „+N“ (виж acqLeftCard): инвентирани
+           повече от обявеното е разминаване между КДБФ Част № 1 и първичния
+           документ. В списъка двете числа стоят едно до друго и дотук нищо не
+           подсказваше, че второто не бива да надхвърля първото. */
+        (Number(a.registered_count) || 0) > (Number(a.total_count) || 0) ? ' warn' : ''
+      }">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
       <td><button class="btn sm" onclick="openAcq(${a.id})">Отвори</button></td></tr>`).join('')
     : `<tr><td colspan="9" class="empty">Няма заведени партиди.</td></tr>`;
 }
@@ -193,6 +199,40 @@ function acqCountNote(a) {
       : `Изброените надхвърлят обявения брой с ${listed - declared} — проверете партидата преди подписване.`) + '<br>';
 }
 function acqHasMultiples(items) { return (items || []).some(i => acqQty(i) !== 1); }
+/* „ОСТАВАТ“ НА ЕКРАНА ВЕЧЕ НЕ КРИЕ ПРЕЗАПИСВАНЕТО (v2.4.57).
+   Какво е ставало дотук: картата на партидата смяташе остатъка с
+   `Math.max(0, total_count - инвентирани)`. Тоест при партида за 5 документа с 6
+   инвентирани по нея на екрана светваше кръгла нула — същото число, което
+   показва и изрядно приключена партида. Единствената разлика между „готово“ и
+   „вписан е един документ в повече“ беше, че нулата не е вярна.
+   Защо това е грешно ЗА БИБЛИОТЕКАТА: партидата е ред в Част № 1 на КДБФ, а
+   обявеният общ брой идва от първичния счетоводен документ (фактура, акт за
+   дарение). Инвентиран документ в повече значи едно от две: или документ е
+   вписан по грешна партида (и липсва от своята), или обявеният брой е сгрешен —
+   и в двата случая КДБФ и фактурата се разминават, а разминаването се открива
+   чак при проверка. Разпечатката отдавна го казва (acqCountNote: „Изброените
+   надхвърлят обявения брой с 1“), но екранът, който се гледа всеки ден, мълчеше;
+   тоест програмата знаеше, а човекът разбираше само ако отпечата документа.
+   Защо поправката е точно такава: Math.max(0, …) се маха, защото прикрива точно
+   онова, което трябва да се види. Излишъкът се показва като „+N“ в червено (.num
+   .warn) с друг надпис — „Над обявения брой“ — за да не може да се сбърка с
+   остатък, а под картите излиза същото изречение, с което вече излиза и на
+   разпечатката. Нула вече значи само едно: точно колкото пише в документа. */
+function acqLeft(a) { return (Number(a.total_count) || 0) - acqCount(a && a.items); }
+function acqLeftCard(a) {
+  const left = acqLeft(a);
+  if (left >= 0) return `<div class="card"><div class="num">${left}</div><div class="lbl">Остават</div></div>`;
+  return `<div class="card"><div class="num warn">+${-left}</div><div class="lbl">Над обявения брой</div></div>`;
+}
+function acqOverNote(a) {
+  const left = acqLeft(a);
+  if (left >= 0) return '';
+  return `<div class="note w"><b>Изброените надхвърлят обявения брой с ${-left}.</b>
+    По партидата са инвентирани ${acqCount(a.items)} документа, а първичният документ обявява ${Number(a.total_count) || 0}.
+    Или документ е вписан по грешна партида (и липсва от своята), или обявеният брой е сгрешен — и в двата случая
+    Част № 1 на КДБФ се разминава с документа. Проверете, преди партидата да бъде подписана: обявеният брой се
+    поправя от „Поправи“, а грешно закачен документ — от картона му („Партида в КДБФ“).</div>`;
+}
 // Означението пред цената на един ред в разпечатките. Одит v2.4.14: редът ОБЩО
 // вече беше Σ(цена × бройка), но всеки ред печаташе гола единична цена и в
 // таблицата нямаше нито колона за бройка, нито означение — счетоводителят вижда
@@ -208,8 +248,9 @@ async function openAcq(id) {
       <div class="card"><div class="num">${a.total_count}</div><div class="lbl">Общо по документ</div></div>
       <div class="card"><div class="num">${acqCount(a.items)}</div><div class="lbl">Инвентирани</div>${
         acqHasMultiples(a.items) ? `<div class="lbl">${a.items.length} заглавия</div>` : ''}</div>
-      <div class="card"><div class="num">${Math.max(0, a.total_count - acqCount(a.items))}</div><div class="lbl">Остават</div></div>
+      ${acqLeftCard(a)}
     </div>
+    ${acqOverNote(a)}
     <div class="hint" style="margin-bottom:10px">${esc(a.how || '')} · ${esc(a.from_source || '')} ·
       ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}<br>
       ${acqDeclared(a) != null ? 'Обявена стойност по документа: <b>' + mny(acqDeclared(a)) + '</b>'

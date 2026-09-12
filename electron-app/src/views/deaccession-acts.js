@@ -171,6 +171,50 @@ function drawActList() {
     <td class="num">${mny(actValue(ACT_LIST))}</td><td></td></tr>
     </tbody></table></div>`;
 }
+/* КОЙ Е ЧАКАЛ ТАЗИ КНИГА — КАЗВА СЕ ВЕДНАГА СЛЕД АКТА (v2.4.57).
+   =====================================================================
+   Дотук съставянето на акт завършваше с едно изречение: „отчислени са N
+   документа“. Отказаните резервации падаха мълчаливо — holds:list показва само
+   активните, тоест отказаната изчезва от екрана „Резервации“ в същата секунда,
+   а броят ѝ отиваше единствено в дневника. Нелепото беше, че при АНУЛИРАНЕ на
+   акт програмата изрично предупреждава „N резервации остават отказани —
+   подновете ги“, тоест грижата съществува по пътя, в който резервациите НЕ
+   падат, и липсва по пътя, в който падат наистина.
+
+   За читалището в село това е единственото място, на което може да се хване
+   човекът, тръгнал след две седмици за книга, която вече не съществува.
+   Затова: списък с име, номер на карта и телефон, наречен с това, което трябва
+   да се направи — „обадете се на…“. Същото се отнася и за витрините: акт, който
+   е извадил документ от тематичен списък на сайта, го казва, за да може
+   библиотекарката да сложи друга книга на негово място.
+
+   Чете се през deaccessionActs:get, а не от отговора на самото съставяне: така
+   сведението е трайно и се вижда пак при всяко отваряне на акта, а не само в
+   съобщение, което може да е било пропуснато. */
+function actHoldLine(h) {
+  return `<li><b>${esc(h.reader_name || 'читател')}</b>${h.card_no ? ' · карта № ' + esc(h.card_no) : ''}${
+    h.phone ? ' · тел. ' + esc(h.phone) : ' · <span class="hint">без телефон в картона</span>'}
+    <div class="hint">чакал${h.status_before === 'заделена' ? 'а (книгата е била ЗАДЕЛЕНА за него)' : 'а'} —
+    инв. № ${esc(String(h.inv_number ?? '—'))} · ${esc([h.author, h.title].filter(Boolean).join('. '))}</div></li>`;
+}
+async function actAftermath(actId, okMessage) {
+  const a = await call(window.api.deaccessionActs.get(actId));
+  const holds = (a && a.holds) || [];
+  const shelved = ((a && a.items) || []).filter(i => i.shelves_before);
+  if (!holds.length && !shelved.length) return toast(okMessage, 'ok');
+  modal('Актът е съставен — остава да се уведомят читателите', `
+    <div class="note">${esc(okMessage)}</div>
+    ${holds.length ? `<div class="note w"><b>Обадете се на ${holds.length === 1 ? 'този читател' : 'тези читатели'}</b> —
+      ${holds.length === 1 ? 'той е чакал' : 'те са чакали'} отчислен документ. Резервацията е отказана автоматично
+      и НЕ се подновява: книгата вече не е част от фонда.</div>
+      <ul style="margin:8px 0 0 18px">${holds.map(actHoldLine).join('')}</ul>` : ''}
+    ${shelved.length ? `<div class="note" style="margin-top:12px"><b>Извадени от витрини в онлайн каталога:</b>
+      <ul style="margin:6px 0 0 18px">${shelved.map(i => `<li>инв. № ${esc(String(i.inv_number ?? '—'))} —
+        ${esc(i.shelves_before)}</li>`).join('')}</ul>
+      Витрината на сайта вече не ги показва. Ако тематичният списък трябва да остане пълен, сложете друг документ
+      на тяхно място от „Онлайн каталог“ → „Витрини в каталога“.</div>` : ''}`,
+    `<button class="btn pri" onclick="closeModal()">Разбрах</button>`);
+}
 async function saveAct() {
   const missing = firstMissingRequired('#actF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
@@ -179,9 +223,14 @@ async function saveAct() {
   const p = PRICHINI.find(x => x.k == d.reason_code);
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
-  if (id) { closeModal(); renderActs(); toast('Акт № ' + d.no + ': ' + (actCount(ACT_LIST) === 1 ? 'отчислен е ' : 'отчислени са ')
-    + actDocs(actCount(ACT_LIST))
-    + (actHasMultiples(ACT_LIST) ? ' (' + actTitles(ACT_LIST.length) + ')' : '') + '.', 'ok'); markSaved(); }
+  if (id) {
+    closeModal(); renderActs(); markSaved();
+    // Съобщението за успех се показва САМО ако няма какво да се съобщи освен него
+    // (виж actAftermath по-горе) — иначе се отваря списъкът „обадете се на…“.
+    await actAftermath(id, 'Акт № ' + d.no + ': ' + (actCount(ACT_LIST) === 1 ? 'отчислен е ' : 'отчислени са ')
+      + actDocs(actCount(ACT_LIST))
+      + (actHasMultiples(ACT_LIST) ? ' (' + actTitles(ACT_LIST.length) + ')' : '') + '.');
+  }
 }
 window.saveAct = saveAct;
 /* ---------- проект ---------- */
@@ -239,7 +288,9 @@ async function approveActDraft() {
   const actId = await call(window.api.deaccessionActs.approveDraft({ id: draftId }));
   if (actId) {
     closeModal(); renderActs(); markSaved();
-    toast('Актът е утвърден и ' + actDocs(actCount(ACT_LIST)) + ' са отчислени.', 'ok');
+    // Същият път като при прекия акт — утвърждаването на проект отчислява по
+    // абсолютно същия начин и затова трябва да казва абсолютно същото.
+    await actAftermath(actId, 'Актът е утвърден и ' + actDocs(actCount(ACT_LIST)) + ' са отчислени.');
   }
 }
 window.approveActDraft = approveActDraft;
@@ -260,6 +311,18 @@ async function openAct(id) {
       actHasMultiples(a.items) ? ` (${actTitles(a.items.length)})` : ''}</td>
     <td class="num">${mny(actValue(a.items))}</td></tr>
     </tbody></table></div>
+    ${/* Читателите и витрините стоят и в прегледа на акта, не само в съобщението
+          веднага след съставянето (виж actAftermath): актът се отваря и след
+          седмица — например когато читателят дойде да пита за книгата си — и
+          тогава отговорът трябва да е тук, а не в дневника. */''}
+    ${(a.holds && a.holds.length) ? `<div class="note w" style="margin-top:10px">
+      <b>Отказани резервации при съставянето на акта (${a.holds.length}):</b>
+      <ul style="margin:6px 0 0 18px">${a.holds.map(actHoldLine).join('')}</ul></div>` : ''}
+    ${(a.items || []).some(i => i.shelves_before) ? `<div class="note" style="margin-top:10px">
+      <b>Извадени от витрини в онлайн каталога:</b>
+      <ul style="margin:6px 0 0 18px">${a.items.filter(i => i.shelves_before).map(i =>
+        `<li>инв. № ${esc(String(i.inv_number ?? '—'))} — ${esc(i.shelves_before)}</li>`).join('')}</ul>
+      ${a.revoked_at ? 'Анулирането на акта НЕ ги връща по витрините — това се прави ръчно.' : ''}</div>` : ''}
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
     `${a.revoked_at ? '' : `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>`}
      <button class="btn" onclick="printActDoc(${id})">Печат на акта / PDF</button>
@@ -340,10 +403,19 @@ async function revokeActGo(id) {
      да пита. Сега се казва на глас, при това като предупреждение, а не като
      съобщение за успех. */
   const n = (res.data && res.data.droppedHolds) || 0;
-  toast(n
+  /* Същото важи и за витрините (v2.4.57): съставянето на акта изважда документа
+     от тематичните списъци на сайта, а анулирането не го връща — витрината е
+     подбор, правен от човек. Щом не се връща само, трябва да се каже, иначе
+     документът се прибира във фонда и мълчаливо изпада от сайта завинаги. */
+  const sh = (res.data && res.data.shelvesToRestore) || [];
+  toast((n
     ? 'Актът е анулиран. Внимание: ' + (n === 1
         ? '1 резервация, отказана с този акт, остава отказана — подновете я, ако читателят още чака.'
         : n + ' резервации, отказани с този акт, остават отказани — подновете ги, ако читателите още чакат.')
-    : 'Актът е анулиран. Номерът остава зает, а актът остава в документацията.', n ? 'warn' : 'ok');
+    : 'Актът е анулиран. Номерът остава зает, а актът остава в документацията.')
+    + (sh.length ? ' ' + (sh.length === 1 ? '1 документ е бил махнат от витрина' : sh.length + ' документа са били махнати от витрини')
+        + ' в онлайн каталога — върнете ги ръчно, ако витрината трябва да е както преди ('
+        + sh.map(x => 'инв. № ' + (x.inv_number ?? '—') + ' → ' + x.shelves).join('; ') + ').' : ''),
+    (n || sh.length) ? 'warn' : 'ok');
 }
 window.revokeActGo = revokeActGo;

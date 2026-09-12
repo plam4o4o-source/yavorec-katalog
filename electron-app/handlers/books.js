@@ -10,7 +10,11 @@
 // require('./handlers/books') в main.js, за да няма TDZ — точно както при
 // LOAN_SELECT/firstActiveHold и другите вече установени модели за връщане
 // на споделена стойност напред.
-const { resolveScannedBook, rowFingerprint, assertUnchanged } = require('../security-utils');
+const { resolveScannedBook, rowFingerprint, assertUnchanged, isValidIsoDate } = require('../security-utils');
+/* Общите условия за броене на фонда — едно място за всички (виж db/fund-sql.js). */
+const FUND = require('../db/fund-sql');
+const { fundByStatusPlain } = FUND;
+const { findOpenSuggestionsForBook } = require('./suggestions');
 
 /* Одит v2.4.29: един баркод = един екземпляр. Дублиран баркод се приемаше
    мълчаливо при запис и редакция, а после resolveScannedBook() (security-utils.js)
@@ -59,7 +63,12 @@ function assertUniqueBarcode(db, barcode, invNumber, selfId) {
 }
 
 module.exports = function registerBooksHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode } = deps;
+  /* `flushCatalogWrite` е новото (v2.4.57) и е НЕЗАДЪЛЖИТЕЛНО: подава се от
+     main.js, а по-старите тестови обвръзки, които не го знаят, продължават с
+     досегашния debounced запис (същият модел като в handlers/deaccession-acts.js).
+     Виж afterBookWritten по-долу защо постъплението вече не може да мълчи. */
+  const { getDb, run, logAudit, today, ftsQuery, cnSortKey, diffFields,
+    scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
   /* Одит v2.3.1 №9(a) — позволените стойности се четат от същия списък, който
      създава enum тригера на books.status (db/enum-triggers.js), по образец на
      handlers/data-import.js, за да не могат двата да се разминат. */
@@ -131,18 +140,43 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   /* ---------------- Лимит на броя записи ----------------
      Настройва се в „Настройки“ → „Ограничения“; 0 означава без ограничение.
      Проверява се само при СЪЗДАВАНЕ на нов запис — редакцията на съществуващи
-     остава възможна дори ако лимитът вече е достигнат или намален след това. */
+     остава възможна дори ако лимитът вече е достигнат или намален след това.
+
+     ДВЕТЕ ПРАВИЛА СЕ ЗАКЛЮЧВАХА ЕДНО ДРУГО (v2.4.57).
+     Дотук тук стоеше `COUNT(*) FROM books` без никакво условие — тоест лимитът
+     броеше и ОТЧИСЛЕНИТЕ редове. А отчисленият ред по чл. 39 остава в
+     инвентарната книга отбелязан, не заличен, и books:delete изрично отказва да
+     го изтрие (същият файл, по-долу: „би променило и наличността в КДБФ за
+     минали, вече отчетени години“). Резултатът: библиотека, стигнала тавана,
+     НЕ МОЖЕ да добави нов документ, колкото и да отчислява — единственият
+     позволен начин да освободи място е точно този, който програмата забранява.
+     Съобщението при това съветва да се увеличи лимитът, тоест единственият
+     работещ изход е да се махне самата мярка.
+
+     Лимитът съществува, за да се ограничи РАБОТНИЯТ фонд (големината на базата и
+     на изданието), а не документалната история. Затова се брои с ключа
+     „НАЛИЧНО ДНЕС“ от db/fund-sql.js — същото условие, с което броят фонда
+     таблото и инвентарната книга, вместо да се преписва наново тук (условието
+     е NULL-безопасно: ред със status NULL идва от внесена база и НЕ е отчислен).
+     Читателите нямат отчисляване — техният брояч остава какъвто е. */
+  const LIMIT_COUNT_SQL = {
+    books: `SELECT COUNT(*) AS n FROM books WHERE ${fundByStatusPlain}`,
+    readers: 'SELECT COUNT(*) AS n FROM readers'
+  };
   function checkRecordLimit(kind) {
     const db = getDb();
     const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
     const cfg = kind === 'books'
-      ? { limit: s.limit_books, table: 'books', label: 'документи във фонда' }
-      : { limit: s.limit_readers, table: 'readers', label: 'читатели' };
+      ? { limit: s.limit_books, sql: LIMIT_COUNT_SQL.books, label: 'документи във фонда' }
+      : { limit: s.limit_readers, sql: LIMIT_COUNT_SQL.readers, label: 'читатели' };
     const limit = parseInt(cfg.limit, 10) || 0;
     if (limit <= 0) return;
-    const n = db.prepare(`SELECT COUNT(*) AS n FROM ${cfg.table}`).get().n;
+    const n = db.prepare(cfg.sql).get().n;
     if (n >= limit) {
       throw new Error(`Достигнат е зададеният лимит от ${limit} ${cfg.label}. ` +
+        (kind === 'books'
+          ? 'Броят се само документите във фонда — отчислените с акт не заемат място. '
+          : '') +
         'Увеличете или премахнете лимита в „Настройки“ → „Ограничения“, за да добавяте нови записи.');
     }
   }
@@ -150,9 +184,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT limit_books, limit_readers FROM settings WHERE id = 1').get() || {};
+      /* Показваното число е ТОЧНО онова, което проверката по-горе брои
+         (LIMIT_COUNT_SQL) — иначе екранът „Ограничения“ би обявявал 1000 от 1000
+         заети, докато записването продължава да минава, или обратното. */
       return {
-        books: db.prepare('SELECT COUNT(*) AS n FROM books').get().n,
-        readers: db.prepare('SELECT COUNT(*) AS n FROM readers').get().n,
+        books: db.prepare(LIMIT_COUNT_SQL.books).get().n,
+        readers: db.prepare(LIMIT_COUNT_SQL.readers).get().n,
         limitBooks: parseInt(s.limit_books, 10) || 0,
         limitReaders: parseInt(s.limit_readers, 10) || 0
       };
@@ -196,6 +233,37 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
        'наличен' по подразбиране остава само когато записът реално се създава (prev
        липсва).*/
     out.status = b.status || (prev ? prev.status : 'наличен');
+    /* ДАТАТА НА ВПИСВАНЕ СЕ ПРОВЕРЯВА (v2.4.57).
+       Дотук тук стоеше само `b.register_date || today()` — в целия този файл
+       нямаше нито едно повикване на isValidIsoDate, докато актът за отчисляване,
+       протоколът по чл. 40, МЗС и заемането всички го правят изрично. Тоест
+       най-често въвежданият път в цялата програма беше единственият непроверен.
+
+       Доказано изпълнимо: books:create с register_date 'НЕВАЛИДНА-99-99' минаваше,
+       редът влизаше в базата, и после документът пропадаше през ВСИЧКИТЕ ТРИ
+       мрежи наведнъж — не е <= '2026-12-31' (кирилското „Н“ сортира след
+       цифрите), substr(...,1,4) не е година, и броячът „без дата на вписване“
+       търсеше само IS NULL или празно. Измерено при три документа (10 лв., 99 лв.
+       със счупена дата, 50 лв.):
+
+         КДБФ наличност 31.12  : 2 документа, 60 лв.   ← 99-те лева ги няма
+         КДБФ постъпили        : 2 документа, 60 лв.   ← и тук ги няма
+         КДБФ „без дата“       : 0                      ← и тук ги няма
+         Табло                 : 3 документа            ← а тук ги има
+
+       Документ за 99 лв. е във фонда, брои се на таблото, може да се заема — и
+       НЕ СЪЩЕСТВУВА в официалния регистър по Наредба № 3. Разликата е невидима:
+       няма екран, на който да се види, че нещо липсва.
+
+       Датата на вписване е реквизит по чл. 16, ал. 2 и мястото на документа във
+       времето — тя решава в коя година се брои постъплението. Невалидна дата
+       не е „по-добра от нищо“: тя е по-лоша от липсваща, защото липсващата поне
+       се брои от предупреждението за недатирани документи. */
+    if (b.register_date && !isValidIsoDate(b.register_date)) {
+      throw new Error('Датата на вписване „' + b.register_date + '“ не е валидна дата. '
+        + 'Тя решава в коя година се брои постъплението в Книгата за движение на фонда — '
+        + 'въведете я като ден, месец и година, или я оставете празна.');
+    }
     out.register_date = b.register_date || today();
     out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
     out.status_date = !prev ? today()
@@ -251,8 +319,15 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const offset = Math.max(parseInt(page.offset, 10) || 0, 0);
       const rows = db.prepare(`${BOOK_LIST_SELECT} ${W} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...p, limit, offset);
       const total = db.prepare(`SELECT COUNT(*) AS n FROM books b ${W}`).get(...p).n;
-      // Отделите в резултата от търсенето (без филтъра по отдел — иначе менюто се свива до избрания).
-      const depts = db.prepare(`SELECT DISTINCT b.department FROM books b ${where ? 'WHERE ' + where : ''}
+      /* Отделите в резултата от търсенето (без филтъра по отдел — иначе менюто се
+         свива до избрания). БЕЗ отчислените (v2.4.57): отдел, в който са останали
+         само отчислени документи, продължаваше да стои в менюто, а изборът му
+         връщаше точно тях. Отчисленият документ пази отдела си нарочно — той е
+         част от снимката и от справките за минали години (виж защо не се чисти
+         при отчисляване) — но менюто отговаря на въпроса „къде да търся книга“,
+         а там отговорът е само фондът. */
+      const deptWhere = [where, FUND.fundByStatus].filter(Boolean).join(' AND ');
+      const depts = db.prepare(`SELECT DISTINCT b.department FROM books b WHERE ${deptWhere}
         ORDER BY b.department`).pluck().all(...params).filter(Boolean);
       return { rows, total, depts, offset, limit };
     })
@@ -323,14 +398,132 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     return n;
   }
 
-  ipcMain.handle('books:create', (e, book) =>
-    run(() => {
+  /* ЗАЕТИЯТ ИНВЕНТАРЕН НОМЕР КАЗВА КАКВО ДА СЕ НАПРАВИ (v2.4.57).
+     Формата се предпопълва със settings.next_inv_number при ОТВАРЯНЕ, а номерът
+     се заема чак при записа. При два компютъра към една мрежова база (изрично
+     поддържан режим) и двамата отварят „Нов документ“ с № 512 и вторият запис
+     пада върху UNIQUE индекса на books.inv_number. Дотук библиотекарката
+     получаваше общия превод на SQLite грешката — „Този инвентарен номер вече е
+     зает от друг документ.“ (main.js, friendlyDbError) — вярно изречение, което
+     обаче не казва НИТО защо се е случило, НИТО какво да се направи; типичната
+     реакция е да се въведе „свободен“ номер на ръка, което пробива дупка в
+     поредицата (виж следващата бележка). Актът за отчисляване, протоколът по
+     чл. 40, МЗС и партидата в КДБФ всички вече обясняват точно този случай с
+     едно и също изречение; инвентарният номер — най-често заеманият номер в
+     цялата програма — беше единственият без него.
+     Проверката е ВЪТРЕ в транзакцията, пусната с .immediate() (правото на запис
+     се взима преди четенето), затова между нея и INSERT-а никой не може да
+     вмъкне същия номер; UNIQUE индексът остава последната преграда. */
+  function assertInvNumberFree(db, invNumber) {
+    if (invNumber == null) return;
+    const other = db.prepare('SELECT id, title FROM books WHERE inv_number = ? LIMIT 1').get(invNumber);
+    if (other) {
+      throw new Error('Инв. № ' + invNumber + ' вече е зает от „' + (other.title || 'без заглавие')
+        + '“ — най-вероятно е създаден от друго работно място към същата база. '
+        + 'Затворете и отворете формата отново, за да получите следващия свободен номер.');
+    }
+  }
+  /* ПРЕСКОЧЕНИЯТ НОМЕР ВЕЧЕ ОСТАВЯ СЛЕДА (v2.4.57).
+     Дотук ръчно въведен инвентарен номер, по-голям от следващия по ред, просто
+     избутваше брояча напред: `if (inv >= next) next = inv + 1` — без дума, без
+     ред в дневника, без нищо на екрана. Проверено емпирично: при next_inv № 3
+     създаването на документ с № 5000 оставя next_inv 5001 и 4997 неизползвани
+     номера, за които в програмата няма НИКАКВА следа.
+     Защо това е грешно ЗА БИБЛИОТЕКАТА: инвентарната книга е поредица и
+     проверката по чл. 17, ал. 2 иска отговор за ВСЕКИ номер в нея. Самата
+     програма вече знае това — books:delete отказва изтриване именно с довода,
+     че „инвентарен № N остава празно място в поредицата и при проверка няма с
+     какво да се обясни“. Същият довод важи дословно и при създаването, само че
+     там дупката е не един номер, а хиляди — и се пробива по-лесно, отколкото се
+     трие документ.
+     Защо поправката е точно такава: номерът НЕ се отказва. Скокът е законен и
+     обичаен — библиотеката минава на нова хилядна поредица, продължава номерация
+     от стара книга, дарение получава отделен блок. Отказът би спрял редовна
+     работа. Отказва се само МЪЛЧАНИЕТО: задължителен ред в одитната следа с
+     броя прескочени номера (за да има какво да се каже при проверка) и
+     предупреждение обратно към прозореца, за да го види човекът, който още е
+     пред формата и може да се поправи. */
+  function invGapNotice(previousNext, invNumber) {
+    const from = parseInt(previousNext, 10);
+    if (!Number.isFinite(from) || from <= 0 || invNumber == null || invNumber <= from) return null;
+    const skipped = invNumber - from;
+    return {
+      inv_number: invNumber, from, to: invNumber - 1, skipped,
+      message: 'Инв. № ' + invNumber + ' е въведен на ръка, а по ред следваше № ' + from + '. '
+        + (skipped === 1
+          ? 'Номер ' + from + ' остава празен в инвентарната книга'
+          : 'Номерата от ' + from + ' до ' + (invNumber - 1) + ' (' + skipped + ' на брой) остават празни в инвентарната книга')
+        + ' и при проверка по чл. 17, ал. 2 няма с какво да се обяснят. '
+        + 'Ако това е нарочно (нова поредица, продължение на стара книга), няма какво да се прави — '
+        + 'записът вече е отбелязан в дневника. Ако номерът е сгрешен, поправете го сега, докато документът е сам в поредицата.'
+    };
+  }
+  /* ЗАПИСЪТ НА ПУБЛИЧНИЯ КАТАЛОГ ПРИ НОВО ПОСТЪПЛЕНИЕ (v2.4.57).
+     Дотук books:create викаше scheduleCatalogWrite() — debounced запис след 4
+     секунди, чийто резултат се изхвърля. Отчисляването отдавна прави обратното
+     (afterActWritten в handlers/deaccession-acts.js): вика flushCatalogWrite()
+     синхронно и вписва в дневника две РАЗЛИЧНИ предупреждения според това дали
+     записът е спрян от предпазната мярка, или просто не е успял.
+     Защо това е грешно ЗА БИБЛИОТЕКАТА: измерено на изключена мрежова папка —
+     цяла новопостъпила партида от 40 книги не стига до сайта, а в дневника няма
+     нито ред. Читателят търси новите книги онлайн и не ги намира; библиотекарят
+     е сигурен, че ги е въвел, защото програмата не е казала нищо. Мълчаливият
+     провал при ПОСТЪПЛЕНИЕ е точно толкова тежък, колкото при отчисляване —
+     разликата беше само че единият път е бил поправен, а другият не.
+     Защо поправката е точно такава: същият образец, дословно, включително двете
+     различни съобщения. Цената е един синхронен запис на katalog.json на нов
+     документ вместо един на партида; при несвързана папка writeCatalogIfConfigured
+     излиза веднага с { written: false } и не струва нищо, а при свързана папка
+     верността на публикуваното си струва частта от секундата — библиотеката
+     каталогизира партида веднъж на няколко месеца, а сайтът се гледа всеки ден.
+     Редакцията и груповата редакция нарочно остават на debounced записа: там
+     една промяна ражда десетки последователни записи и сливането им е смисълът
+     на самия debouncer. */
+  function afterBookWritten(what) {
+    const w = flushCatalogWrite ? flushCatalogWrite() : (scheduleCatalogWrite(), null);
+    if (w && w.blocked) {
+      const msg = 'ВНИМАНИЕ: записът на каталога след ' + what + ' е спрян — фондът в тази база излиза празен, '
+        + 'а публикуваният каталог не е. Използвайте „Ръчен запис“ в „Онлайн каталог“, ако наистина искате празен каталог.';
+      logAudit('Онлайн каталог', msg);
+      return msg;
+    }
+    /* w.error, не w.written !== undefined: несвързана папка връща точно
+       { written: false } (writeCatalogIfConfigured в main.js) — без грешка,
+       защото няма какво да се провали. Старото условие броеше и това за
+       провал, тоест ВСЯКО постъпление в библиотека без свързан онлайн
+       каталог (подразбирането) показваше лъжливо „записът... не успя“. Само
+       w.error различава истинска грешка при запис от изобщо липсваща папка;
+       w.blocked вече е хванат от клона отгоре. */
+    if (w && !w.written && w.error) {
+      const msg = 'ВНИМАНИЕ: записът на каталога след ' + what + ' не успя: ' + w.error
+        + ' Проверете папката за онлайн каталога в „Настройки“ '
+        + '(свързан ли е мрежовият диск?) — новото постъпление няма да се появи на сайта, докато записът не мине.';
+      logAudit('Онлайн каталог', msg);
+      return msg;
+    }
+    return null;
+  }
+  /* Отговорът на books:create (v2.4.57).
+     `data` остава ТОЧНО каквото беше — идентификаторът на новия ред, защото
+     прозорецът го ползва за открояване на реда, а десетки места го четат така.
+     Новото стои в отделни полета ДО него, по вече установения в програмата
+     модел на catalog:chooseFolder ({ ok, data, adopted, mismatch, remote }):
+       • invGap        — { inv_number, from, to, skipped, message } или null;
+       • suggestions   — отворените предложения за същото заглавие (може празен
+                         масив); прозорецът пита библиотекаря дали да ги отбележи
+                         като „получено“ — тук нищо не се затваря самò;
+       • catalogWarning — текстът на предупреждението за онлайн каталога или null.
+     Така старите повиквания (и всички тестове, които четат .data) продължават да
+     работят непроменени, а прозорецът може да покаже новото, когато го поиска. */
+  ipcMain.handle('books:create', (e, book) => {
+    const res = run(() => {
       const db = getDb();
       checkRecordLimit('books');
       const tx = db.transaction((b) => {
         const payload = bookPayload(b);
         assertValidStatus(payload.status);
         assertUniqueBarcode(db, payload.barcode, payload.inv_number, null);
+        assertInvNumberFree(db, payload.inv_number);
         const info = db.prepare(`
           INSERT INTO books (${BOOK_FIELDS.join(',')}, register_date)
           VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')}, @register_date)
@@ -338,20 +531,49 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         const id = info.lastInsertRowid;
         db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)')
           .run(id, normalizeQuantity(b.quantity));
+        let invGap = null;
         if (payload.inv_number) {
-          const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get();
+          const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
+          invGap = invGapNotice(s.next_inv_number, payload.inv_number);
           if (payload.inv_number >= s.next_inv_number) {
             db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(payload.inv_number + 1);
           }
         }
+        /* Следата за дупката се пише ПРЕДИ „Нов документ“ нарочно: двете са едно
+           събитие, а последният ред в дневника трябва да остане самото вписване
+           (така го търси и окото, и всичко, което чете последното действие). */
+        if (invGap) {
+          logAudit('Прескочени инвентарни номера',
+            'при вписване на инв. № ' + invGap.inv_number + ' („' + (b.title || 'без заглавие') + '“) '
+            + 'остават неизползвани ' + (invGap.skipped === 1
+              ? 'инв. № ' + invGap.from
+              : invGap.skipped + ' номера: от ' + invGap.from + ' до ' + invGap.to)
+            + ' — въведени на ръка, без документ по тях');
+        }
         logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
-        return id;
+        return { id, invGap };
       });
-      const id = tx.immediate(book);
-      scheduleCatalogWrite();
-      return id;
-    })
-  );
+      return tx.immediate(book);
+    });
+    if (!res.ok) return res;
+    const catalogWarning = afterBookWritten('нов документ инв. № '
+      + (book && book.inv_number != null && book.inv_number !== '' ? book.inv_number : '—'));
+    /* Търсенето на предложения е СЛЕД транзакцията и никога не проваля
+       вписването: документът вече е в инвентарната книга и отказ тук би върнал
+       „грешка“ за успешно вписан документ — най-лошото възможно съобщение.
+       Затова грешката се улавя, но НЕ се преглъща: остава и в конзолата, и в
+       дневника, защото мълчаливо изчезнало съвпадение изглежда точно като
+       липсващо съвпадение. */
+    let suggestions = [];
+    try {
+      suggestions = findOpenSuggestionsForBook(getDb(), book || {});
+    } catch (err) {
+      console.error('Търсене на предложения за покупка при ново постъпление:', err.message);
+      logAudit('Предложение за покупка', 'проверката дали някой е поискал „' + ((book && book.title) || '')
+        + '“ не можа да се направи: ' + err.message);
+    }
+    return { ok: true, data: res.data.id, invGap: res.data.invGap, suggestions, catalogWarning };
+  });
   ipcMain.handle('books:update', (e, book) =>
     run(() => {
       const db = getDb();
@@ -526,7 +748,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       // „кога стана липсваща" няма отговор.
       const extra = field === 'status' ? ", status_date = date('now')" : '';
       const tx = db.transaction(() => db.prepare(
-        `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND (status != 'отчислен' OR status IS NULL)`
+        `UPDATE books SET ${field} = ?${extra} WHERE id IN (${placeholders}) AND ${fundByStatusPlain}`
       ).run(v, ...ids).changes);
       const changes = tx.immediate();
       logAudit('Групова редакция', changes + ' документ(а) — ' + field + ' → ' + (value || '—'));

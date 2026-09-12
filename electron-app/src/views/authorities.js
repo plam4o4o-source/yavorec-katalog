@@ -43,12 +43,26 @@ async function renderAuth() {
         ${!AUTH_LOOSE ? 'Опитайте и с „И съкратени имена“ — той хваща и „И. Вазов“.' : ''}
       </div></div>`}
 
+    ${/* ДВЕ ЧИСЛА, ЗАЩОТО ВЪПРОСИТЕ СА ДВА (v2.4.57).
+          ==========================================================
+          Колоната „Документи“ брои всички описани с тази стойност, включително
+          отчислените — и така трябва: списъкът се ползва и за автодовършване, а
+          отчислената книга си остава описана с това име. Но на екрана числото се
+          чете като „толкова книги имаме от този автор“, а това е друг въпрос:
+          библиотека, отчислила цяла остаряла поредица, продължаваше да чете
+          „Вазов, Иван — 12 документа“, докато на рафта няма нито един. Затова
+          числата са две и всяко си носи името. */''}
     <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Всички стойности в полето</h3>
       <div class="hint" style="margin-top:0">Подредени по брой документи. Този списък се предлага
-      за автодовършване при въвеждане на нова книга.</div>
-      <table class="ledger" style="margin-top:8px"><thead><tr><th>Стойност</th><th style="width:120px">Документи</th></tr></thead>
+      за автодовършване при въвеждане на нова книга — затова „Описани“ брои и отчислените:
+      те си остават описани с това име и в актовете по чл. 39.</div>
+      <table class="ledger" style="margin-top:8px"><thead><tr><th>Стойност</th>
+        <th style="width:120px">Описани</th><th style="width:140px">От тях в наличност</th></tr></thead>
         <tbody>${(values || []).slice(0, 300).map(v => `<tr>
-          <td>${esc(v.value)}</td><td class="num">${v.n}</td></tr>`).join('')}</tbody></table>
+          <td>${esc(v.value)}</td><td class="num">${v.n}</td>
+          <td class="num">${v.avail === 0
+            ? '<span class="badge warn" title="Нито един документ с тази стойност не е във фонда — всички са отчислени.">0</span>'
+            : v.avail}</td></tr>`).join('')}</tbody></table>
       ${total > 300 ? `<div class="hint">Показани са първите 300 от ${total}.</div>` : ''}
     </div>`;
 }
@@ -57,7 +71,7 @@ function authGroupHtml(g, i) {
     ${g.items.map((it, j) => `<label class="authRow">
       <input type="radio" name="ag${i}sel" value="${esc(it.value)}" ${j === 0 ? 'checked' : ''}>
       <span class="authVal">${esc(it.value)}</span>
-      <span class="authN">${it.n} док.</span>
+      <span class="authN">${it.n} док.${it.avail !== it.n ? ' (' + it.avail + ' в наличност)' : ''}</span>
       <span class="authTarget">${j === 0 ? 'предложено' : ''}</span>
     </label>`).join('')}
     <div class="toolbar" style="margin-top:8px">
