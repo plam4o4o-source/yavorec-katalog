@@ -63,9 +63,14 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const acquiredYear = db.prepare(
         `SELECT COALESCE(SUM(${QTYJ}),0) AS n ${BOOKS_INV} WHERE b.register_date BETWEEN ? AND ?`
       ).get(y + '-01-01', y + '-12-31').n;
+      /* Анулираните актове НЕ се броят никъде (v2.4.56). Редът им остава в
+         базата завинаги — актът е документ по чл. 39 и вече не се трие — но
+         документите по него са върнати във фонда, тоест отчисляване не е имало.
+         Без този филтър анулирането щеше да краде от фонда на хартия. */
       const deaccessionedYear = db.prepare(`
         SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) AS n
-        FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
+        FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id
+        WHERE d.year = ? AND d.revoked_at IS NULL
       `).get(y).n;
       // BETWEEN по idx_loans_date_out вместо substr() — пълно сканиране на 100 000 реда при всяко отваряне на таблото (v2.4.31).
       const loansYear = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_out BETWEEN ? AND ?').get(y + '-01-01', y + '-12-31').n;

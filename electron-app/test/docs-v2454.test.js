@@ -212,7 +212,7 @@ test('анулираният акт КАЗВА колко резервации �
     assert.equal(h1.status_before, status,
       'и какво е била — „чака“ и „заделена“ не са едно и също: заделената книга стои на рафта с име');
 
-    const revoked = ipc.invoke('deaccessionActs:revoke', created.data);
+    const revoked = ipc.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
     assert.ok(revoked.ok, revoked.error);
     assert.equal(db.prepare('SELECT status FROM holds WHERE book_id=?').get(bid).status, 'отказана',
       'анулирането НЕ възкресява резервацията — това е нарочно и е решено в по-ранен кръг');
@@ -233,7 +233,7 @@ test('без отказани резервации следата не плаш�
   const c = ipc.invoke('deaccessionActs:create', {
     act: { no: 11, date: '2026-06-01', reason_code: 1, reason_text: 'амортизация' }, bookIds: [bid]
   });
-  const r = ipc.invoke('deaccessionActs:revoke', c.data);
+  const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(r.data.droppedHolds, 0);
   const line = audit.find(x => x.a === 'Анулиране на акт');
   assert.doesNotMatch(line.d, /резервац/, 'без резервации следата не бива да ги споменава');
@@ -252,7 +252,7 @@ test('броят се само резервациите на ТОЗИ акт, н
     act: { no: 10, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели' }, bookIds: [bid]
   });
   assert.ok(c.ok, c.error);
-  const r = ipc.invoke('deaccessionActs:revoke', c.data);
+  const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });
   assert.ok(r.ok, r.error);
   assert.equal(r.data.droppedHolds, 1,
     'отказаната по-рано и по друг повод не е дело на акта и не бива да се брои');
@@ -261,7 +261,10 @@ test('броят се само резервациите на ТОЗИ акт, н
 
 test('прозорецът показва предупреждението, а не съобщение за успех', () => {
   const V = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'deaccession-acts.js'), 'utf8');
-  const fn = V.slice(V.indexOf('async function revokeAct'), V.indexOf('window.revokeAct'));
+  // v2.4.56: анулирането се разцепи на две — revokeAct() пита за ОСНОВАНИЕ
+  // (актът вече не изчезва и до реда трябва да пише защо е отпаднал), а
+  // revokeActGo() извършва самото анулиране и показва резултата.
+  const fn = V.slice(V.indexOf('async function revokeActGo'), V.indexOf('window.revokeActGo'));
   assert.match(fn, /res\.data && res\.data\.droppedHolds/, 'броят трябва да се прочете от отговора');
   assert.match(fn, /подновете/, 'библиотекарката трябва да разбере какво да направи');
   assert.match(fn, /n \? 'warn' : 'ok'/,

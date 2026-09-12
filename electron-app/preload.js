@@ -61,6 +61,14 @@ contextBridge.exposeInMainWorld('api', {
     // „Настройки“ → „Резервно копие“ (v2.2.1); дотогава предупреждението стигаше
     // до библиотекаря само през одитната следа.
     autoStatus: invoke('backup:autoStatus'),
+    /* Втора (незадължителна) папка за копие — USB, външен или мрежов диск.
+       Всички копия дотук стояха в backups/ ДО самата база: един изгорял диск
+       отнасяше и базата, и 30-те копия наведнъж. Пътят е настройка на този
+       компютър (config.json), затова минава през main процеса, а не през
+       таблицата settings, която е обща за мрежата. */
+    secondFolder: invoke('backup:secondFolder'),
+    chooseSecondFolder: invoke('backup:chooseSecondFolder'),
+    clearSecondFolder: invoke('backup:clearSecondFolder'),
     /* Дневното копие се прекриптира в main процеса — при отключване и при СМЯНА
        на паролата — и това може да се провали. Дотук резултатът стигаше само до
        console.error. Сега main изпраща известие, а „Настройки“ показва тост и
@@ -126,6 +134,10 @@ contextBridge.exposeInMainWorld('api', {
     get: invoke('acquisitions:get'),
     nextNo: invoke('acquisitions:nextNo'),
     create: invoke('acquisitions:create'),
+    // Поправка на вписана партида (v2.4.56). Дотук имаше само create и delete, а
+    // delete отказва, щом поне един документ е инвентиран — тоест сгрешен номер
+    // на фактура оставаше завинаги в КДБФ Част № 1.
+    update: invoke('acquisitions:update'),
     delete: invoke('acquisitions:delete')
   },
   deaccessionActs: {
@@ -134,7 +146,14 @@ contextBridge.exposeInMainWorld('api', {
     nextNo: invoke('deaccessionActs:nextNo'),
     findBook: invoke('deaccessionActs:findBook'),
     create: invoke('deaccessionActs:create'),
-    revoke: invoke('deaccessionActs:revoke')
+    revoke: invoke('deaccessionActs:revoke'),
+    // Проект на акт (v2.4.56) — виж handlers/deaccession-acts.js: актът вече не
+    // се трие, затова грешките трябва да имат къде да се случат преди него.
+    drafts: invoke('deaccessionActs:drafts'),
+    getDraft: invoke('deaccessionActs:getDraft'),
+    saveDraft: invoke('deaccessionActs:saveDraft'),
+    deleteDraft: invoke('deaccessionActs:deleteDraft'),
+    approveDraft: invoke('deaccessionActs:approveDraft')
   },
   kdbf: {
     report: invoke('kdbf:report')
@@ -151,6 +170,15 @@ contextBridge.exposeInMainWorld('api', {
     delete: invoke('readers:delete'),
     clearSuspension: invoke('readers:clearSuspension'),
     exportCsv: invoke('readers:exportCsv')
+  },
+  /* Пълен износ на данните (CSV в ZIP) — handlers/export-all.js. Стои като
+     отделна група, а не под `settings`, защото не е настройка, а действие върху
+     ЦЯЛАТА база: изнася всяка таблица, не само тази на раздела, от който е
+     натиснат бутонът. Групата е с едно повикване, за да има място за
+     `exportAll:folder` (папка вместо архив) и за износ по избор на таблици,
+     без да се пипа нищо друго. */
+  exportAll: {
+    run: invoke('exportAll:run')
   },
   pdp: {
     status: invoke('pdp:status'),
@@ -216,6 +244,15 @@ contextBridge.exposeInMainWorld('api', {
     return: invoke('loans:return'),
     returnByCode: invoke('loans:returnByCode'),
     extend: invoke('loans:extend'),
+    /* Изгубен/невърнат от читателя документ (v2.4.56) — виж handlers/loans.js:
+       markLost приключва заемането с изричен белег, че документът НЕ е върнат;
+       lostQuote дава предложената сума ПРЕДИ решението; lost е списъкът за акта
+       по чл. 30, т. 5 с начисленото и събраното по всеки документ. */
+    markLost: invoke('loans:markLost'),
+    lostQuote: invoke('loans:lostQuote'),
+    lost: invoke('loans:lost'),
+    lostPolicy: invoke('loans:lostPolicy'),
+    lostPolicySave: invoke('loans:lostPolicySave'),
     reminders: invoke('loans:reminders'),
     mailto: invoke('loans:mailto')
   },
@@ -247,6 +284,16 @@ contextBridge.exposeInMainWorld('api', {
   periodicalIssues: {
     add: invoke('periodicalIssues:add'),
     delete: invoke('periodicalIssues:delete')
+  },
+  /* Инвентиране на годишния комплект (v2.4.56). Дотук периодиката нямаше НИТО
+     ЕДИН канал, който да я свързва с фонда — затова и КДБФ, и годишният отчет я
+     пропускаха, макар отпечатаното заглавие на Част № 1 да я изброява поименно.
+     register({ periodical_id, year, price, register_date, inv_number, acquisition_id, note })
+     създава реда в инвентарната книга и го свързва с изданието; всичко останало
+     (партидата) минава през вече съществуващия мост acquisitions по-горе, за да
+     няма втора бройна логика за номерата в КДБФ. */
+  periodicalVolumes: {
+    register: invoke('periodicalVolumes:register')
   },
   mzs: {
     list: invoke('mzs:list'),
