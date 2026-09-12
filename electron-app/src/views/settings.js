@@ -155,6 +155,20 @@ async function renderSetup() {
           ${mnyField('Обезщетение за забава (на ден)', 'fine_per_day', { val: s.fine_per_day, min: 0,
             hint: 'проверете стойността' })}
           ${mnyField('Годишна такса', 'annual_fee', { val: s.annual_fee, min: 0 })}
+          ${/* Обезщетението за изгубен документ (v2.4.56). Стои тук, до тарифите,
+                а не в прозореца „Документът е изгубен“, където се роди: това е
+                правило на библиотеката, а не решение по конкретен случай. */''}
+          ${fld('Обезщетение за изгубен документ — кратност', 'lost_price_multiplier',
+            { val: s.lost_price_multiplier, type: 'number', min: 0, step: '0.5',
+              hint: 'умножава цената по инвентарната книга · празно = 3' })}
+          ${mnyField('… когато документът е без вписана цена', 'lost_fallback_amount',
+            { val: s.lost_fallback_amount, min: 0, hint: 'празно = 10 €' })}
+          <div class="note" style="grid-column:1/-1">
+            <b>Чл. 43, ал. 2</b> задължава ползвателя да обезщети библиотеката за изгубен документ,
+            но <b>не определя размера</b> — той се приема от настоятелството. Тези две числа са само
+            предложението, което програмата показва при приключване на заемане като изгубено;
+            сумата се променя и на място, за всеки отделен случай.
+          </div>
           <div class="note" style="grid-column:1/-1">
             <b>Тарифите са преобразувани от лева в евро</b> при обновяването до
             v2.4.51 по фиксирания курс 1.95583 и са закръглени до цял евроцент.
@@ -268,7 +282,7 @@ async function renderSetup() {
       backups && backups.length
         ? esc('последно: ' + fmtDateTime(backups[0].mtime).slice(0, 10) + ' · ' + pl(backups.length, 'копие', 'копия'))
         : 'няма направени копия', `
-      ${setupHow('Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави <b>автоматично резервно копие веднъж на ден</b> (при първото стартиране за деня) в подпапка <code>backups</code> до базата данни, като пази последните 30 дни. Копията служат за възстановяване при срив на компютъра/програмата, или за пренасяне на данните на друг компютър със същата програма.')}
+      ${setupHow('Всяко действие (нов документ, заемане, връщане, отчисляване и т.н.) се записва автоматично в базата данни — няма нужда от бутон „Запази“ за самите данни. Освен това програмата прави <b>автоматични резервни копия</b> в подпапка <code>backups</code> до базата данни: едно при първото стартиране за деня, едно при затваряне на програмата и по едно на всеки 3 часа, <i>ако</i> в базата е било записвано нещо ново (компютър, който стои включен със седмици, иначе би останал без ново копие). Пазят се <b>всекидневните копия за 30 дни, по едно на седмица за 3 месеца и по едно на месец за 2 години</b> — сгрешено отчисляване или изтрит читател често излизат наяве чак при годишната инвентаризация. Всяко прясно записано копие се проверява (SQLite <code>integrity_check</code>), преди да заеме мястото си, така че в списъка да не стоят наполовина записани файлове. Копията служат за възстановяване при срив на компютъра/програмата, или за пренасяне на данните на друг компютър със същата програма.')}
       <div id="autoBkBox"></div>
       <div class="toolbar">
         <button class="btn pri" onclick="backupNowForm()">Направи резервно копие сега…</button>
@@ -282,6 +296,16 @@ async function renderSetup() {
               ${b.encrypted ? '<span class="badge" title="Защитено с парола">🔒 криптирано</span>' : ''}</td>
           <td><button class="btn sm" onclick="restoreBackupFromList('${jsq(b.path)}')">Възстанови</button></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="hint">Все още няма направени резервни копия.</div>'}`)}
+    ${/* ПЪЛЕН ИЗНОС (v2.4.56). Дотук износ имаше само за читатели, каталог,
+          дневник и одитна следа — заеманията, актовете, постъпленията,
+          периодиката, инвентаризациите и резервациите нямаха НИКАКЪВ. Тоест
+          мигрирането към нов компютър работеше (през резервното копие), но изход
+          ИЗВЪН тази програма нямаше: при смяна на софтуер или спрял проект
+          библиотеката оставаше зависима от това някой да отвори SQLite файл. За
+          обществена библиотека с нормативни регистри това е реална зависимост. */''}
+    ${setupMore('Пълен износ на данните', 'всяка таблица като CSV в един ZIP', `
+      ${setupHow('Изнася <b>всяка</b> таблица от базата като отделен CSV файл в един ZIP архив, заедно с <code>PROCHETI-ME.txt</code>, който обяснява кой файл какво съдържа. CSV се отваря с Excel и LibreOffice и се чете от всяка друга програма — за разлика от резервното копие, което е във формàта на тази програма. <b>ЕГН и номерът на личната карта не излизат в този архив.</b> Докато защитата на личните данни е заключена, скрити са и адресът, телефонът, имейлът и данните на гаранта. Пълно копие <i>с</i> личните данни е криптираното резервно копие по-горе.')}
+      <div class="toolbar"><button type="button" class="btn" onclick="runFullExport()">Пълен износ на данните (CSV в ZIP)…</button></div>`)}
     ${setupMore('Работа в мрежа (няколко компютъра)', esc(dbLoc && !dbLoc.isDefault ? (dbLoc.folder || 'персонализирана папка') : 'локална папка по подразбиране'), `
       ${setupHow('За да работят няколко работни компютъра с една и съща база данни, посочете папка на <b>споделен мрежов диск</b> (напр. картографиран диск <code>Z:\\</code> или път от вида <code>\\\\СЪРВЪР\\споделена-папка</code>) — всички програми, сочещи към тази папка, ще виждат едни и същи данни.<br><br><b>Важно за надеждността:</b> SQLite (форматът на базата данни) официално <b>не е препоръчан</b> за едновременен запис от няколко компютъра върху мрежов диск (SMB) — заключването на файлове по мрежата не винаги работи коректно и в редки случаи може да доведе до повредена база. Препоръки: работете един по един, когато е възможно; правете редовно резервно копие на файла <code>library.db</code>; ако забележите грешки „database is locked“ или повредени данни — върнете последното добро резервно копие.')}
       <div class="hint">Текуща папка: <b style="font-family:var(--mono)">${esc(dbLoc ? dbLoc.folder : '')}</b>
@@ -396,41 +420,133 @@ async function loadAutoBackupBox() {
         ако възстановяване се окаже сгрешено. Ако личните данни в тях са проблем, преместете ги
         на място, което не е споделено в мрежата.</div>`
     : '';
+  /* ВЪЗРАСТТА на най-новото копие и изходът от ПОСЛЕДНИЯ опит.
+     Дотук цялата карта отговаряше само на въпроса „криптират ли се копията“ и
+     мълчеше по далеч по-важния: „има ли изобщо скорошно копие“. Компютър, който
+     не е рестартиран от вторник, пълен диск или изключен мрежов дял оставяха
+     библиотеката без ново копие с дни, а екранът показваше спокойно зелено „🔒“.
+     Затова: червено предупреждение, когато най-новото копие е по-старо от два
+     дни или когато последният опит се е провалил — с изход на място
+     („Направи резервно копие сега“). Полетата идват от backup:autoStatus; по-стар
+     main процес не ги праща и тогава просто не се показва нищо (undefined не е
+     „няма копия“). */
+  const age = (st.ageDays === null || st.ageDays === undefined) ? null : Number(st.ageDays);
+  const attempt = st.lastAttempt || null;
+  const attemptFailed = !!(attempt && attempt.ok === false);
+  const noneAtAll = st.newest === null && st.ageDays === null; // изрично „нито един файл“
+  const ageText = age === null ? '' : (age < 1
+    ? 'днес'
+    : 'отпреди ' + Math.floor(age) + (Math.floor(age) === 1 ? ' ден' : ' дни'));
+  let banner = '';
+  if (noneAtAll || (age !== null && age > 2) || attemptFailed) {
+    banner = `<div class="note d" style="margin-top:0">
+      <b>⚠ ${noneAtAll ? 'В папката няма нито едно резервно копие.' : 'Резервните копия изостават.'}</b>
+      ${noneAtAll ? '' : (st.newest
+        ? `Най-новото копие е ${esc(ageText)} (<code>${esc(st.newest.name)}</code>).`
+        : '')}
+      ${attemptFailed
+        ? ` Последният опит за копие се провали: ${esc(String(attempt.message || ''))}
+            Най-честите причини са пълен диск, изключен мрежов диск и заключен от антивирусна програма файл.`
+        : ''}
+      <div class="hint" style="margin-top:6px">Докато това не се оправи, при повреда на компютъра ще се
+        загуби всичко, въведено след последното копие — заемания, върнати книги, нови постъпления.</div>
+      <div class="toolbar" style="margin:8px 0 0">
+        <button type="button" class="btn pri" onclick="backupNowForm()">Направи резервно копие сега…</button>
+      </div>
+    </div>`;
+  }
+  /* Втората папка за копие (незадължителна). Всички копия иначе стоят в
+     подпапка до самата база: един изгорял диск или една криптовирусна зараза
+     отнася базата и всичките копия наведнъж. Ако папка не е зададена или не е
+     достъпна, програмата работи както досега — но тук го КАЗВА, вместо
+     мълчаливо да не прави второто копие. */
+  const sec = st.second || null;
+  let secondBox = '';
+  if (sec && !sec.configured) {
+    secondBox = `<div class="note" style="margin-top:8px">
+      <b>Копие на втори диск: не е настроено.</b> В момента всички резервни копия стоят в подпапка
+      <code>backups</code> до самата база данни — един повреден или откраднат диск отнася и базата, и копията.
+      Посочете папка на друг диск (USB, външен диск, мрежов дял) и дневното копие ще се записва и там.
+      <div class="toolbar" style="margin:8px 0 0">
+        <button type="button" class="btn" onclick="chooseSecondBackupFolder()">Избери втора папка…</button>
+      </div></div>`;
+  } else if (sec && sec.available === false) {
+    secondBox = `<div class="note d" style="margin-top:8px">
+      <b>⚠ Втората папка за копия не е достъпна.</b>
+      <code>${esc(sec.folder || '')}</code> — най-често изваден USB или изключен мрежов диск.
+      Копията в папката до базата продължават да се правят, но втори екземпляр в момента НЯМА.
+      <div class="toolbar" style="margin:8px 0 0">
+        <button type="button" class="btn" onclick="chooseSecondBackupFolder()">Посочи друга папка…</button>
+        <button type="button" class="btn" onclick="clearSecondBackupFolder()">Спри второто копие</button>
+      </div></div>`;
+  } else if (sec) {
+    const lastSec = sec.last && sec.last.ok === false
+      ? `<div class="hint" style="margin-top:6px">⚠ Последното дублиране не се получи:
+          ${esc(String(sec.last.error || ''))}</div>`
+      : (sec.last && sec.last.file
+        ? `<div class="hint" style="margin-top:6px">Последно дублирано: <code>${esc(sec.last.file)}</code></div>`
+        : '');
+    secondBox = `<div class="note" style="margin-top:8px">
+      Дневното копие се записва и във втора папка: <code>${esc(sec.folder || '')}</code>.${lastSec}
+      <div class="toolbar" style="margin:8px 0 0">
+        <button type="button" class="btn" onclick="chooseSecondBackupFolder()">Смени папката…</button>
+        <button type="button" class="btn" onclick="clearSecondBackupFolder()">Спри второто копие</button>
+      </div></div>`;
+  }
   if (state === 'encrypted') {
     /* Одит v2.4.24: тук се показваше САМО зеленото „копията се криптират“. Но
        включването на защитата криптира само днешното копие — вчерашните остават в
        чист текст завинаги, тоест точно в мига, в който библиотекарят вижда
        успокоителния надпис, на дяла стоят до 30 пълни регистъра с лични данни. */
-    el.innerHTML = `<div class="note${plainNote ? ' d' : ''}" style="margin-top:0">🔒 Автоматичните дневни копия се
+    el.innerHTML = banner + `<div class="note${plainNote ? ' d' : ''}" style="margin-top:0">🔒 Автоматичните дневни копия се
       <b>криптират</b> с паролата за защита на личните данни.
       ${st.last ? 'Последно копие: ' + esc(st.last.date) + '.' : ''}${plainNote}
       ${plainNote ? `<div class="hint" style="margin-top:6px">Криптирането важи за копията отсега нататък.
         Старите некриптирани <b>дневни</b> копия могат да се изтрият от папката с копията — базата и днешното
-        копие остават.</div>` : ''}${restoreNote}</div>`;
+        копие остават.</div>` : ''}${restoreNote}</div>` + secondBox;
     return;
   }
   if (state === 'failed') {
     /* Най-опасният случай: библиотекарят е направил всичко както трябва, а
        копието въпреки това е в чист текст. Затова се казва изрично КАКВО се е
        провалило и се дава пряк изход — ръчно криптирано копие сега. */
-    el.innerHTML = `<div class="note d" style="margin-top:0">
+    el.innerHTML = banner + `<div class="note d" style="margin-top:0">
       <b>⚠ Днешното копие НЕ е криптирано, въпреки че защитата е включена.</b>
       ${esc(st.warning || '')}${plainNote}${restoreNote}
       <div class="toolbar" style="margin:8px 0 0">
         <button type="button" class="btn pri" onclick="backupNowForm()">Направи копие с парола сега…</button>
         <button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button>
       </div>
-    </div>`;
+    </div>` + secondBox;
     return;
   }
-  el.innerHTML = `<div class="note ${state === 'locked' ? 'w' : 'd'}" style="margin-top:0">
+  el.innerHTML = banner + `<div class="note ${state === 'locked' ? 'w' : 'd'}" style="margin-top:0">
     <b>${state === 'locked' ? '⚠ Копията не се криптират в момента.' : '⚠ Копията НЕ са криптирани.'}</b>
     ${esc(st.warning || '')}${plainNote}${restoreNote}
     ${state === 'locked'
       ? '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn" onclick="pdpFocus()">Към защитата на личните данни</button></div>'
       : '<div class="toolbar" style="margin:8px 0 0"><button type="button" class="btn pri" onclick="pdpSetupForm()">Включи защита на личните данни…</button></div>'}
-  </div>`;
+  </div>` + secondBox;
 }
+/* Втората папка за копие се избира със СИСТЕМНИЯ диалог в main процеса (а не с
+   писане на път в поле): сгрешен или несъществуващ път иначе изглежда настроен,
+   а второ копие не се прави. */
+async function chooseSecondBackupFolder() {
+  const res = await window.api.backup.chooseSecondFolder();
+  if (!res || !res.ok) { if (res && res.error) toast(res.error, 'err'); return; }
+  toast('Резервните копия ще се дублират и в: ' + ((res.data && res.data.folder) || ''), 'ok');
+  loadAutoBackupBox();
+}
+window.chooseSecondBackupFolder = chooseSecondBackupFolder;
+async function clearSecondBackupFolder() {
+  if (!await askConfirm('Да спра ли дублирането на резервните копия във втората папка? Вече направените копия в нея остават.',
+    { kind: 'warn', title: 'Второ копие', okLabel: 'Спри' })) return;
+  const res = await window.api.backup.clearSecondFolder();
+  if (!res || !res.ok) { if (res && res.error) toast(res.error, 'err'); return; }
+  toast('Дублирането е спряно. Копията остават в папката до базата данни.', 'ok');
+  loadAutoBackupBox();
+}
+window.clearSecondBackupFolder = clearSecondBackupFolder;
 window.loadAutoBackupBox = loadAutoBackupBox;
 /* Известия от main процеса: дневното копие беше прекриптирано (напр. след смяна
    на паролата) или опитът се провали. Дотук провалът не стигаше до библиотекаря
@@ -895,6 +1011,16 @@ async function restoreBackupFromList(path) {
   if (res.data && res.data.needsPassword) askBackupPassword(res.data.path, true);
 }
 window.restoreBackupFromList = restoreBackupFromList;
+/* Пълен износ (v2.4.56). Отделна функция, а не израз в onclick: диалогът за
+   папка се отказва с Esc и това НЕ е грешка — при отказ не бива да излиза нищо. */
+async function runFullExport() {
+  const r = await call(window.api.exportAll.run());
+  if (!r) return;                 // отказан диалог — call() вече е показал грешка, ако е имало
+  toast('Данните са изнесени в ' + r.path + ' — ' + r.tables + ' таблици, '
+    + r.rows.toLocaleString('bg-BG') + ' записа.'
+    + (r.pdpLocked ? ' Личните данни са скрити (защитата е заключена).' : ''), 'ok');
+}
+window.runFullExport = runFullExport;
 async function restoreBackupBrowse() {
   if (!await askConfirm('Ще изберете файл с резервно копие (.db или .invbak) от компютъра/USB/мрежов диск. ' + RESTORE_WARN, RESTORE_OPTS)) return;
   const res = await window.api.backup.restoreBrowse();

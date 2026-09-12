@@ -43,10 +43,14 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         WHERE b.register_date BETWEEN ? AND ?
       `).get(y + '-01-01', end);
       // Снимката в самия акт, не живото inventory — виж бележката в handlers/kdbf.js.
+      /* Анулираните актове НЕ се броят никъде (v2.4.56). Редът им остава в
+         базата завинаги — актът е документ по чл. 39 и вече не се трие — но
+         документите по него са върнати във фонда, тоест отчисляване не е имало.
+         Без този филтър анулирането щеше да краде от фонда на хартия. */
       const deaccessioned = db.prepare(`
         SELECT i.*, COALESCE(i.quantity, 1) AS qty FROM deaccession_items i
         JOIN deaccession_acts d ON d.id = i.act_id
-        WHERE d.year = ?
+        WHERE d.year = ? AND d.revoked_at IS NULL
       `).all(y);
       /* Локални заместители на споделените value()/COUNT: претеглят по бройки.
          Споделеният value() в main.js нарочно НЕ се пипа — ползва се и от места,
@@ -70,9 +74,16 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       /* Едно минаване по върнатите през годината (idx_loans_open): в срок / със
          забава / начислени обезщетения. finesCharged брои и затворените от акт
          (както досега — сумата им е начислена при затварянето). */
+      /* COALESCE(lost,0) = 0 (v2.4.56) — точно същата мярка като при
+         deaccession_act_id: заемане, приключено като ИЗГУБЕНО, се затваря с
+         date_in (иначе документът виси зает завинаги), но книгата никога не се е
+         върнала. Без този филтър показателят „спазени срокове“ броеше като
+         върната в срок книга, която библиотеката вече няма. */
       const returned = db.prepare(`
-        SELECT SUM(CASE WHEN deaccession_act_id IS NULL AND date_due IS NOT NULL AND date_in <= date_due THEN 1 ELSE 0 END) AS onTime,
-               SUM(CASE WHEN deaccession_act_id IS NULL AND date_due IS NOT NULL AND date_in > date_due THEN 1 ELSE 0 END) AS late,
+        SELECT SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0) = 0
+                         AND date_due IS NOT NULL AND date_in <= date_due THEN 1 ELSE 0 END) AS onTime,
+               SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0) = 0
+                         AND date_due IS NOT NULL AND date_in > date_due THEN 1 ELSE 0 END) AS late,
                COALESCE(SUM(fine), 0) AS finesCharged
         FROM loans WHERE date_in BETWEEN ? AND ?
       `).get(y + '-01-01', end);
@@ -143,7 +154,11 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           while (money > 0.0001 && q.length) {
             const head = q[0];
             const used = Math.min(money, head.left);
-            if (inYear && head.type === 'обезщетение') finesCollected += used;
+            /* И новият вид начисление „обезщетение за изгубен документ“ (v2.4.56):
+               то също е обезщетение по чл. 43 и събраното по него е приход на
+               библиотеката. Дотук сравнението беше буквално с една стойност и
+               новият вид просто нямаше да се появи в „Събрани обезщетения“. */
+            if (inYear && (head.type === 'обезщетение' || head.type === 'обезщетение за изгубен документ')) finesCollected += used;
             head.left -= used;
             money -= used;
             if (head.left <= 0.0001) q.shift();
@@ -333,7 +348,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           SELECT COALESCE(d.reason_text,'—') AS k,
                  COALESCE(SUM(COALESCE(i.quantity,1)),0) AS cnt,
                  COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) AS val
-          FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? GROUP BY k ORDER BY cnt DESC
+          FROM deaccession_items i JOIN deaccession_acts d ON d.id = i.act_id
+          WHERE d.year = ? AND d.revoked_at IS NULL GROUP BY k ORDER BY cnt DESC
         `).all(y);
         return {
           id, year: y,

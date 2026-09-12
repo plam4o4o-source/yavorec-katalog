@@ -11,6 +11,15 @@
 // и scheduleCatalogWrite (по референция, hoisted по-долу в main.js) идват
 // от все още неизвадения домейн "Книги"/"Онлайн каталог".
 const { isValidIsoDate, resolveScannedBook } = require('../security-utils');
+/* Стойностите, които тригерите в db/enum-triggers.js пускат — взети оттам, а не
+   преписани тук (виж дългия коментар при BOOK_STATUS_LOST в онзи файл).
+   applyEnumTriggers се изисква по същата причина, поради която го прави и
+   миграция 9 в main.js: списъкът с позволени стойности живее в кода, а тригерите
+   в базата са снимка от деня, в който са създадени. */
+const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/enum-triggers');
+/* Начислението в читателската сметка минава през handlers/account.js — сметката
+   има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
+const { chargeLost, chargeCoverage, LOST_CHARGE_TYPE } = require('./account');
 
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
@@ -204,6 +213,17 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const b0 = db.prepare('SELECT inv_number, status FROM books WHERE id = ?').get(book_id);
         if (!b0) throw new Error('Документът не е намерен.');
         if (b0.status === 'отчислен') throw new Error('Инв. № ' + b0.inv_number + ' е отчислен от фонда.');
+        /* v2.4.56: документ, приключен като изгубен, не се заема. Без тази
+           проверка предишният читател „губи“ книгата, екземплярът се освобождава
+           (заемането е затворено) и следващият читател я взема от рафт, на който
+           тя физически я няма — а програмата му я записва като заета. Отказът е
+           изричен и казва какво се прави оттук нататък, за да не изглежда като
+           повреда. Същата проверка и в двете врати за заемане (виж бележката
+           „ДВЕ ВРАТИ, ЕДНИ ПРАВИЛА“ по-долу). */
+        if (b0.status === BOOK_STATUS_LOST) {
+          throw new Error('Инв. № ' + b0.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
+            + 'върнете състоянието му на „наличен“ от „Книги“; ако не — отчислете го с акт по чл. 30, т. 5.');
+        }
         const s = circRule(readerCategory(reader_id));
         const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
         if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
@@ -388,6 +408,349 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     })
   );
 
+  /* ================================================================
+     ИЗГУБЕН ИЛИ НЕВЪРНАТ ОТ ЧИТАТЕЛЯ ДОКУМЕНТ (v2.4.56)
+     ================================================================
+     КАКВО СТАВАШЕ ДОТУК. Програмата познаваше само два изхода на едно заемане:
+     книгата се връща (loans:return / loans:returnByCode) или заемането виси
+     отворено и трупа дни в „Просрочени“. Трети изход — читателят да каже „загубих
+     я“ или просто да не я върне никога — нямаше. Библиотекарката правеше три
+     несвързани действия на ръка: приемаше несъществуващата книга като върната (за
+     да слезе от списъка), после ѝ сменяше състоянието в „Книги“, после отваряше
+     картона на читателя и вписваше начисление „друго“. И трите бяха погрешни
+     всяко по своему:
+       • „приета обратно“ значи, че книгата е на рафта — годишният отчет я броеше
+         сред върнатите, публичният каталог я обявяваше за налична, следващият
+         читател я резервираше и идваше за нея;
+       • обезщетението се смяташе ЕДИНСТВЕНО по дни просрочие (fine_per_day) —
+         тоест за невърната книга за 80 лв. библиотеката „искаше“ 4 лв. забава и
+         нищо за самата книга;
+       • нищо не свързваше начислението с документа: когато след месеци се
+         съставяше акт по чл. 30, т. 5 (повредени или невърнати от ползватели),
+         в него не личеше нито че има начислено обезщетение, нито дали е събрано.
+
+     КАКВО ПРАВИ ТОЗИ БЛОК. Приключва заемането ИЗРИЧНО като невърнато (loans.lost
+     = 1 — отделен белег, а не досещане по дати), слага на документа състояние
+     „изгубен“, вписва събитие от вид „изгубен“ (не „връщане“) и записва кой от
+     трите изхода е избрал библиотекарят: обезщетение в пари, замяна с идентичен
+     документ или замяна с равностоен документ. Следата носи името на читателя,
+     инвентарния номер и заглавието на документа и сумата.
+
+     ЗА РАЗМЕРА. Чл. 43, ал. 2 от Наредба № 3 урежда обезщетяването, но конкретният
+     размер е решение на библиотеката (вътрешни правила/устройствен акт), не число,
+     записано в наредбата. Затова програмата НЕ налага размер: предлага сума по
+     правило, което библиотеката сама си задава в настройките (кратно на цената на
+     документа), и библиотекарят я променя на ръка, когато случаят го изисква.
+     Интерфейсът го казва с думи, за да не остане впечатление за нормативно
+     изискване.
+
+     ЗАЩО ЗАЕМАНЕТО СЕ ЗАТВАРЯ (date_in), А НЕ ОСТАВА ОТВОРЕНО. Отвореното заемане
+     значи „екземплярът е у читател“ — то заема бройката (trg_loans_capacity),
+     държи документа в „Просрочени“ и в напомнителните писма и го брои в лимита на
+     читателя. Нито едно от тези неща не е вярно за изгубен документ: случаят е
+     приключен, остава само отчисляването. Затова редът се затваря, но с белега
+     lost = 1, по който всеки консуматор може да го отличи от истинско връщане —
+     точно както deaccession_act_id вече отличава заеманията, закрити от акт. */
+  const LOST_RESOLUTIONS = ['обезщетение', 'замяна с идентичен документ', 'замяна с равностоен документ'];
+  /* Подразбиращи се стойности на ПРАВИЛОТО, не на нормата. Тройният размер е
+     разпространената практика в обществените библиотеки и е само предложение —
+     затова стои като число в настройка, която библиотекарят вижда и променя.
+     LOST_FALLBACK_DEFAULT покрива стария фонд без вписана цена: инвентарните
+     книги отпреди деноминацията често нямат стойност, а нула като предложено
+     обезщетение е по-лоша от каквото и да е — изглежда като пресметнат отговор. */
+  const LOST_MULTIPLIER_DEFAULT = 3;
+  const LOST_FALLBACK_DEFAULT = 10;
+
+  /* Миграцията стои ТУК, а не в main.js, по вече установения в проекта образец
+     (виж ensureLoanActColumn в handlers/deaccession-acts.js): модулът трябва да
+     работи и когато е зареден самостоятелно (тестовете го правят), а
+     ALTER TABLE ... ADD COLUMN е идемпотентно защитен с PRAGMA table_info.
+     Стара база не се пренаписва и не се проверява — колоните просто се добавят
+     празни, а празно значи „това заемане не е приключено като изгубено“, което
+     за всички досегашни редове е вярно.
+     applyEnumTriggers() се вика от същото място и по същата причина: миграции 5
+     и 9 в main.js отдавна са минали за всяка действаща инсталация, тоест новите
+     стойности „изгубен“ и „обезщетение за изгубен документ“ иначе нямаше да
+     стигнат до нито една реална база и първото натискане на бутона щеше да върне
+     „Непозната стойност за books.status.“ (виж бележката при buildSql там).
+     Проверката се прави веднъж на база и е евтина. */
+  let lostSchemaChecked = null;
+  function ensureLostSchema(db) {
+    if (lostSchemaChecked === db) return;
+    const loanCols = db.prepare('PRAGMA table_info(loans)').all().map(c => c.name);
+    const addLoan = {
+      lost: 'INTEGER',                       // 1 = приключено като изгубено/невърнато
+      lost_date: 'TEXT',                     // денят, в който библиотекарят го е приключил
+      lost_resolution: 'TEXT',               // обезщетение | замяна с идентичен документ | замяна с равностоен документ
+      lost_amount: 'REAL',                   // договореното обезщетение в евро (0 при замяна)
+      lost_account_line_id: 'INTEGER',       // редът в читателската сметка, ако има начисление
+      lost_replacement_book_id: 'INTEGER',   // приетият вместо изгубения документ, ако е вписан във фонда
+      lost_replacement_note: 'TEXT',         // описание на приетия документ (когато още няма инв. №)
+      lost_note: 'TEXT'                      // бележка на библиотекаря по случая
+    };
+    for (const [name, ddl] of Object.entries(addLoan)) {
+      if (!loanCols.includes(name)) db.exec(`ALTER TABLE loans ADD COLUMN ${name} ${ddl}`);
+    }
+    const setCols = db.prepare('PRAGMA table_info(settings)').all().map(c => c.name);
+    /* Двете настройки нарочно са БЕЗ DEFAULT в схемата: NULL значи „библиотеката
+       не е пипала правилото“ и кодът пада към LOST_*_DEFAULT. Ако тук стоеше
+       DEFAULT 3, нямаше да се различава библиотека, която изрично е решила
+       тройния размер, от такава, която просто не е отваряла настройката — а
+       разликата има значение в деня, в който подразбиращото се число се промени. */
+    if (!setCols.includes('lost_price_multiplier')) db.exec('ALTER TABLE settings ADD COLUMN lost_price_multiplier REAL');
+    if (!setCols.includes('lost_fallback_amount')) db.exec('ALTER TABLE settings ADD COLUMN lost_fallback_amount REAL');
+    applyEnumTriggers(db);
+    lostSchemaChecked = db;
+  }
+
+  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  function lostPolicy(db) {
+    const s = db.prepare('SELECT lost_price_multiplier, lost_fallback_amount FROM settings WHERE id = 1').get() || {};
+    const m = Number(s.lost_price_multiplier);
+    const f = Number(s.lost_fallback_amount);
+    return {
+      multiplier: Number.isFinite(m) && m > 0 ? m : LOST_MULTIPLIER_DEFAULT,
+      fallback: Number.isFinite(f) && f > 0 ? f : LOST_FALLBACK_DEFAULT,
+      multiplierSet: Number.isFinite(m) && m > 0,
+      fallbackSet: Number.isFinite(f) && f > 0,
+      defaults: { multiplier: LOST_MULTIPLIER_DEFAULT, fallback: LOST_FALLBACK_DEFAULT },
+      resolutions: LOST_RESOLUTIONS
+    };
+  }
+  /* Предложението е кратно на ЦЕНАТА ПО ИНВЕНТАРНАТА КНИГА, защото тя е
+     единствената стойност на документа, която библиотеката може да докаже пред
+     ревизия. Документ без вписана цена не дава нула (виж LOST_FALLBACK_DEFAULT) —
+     връща се резервната сума и изрично се казва, че цена няма, за да не изглежда
+     резервното число като пресметнато. */
+  function suggestLostAmount(book, policy) {
+    const price = Number(book && book.price);
+    if (Number.isFinite(price) && price > 0) {
+      return { amount: toCents(price * policy.multiplier), basis: 'цена', price };
+    }
+    return { amount: toCents(policy.fallback), basis: 'без цена', price: 0 };
+  }
+
+  ipcMain.handle('loans:lostPolicy', () => run(() => { const db = getDb(); ensureLostSchema(db); return lostPolicy(db); }));
+  /* Правилото живее на ДВЕ места и това е нарочно. „Настройки“ → „Заемане“ го
+     задава веднъж, за библиотеката (settings:update от v2.4.56 знае и двете
+     колони). Този канал го сменя от самия прозорец „Документът е изгубен“ —
+     защото точно там библиотекарката вижда, че предложената сума не отговаря на
+     решението на настоятелството, и няма смисъл да я пращаме през цял друг
+     екран. Двата пътя пишат в едни и същи колони, а следата казва кой и кога. */
+  ipcMain.handle('loans:lostPolicySave', (e, { multiplier, fallback } = {}) =>
+    run(() => {
+      const db = getDb();
+      ensureLostSchema(db);
+      const m = Number(multiplier), f = Number(fallback);
+      if (!Number.isFinite(m) || m <= 0) throw new Error('Кратността трябва да е положително число (например 3 за троен размер).');
+      if (!Number.isFinite(f) || f <= 0) throw new Error('Сумата за документ без вписана цена трябва да е положителна.');
+      db.prepare('UPDATE settings SET lost_price_multiplier = ?, lost_fallback_amount = ? WHERE id = 1')
+        .run(m, toCents(f));
+      logAudit('Редакция на настройки', 'правило за обезщетение при изгубен документ: '
+        + m + '-кратно на цената; ' + toCents(f).toFixed(2) + ' € за документ без вписана цена');
+      return lostPolicy(db);
+    })
+  );
+
+  /* Какво ще види библиотекарят в прозореца, ПРЕДИ да реши. Смята се в главния
+     процес по същите функции, по които после ще се запише — иначе екранът пак би
+     показал едно число, а гишето да начисли друго (същата болест, поправена вече
+     три пъти при обезщетението за просрочие, виж loans:overdue по-горе). */
+  ipcMain.handle('loans:lostQuote', (e, { id, date } = {}) =>
+    run(() => {
+      const db = getDb();
+      ensureLostSchema(db);
+      const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
+      if (!l) throw new Error('Заемането не е намерено.');
+      if (l.date_in) throw new Error('Това заемане вече е приключено на ' + l.date_in.split('-').reverse().join('.') + '.');
+      const when = date && isValidIsoDate(date) ? date : today();
+      const policy = lostPolicy(db);
+      const b = db.prepare('SELECT price FROM books WHERE id = ?').get(l.book_id) || {};
+      const sug = suggestLostAmount(b, policy);
+      const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+      const daysLate = effectiveDaysLate(l.date_due, when);
+      return {
+        loan_id: l.id, book_id: l.book_id, reader_id: l.reader_id,
+        title: l.title, author: l.author, inv_number: l.inv_number,
+        reader_name: l.reader_name, card_no: l.card_no,
+        date_out: l.date_out, date_due: l.date_due,
+        price: sug.price, basis: sug.basis, suggested: sug.amount, policy,
+        // Начисленото за забава е ОТДЕЛНО задължение и не се слива с обезщетението
+        // за самия документ — виж защо в db/enum-triggers.js при account_lines.type.
+        daysLate, fineAccrued: toCents(Number(l.fine) || 0),
+        fineToAdd: toCents(daysLate * ((cfg && cfg.fine_per_day) || 0))
+      };
+    })
+  );
+
+  ipcMain.handle('loans:markLost', (e, { id, resolution, amount, replacement_code, replacement_note, note, date } = {}) =>
+    run(() => {
+      if (date != null && date !== '' && !isValidIsoDate(date)) {
+        throw new Error('Датата (' + date + ') е невалидна.');
+      }
+      if (!LOST_RESOLUTIONS.includes(resolution)) {
+        throw new Error('Изберете как се урежда случаят: ' + LOST_RESOLUTIONS.join(', ') + '.');
+      }
+      const db = getDb();
+      ensureLostSchema(db);
+      const when = date || today();
+      const tx = db.transaction(() => {
+        const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
+        if (!l) throw new Error('Заемането не е намерено.');
+        /* Същата защита срещу двойно приключване като при loans:return — и по
+           същата причина: бутонът стои на два екрана („Заемане и връщане“ и
+           „Просрочени“), а второто натискане би начислило обезщетението ВТОРИ
+           път в сметката на читателя. Проверката е двойна: изрична тук (за да
+           има разбираемо съобщение) и атомарна в `AND date_in IS NULL` по-долу
+           (за да не мине при две станции едновременно). */
+        if (l.date_in) {
+          throw new Error('Това заемане вече е приключено на ' + l.date_in.split('-').reverse().join('.')
+            + (l.lost ? ' като изгубен документ' : ' с връщане') + ' — не се приключва втори път.');
+        }
+        /* ЗАМЯНАТА ТРЯБВА ДА СОЧИ КЪМ НЕЩО. „Читателят донесе друга книга“ без
+           никакво указание коя е тя не става следа — след година никой не може да
+           каже дали фондът наистина е възстановен. Затова се иска или инвентарен
+           номер/баркод на вече вписания заместител, или поне описанието му, ако
+           още не е заведен в инвентарната книга (новопостъпил документ се
+           инвентира отделно, по общия ред — програмата не го вписва сама, за да
+           не се появи екземпляр без партида и без номер). */
+        let replBook = null;
+        const replNote = String(replacement_note || '').trim();
+        if (resolution !== 'обезщетение') {
+          const code = normalizeScanCode(replacement_code);
+          if (code) {
+            replBook = resolveScannedBook(db, code, BOOK_SELECT);
+            if (!replBook) throw new Error('Няма документ с баркод/инв. № „' + replacement_code + '“. '
+              + 'Впишете заместващия документ в „Книги“ (той получава свой инвентарен номер) или опишете го в полето „Описание“.');
+            if (replBook.id === l.book_id) throw new Error('Заместващият документ не може да е самият изгубен документ.');
+            if (replBook.status === 'отчислен') throw new Error('Инв. № ' + replBook.inv_number + ' е отчислен от фонда и не може да замести изгубения документ.');
+          }
+          if (!replBook && !replNote) {
+            throw new Error('Запишете кой документ е приет вместо изгубения — инвентарен номер/баркод или описание.');
+          }
+        }
+        /* Забавата до деня на приключването се начислява, преди заемането да се
+           затвори — точно както прави и loans:extend (виж бележката там). Иначе
+           натискането на „Документът е изгубен“ би заличило вече натрупаното по
+           просрочието: книга с 60 дни забава излизаше от списъка с fine = 0.
+           Двете суми си остават различни неща: тази влиза в loans.fine (забава),
+           обезщетението за самия документ — в читателската сметка. */
+        const daysLate = effectiveDaysLate(l.date_due, when);
+        const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
+        const addedFine = toCents(daysLate * ((cfg && cfg.fine_per_day) || 0));
+        const amt = resolution === 'обезщетение' ? toCents(Math.abs(Number(amount) || 0)) : 0;
+        if (resolution === 'обезщетение' && !amt) {
+          throw new Error('Въведете размер на обезщетението (поне 0.01 €) или изберете замяна с документ.');
+        }
+        let lineId = null;
+        if (resolution === 'обезщетение') {
+          const charge = chargeLost(db, {
+            reader_id: l.reader_id, amount: amt, date: when,
+            note: 'Невърнат документ инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
+          });
+          lineId = charge.id;
+        }
+        const upd = db.prepare(`
+          UPDATE loans SET date_in = ?, lost = 1, lost_date = ?, lost_resolution = ?, lost_amount = ?,
+            lost_account_line_id = ?, lost_replacement_book_id = ?, lost_replacement_note = ?, lost_note = ?,
+            fine = COALESCE(fine, 0) + ?
+          WHERE id = ? AND date_in IS NULL
+        `).run(when, when, resolution, amt, lineId, replBook ? replBook.id : null,
+          replNote || null, String(note || '').trim() || null, addedFine, id);
+        if (upd.changes === 0) throw new Error('Това заемане вече е приключено — не се приключва втори път.');
+        /* Състоянието на документа се сменя ВЪТРЕ в същата транзакция. Ако това
+           беше отделно действие (както го правеше библиотекарката на ръка),
+           прекъсване по средата оставяше затворено заемане и книга, която фондът
+           още води за налична — тоест заемаема и видима в публичния каталог.
+           Документът НЕ се отчислява тук: отчисляването е акт на комисия по
+           чл. 30 и чл. 35 и се прави от „Отчисляване“; дотогава документът стои
+           във фонда със състояние „изгубен“ и се брои в наличността, както
+           изисква и самата наредба. */
+        db.prepare('UPDATE books SET status = ?, status_date = ? WHERE id = ?').run(BOOK_STATUS_LOST, when, l.book_id);
+        /* Събитието е от вид „изгубен“, НЕ „връщане“ — книгата не се е върнала и
+           не бива да влиза в броя върнати документи нито в дневника, нито в
+           годишния отчет. */
+        logEvent(EVENT_KIND_LOST, { bookId: l.book_id, readerId: l.reader_id, date: when });
+        /* Наказанието в дни се налага по същото правило, както при връщане със
+           забава: просрочието е факт независимо от това, че книгата няма да се
+           върне. Смисълът му тук е практичен — читателят не бива да си тръгне с
+           нова книга в ръка в деня, в който е признал, че предишната я няма. */
+        const suspendedUntil = applySuspension(l.reader_id, l.date_due, when);
+        /* Резервациите по този документ нарочно НЕ се пипат. Отказването им е
+           решение, взето при отчисляването (виж handlers/deaccession-acts.js,
+           където отказаната резервация носи номера на акта и снимка на
+           предишното си състояние) — тук документът още е във фонда и все още е
+           възможно читателят да го върне намерен или да донесе заместител. */
+        logAudit('Изгубен документ',
+          'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title + '; читател ' + l.reader_name
+          + (l.card_no ? ' (карта ' + l.card_no + ')' : '')
+          + '; ' + resolution
+          + (amt ? ' ' + amt.toFixed(2) + ' € (начислено в читателската сметка)' : '')
+          + (replBook ? '; приет вместо него инв. № ' + (replBook.inv_number ?? '—') + ' — ' + replBook.title : '')
+          + (!replBook && replNote ? '; приет вместо него: ' + replNote : '')
+          + (addedFine ? '; начислена забава ' + daysLate + ' дни, ' + addedFine.toFixed(2) + ' €' : ''));
+        return {
+          title: l.title, inv_number: l.inv_number, reader_name: l.reader_name,
+          resolution, amount: amt, account_line_id: lineId,
+          replacement: replBook ? { id: replBook.id, inv_number: replBook.inv_number, title: replBook.title } : null,
+          replacement_note: replNote || null,
+          daysLate, fineAdded: addedFine, suspendedUntil
+        };
+      });
+      const r = tx.immediate();
+      scheduleCatalogWrite(); // документът вече не е „наличен“ — пише файл, не база
+      return r;
+    })
+  );
+
+  /* СПИСЪКЪТ ЗА АКТА ПО ЧЛ. 30, Т. 5.
+     =====================================================================
+     Отчисляването на невърнат документ е отделно действие, което се прави
+     по-късно и от друг човек (комисията). Дотогава изгубените документи нямаше
+     къде да се видят заедно: библиотекарката трябваше да ги помни. Тук се връща
+     всичко, което актът и придружаващата го следа изискват — документът, читателят
+     който не го е върнал, как е уреден случаят, колко е начислено и КОЛКО ОТ
+     НЕГО Е СЪБРАНО (chargeCoverage в handlers/account.js разнася плащанията по
+     същото правило, по което ги разнася и справката „Приходи от такси и
+     обезщетения“, за да не твърдят двете различни неща за едни и същи пари).
+     `acted` казва дали документът вече е влязъл в акт — редовете не изчезват след
+     отчисляването, защото връзката „акт → начислено/събрано обезщетение“ е
+     точно това, което трябва да остане видимо и след него. */
+  ipcMain.handle('loans:lost', (e, { includeActed } = {}) =>
+    run(() => {
+      const db = getDb();
+      ensureLostSchema(db);
+      const rows = db.prepare(`
+        SELECT l.id, l.book_id, l.reader_id, l.date_out, l.date_due, l.lost_date, l.lost_resolution,
+               l.lost_amount, l.lost_account_line_id, l.lost_replacement_book_id, l.lost_replacement_note,
+               l.lost_note, l.fine,
+               b.title, b.author, b.inv_number, b.price, b.status, b.deaccession_act_id, b.deaccession_date,
+               r.name AS reader_name, r.card_no,
+               rb.inv_number AS replacement_inv_number, rb.title AS replacement_title
+        FROM loans l
+        JOIN books b ON b.id = l.book_id
+        JOIN readers r ON r.id = l.reader_id
+        LEFT JOIN books rb ON rb.id = l.lost_replacement_book_id
+        WHERE l.lost = 1
+        ORDER BY l.lost_date DESC, l.id DESC
+      `).all();
+      const out = [];
+      for (const row of rows) {
+        row.acted = row.deaccession_act_id != null || row.deaccession_date != null;
+        if (!includeActed && row.acted) continue;
+        /* Начислението може и да е изтрито от картона на читателя (account:
+           deleteLine го позволява и оставя следа). Тогава НЕ се показва нула —
+           нулата значи „платено докрай“ и точно тя не бива да се появи под акт,
+           по който парите никога не са били начислени. */
+        row.charge = row.lost_account_line_id ? chargeCoverage(db, row.lost_account_line_id) : null;
+        row.chargeMissing = !!row.lost_account_line_id && !row.charge;
+        row.chargeType = LOST_CHARGE_TYPE;
+        out.push(row);
+      }
+      return out;
+    })
+  );
+
   /* Заемане и връщане чрез баркод четец — четецът въвежда текст и Enter, точно
      както при физическа клавиатура, затова тук се приема inv. номер или баркод. */
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
@@ -409,6 +772,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const b = resolveScannedBook(db, c, BOOK_SELECT);
         if (!b) throw new Error('Няма документ с баркод/инв. № „' + code + '“.');
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
+        // Виж бележката при loans:checkout — изгубеният документ не се заема по нито една от двете врати.
+        if (b.status === BOOK_STATUS_LOST) {
+          throw new Error('Инв. № ' + b.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
+            + 'върнете състоянието му на „наличен“ от „Книги“; ако не — отчислете го с акт по чл. 30, т. 5.');
+        }
         /* Свободна бройка, а не „има ли изобщо отворен заем". Моделът на данните
            изрично поддържа няколко екземпляра на едно заглавие (inventory.quantity),
            а самата схема има тригер trg_loans_capacity, чийто коментар гласи, че

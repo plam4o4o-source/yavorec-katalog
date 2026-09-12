@@ -31,7 +31,14 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
     loan_days: 'int', max_books: 'int', extensions_count: 'int', extension_days: 'int',
     fine_per_day: 'real', annual_fee: 'real', free_access_pct: 'real',
     next_inv_number: 'int', suspend_per_day: 'real', suspend_max: 'int',
-    remind2_days: 'int', remind3_days: 'int', anonymize_years: 'int'
+    remind2_days: 'int', remind3_days: 'int', anonymize_years: 'int',
+    /* Обезщетението за ИЗГУБЕН документ (v2.4.56). Чл. 43, ал. 2 урежда, че
+       ползвателят обезщетява библиотеката, но не определя размера — той е
+       решение на настоятелството. Затова тук стоят двете числа, а не зашита
+       стойност в кода: кратност спрямо цената по инвентарната книга и сума за
+       документ без вписана цена (старите инвентарни книги често нямат стойност,
+       а нула изглежда като пресметнат отговор). */
+    lost_price_multiplier: 'real', lost_fallback_amount: 'real'
   };
   function normalizeNumericSettings(s) {
     const out = Object.assign({}, s);
@@ -55,7 +62,8 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
           fine_per_day=@fine_per_day, annual_fee=@annual_fee, free_access_pct=@free_access_pct,
           next_inv_number=@next_inv_number, committee1=@committee1, committee2=@committee2, committee3=@committee3,
           sru_endpoint=@sru_endpoint, suspend_per_day=@suspend_per_day, suspend_max=@suspend_max,
-          remind2_days=@remind2_days, remind3_days=@remind3_days, anonymize_years=@anonymize_years
+          remind2_days=@remind2_days, remind3_days=@remind3_days, anonymize_years=@anonymize_years,
+          lost_price_multiplier=@lost_price_multiplier, lost_fallback_amount=@lost_fallback_amount
         WHERE id = 1
       `).run(s);
       logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
