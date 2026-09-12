@@ -128,10 +128,34 @@ body{
 ::-webkit-scrollbar-thumb{background:var(--rule2); border-radius:6px; border:3px solid var(--paper)}
 ::-webkit-scrollbar-thumb:hover{background:var(--brass)}
 
-/* ---------- Sidebar ---------- */
+/* ---------- Sidebar ----------
+   Одит v2.4.56: дотук ЦЯЛАТА лента беше едно превъртащо се поле
+   (#rail{overflow-y:auto}), а списъкът с раздели — обикновено съдържание в нея.
+   Измерено в Chromium при 1280×768 и 125 % увеличение (тоест 1024×614 CSS px —
+   увеличението в Electron е webFrame.setZoomFactor, което смалява CSS пикселите,
+   а не плътността им): лентата иска 1146 px височина в поле от 614 px, тоест 12
+   раздела — от „Периодика“ надолу до „Настройки“ — стоят под долния ръб.
+   Превъртане имаше, но то влачеше надолу и рамката с наименованието на
+   библиотеката, и подписа отдолу; след като се превърти до „Настройки“, горните
+   11 раздела (включително „Читатели“ и „Заемане и връщане“, които се ползват
+   през цялото работно време) излизат нагоре извън екрана. Тоест на 768 px в
+   лентата НИКОГА не се вижда цялото меню, а онова, което се вижда, зависи от
+   това докъде е било превъртяно последния път.
+
+   Защо това е скъпо за библиотекаря: 125 % е стандартната настройка на Windows
+   на лаптоп 1366×768 — тоест това е обикновеното работно място, не краен
+   случай. Човек, който търси „Одитна следа“ или „Настройки“, ги вижда
+   изчезнали и няма как да разбере, че лентата се превърта: заглавието на
+   програмата стои най-горе и нищо не подсказва, че под него има още.
+
+   Поправката разделя лентата на три части: рамката с наименованието горе,
+   подписът долу, а превъртането се премества В САМИЯ СПИСЪК с разделите (виж
+   #nav по-долу). Така двата ориентира остават винаги на екрана, а превъртането
+   касае само онова, което наистина е дълго. Заедно с това се поправя и мъртвото
+   правило за нисък екран (виж @media (max-height:780px) по-долу). */
 #rail{
   width:var(--rail); flex:0 0 var(--rail); background:var(--spine); color:#e9e2cf;
-  display:flex; flex-direction:column; overflow-y:auto;
+  display:flex; flex-direction:column; overflow:hidden;
 }
 .brand{padding:18px 16px 16px; border-bottom:1px solid var(--spine3)}
 /* Логото на InvLib (новата визуална идентичност, v2.4.1+), центрирано най-отгоре
@@ -164,7 +188,30 @@ body{
    (#brandName), затова тук не се повтарят. Скрито изцяло, когато мястото
    липсва (виж updateBrandSub в core.js), вместо да остава празен ред. */
 .brandSub{font-size:12.5px; color:#B8AF95; margin-top:8px; line-height:1.45}
-#nav{padding:10px 0 20px}
+/* Превъртането е ТУК, а не на цялата лента (одит v2.4.56 — виж дългия коментар
+   при #rail). flex:1 1 auto заема цялото останало място между рамката с
+   наименованието и подписа; min-height:0 е задължително — елемент във flex
+   колона има подразбиращо се min-height:auto, което значи „поне колкото е
+   съдържанието“, и без него #nav просто пораства до 939 px, изтиква подписа
+   под екрана и не превърта НИЩО (проверено в Chromium: scrollHeight ==
+   clientHeight, тоест поправката би изглеждала приложена и не би работила). */
+#nav{
+  flex:1 1 auto; min-height:0; overflow-y:auto; padding:10px 0 20px;
+  /* „Сянки при превъртане“ — единственият начин БЕЗ JavaScript да се покаже, че
+     под ръба има още раздели. Работи така: първите два слоя са в цвета на
+     лентата и са закачени за СЪДЪРЖАНИЕТО (background-attachment:local), тоест
+     се движат с него; вторите два са тъмни ивици, закачени за самото поле
+     (scroll) и стоят на място. Когато списъкът е превъртян до горе, светлият
+     слой покрива горната тъмна ивица и тя не се вижда; щом има още надолу,
+     долната тъмна ивица остава открита. Това е важно, защото дефектът, който се
+     поправя тук, е точно „не се вижда, че има още“ — само превъртането не стига,
+     ако нищо не подсказва, че то съществува. */
+  background:
+    linear-gradient(var(--spine) 40%, rgba(0,0,0,0)) top / 100% 22px no-repeat local,
+    linear-gradient(rgba(0,0,0,0), var(--spine) 60%) bottom / 100% 22px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgba(0,0,0,.35), rgba(0,0,0,0)) top / 100% 9px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,.35), rgba(0,0,0,0)) bottom / 100% 9px no-repeat scroll;
+}
 /* Тънка линия след заглавието на групата запълва остатъка от реда */
 /* Заглавието на групата е БУТОН (v2.4.50): сгъва групата и помни състоянието.
    Изглежда като надпис — само стрелката и промяната при посочване издават, че
@@ -186,16 +233,6 @@ body{
   border-top:5px solid currentColor; opacity:.75; transition:transform .12s ease;
 }
 .nav-grp.folded .nav-grpChev{transform:rotate(-90deg)}
-/* На лаптоп 1366×768 при мащаб 125 % лентата има ~614 px височина, а менюто
-   (24 реда + 7 групи + логото) минаваше 1 400 px — „Отчети“ и „Настройки“ бяха
-   под ръба при всяко стартиране (v2.4.27, A5). Логото отстъпва при ниска
-   височина; редовете са по-плътни; рамката с наименованието остава. */
-@media (max-height:780px){
-  .brandIcon{display:none}
-  .brand{padding:12px 14px 12px}
-  #nav a{padding:4px 10px; font-size:13px}
-  .nav-grp{padding:9px 20px 4px}
-}
 .nav-grp::after{content:''; flex:1; height:1px; background:linear-gradient(90deg,var(--spine3),transparent)}
 /* Празно място под сгънатата група не остава: редовете ѝ се махат от подредбата.
    Правилата се пишат ИЗРИЧНО, защото браузърското „[hidden]{display:none}“ е по
@@ -228,11 +265,44 @@ body{
 }
 #nav a.on .ic{opacity:1; filter:none}
 #nav a .n{margin-left:auto; background:var(--brassD); color:#F4EFDF; font-size:11px; padding:1px 7px; border-radius:9px; flex:0 0 auto}
-/* Скролбарът на тъмната лента — тънък и в нейните цветове, вместо системния сив */
-#rail::-webkit-scrollbar{width:9px}
-#rail::-webkit-scrollbar-track{background:transparent}
-#rail::-webkit-scrollbar-thumb{background:var(--spine3); border-radius:5px; border:2px solid var(--spine)}
-#rail::-webkit-scrollbar-thumb:hover{background:var(--brassD)}
+
+/* На лаптоп 1366×768 при мащаб 125 % лентата има ~614 px височина, а менюто
+   (24 реда + 7 групи + логото) минаваше 1 400 px — „Отчети“ и „Настройки“ бяха
+   под ръба при всяко стартиране (v2.4.27, A5). Логото отстъпва при ниска
+   височина; редовете са по-плътни; рамката с наименованието остава.
+
+   Одит v2.4.56 — блокът СТОЕШЕ ПРЕДИ правилото `#nav a{…}` малко по-горе и
+   заради това половината от него беше мъртва: и двата селектора са `#nav a`,
+   тоест със същата тежест (1-0-1), а при равна тежест печели ПО-КЪСНИЯТ в
+   документа. Измерено в Chromium при 614 px височина: `.brandIcon` наистина се
+   скриваше (затова дефектът не личеше отстрани), но редовете на менюто си
+   оставаха 13.5 px с отстъп 6 px, тоест уплътняването, заради което блокът е
+   писан, изобщо не се е случвало и „Отчети“ и „Настройки“ са били под ръба
+   въпреки поправката v2.4.27. Блокът е преместен СЛЕД правилата за `#nav a` и
+   отгоре на това всеки селектор в него е вдигнат с `#rail` пред себе си (1-1-1
+   срещу 0-1-0/1-0-1). Така поправката не зависи от това КЪДЕ в 1500-редовия файл
+   стои блокът: `.railFoot` и `.appCredit` например са описани чак 600 реда
+   по-надолу, в дъното на лентата, и уплътняването им пак щеше да е мъртво, ако
+   се разчиташе само на реда. */
+@media (max-height:780px){
+  #rail .brandIcon{display:none}
+  #rail .brand{padding:12px 14px 12px}
+  #rail #nav a{padding:4px 10px; font-size:13px}
+  #rail .nav-grp{padding:9px 20px 4px}
+  #rail .brandMark{padding:8px 9px}
+  #rail .brandSub{margin-top:5px}
+  #rail .railFoot{padding:9px 16px}
+  #rail .appCredit{margin-top:6px}
+  #rail .savedIndicator{margin-top:4px}
+}
+/* Скролбарът на тъмната лента — тънък и в нейните цветове, вместо системния сив.
+   Превъртащото поле вече е #nav (виж коментара при #rail), затова правилата
+   важат и за него; #rail остава в списъка, защото при много високи теми/шрифтове
+   може да превърти и той. */
+#rail::-webkit-scrollbar, #nav::-webkit-scrollbar{width:9px}
+#rail::-webkit-scrollbar-track, #nav::-webkit-scrollbar-track{background:transparent}
+#rail::-webkit-scrollbar-thumb, #nav::-webkit-scrollbar-thumb{background:var(--spine3); border-radius:5px; border:2px solid var(--spine)}
+#rail::-webkit-scrollbar-thumb:hover, #nav::-webkit-scrollbar-thumb:hover{background:var(--brassD)}
 
 /* ---------- Main ---------- */
 #main{flex:1; overflow-y:auto; display:flex; flex-direction:column}
@@ -1459,10 +1529,65 @@ table.ledger td.ts .sep{position:absolute; opacity:0; width:0; overflow:hidden}
   color:var(--red);
 }
 .rowMenuPop .btn.dgr:hover{background:var(--redL); border-color:var(--red); color:var(--red)}
-table.ledger td.actsCell{width:1%; white-space:nowrap}
+/* ---------- Действията на реда остават на екрана (одит v2.4.56) ----------
+   Дотук колоната с действията беше просто последната клетка на таблицата:
+   `td.actsCell{width:1%; white-space:nowrap}` в таблица с автоматично
+   разпределение (table-layout:auto), а колоната с ИМЕТО носеше
+   `white-space:nowrap`. Тоест ширината на таблицата се определяше от
+   съдържанието ѝ: щом в картотеката има читател с две фамилии и тире —
+   „Константинова-Александрова, Мария-Магдалена“ — редът не може да се пренесе,
+   колоната „Име“ набъбва и избутва всичко надясно. Измерено в Chromium при
+   1366×768: таблицата става 1082 px в поле от 1034 px, а копчето „⋯“ свършва на
+   1375 px — тоест 39 px отвъд видимата част на таблицата и 9 px отвъд самия
+   прозорец. При 1280×768 със 125 % увеличение излизането е 125 px и извън
+   екрана остава и „Редакция“.
+
+   Защо това е скъпо за библиотекаря: „Заемане“ на реда е действието, заради
+   което изобщо се отваря списъкът с читатели. Когато то изчезне вдясно,
+   единственият път до него е хоризонтално превъртане на всеки ред поотделно —
+   а човек на гише, който търси читател, обикновено дори не забелязва, че
+   таблицата се превърта настрани, и остава с впечатление, че бутоните ги няма.
+
+   Поправката е на СТРУКТУРАТА на таблицата, а не на размера на копчетата:
+   а) колоната „Име“ вече се пренася (overflow-wrap:anywhere + горна граница на
+      ширината) — така съдържанието НЕ може повече да разтяга таблицата;
+   б) колоната с действията е залепена за десния ръб на превъртащото поле
+      (position:sticky; right:0). Дори когато някоя таблица все пак стане
+      по-широка от екрана (напр. „Книги“ с дълги заглавия), действията остават
+      видими на място, вместо да отплуват вдясно.
+   Залепената клетка трябва да носи СОБСТВЕН непрозрачен фон — иначе текстът на
+   реда минава ПОД нея при превъртане и двете се четат едно върху друго; затова
+   фонът се повтаря изрично за четните редове („зебрата“) и за посочения ред.
+   Четният ред иначе е color-mix(... , transparent) — тук прозрачното се заменя
+   с var(--paper2), за да се получи точно същият цвят, но плътен. */
+table.ledger td.actsCell, table.ledger th.actsCell{
+  width:1%; white-space:nowrap;
+  position:sticky; right:0; z-index:2;
+  background:var(--paper2);
+}
+table.ledger th.actsCell{background:var(--paper3); z-index:3}
+table.ledger tbody tr:nth-child(even) td.actsCell{background:color-mix(in srgb, var(--paper3) 38%, var(--paper2))}
+table.ledger tbody tr:hover td.actsCell{background:var(--paper3)}
+/* Лявата сянка показва, че отдолу минава съдържание. Рисува се ВЛЯВО от самата
+   клетка (translateX(-100%)), за да не изяжда от мястото за копчетата. */
+table.ledger td.actsCell::before, table.ledger th.actsCell::before{
+  content:''; position:absolute; left:0; top:0; bottom:0; width:10px;
+  transform:translateX(-100%); pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(27,24,19,.07));
+}
 table.ledger.readersTable th, table.ledger.readersTable td{padding:8px 8px}
 table.ledger.readersTable th{white-space:nowrap}
-table.ledger.readersTable td:first-child{white-space:nowrap}
+/* Името се ПРЕНАСЯ, вместо да разтяга таблицата (виж дългия коментар по-горе).
+   `break-word`, а НЕ `anywhere`: разликата е, че `anywhere` влиза и в сметката за
+   минималната ширина на колоната, тоест браузърът смята, че „Ангелов“ може да се
+   събере в една буква — и при тесен прозорец свива колоната до 30 px, при което
+   всяко име излиза изрязано по срички по седем реда (снимано в Chromium при
+   1024 px: „Анг / ело / в, / Дим / итъ / р“). `break-word` пази естествената
+   минимална ширина (най-дългата непрекъсваема част от името) и къса дума само
+   когато наистина няма накъде.
+   max-width е горна граница за ПРЕДПОЧИТАНАТА ширина при table-layout:auto —
+   колоната спира да расте на 320 px и остатъкът остава за другите колони. */
+table.ledger.readersTable td:first-child{white-space:normal; overflow-wrap:break-word; max-width:320px}
 /* „Днес на гишето“ */
 .circOps{display:flex; flex-direction:column}
 .circOp{display:flex; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--rule); font-size:13px}
@@ -1487,3 +1612,15 @@ table.ledger.oditTable td:nth-child(3) .badge{white-space:nowrap}
 }
 .viewFailed{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
 .viewFailed .btn{margin-left:auto}
+
+/* Анулиран акт за отчисляване (v2.4.56). Редът НЕ изчезва — актът е документ по
+   чл. 39 и вече не се трие — затова трябва да се чете като зачертан и на екрана,
+   и на хартия. Зачертаването е върху текста, не върху реда: цялата линия през
+   таблицата се губи при печат в черно-бяло. */
+tr.revokedRow > td{color:var(--ink3); text-decoration:line-through}
+tr.revokedRow > td .badge, tr.revokedRow > td b{text-decoration:none}
+
+/* Поле само за четене (v2.4.56) — номерът на вече вписана партида във формата за
+   поправка. Различава се на пръв поглед от поле за писане, иначе библиотекарката
+   пробва да го смени и не разбира защо не става. */
+.field input[readonly]{background:var(--paper3); color:var(--ink2); cursor:default}

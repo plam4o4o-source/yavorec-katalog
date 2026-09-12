@@ -4,7 +4,7 @@
 // подават по референция — всички са function declarations (hoisted) или
 // стабилен модулен export в main.js, затворени над реалните мутируеми
 // състояния там (PDP_KEY, db) — работят коректно и извикани оттук.
-const { ANON_READER_NAME } = require('../security-utils');
+const { ANON_READER_NAME, rowFingerprint, assertUnchanged } = require('../security-utils');
 
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
@@ -101,7 +101,20 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
       return { rows, total, offset, limit: lim };
     })
   );
-  ipcMain.handle('readers:get', (e, id) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id))));
+  /* `_rev` — отпечатък на реда към момента на отварянето (v2.4.56); формата го
+     връща при записа и readers:update отказва, ако междувременно друго работно
+     място е пипнало същия читател. Смята се ПРЕДИ маскирането: маскираният ред
+     не носи истинските стойности и отпечатъкът му би се сменял според това дали
+     защитата на личните данни е отключена, тоест би отказвал редакция без
+     никаква чужда промяна. Виж rowFingerprint в security-utils.js. */
+  ipcMain.handle('readers:get', (e, id) => run(() => {
+    const raw = getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id);
+    if (!raw) return raw;
+    const rev = rowFingerprint(raw, READER_FIELDS);
+    const out = maskReaderRow(raw);
+    if (out) out._rev = rev;
+    return out;
+  }));
   // normalizeScanCode() (v1.70.1, security-utils.js): баркод четецът въвежда
   // текста буква по буква като клавиатура, а активна кирилска (фонетична)
   // разредба на Windows превръща букви от Code 39 картата (напр. B) в
@@ -132,6 +145,11 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          тоест изтрит от другаде читател е нормален случай, не хипотеза. Същата
          проверка пази и books:update. */
       if (!prev) throw new Error('Читателят не е намерен — вероятно е изтрит от друго работно място.');
+      /* И обратният случай на същия режим: редът е ТУК, но е сменен, откакто
+         формата е отворена. Дотук записът минаваше мълчаливо и заличаваше
+         чуждата промяна — телефонът, добавен от другото работно място преди
+         минута, изчезваше без нищо на екрана. */
+      assertUnchanged(prev, r._rev, READER_FIELDS, 'Читателят е променен');
       const payload = readerPayload(r, prev);
       preparePiiForWrite(payload, prev);
       db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
