@@ -57,7 +57,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
         SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) AS n,
                COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) AS v
         FROM deaccession_items i
-        JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ?
+        JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? AND d.revoked_at IS NULL
       `).get(y);
       /* ---- Съгласуване между Част № 1 и Част № 2 ----------------------------
          Двете части броят по РАЗЛИЧНИ ключа и това е по същество, не по грешка:
@@ -103,10 +103,23 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
         WHERE (b.register_date IS NULL OR b.register_date = '')
           AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
       `).get(end);
+      /* Разбивка по видове документи към края на годината (v2.4.56) — за
+         Приложение № 2, чийто образец я съдържа, а програмата дотук печаташе
+         само трите общи реда. Ключът е ВИДЪТ (categories.name: книга, продължаващо
+         издание, аудио, електронно…), същият, по който Част № 1 вече дава
+         „По вид документи“, за да се четат двете части с един и същ речник.
+         Броят е по документи, не по заглавия — както навсякъде в КДБФ. */
+      const byKind = db.prepare(`
+        SELECT COALESCE(c.name, '— без вид —') AS kind,
+               COALESCE(SUM(${QTYJ}),0) AS n, COALESCE(SUM(b.price * ${QTYJ}),0) AS v
+        ${BOOKS_INV} LEFT JOIN categories c ON c.id = b.category_id
+        WHERE +b.register_date <= ? AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
+        GROUP BY kind ORDER BY n DESC, kind
+      `).all(end, end);
       const part1Sum = part1.reduce((s, a) => ({
         n: s.n + (a.registered_count || 0), v: s.v + (a.registered_value || 0)
       }), { n: 0, v: 0 });
-      return { part1, part3, stockEnd, acquiredYear, deaccYear, year: y, crossIn, crossOut, undated, part1Sum };
+      return { part1, part3, stockEnd, acquiredYear, deaccYear, year: y, crossIn, crossOut, undated, part1Sum, byKind };
     })
   );
 };

@@ -6,7 +6,7 @@
 // `yearOf` също по референция (const функция, дефинирана по-рано в main.js).
 module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf } = deps;
-  const { parseRegisterNo } = require('../security-utils');
+  const { parseRegisterNo, isValidIsoDate } = require('../security-utils');
 
   ipcMain.handle('acquisitions:list', () =>
     run(() => getDb().prepare(`
@@ -99,6 +99,64 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
         logAudit('Постъпление', 'партида № ' + no + '/' + year + ' — ' + (parseInt(a.total_count, 10) || 0)
           + ' бр. от ' + (a.from_source || '—'));
         return info.lastInsertRowid;
+      });
+      return tx.immediate();
+    })
+  );
+  /* ПОПРАВКА НА ВПИСАНА ПАРТИДА (v2.4.56).
+     Дотук имаше само create и delete, а delete отказва, щом поне един документ е
+     инвентиран в партидата. Тоест сгрешен номер на фактура, сгрешена дата на
+     документа или сгрешен общ брой оставаха ЗАВИНАГИ в КДБФ Част № 1 и излизаха
+     при всяка проверка — единственият „изход“ беше да се остави грешно.
+     Поправката е позволена, но не е мълчалива: всяко променено поле влиза в
+     одитната следа със старата и новата стойност, точно както при документите
+     (виж diffFields в handlers/books.js). Номерът и годината НЕ се пипат оттук —
+     те са мястото на реда в регистъра; за тях остава изтриване и ново вписване,
+     докато няма инвентирани документи. */
+  const ACQ_EDITABLE = ['date', 'how', 'from_source', 'doc_type', 'doc_no', 'doc_date',
+    'total_count', 'sum', 'donor_address', 'note', 'committee1', 'committee2', 'committee3'];
+  const ACQ_LABEL = {
+    date: 'дата', how: 'начин', from_source: 'откъде', doc_type: 'вид документ',
+    doc_no: 'номер на документа', doc_date: 'дата на документа', total_count: 'общ брой',
+    sum: 'обявена стойност', donor_address: 'адрес на дарителя', note: 'забележка',
+    committee1: 'комисия 1', committee2: 'комисия 2', committee3: 'комисия 3'
+  };
+  ipcMain.handle('acquisitions:update', (e, { id, acq }) =>
+    run(() => {
+      const db = getDb();
+      const a = acq || {};
+      if (!isValidIsoDate(a.date)) throw new Error('Датата на партидата липсва или е невалидна.');
+      /* „Дарение“ изисква адрес на дарителя по чл. 6, ал. 5 — същата проверка
+         като при създаването, иначе поправката е дупка в нея. */
+      if (String(a.how || '') === 'дарение' && !String(a.donor_address || '').trim()) {
+        throw new Error('При дарение адресът на дарителя е задължителен (чл. 6, ал. 5).');
+      }
+      const tx = db.transaction(() => {
+        const prev = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(id);
+        if (!prev) throw new Error('Партидата не е намерена — вероятно е изтрита от друго работно място.');
+        const declared = (a.sum === '' || a.sum === null || a.sum === undefined) ? null : parseFloat(a.sum);
+        const next = {
+          id,
+          date: a.date, how: a.how || null, from_source: a.from_source || null,
+          doc_type: a.doc_type || null, doc_no: a.doc_no || null, doc_date: a.doc_date || null,
+          total_count: parseInt(a.total_count, 10) || 0,
+          sum: Number.isFinite(declared) ? declared : null,
+          donor_address: a.donor_address || null, note: a.note || null,
+          committee1: a.committee1 || null, committee2: a.committee2 || null, committee3: a.committee3 || null
+        };
+        db.prepare(`UPDATE acquisitions SET date=@date, how=@how, from_source=@from_source,
+          doc_type=@doc_type, doc_no=@doc_no, doc_date=@doc_date, total_count=@total_count,
+          sum=@sum, donor_address=@donor_address, note=@note,
+          committee1=@committee1, committee2=@committee2, committee3=@committee3 WHERE id=@id`).run(next);
+        const changed = ACQ_EDITABLE
+          .filter(k => String(prev[k] == null ? '' : prev[k]) !== String(next[k] == null ? '' : next[k]))
+          .map(k => (ACQ_LABEL[k] || k) + ': „' + (prev[k] == null || prev[k] === '' ? '—' : prev[k])
+            + '“ → „' + (next[k] == null || next[k] === '' ? '—' : next[k]) + '“');
+        /* Следа се пише ВИНАГИ, дори когато нищо не се е променило: отварянето и
+           записването на ред от официален регистър е събитие само по себе си. */
+        logAudit('Поправена партида', 'партида № ' + prev.no + '/' + prev.year
+          + (changed.length ? ' — ' + changed.join('; ') : ' — записана без промяна'));
+        return changed.length;
       });
       return tx.immediate();
     })

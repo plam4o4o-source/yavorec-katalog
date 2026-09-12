@@ -52,53 +52,80 @@ async function renderAcq() {
     <div class="toolbar" id="acqMore" style="justify-content:center"></div>`;
   paintAcqRows(false);
 }
-async function acqForm() {
+/* ЕДНА форма за завеждане и за ПОПРАВКА (v2.4.56). Дотук партидата можеше само
+   да се създаде и да се изтрие — а изтриването отказва, щом поне един документ е
+   инвентиран в нея. Тоест сгрешен номер на фактура, сгрешена дата на документа
+   или сгрешен общ брой оставаха ЗАВИНАГИ в КДБФ Част № 1 и излизаха при всяка
+   проверка; единственият „изход“ беше да се оставят грешни. Номерът и годината
+   не се пипат оттук — те са мястото на реда в регистъра. */
+async function acqForm(acq) {
   const y = yr();
-  const no = await call(window.api.acquisitions.nextNo(y));
+  const edit = !!acq;
+  const no = edit ? acq.no : await call(window.api.acquisitions.nextNo(y));
   const s = await call(window.api.settings.get());
-  modal('Нова партида — обща регистрация', `
+  const v = acq || {};
+  modal(edit ? 'Поправка на партида № ' + acq.no + ' / ' + acq.year : 'Нова партида — обща регистрация', `
     <div class="note"><b>Чл. 14, ал. 2</b> — вписват се: дата и номер, откъде и как са постъпили, вид/номер/дата на
     първичния документ, общ брой документи.</div>
+    ${edit ? `<div class="note w">Партидата вече е вписана в КДБФ Част № 1. Поправката е позволена, но
+      <b>не е мълчалива</b>: всяко променено поле влиза в дневника със старата и новата стойност.
+      Номерът и годината не се променят — те са мястото на реда в регистъра.</div>` : ''}
     <form id="acqF" onsubmit="return false">
       <div class="grid g4">
-        ${fld('№ на вписване', 'no', { val: no, req: 1 })}
-        ${fld('Дата на вписване', 'date', { val: today(), type: 'date', req: 1 })}
-        ${fld('Начин на постъпване', 'how', { type: 'select', opts: NACHINI, val: NACHINI[0] })}
-        ${fld('Общ брой документи', 'total_count', { val: '', type: 'number', req: 1 })}
+        ${fld('№ на вписване', 'no', { val: no, req: 1, ro: edit ? 1 : 0 })}
+        ${fld('Дата на вписване', 'date', { val: v.date || today(), type: 'date', req: 1 })}
+        ${fld('Начин на постъпване', 'how', { type: 'select', opts: NACHINI, val: v.how || NACHINI[0] })}
+        ${fld('Общ брой документи', 'total_count', { val: v.total_count != null ? v.total_count : '', type: 'number', req: 1 })}
       </div>
-      ${fld('Откъде (доставчик / дарител)', 'from_source', { req: 1 })}
+      ${fld('Откъде (доставчик / дарител)', 'from_source', { val: v.from_source || '', req: 1 })}
       <div class="grid g3">
-        ${fld('Вид първичен документ', 'doc_type', { type: 'select', opts: PARV_DOK })}
-        ${fld('Номер на документа', 'doc_no', {})}
-        ${fld('Дата на документа', 'doc_date', { val: today(), type: 'date' })}
+        ${fld('Вид първичен документ', 'doc_type', { type: 'select', opts: PARV_DOK, val: v.doc_type || '' })}
+        ${fld('Номер на документа', 'doc_no', { val: v.doc_no || '' })}
+        ${fld('Дата на документа', 'doc_date', { val: v.doc_date || today(), type: 'date' })}
       </div>
       <div class="grid g2">
-        ${mnyField('Обща стойност по документа', 'sum', { min: 0, hint: 'оставете празно, ако документът не обявява стойност' })}
-        ${fld('Адрес на дарителя', 'donor_address', { hint: 'задължително при дарение — чл. 6, ал. 5' })}
+        ${mnyField('Обща стойност по документа', 'sum', { val: v.sum, min: 0, hint: 'оставете празно, ако документът не обявява стойност' })}
+        ${fld('Адрес на дарителя', 'donor_address', { val: v.donor_address || '', hint: 'задължително при дарение — чл. 6, ал. 5' })}
       </div>
-      ${fld('Забележка', 'note', { type: 'textarea', rows: 2 })}
+      ${fld('Забележка', 'note', { type: 'textarea', rows: 2, val: v.note || '' })}
       <fieldset><legend>Комисия — подписва акта за дарение / протокола по чл. 3, ал. 2</legend>
         <div class="hint" style="margin-bottom:6px">Имената се запомнят В ПАРТИДАТА, за да остане препечатаният акт верен и след като
         Настройките бъдат сменени от следващ акт за отчисляване.</div>
         <div class="grid g3">
-          ${fld('Член 1', 'committee1', { val: s ? s.committee1 || '' : '' })}
-          ${fld('Член 2', 'committee2', { val: s ? s.committee2 || '' : '' })}
-          ${fld('Член 3 (счетоводител)', 'committee3', { val: s ? s.committee3 || '' : '' })}
+          ${fld('Член 1', 'committee1', { val: v.committee1 || (s ? s.committee1 || '' : '') })}
+          ${fld('Член 2', 'committee2', { val: v.committee2 || (s ? s.committee2 || '' : '') })}
+          ${fld('Член 3 (счетоводител)', 'committee3', { val: v.committee3 || (s ? s.committee3 || '' : '') })}
         </div>
       </fieldset>
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn pri" onclick="saveAcq()">Заведи партидата</button>`);
+     <button class="btn pri" onclick="saveAcq(${edit ? acq.id : 'null'})">${edit ? 'Запиши поправката' : 'Заведи партидата'}</button>`);
 }
 window.acqForm = acqForm;
-async function saveAcq() {
+async function saveAcq(id) {
   const missing = firstMissingRequired('#acqF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#acqF');
-  const id = await call(window.api.acquisitions.create(d), 'Партидата е заведена в КДБФ част 1.');
-  if (id) { closeModal(); renderAcq(); }
+  if (id) {
+    const changed = await call(window.api.acquisitions.update({ id, acq: d }));
+    if (changed === null) return;
+    closeModal(); renderAcq();
+    toast(changed ? 'Партидата е поправена — промените са вписани в дневника.'
+      : 'Партидата е записана без промяна.', 'ok');
+    markSaved();
+    return;
+  }
+  const newId = await call(window.api.acquisitions.create(d), 'Партидата е заведена в КДБФ част 1.');
+  if (newId) { closeModal(); renderAcq(); }
 }
 window.saveAcq = saveAcq;
+async function editAcq(id) {
+  const a = await call(window.api.acquisitions.get(id));
+  if (!a) return;
+  closeModal();
+  acqForm(a);
+}
+window.editAcq = editAcq;
 /* Отчетната бройка на един инвентиран ред от партидата. `fund_qty` идва от
    acquisitions:get и е COALESCE(inventory.quantity, 1) — броят ДОКУМЕНТИ, за
    разлика от `quantity`, което е наличността за заемане и е 0 при липсващ ред.
@@ -193,6 +220,7 @@ async function openAcq(id) {
       <td class="num">${esc(i.year || '')}</td><td class="num">${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="hint">Все още няма инвентирани документи по тази партида.</div>'}`,
     `<button class="btn l dgr" onclick="delAcq(${id})">Изтрий</button>
+     <button class="btn l" onclick="editAcq(${id})">Поправи</button>
      ${a.how === 'дарение' ? `<button class="btn l" onclick="printDonationDoc(${id})">Акт за дарение / PDF</button>` : ''}
      ${a.doc_type && a.doc_type.indexOf('без документ') > -1 ? `<button class="btn l" onclick="printAcqNoDocDoc(${id})">Протокол за придобиване / PDF</button>` : ''}
      <button class="btn" onclick="closeModal();bookForm(null, ${id})">+ Инвентирай документ</button>

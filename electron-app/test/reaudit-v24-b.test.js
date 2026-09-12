@@ -207,7 +207,7 @@ test('deaccessionActs:revoke НЕ възкресява резервация, о�
   const holdAfterDeacc = db.prepare('SELECT status FROM holds WHERE id = ?').get(holdId);
   assert.equal(holdAfterDeacc.status, 'отказана', 'предпоставка: резервацията трябва да е отказана от самото отчисляване');
 
-  const revokeRes = await ipcMain.invoke('deaccessionActs:revoke', actId);
+  const revokeRes = await ipcMain.invoke('deaccessionActs:revoke', actId, { reason: 'сгрешен акт (тест)' });
   assert.equal(revokeRes.ok, true, revokeRes.error);
 
   const bookAfterRevoke = db.prepare('SELECT status FROM books WHERE id = ?').get(bookId);

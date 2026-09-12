@@ -210,16 +210,31 @@ function printKdbfDoc() {
           съвпадаше с този на екрана (там причината е трета), тоест двата изгледа на
           един и същ регистър се четяха различно. Сега подредбата следва екрана, а
           отдолу стои ред ОБЩО — Приложение № 3 се подава със сбор. -->
-     <table><thead><tr><th>№ по ред</th><th>Дата на акта</th><th>Акт №</th><th>Причина (чл. 30)</th><th>Общо</th><th>Стойност</th></tr></thead><tbody>
-     ${r.part3.map((a, i) => `<tr><td>${i + 1}</td><td>${bg(a.date)}</td><td>№ ${a.no} / ${esc(a.year || y)}</td>
-     <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}</td>
-     <td>${a.item_count}</td><td>${mny(a.item_value)}</td></tr>`).join('')}
+     <!-- Колоната „Начин на разпореждане“ (чл. 36) слиза от акта в регистъра
+          (v2.4.56): полето се въвежда, печата се в самия акт, но в Приложение № 3
+          го нямаше — а точно то отговаря на въпроса какво е станало физически с
+          отчислените документи. Анулираните актове стоят тук ЗАЧЕРТАНИ, с
+          основанието за анулиране, и с нула в сборовете: актът е документ по
+          чл. 39 и не се трие, но отчисляване по него не е имало. -->
+     <table><thead><tr><th>№ по ред</th><th>Дата на акта</th><th>Акт №</th><th>Причина (чл. 30)</th>
+     <th>Начин на разпореждане (чл. 36)</th><th>Общо</th><th>Стойност</th></tr></thead><tbody>
+     ${r.part3.map((a, i) => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td>${i + 1}</td><td>${bg(a.date)}</td>
+     <td>№ ${a.no} / ${esc(a.year || y)}</td>
+     <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
+       ? `<br><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+           a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
+     <td>${esc(a.disposal || '')}</td>
+     <td>${a.revoked_at ? '0' : a.item_count}</td><td>${a.revoked_at ? mny(0) : mny(a.item_value)}</td></tr>`).join('')}
      ${r.part3.length
-       ? `<tr style="font-weight:700"><td colspan="4">ОБЩО за ${y} г.</td>
-          <td>${r.part3.reduce((s, a) => s + (a.item_count || 0), 0)}</td>
-          <td>${mny(r.part3.reduce((s, a) => s + (a.item_value || 0), 0))}</td></tr>`
-       : `<tr><td colspan="6" style="text-align:center">През ${y} г. няма отчислени документи.</td></tr>`}
-     </tbody></table>${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+       ? `<tr style="font-weight:700"><td colspan="5">ОБЩО за ${y} г.</td>
+          <td>${r.part3.reduce((s, a) => s + (a.revoked_at ? 0 : (a.item_count || 0)), 0)}</td>
+          <td>${mny(r.part3.reduce((s, a) => s + (a.revoked_at ? 0 : (a.item_value || 0)), 0))}</td></tr>`
+       : `<tr><td colspan="7" style="text-align:center">През ${y} г. няма отчислени документи.</td></tr>`}
+     </tbody></table>
+     ${r.part3.some(a => a.revoked_at) ? `<div class="pmeta">Зачертаните редове са АНУЛИРАНИ актове.
+       Номерът им остава зает и актът остава в документацията по чл. 39, но документите по него са върнати
+       във фонда и не участват в сборовете.</div>` : ''}
+     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
@@ -230,6 +245,17 @@ function printKdbfDoc() {
      <tr><td>Отчислени през ${y} г.</td><td>${r.deaccYear.n}</td><td>${mny(r.deaccYear.v)}</td></tr>
      <tr style="font-weight:700"><td>Наличност към 31.12.${y} г.</td><td>${r.stockEnd.n}</td><td>${mny(r.stockEnd.v)}</td></tr>
      </tbody></table>
+     <!-- РАЗБИВКА ПО ВИДОВЕ (v2.4.56). Образецът на Приложение № 2 съдържа
+          разпределение по видове документи, а Част № 1 вече го прави (колоната
+          „По вид документи“). Дотук Част № 2 излизаше само с трите общи реда —
+          данните ги имаше, но не стигаха до документа, и проверяващият нямаше
+          как да види от какво точно е съставен фондът. -->
+     ${(r.byKind && r.byKind.length) ? `<div class="pmeta" style="margin-top:6mm"><b>Разпределение по видове документи към 31.12.${y} г.</b></div>
+     <table><thead><tr><th>Вид документ</th><th>Брой</th><th>Стойност, €</th></tr></thead><tbody>
+     ${r.byKind.map(k => `<tr><td>${esc(k.kind || '—')}</td><td>${k.n}</td><td>${mny(k.v)}</td></tr>`).join('')}
+     <tr style="font-weight:700"><td>ОБЩО</td><td>${r.byKind.reduce((s, k) => s + (k.n || 0), 0)}</td>
+       <td>${mny(r.byKind.reduce((s, k) => s + (k.v || 0), 0))}</td></tr>
+     </tbody></table>` : ''}
      ${kdbfUndatedNote(r) ? `<div class="pmeta">${kdbfUndatedNote(r)}</div>` : ''}
      ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
      ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);

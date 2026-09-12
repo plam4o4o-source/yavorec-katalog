@@ -2,39 +2,72 @@
 async function renderActs() {
   const rows = await call(window.api.deaccessionActs.list());
   if (!rows) return;
+  /* Проектите се четат отделно и стоят НАД актовете (v2.4.56). Проектът не е
+     документ: няма номер, нищо не е отчислено, документите са във фонда. Виждат
+     се първи, защото са недовършена работа и чакат комисията. */
+  const drafts = (await call(window.api.deaccessionActs.drafts())) || [];
   $('#view').innerHTML = `
     <div class="note d"><b>Чл. 35</b> — отчисляването се извършва от комисия. В един акт се вписват документи,
-    отчислени само по една причина (чл. 30).</div>
-    <div class="toolbar"><button class="btn pri" onclick="actForm()">+ Нов акт за отчисляване</button></div>
+    отчислени само по една причина (чл. 30). Утвърденият акт е документ и <b>не се изтрива</b> (чл. 39):
+    ако е сгрешен, се <b>анулира</b> с основание, номерът му остава зает, а документите се връщат във фонда.
+    Затова подгответе го първо като <b>проект</b> — проектът се поправя и трие свободно.</div>
+    <div class="toolbar">
+      <button class="btn pri" onclick="actForm()">+ Нов акт за отчисляване</button>
+      <button class="btn" onclick="actForm(null, 1)">+ Нов проект</button>
+    </div>
+    ${drafts.length ? `<h3 style="margin:14px 0 6px">Проекти (още не са актове)</h3>
+    <div class="wrap"><table class="ledger"><thead><tr><th>Проект №</th><th>Дата</th><th>Причина</th>
+      <th>Заглавия</th><th>Поправен</th><th></th></tr></thead><tbody>
+    ${drafts.map(d => `<tr><td class="num">${d.id}</td><td class="num">${bg(d.date) || '—'}</td>
+      <td>${d.reason_code ? 'т. ' + d.reason_code + '. ' : ''}${esc(d.reason_text || '— без причина —')}</td>
+      <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(String(d.updated_at || '').slice(0, 16))}</td>
+      <td><button class="btn sm" onclick="openDraft(${d.id})">Отвори</button>
+          <button class="btn sm dgr" onclick="delDraft(${d.id})">Изтрий</button></td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+    ${drafts.length ? '<h3 style="margin:18px 0 6px">Съставени актове</h3>' : ''}
     <div class="wrap"><table class="ledger"><thead><tr><th>Акт №</th><th>Дата</th><th>Причина</th>
       <th>Брой</th><th>Стойност</th><th>Начин</th><th></th></tr></thead><tbody>
-    ${rows.length ? rows.map(a => `<tr><td class="num">${a.no} / ${a.year}</td><td class="num">${bg(a.date)}</td>
-      <td>т. ${a.reason_code}. ${esc(a.reason_text)}</td><td class="num">${a.item_count}</td>
-      <td class="num">${mny(a.item_value)}</td><td style="font-size:12px">${esc(a.disposal || '')}</td>
+    ${rows.length ? rows.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${a.no} / ${a.year}</td>
+      <td class="num">${bg(a.date)}</td>
+      <td>т. ${a.reason_code}. ${esc(a.reason_text)}${a.revoked_at
+        ? `<br><span class="badge warn">АНУЛИРАН</span> ${esc(String(a.revoked_at).slice(0, 10))}${
+            a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
+      <td class="num">${a.revoked_at ? '—' : a.item_count}</td>
+      <td class="num">${a.revoked_at ? '—' : mny(a.item_value)}</td><td style="font-size:12px">${esc(a.disposal || '')}</td>
       <td><button class="btn sm" onclick="openAct(${a.id})">Отвори</button></td></tr>`).join('')
       : `<tr><td colspan="7" class="empty">Няма съставени актове.</td></tr>`}
     </tbody></table></div>`;
 }
 let ACT_LIST = [];
-async function actForm() {
-  ACT_LIST = [];
+let ACT_DRAFT_ID = null;
+/* Една форма за двете състояния (v2.4.56). `asDraft` сменя само заглавието,
+   бутоните и това дали номерът се пита — самите полета са същите, защото
+   проектът става акт без нищо да се преписва. */
+async function actForm(draft, asDraft) {
+  ACT_LIST = (draft && draft.items) ? draft.items.slice() : [];
+  ACT_DRAFT_ID = draft ? draft.id : null;
+  const isDraft = !!(asDraft || draft);
   const y = yr();
-  const no = await call(window.api.deaccessionActs.nextNo(y));
+  const no = isDraft ? null : await call(window.api.deaccessionActs.nextNo(y));
   const s = await call(window.api.settings.get());
-  modal('Акт за отчисляване на библиотечни документи', `
+  const v = draft || {};
+  modal(isDraft ? 'Проект за акт за отчисляване' : 'Акт за отчисляване на библиотечни документи', `
+    ${isDraft ? `<div class="note"><b>Това е проект, не акт.</b> Нищо не се отчислява, документите остават във фонда
+      и могат да се заемат. Номер се взима чак при утвърждаването — затова проектът може да се поправя и трие
+      свободно, за разлика от утвърдения акт (чл. 39).</div>` : ''}
     <form id="actF" onsubmit="return false">
       <div class="grid g3">
-        ${fld('Акт №', 'no', { val: no, req: 1 })}
-        ${fld('Дата', 'date', { val: today(), type: 'date', req: 1 })}
-        ${fld('Заповед №', 'order_no', {})}
+        ${isDraft ? '' : fld('Акт №', 'no', { val: no, req: 1 })}
+        ${fld('Дата', 'date', { val: v.date || today(), type: 'date', req: isDraft ? 0 : 1 })}
+        ${fld('Заповед №', 'order_no', { val: v.order_no || '' })}
       </div>
       ${/* req: чл. 30 изисква точно една причина за акт. Одит v2.4.25: без req
             празният ред „—“ минаваше и подписаният акт печаташе „чл. 30, т. null“. */''}
-      ${fld('Причина за отчисляване', 'reason_code', { type: 'select', req: 1, emptyLabel: '— изберете —',
-        opts: PRICHINI.map(p => ({ v: p.k, t: 'т. ' + p.k + '. ' + p.t })) })}
+      ${fld('Причина за отчисляване', 'reason_code', { type: 'select', req: isDraft ? 0 : 1, emptyLabel: '— изберете —',
+        val: v.reason_code || '', opts: PRICHINI.map(p => ({ v: p.k, t: 'т. ' + p.k + '. ' + p.t })) })}
       <div class="grid g2">
-        ${fld('Начин на разпореждане', 'disposal', { type: 'select', opts: ['предадени за вторични суровини', 'продадени', 'предоставени безвъзмездно на друга библиотека', 'предоставени на организация в обществена полза', 'обменени с друга библиотека', 'унищожени'] })}
-        ${fld('Приложен документ', 'attach', {})}
+        ${fld('Начин на разпореждане', 'disposal', { type: 'select', val: v.disposal || '', opts: ['предадени за вторични суровини', 'продадени', 'предоставени безвъзмездно на друга библиотека', 'предоставени на организация в обществена полза', 'обменени с друга библиотека', 'унищожени'] })}
+        ${fld('Приложен документ', 'attach', { val: v.attach || '' })}
       </div>
       <fieldset><legend>Списък на отчислените документи — чл. 35, ал. 2</legend>
         <div class="toolbar">
@@ -44,13 +77,18 @@ async function actForm() {
         <div id="actList"></div>
       </fieldset>
       <div class="grid g3">
-        ${fld('Член на комисия 1', 'committee1', { val: s ? s.committee1 || '' : '' })}
-        ${fld('Член на комисия 2', 'committee2', { val: s ? s.committee2 || '' : '' })}
-        ${fld('Член на комисия 3 (счетоводител)', 'committee3', { val: s ? s.committee3 || '' : '' })}
+        ${fld('Член на комисия 1', 'committee1', { val: v.committee1 || (s ? s.committee1 || '' : '') })}
+        ${fld('Член на комисия 2', 'committee2', { val: v.committee2 || (s ? s.committee2 || '' : '') })}
+        ${fld('Член на комисия 3 (счетоводител)', 'committee3', { val: v.committee3 || (s ? s.committee3 || '' : '') })}
       </div>
     </form>`,
-    `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn pri" onclick="saveAct()">Утвърди акта и отчисли</button>`);
+    isDraft
+      ? `<button class="btn" onclick="closeModal()">Отказ</button>
+         <button class="btn" onclick="saveActDraft()">Запиши проекта</button>
+         <button class="btn pri" onclick="approveActDraft()">Утвърди като акт и отчисли</button>`
+      : `<button class="btn" onclick="closeModal()">Отказ</button>
+         <button class="btn" onclick="saveActDraft()">Запиши като проект</button>
+         <button class="btn pri" onclick="saveAct()">Утвърди акта и отчисли</button>`);
   setTimeout(() => {
     const el = $('#actScan'); if (!el) return; el.focus();
     el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); actAdd(); } });
@@ -71,6 +109,16 @@ async function actAdd() {
   if (!b) return toast('Няма документ с баркод/инв. № ' + code, 'err');
   if (ACT_LIST.some(x => x.id === b.id)) return toast('Инв. № ' + b.inv_number + ' вече е в списъка.', 'err');
   if (b.available < b.quantity) toast('Внимание: инв. № ' + b.inv_number + ' в момента е зает от читател.', 'err');
+  /* Изгубеният документ носи със себе си и обезщетението (v2.4.56). Казва се на
+     глас още при добавянето в акта, защото точно това пита счетоводството, щом
+     актът е по чл. 30, т. 5, а дотук трите действия не се срещаха никъде. */
+  if (b.lost) {
+    const c = b.lost.charge;
+    toast('Инв. № ' + b.inv_number + ' е изгубен от '
+      + (b.lost.reader_name || 'читател') + ' — ' + (b.lost.lost_resolution || 'уреждането не е отбелязано')
+      + (c ? '; начислено ' + mny(c.charged || 0) + ', събрано ' + mny(c.covered || 0) : '')
+      + '. Ползвайте причина по чл. 30, т. 5.', 'warn');
+  }
   /* Проверката за заетост по-горе ползва b.quantity (наличност). СЛЕД нея полето
      се заменя с ОТЧЕТНАТА бройка, защото от този момент нататък редът живее в
      ACT_LIST и се брои от actQty() по същото правило, по което ще бъде снимано в
@@ -112,7 +160,11 @@ function drawActList() {
   el.innerHTML = `<div class="wrap" style="max-height:220px"><table class="ledger"><thead><tr>
     <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th></th></tr></thead><tbody>
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
-    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td><td class="num">${esc(l.year || '')}</td>
+    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.lost
+      ? `<br><span class="badge warn">изгубен</span> <span class="hint">${esc(l.lost.reader_name || 'читател')} · ${
+          esc(l.lost.lost_resolution || 'уреждането не е отбелязано')}${l.lost.charge
+            ? ' · начислено ' + mny(l.lost.charge.charged || 0) + ', събрано ' + mny(l.lost.charge.covered || 0) : ''}</span>` : ''}</td>
+    <td class="num">${esc(l.year || '')}</td>
     <td class="num">${actQtyMark(l)}${mny(l.price)}</td><td><button type="button" class="btn sm dgr" onclick="actDel(${n})">×</button></td></tr>`).join('')}
     <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actDocs(actCount(ACT_LIST))}${
       actHasMultiples(ACT_LIST) ? ` (${actTitles(ACT_LIST.length)})` : ''}</td>
@@ -132,10 +184,73 @@ async function saveAct() {
     + (actHasMultiples(ACT_LIST) ? ' (' + actTitles(ACT_LIST.length) + ')' : '') + '.', 'ok'); markSaved(); }
 }
 window.saveAct = saveAct;
+/* ---------- проект ---------- */
+async function saveActDraft() {
+  const d = formData('#actF');
+  const p = PRICHINI.find(x => x.k == d.reason_code);
+  /* Проектът се записва и непълен — това му е работата. Затова тук НЯМА
+     firstMissingRequired: проверките по чл. 30 и чл. 35 се правят при
+     утвърждаването, не докато комисията още събира номерата. */
+  const draft = Object.assign({}, d, { reason_text: p ? p.t : null });
+  delete draft.no;
+  const id = await call(window.api.deaccessionActs.saveDraft({
+    id: ACT_DRAFT_ID, draft, bookIds: ACT_LIST.map(b => b.id)
+  }));
+  if (id) {
+    ACT_DRAFT_ID = id;
+    closeModal(); renderActs(); markSaved();
+    toast('Проектът е записан. Нищо не е отчислено — документите остават във фонда.', 'ok');
+  }
+}
+window.saveActDraft = saveActDraft;
+async function openDraft(id) {
+  const d = await call(window.api.deaccessionActs.getDraft(id));
+  if (!d) return toast('Проектът не е намерен.', 'err');
+  actForm(d);
+}
+window.openDraft = openDraft;
+async function delDraft(id) {
+  if (!await askConfirm('Изтриване на проекта. Нищо не е било отчислено, така че нищо не се връща обратно. Да продължа?',
+    { okLabel: 'Изтрий проекта' })) return;
+  const ok = await call(window.api.deaccessionActs.deleteDraft(id), 'Проектът е изтрит.');
+  if (ok !== null) { renderActs(); markSaved(); }
+}
+window.delDraft = delDraft;
+async function approveActDraft() {
+  /* Утвърждаването прави документа — оттук нататък номерът е зает завинаги и
+     поправка има само чрез анулиране. Затова се пита изрично, с числата. */
+  const d = formData('#actF');
+  if (!d.date) return toast('Датата на акта е задължителна при утвърждаване.', 'err');
+  if (!d.reason_code) return toast('Причината по чл. 30 е задължителна при утвърждаване.', 'err');
+  if (!ACT_LIST.length) return toast('Добавете поне един документ в списъка.', 'err');
+  const p = PRICHINI.find(x => x.k == d.reason_code);
+  // Първо се записва това, което е на екрана — иначе утвърденото е старата снимка.
+  const draft = Object.assign({}, d, { reason_text: p ? p.t : null });
+  delete draft.no;
+  const draftId = await call(window.api.deaccessionActs.saveDraft({
+    id: ACT_DRAFT_ID, draft, bookIds: ACT_LIST.map(b => b.id)
+  }));
+  if (!draftId) return;
+  ACT_DRAFT_ID = draftId;
+  if (!await askConfirm('Утвърждаване: ' + actDocs(actCount(ACT_LIST))
+    + ' излизат от фонда, актът получава номер и остава в документацията ЗАВИНАГИ (чл. 39). '
+    + 'След това поправка има само чрез анулиране, с основание. Да продължа?',
+    { okLabel: 'Утвърди акта' })) return;
+  const actId = await call(window.api.deaccessionActs.approveDraft({ id: draftId }));
+  if (actId) {
+    closeModal(); renderActs(); markSaved();
+    toast('Актът е утвърден и ' + actDocs(actCount(ACT_LIST)) + ' са отчислени.', 'ok');
+  }
+}
+window.approveActDraft = approveActDraft;
 async function openAct(id) {
   const a = await call(window.api.deaccessionActs.get(id));
   if (!a) return;
-  modal('Акт за отчисляване № ' + a.no + ' / ' + a.year, `
+  modal('Акт за отчисляване № ' + a.no + ' / ' + a.year + (a.revoked_at ? ' — АНУЛИРАН' : ''), `
+    ${a.revoked_at ? `<div class="note w"><b>Този акт е анулиран</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+      a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}${a.revoked_by ? ' (' + esc(a.revoked_by) + ')' : ''}.<br>
+      Документите по него са върнати във фонда и не се броят никъде. Самият акт остава в документацията
+      по чл. 39, а номер ${a.no}/${a.year} остава зает и не се дава на друг акт.</div>` : ''}
     <div class="note d"><b>Причина (чл. 30, т. ${a.reason_code}):</b> ${esc(a.reason_text)}<br>
     <b>Разпореждане (чл. 36):</b> ${esc(a.disposal || '—')}${a.attach ? ' · ' + esc(a.attach) : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
@@ -146,7 +261,7 @@ async function openAct(id) {
     <td class="num">${mny(actValue(a.items))}</td></tr>
     </tbody></table></div>
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
-    `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>
+    `${a.revoked_at ? '' : `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>`}
      <button class="btn" onclick="printActDoc(${id})">Печат на акта / PDF</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
 }
@@ -161,6 +276,13 @@ async function printActDoc(id) {
   setPrintPage({ name: `Акт за отчисляване № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>АКТ № ${a.no} / ${bg(a.date)}<br><span style="font-size:12pt">за отчисляване на библиотечни документи</span></h2>
+    ${/* Разпечатката на анулиран акт НОСИ белега (v2.4.56). Иначе от принтера
+         излиза документ, неразличим от действащ — а екземплярът в счетоводството
+         вече е зачертан. */''}
+    ${a.revoked_at ? `<div class="pmeta" style="text-align:center;border:2px solid #000;padding:3mm;margin-bottom:5mm">
+      <b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}${
+      a.revoked_by ? '<br>Анулирал: ' + esc(a.revoked_by) : ''}<br>
+      Документите по този акт са върнати във фонда. Номерът остава зает.</div>` : ''}
     <div class="pmeta">Днес, ${bg(a.date)} г., комисия, назначена със заповед ${a.order_no ? '№ ' + esc(a.order_no) : '№ …………'} на
     ${esc(s.director_role || 'ръководителя')} на ${esc(s.org || '')}, в състав:<br>
     1. ${esc(a.committee1 || '…………………')} &nbsp; 2. ${esc(a.committee2 || '…………………')} &nbsp; 3. ${esc(a.committee3 || '…………………')} (счетоводител)<br><br>
@@ -187,9 +309,28 @@ async function printActDoc(id) {
     ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printActDoc = printActDoc;
-async function revokeAct(id) {
-  if (!await askConfirm('Анулиране на акта и връщане на документите във фонда. Използвайте само при сгрешен акт. Да продължа?', { okLabel: 'Анулирай акта' })) return;
-  const res = await window.api.deaccessionActs.revoke(id);
+/* Анулирането вече иска ОСНОВАНИЕ и го казва ясно (v2.4.56): актът не изчезва.
+   Дотук диалогът беше едно „Да продължа?“, а зад него стоеше DELETE — оттам и
+   впечатлението, че анулирането „маха“ акта. Сега се пита с формуляр, защото
+   основанието влиза в КДБФ Приложение № 3 до самия ред и се чете от проверяващ. */
+function revokeAct(id) {
+  modal('Анулиране на акт за отчисляване', `
+    <div class="note w"><b>Актът не се изтрива.</b> Той е документ по чл. 39: редът остава в регистъра,
+    номерът му остава зает завинаги и повече не се дава на друг акт, а в КДБФ Приложение № 3 излиза
+    зачертан, с основанието по-долу. Документите се връщат във фонда.</div>
+    <form id="revF" onsubmit="return false">
+      ${fld('Основание за анулиране', 'reason', { req: 1,
+        hint: 'например: сгрешен инвентарен номер; актът е съставен повторно; комисията не го утвърди' })}
+      ${fld('Анулирал (име и длъжност)', 'by', {})}
+    </form>`,
+    `<button class="btn" onclick="closeModal()">Отказ</button>
+     <button class="btn dgr" onclick="revokeActGo(${id})">Анулирай акта</button>`);
+}
+window.revokeAct = revokeAct;
+async function revokeActGo(id) {
+  const d = formData('#revF');
+  if (!d.reason || !String(d.reason).trim()) return toast('Основанието за анулиране е задължително.', 'err');
+  const res = await window.api.deaccessionActs.revoke(id, { reason: d.reason, by: d.by });
   if (!res.ok) return toast(res.error, 'err');
   closeModal(); renderActs(); markSaved();
   /* Резервациите, отказани при съставянето на акта, НЕ се възстановяват при
@@ -203,6 +344,6 @@ async function revokeAct(id) {
     ? 'Актът е анулиран. Внимание: ' + (n === 1
         ? '1 резервация, отказана с този акт, остава отказана — подновете я, ако читателят още чака.'
         : n + ' резервации, отказани с този акт, остават отказани — подновете ги, ако читателите още чакат.')
-    : 'Актът е анулиран.', n ? 'warn' : 'ok');
+    : 'Актът е анулиран. Номерът остава зает, а актът остава в документацията.', n ? 'warn' : 'ok');
 }
-window.revokeAct = revokeAct;
+window.revokeActGo = revokeActGo;
