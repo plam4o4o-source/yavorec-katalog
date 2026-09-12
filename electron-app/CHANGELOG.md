@@ -11,6 +11,184 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.56
+
+**BG:** Анонимно отчитане на инсталациите — за да се знае на колко компютъра
+реално работи програмата и коя версия ползват. Нищо друго в програмата не е
+пипано.
+
+**Защо изобщо.** Броячът на изтеглянията в GitHub брои ИЗТЕГЛЯНИЯ, не
+инсталации: читалище, което свали инсталатора на три работни места и веднъж
+пак след антивирусна тревога, се брои четири пъти, а библиотека, получила
+файла на флашка, не се брои изобщо. Без реално число не може да се прецени
+нито докога има смисъл да се пази съвместимост със стара версия, нито дали
+автоматичното обновяване изобщо стига до работните места.
+
+**Какво излиза от компютъра — това е целият списък:** случаен номер на
+инсталацията, версията на програмата и груб вид на операционната система
+(„Windows 11“). Нищо друго. Номерът се тегли от криптографския генератор на
+системата (`crypto.randomUUID`) при първото пускане и НЕ е производен на
+нищо: не се смята от MAC адрес, сериен номер на диска, име на компютър или
+на потребител — обратен път от него към конкретна библиотека няма. Видът на
+операционната система е нарочно ГРУБ: точният номер на компилацията стеснява
+кръга до шепа машини, а за преценка „още ли се ползва Windows 10“ не носи
+нищо повече.
+
+**Какво НЕ излиза, никога:** име на потребител или компютър, имейл, IP
+адрес, MAC адрес, сериен номер на диска, какъвто и да е хардуерен отпечатък,
+име на библиотеката, пътища по диска, и НИТО ЕДИН ред от базата данни — нито
+книга, нито читател, нито заемане. Заковано с тест, който изисква в тялото
+на заявката да има ТОЧНО три полета: всяко ново поле чупи теста, вместо да
+се промъкне незабелязано при бъдеща промяна.
+
+**Кога.** При първо пускане, при смяна на версията, и после най-много веднъж
+на 24 часа. Не при действия на потребителя — програмата се стартира по
+няколко пъти на ден и това не е брояч на стартирания.
+
+**При липса на интернет не се случва нищо видимо.** Заявката тръгва СЛЕД
+като прозорецът вече е създаден, никой не я чака, таванът ѝ е 4 секунди. При
+липса на връзка, прокси, изтекло време или грешка от сървъра остава един ред
+в дневника (предупреждение, не грешка — липсата на интернет в читалище не е
+повреда на програмата), а опитът се повтаря при следващото стартиране.
+Проверено срещу истинската програма при мъртва мрежа: базата се отваря,
+резервното копие се прави, прозорецът се показва.
+
+**Къде се пази номерът.** В собствен файл (`installation.json`) в
+потребителската папка — нарочно НЕ в `config.json`, защото той носи пътя до
+базата данни и вече веднъж е бил изтриван от неуспешен прочит. И нарочно НЕ
+в базата: тя често е на мрежов дял, споделен между няколко работни места —
+там номерът щеше да е един за цялото читалище, щеше да пътува с резервните
+копия и да „възкръсва“ при възстановяване върху друга машина.
+
+**Адрес и изключване.** Адресът на сървъра стои на ЕДНО място в кода
+(`install-report.js`) — `https://invlib.com/api/invlib/install`; смяна на
+адреса значи смяна само на този ред. Празен низ изключва механизма напълно
+(нито заявка, нито дори файл с номер) — това е изходът, ако някога трябва да
+се спре от кода. На конкретна машина се изключва с ред
+`"installReporting": false` в `config.json`. Работи само в инсталираната
+програма, не при разработка и тестове.
+
+**Намерено при прегледа на самата промяна и поправено, преди да излезе:**
+
+- **Новият файл не влизаше в инсталатора** (`build.files`). `require()` щеше
+  да хвърли САМО в инсталираната програма — тоест точно там, където никой
+  разработчик не гледа — грешката влизаше в общия предпазител на старта и
+  вместо отчитане показваше „Стартирането пропадна“: броячът на инсталации
+  щеше да СПИРА програмата на всяка библиотека. Хванато от собствения тест
+  на проекта (`build-files-coverage.test.js`). Добавен е и втори пояс: цялото
+  тяло на свързването е в try/catch. Измерено с нарочно скрит модул — с пояса
+  0 диалога и 0 опита за изход, без него: диалог и изход.
+- **Заключен файл се четеше като „първо пускане“.** Под Windows антивирусна
+  програма държи файл за миг постоянно; при това положение номерът се
+  създаваше наново и се записваше ВЪРХУ здравия — едно читалище се броеше за
+  две инсталации, и то при всяко улучване. Точно провалът, заради който този
+  файл е отделен от config.json. Сега „липсва“ и „не се чете“ са различни
+  неща: при нечетим файл не се пипа нищо. Възпроизведено с подменен
+  readFileSync, който хвърля EBUSY.
+- **Незаписан номер въпреки това се пращаше.** При папка без права всяко
+  пускане теглеше нов номер и го изпращаше — един компютър щеше да се брои
+  като десетки. Сега при неуспешен запис не се отчита изобщо.
+- **Бисквитки.** Заявката вече е с `credentials: 'omit'`: иначе отговор със
+  `Set-Cookie` от сървъра би станал ВТОРИ, постоянен белег, при това такъв,
+  който преживява подмяната на самия номер — обратното на обещаното.
+- **Опит при всяко пускане.** Библиотека без интернет правеше по един
+  четирисекунден опит и по ред в дневника при всяко пускане, завинаги. Сега
+  след неуспял опит се изчаква час.
+- Свързването е изнесено в `setImmediate` — синхронната част (require, четене
+  на config.json, при първо пускане и запис) няма работа в тика, който показва
+  прозореца.
+- Дребно: неуспешно преименуване оставяше файл `.tmp` да лежи завинаги;
+  документацията твърдеше „една инсталация = един компютър“, а мярката е
+  потребителски профил на Windows (така се и инсталира програмата).
+
+Проверки: 26 нови теста (test/install-report-v2456.test.js), 17 мутации на
+реалния код, всяка с връщане и повторно пускане — всичките уловени; плюс
+контролна мутация, която трябва да мине, и минава. Пет сценария измерени
+срещу ИСТИНСКИЯ main.js: както се разпространява днес (0 заявки, 0 файла),
+с мъртва мрежа, с работещ сървър, повторно стартиране след обновяване на
+версията (същият номер, нова версия), и с нарочно липсващ модул. Пълната
+поредица: 1504 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария
++ всички проверки при 15 002 записа.
+
+**EN:** Anonymous installation reporting — to learn how many computers
+actually run the program and which version they use. Nothing else in the
+program was touched.
+
+**Why.** GitHub's download counter counts DOWNLOADS, not installations: a
+library that fetched the installer on three workstations and once more after
+an antivirus false alarm counts four times, while one that got the file on a
+USB stick does not count at all. Without a real number there is no way to
+judge how long compatibility with an old version is worth keeping, or
+whether automatic updates reach the workstations at all.
+
+**What leaves the computer — this is the entire list:** a random
+installation number, the program version, and a coarse operating-system
+label ("Windows 11"). Nothing else. The number comes from the system's
+cryptographic generator (`crypto.randomUUID`) on first launch and is derived
+from NOTHING: not from a MAC address, disk serial, computer or user name —
+there is no path back from it to a particular library. The OS label is
+deliberately coarse: an exact build number narrows the field to a handful of
+machines and adds nothing to "is Windows 10 still in use".
+
+**What never leaves:** user or computer name, e-mail, IP address, MAC
+address, disk serial, any hardware fingerprint, the library's name, disk
+paths, and NOT ONE ROW from the database — no book, no reader, no loan.
+Locked down by a test requiring EXACTLY three fields in the request body: any
+new field breaks the test instead of slipping through unnoticed.
+
+**When.** On first launch, on a version change, and after that at most once
+per 24 hours. Not on user actions — the program is started several times a
+day and this is not a launch counter.
+
+**With no internet nothing visible happens.** The request starts AFTER the
+window exists, nobody waits for it, and it is capped at 4 seconds. On no
+connection, a proxy, a timeout or a server error, one line goes to the log (a
+warning, not an error — no internet in a village library is not a program
+fault) and the attempt repeats on the next launch. Verified against the real
+program with a dead network: the database opens, the backup is written, the
+window appears.
+
+**Where the number lives.** In its own file (`installation.json`) in the user
+folder — deliberately NOT in `config.json`, which carries the path to the
+library database and has already once been wiped by a failed read. And
+deliberately NOT in the database: it often sits on a network share used by
+several workstations, where the number would be one per library regardless of
+machine count, would travel with backups, and would "resurrect" when a backup
+is restored onto another machine.
+
+**Address and turning it off.** The server address lives in ONE place in the
+code (`install-report.js`) — `https://invlib.com/api/invlib/install`; changing
+it means changing that one line. An empty string turns the mechanism entirely
+off (no request, not even an identifier file) — the escape hatch if it ever
+needs stopping from the code. On a given machine it is disabled with
+`"installReporting": false` in `config.json`. It runs only in the installed
+program, never during development.
+
+**Found while reviewing this very change, and fixed before release:** the new
+file was missing from `build.files`, so `require()` would have thrown ONLY in
+the installed program — the error reached the startup guard and showed
+"Стартирането пропадна" instead of reporting, i.e. the installation counter
+would have STOPPED the program at every library (caught by the project's own
+`build-files-coverage.test.js`; a second guard now wraps the whole wiring in
+try/catch). A locked file (antivirus, `EBUSY` — daily reality on Windows) read
+as "first run", minting a new number OVER the healthy one, counting one library
+as two — precisely the failure this file is kept separate from `config.json`
+for. An unwritable folder still sent a fresh number on every launch, counting
+one computer as dozens; now it does not report at all. The request now uses
+`credentials: 'omit'`, since a `Set-Cookie` from the server would be a SECOND,
+permanent marker surviving replacement of the number itself. A library with no
+internet retried on every launch forever; now it waits an hour after a failure.
+The call moved into `setImmediate` so the synchronous part stays out of the tick
+that shows the window.
+
+Checks: 26 new tests (test/install-report-v2456.test.js), 17 mutations of the
+real code, each reverted and re-run — all caught; plus a control mutation that
+must pass, and does. Five scenarios measured against the REAL main.js: as
+shipped today (0 requests, 0 files), with a dead network, with a working
+server, a restart after a version upgrade (same number, new version), and with
+the module deliberately missing. Full suite: 1,504 passing, 0 failing (UTC and
+Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
+
 ## v2.4.55
 
 **BG:** Преглед на v2.4.54 (документите, които програмата издава) — два
