@@ -1,4 +1,11 @@
 // Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) — извадени от main.js
+/* Условията за броене на фонда идват от db/fund-sql.js (v2.4.57) — едно място
+   за всички. Дотук всяко от дванайсетте места, които показват фондово число, ги
+   пишеше наново; две от тях бяха забравили NULL-безопасността на статуса, а
+   „Библиотечен фонд“ на таблото и „Библиотечен фонд“ в отчета се оказаха два
+   различни ключа под едно име. Виж дългата бележка там кой ключ на какъв въпрос
+   отговаря и защо са два. */
+const FUND = require('../db/fund-sql');
 // в отделен модул (Фаза 4, стъпка 13 от разбиването на монолита на модули
 // по домейн). Един-единствен read-only handler, изцяло самостоятелен: не
 // ползва BOOK_SELECT/BOOK_FIELDS (свои собствени JOIN-и), само getDb()/run.
@@ -115,11 +122,11 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
          Числото НЕ се променя — само се обявява, точно както в КДБФ.
          Броят се редовете, които участват в ГОРНОТО число (неотчислените): за
          отчислените датата на вписване вече не мести нито един сбор. */
-      const UNDATED_ACTIVE = "(b.register_date IS NULL OR b.register_date = '') AND (b.status != 'отчислен' OR b.status IS NULL)";
+      const UNDATED_ACTIVE = `${FUND.BAD_DATE} AND ${FUND.fundByStatus}`;
       s = db.prepare(`
         SELECT COUNT(*) AS rows,
-               COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS activeCopies,
-               COALESCE(SUM(CASE WHEN b.status != 'отчислен' OR b.status IS NULL THEN COALESCE(b.price, 0) * COALESCE(i.quantity, 1) ELSE 0 END), 0) AS value,
+               COALESCE(SUM(CASE WHEN ${FUND.fundByStatus} THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS activeCopies,
+               COALESCE(SUM(CASE WHEN ${FUND.fundByStatus} THEN COALESCE(b.price, 0) * COALESCE(i.quantity, 1) ELSE 0 END), 0) AS value,
                COALESCE(SUM(CASE WHEN b.status = 'отчислен' THEN 1 ELSE 0 END), 0) AS deacc,
                COALESCE(SUM(CASE WHEN ${UNDATED_ACTIVE} THEN 1 ELSE 0 END), 0) AS undatedRows,
                COALESCE(SUM(CASE WHEN ${UNDATED_ACTIVE} THEN COALESCE(i.quantity, 1) ELSE 0 END), 0) AS undatedCopies

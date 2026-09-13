@@ -17,16 +17,56 @@ const { resolveScannedBook } = require('../security-utils');
 module.exports = function registerShelvesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, scheduleCatalogWrite, normalizeScanCode } = deps;
 
+  /* КОЙ РЕД ОТ ВИТРИНАТА РЕАЛНО СТИГА ДО САЙТА (v2.4.57).
+     =====================================================================
+     Витрината се брои на ДВЕ места и дотук двете броеха различно: shelves:list
+     броеше редовете в catalog_shelf_items, а buildCatalogPayload (main.js)
+     публикува само документи със `status != 'отчислен' AND department !=
+     'служебен'`. Едно отчисляване стигаше, за да се разминат: библиотекарката
+     четеше „Класика (2)“, а посетителят на сайта виждаше 1 книга — без нито
+     дума къде е втората.
+
+     Условието е ПРЕПИСАНО от износа на каталога, а не взето от db/fund-sql.js,
+     и това е нарочно. fund-sql държи двата ФОНДОВИ ключа („регистър“ и „налично
+     днес“), а тук въпросът е трети и по-тесен: „ПУБЛИКУВА ЛИ СЕ“. Разликите са
+     две и двете са същински:
+       • служебните документи са част от фонда, но не се публикуват;
+       • ред със status NULL (стар внос) за fundByStatus Е във фонда, а за
+         публикуването НЕ Е — SQL-ът `status != 'отчислен'` дава NULL за него и
+         SQLite го изхвърля от WHERE. Точно това разминаване вече е описано в
+         shelves:addBook по-долу.
+     Да се ползва фондовият ключ тук би върнало обратно същата грешка, която
+     този кръг поправя — затова условието стои на едно място В ТОЗИ файл и
+     всички заявки тук го ползват. */
+  const SHELF_PUBLISHED = `(b.status IS NOT NULL AND b.status != 'отчислен'
+     AND COALESCE(b.department,'') != 'служебен')`;
+
   ipcMain.handle('shelves:list', () =>
     run(() => getDb().prepare(`
-      SELECT sh.*, (SELECT COUNT(*) FROM catalog_shelf_items si WHERE si.shelf_id = sh.id) AS n
+      SELECT sh.*,
+             (SELECT COUNT(*) FROM catalog_shelf_items si JOIN books b ON b.id = si.book_id
+              WHERE si.shelf_id = sh.id AND ${SHELF_PUBLISHED}) AS n,
+             /* Редовете, които стоят във витрината, но НЕ се публикуват. Стари
+                бази ги имат (отчислявания отпреди поправката в акта), затова
+                числото се показва, вместо да се крие: празната разлика между
+                екрана и сайта е точно това, което библиотекарката не можеше да
+                види. */
+             (SELECT COUNT(*) FROM catalog_shelf_items si JOIN books b ON b.id = si.book_id
+              WHERE si.shelf_id = sh.id AND NOT ${SHELF_PUBLISHED}) AS stale
       FROM catalog_shelves sh ORDER BY sh.sort, sh.name
     `).all())
   );
   ipcMain.handle('shelves:items', (e, shelfId) =>
     run(() => getDb().prepare(`
-      SELECT b.id, b.inv_number, b.title, b.author, b.status, b.department
-      FROM catalog_shelf_items si JOIN books b ON b.id = si.book_id
+      SELECT b.id, b.inv_number, b.title, b.author, b.status, b.department,
+             CASE WHEN ${SHELF_PUBLISHED} THEN 1 ELSE 0 END AS published,
+             /* Номерът на акта — за да казва редът „отчислен с акт № 3/2026“, а
+                не само „отчислен“. Анулиран акт не се показва: документът по него
+                е върнат във фонда и редът пак се публикува. */
+             da.no AS act_no, da.year AS act_year
+      FROM catalog_shelf_items si
+      JOIN books b ON b.id = si.book_id
+      LEFT JOIN deaccession_acts da ON da.id = b.deaccession_act_id AND da.revoked_at IS NULL
       WHERE si.shelf_id = ? ORDER BY si.sort, b.title
     `).all(shelfId))
   );
@@ -98,7 +138,10 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
         -- Същата консервативна проверка като в износа на каталога (виж бележката в
         -- handlers/catalog.js): документ, който няма да бъде публикуван, не бива да
         -- влиза и във витрина — иначе страницата показва празна карта.
-        SELECT ?, id FROM books WHERE id = ? AND status != 'отчислен' AND COALESCE(department,'') != 'служебен'
+        -- v2.4.57: условието вече не се преписва тук — ползва се SHELF_PUBLISHED,
+        -- същото, с което се брои витрината. Дотук бяха две копия на едно правило
+        -- и точно такива копия се разминаха при отчисляването.
+        SELECT ?, b.id FROM books b WHERE b.id = ? AND ${SHELF_PUBLISHED}
       `);
       /* Одит v2.4.14: пропуснатите се връщат ПОИМЕННО, а не се подминават тихо.
          shelves:addBook (единичното сканиране) обяснява подробно защо документ без

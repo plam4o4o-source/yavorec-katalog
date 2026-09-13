@@ -123,6 +123,12 @@ async function renderDash() {
       <input id="dashScan" class="scan" placeholder="Сканирай баркод, инв. № или № читателска карта…" autocomplete="off">
     </div>
     <div id="dashScanResult"></div>
+    ${/* Съгласуването на фондовите числа се показва ТУК и само когато има какво
+         да се каже (v2.4.57). Мястото е таблото, защото това е екранът, който се
+         гледа всеки ден: разминаване между КДБФ, годишния отчет и таблото дотук
+         се откриваше чак когато две подписани разпечатки в една папка не се
+         връзват — тоест месеци по-късно и пред проверяващ. */''}
+    <div id="dashFundCheck"></div>
 
     <div class="kpis">
       ${kpi(DASH_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
@@ -249,7 +255,31 @@ async function renderDash() {
       if (code) await dashLookup(code);
     });
   }
+  /* Проверката на фондовите числа се пуска СЛЕД изчертаването и БЕЗ await, за да
+     не бави таблото: тя минава през пет заявки, а екранът трябва да се появи
+     веднага. Мълчи, когато числата се връзват. */
+  dashFundCheck();
 }
+/* Съгласуването на фондовите числа (v2.4.57). Показва се на таблото — екранът,
+   който се гледа всеки ден — само когато има какво да се каже. Дотук нямаше
+   НИТО ЕДНО място, което да сравни две от дванайсетте фондови числа: разминаване
+   между КДБФ, годишния отчет и таблото се откриваше чак когато две подписани
+   разпечатки в една папка не се връзват, тоест месеци по-късно и пред проверяващ. */
+async function dashFundCheck() {
+  if (!window.api.fund || !window.api.fund.check) return;   // по-стар main процес
+  const res = await window.api.fund.check();
+  const box = $('#dashFundCheck');
+  if (!box || !res || !res.ok || !res.data) return;
+  const bad = (res.data.findings || []).filter(f => f.level !== 'бележка');
+  if (!bad.length) return;
+  box.innerHTML = `
+    <div class="note ${bad.some(f => f.level === 'тежко') ? 'd' : 'w'}">
+      <b>Числата за фонда не се връзват.</b>
+      ${bad.map(f => '<br>· ' + esc(f.title)).join('')}
+      <br><button class="btn sm" style="margin-top:8px" onclick="go('setup')">Отвори „Проверка на данните“</button>
+    </div>`;
+}
+window.dashFundCheck = dashFundCheck;
 /* Разпознава сканираното само по това дали съвпада с документ или с читателска карта —
    не се налага потребителят предварително да избира какво сканира. */
 async function dashLookup(code) {

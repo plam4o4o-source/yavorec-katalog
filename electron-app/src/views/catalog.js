@@ -140,10 +140,21 @@ async function loadShelvesBox() {
   const box = $('#shelvesBox'); if (!box) return;
   const shelves = await call(window.api.shelves.list());
   if (!shelves) { box.textContent = 'Витрините не се заредиха.'; return; }
+  /* КОЛОНАТА КАЗВА КОЛКО ВИЖДА ПОСЕТИТЕЛЯТ, А НЕ КОЛКО РЕДА ИМА (v2.4.57).
+     =====================================================================
+     Дотук тук стоеше броят редове в витрината, а сайтът публикува само
+     наличните и неслужебните документи. Едно отчисляване стигаше двете да се
+     разминат: екранът казваше „Класика (2)“, а витрината на сайта излизаше с
+     една книга — и нищо не подсказваше, че втората е излязла от фонда.
+     shelves:list вече връща двете числа поотделно (n = публикуваните, stale =
+     редовете, които сайтът изхвърля); тук се показват и двете, защото
+     непубликуваният ред не е грешка, която да се крие, а нещо за разчистване. */
   box.innerHTML = shelves.length ? `
     <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
-      <tr><th>Витрина</th><th>Записи</th><th style="width:230px"></th></tr></thead><tbody>
-      ${shelves.map(sh => `<tr><td><b>${esc(sh.name)}</b></td><td class="num">${sh.n}</td>
+      <tr><th>Витрина</th><th>На сайта</th><th style="width:230px"></th></tr></thead><tbody>
+      ${shelves.map(sh => `<tr><td><b>${esc(sh.name)}</b>${sh.stale
+        ? ` <span class="badge warn" title="Редове, които стоят във витрината, но не се публикуват — отчислени или служебни документи. Отворете витрината, за да ги махнете.">+${sh.stale} непубликувани</span>` : ''}</td>
+        <td class="num">${sh.n}</td>
         <td><button class="btn sm" onclick="openShelf(${sh.id})">Отвори</button>
             <button class="btn sm" onclick="renameShelf(${sh.id}, '${jsq(sh.name)}')">Преименувай</button>
             <button class="btn sm dgr" onclick="deleteShelf(${sh.id})">Изтрий</button></td></tr>`).join('')}
@@ -186,10 +197,21 @@ async function openShelf(id) {
     качване на каталога.</div>
     <input id="shelfScan" class="scan" placeholder="Инв. № или баркод — Enter за добавяне…" autocomplete="off">
     <div style="margin-top:12px">
+      ${/* Редът, който НЕ стига до сайта, се казва на глас (v2.4.57). Досега
+            списъкът тук изглеждаше точно както витрината на сайта, а не беше
+            той: отчисленият документ седеше между останалите като редови член.
+            Причината се изписва дословно — „отчислен с акт № 3/2026“ — защото
+            „отчислен“ само по себе си не казва на библиотекарката къде да
+            търси документа, ако сметне, че е сгрешено. */''}
       ${items.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
-        <tr><th>Инв. №</th><th>Заглавие</th><th>Автор</th><th style="width:100px"></th></tr></thead><tbody>
+        <tr><th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>На сайта</th><th style="width:100px"></th></tr></thead><tbody>
         ${items.map(b => `<tr><td class="num">${b.inv_number ?? ''}</td><td>${esc(b.title)}</td>
           <td>${esc(b.author || '')}</td>
+          <td>${b.published ? '<span class="badge ok">да</span>'
+            : `<span class="badge warn">не — ${esc(b.status === 'отчислен'
+                ? (b.act_no != null ? 'отчислен с акт № ' + b.act_no + '/' + b.act_year : 'отчислен')
+                : (b.department === 'служебен' ? 'служебен документ'
+                  : (b.status == null ? 'без попълнен статус (запис от по-стар внос)' : String(b.status))))}</span>`}</td>
           <td><button class="btn sm dgr" onclick="removeFromShelf(${id}, ${b.id})">Махни</button></td></tr>`).join('')}
         </tbody></table></div>` : '<div class="hint">Витрината е празна.</div>'}
     </div>`,

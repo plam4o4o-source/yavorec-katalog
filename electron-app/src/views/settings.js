@@ -318,8 +318,13 @@ async function renderSetup() {
         ? `документи: ${limits.limitBooks || '∞'} · читатели: ${limits.limitReaders || '∞'}` : 'без ограничение', `
       ${setupHow('Горна граница за броя записи в програмата. <b>0 означава без ограничение.</b> Проверява се само при добавяне на нов запис — вече въведените данни остават достъпни и редактируеми дори ако лимитът бъде намален по-късно.')}
       <form id="limF" onsubmit="return false"><div class="grid g2">
+        ${/* v2.4.57: броят вече е БЕЗ отчислените. Дотук се броеше COUNT(*) от
+              всички редове — а по чл. 39 отчисленият ред се пази безсрочно и
+              books:delete отказва да го изтрие. Двете правила се заключваха
+              едно друго: библиотека на тавана не можеше да добави документ,
+              колкото и да отчислява. */''}
         ${fld('Лимит на документите във фонда', 'limit_books', { val: limits ? limits.limitBooks : 0, type: 'number', min: 0,
-          hint: limits ? 'в момента: ' + limits.books.toLocaleString('bg-BG') : '' })}
+          hint: limits ? 'в момента: ' + limits.books.toLocaleString('bg-BG') + ' (отчислените не се броят)' : '' })}
         ${fld('Лимит на читателите', 'limit_readers', { val: limits ? limits.limitReaders : 0, type: 'number', min: 0,
           hint: limits ? 'в момента: ' + limits.readers.toLocaleString('bg-BG') : '' })}
       </div></form>
@@ -1242,18 +1247,41 @@ async function runDataChecks() {
   const box = $('#dataChecks');
   if (!box) return;
   box.innerHTML = '<div class="hint">Проверявам…</div>';
-  const [multi, dups, orphanDeacc, amAudit] = await Promise.all([
+  const [multi, dups, orphanDeacc, amAudit, fund] = await Promise.all([
     call(window.api.books.multiCopyRecords()),
     call(window.api.books.findDuplicateBarcodes()),
     call(window.api.books.deaccessionedWithoutAct()),
-    call(window.api.authorMark.audit())
+    call(window.api.authorMark.audit()),
+    /* Съгласуване на фондовите числа (v2.4.57) — сравнява какво показват КДБФ,
+       годишният отчет, таблото и инвентарната книга. Дотук нямаше НИТО ЕДНО
+       място, което да сравни две от тези числа: разминаваха се мълчаливо и се
+       откриваха чак когато две подписани разпечатки в една папка не се връзват. */
+    call(window.api.fund.checkLogged())
   ]);
   if (multi === null || dups === null || orphanDeacc === null) { box.innerHTML = ''; return; }
   const many = multi.filter(r => Number(r.quantity) > 1);
   const zero = multi.filter(r => Number(r.quantity) === 0);
   const copies = many.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
   const nameOf = (r) => esc([r.author, r.title].filter(Boolean).join('. '));
+  const fundHtml = !fund ? '' : `
+    <h4 style="font-size:14px;margin:16px 0 6px">Съгласуване на фондовите числа за ${fund.year} г.</h4>
+    ${fund.findings.length ? fund.findings.map(f => `
+      <div class="note ${f.level === 'тежко' ? 'd' : (f.level === 'важно' ? 'w' : '')}" style="margin-top:0">
+        <b>${esc(f.title)}</b>
+        ${f.a ? `<br>${esc(f.a.label)}: <b>${f.a.n}</b>${f.a.v != null ? ' · ' + mny(f.a.v) : ''}` : ''}
+        ${f.b ? `<br>${esc(f.b.label)}: <b>${f.b.n}</b>${f.b.v != null ? ' · ' + mny(f.b.v) : ''}` : ''}
+        <br>${esc(f.why)}
+        ${f.todo ? `<br><b>Какво да направите:</b> ${esc(f.todo)}` : ''}
+      </div>
+      ${(f.list && f.list.length) ? `<div class="wrap" style="max-height:220px"><table class="ledger">
+        <thead><tr><th>Инв. №</th><th>Заглавие</th><th>Записана дата</th><th></th></tr></thead><tbody>
+        ${f.list.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${esc(r.title || '')}</td>
+          <td class="num">${esc(r.register_date || '— няма —')}</td>
+          <td><button class="btn sm" onclick="bookForm(${r.id})">Поправи датата</button></td></tr>`).join('')}
+        </tbody></table></div>` : ''}`).join('')
+      : '<div class="hint">Числата се връзват — КДБФ, годишният отчет, таблото и инвентарната книга дават едно и също.</div>'}`;
   box.innerHTML = `
+    ${fundHtml}
     <h4 style="font-size:14px;margin:16px 0 6px">Записи с повече от един екземпляр под един инвентарен номер</h4>
     ${many.length ? `
       <div class="note d" style="margin-top:0">Един инвентарен номер отговаря на <b>един</b> екземпляр.

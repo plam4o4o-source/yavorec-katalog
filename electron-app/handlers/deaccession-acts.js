@@ -56,6 +56,32 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     const holdCols = db.prepare('PRAGMA table_info(holds)').all();
     if (!holdCols.some(c => c.name === 'deaccession_act_id')) db.exec('ALTER TABLE holds ADD COLUMN deaccession_act_id INTEGER');
     if (!holdCols.some(c => c.name === 'status_before')) db.exec('ALTER TABLE holds ADD COLUMN status_before TEXT');
+    /* ВИТРИНИТЕ — ТОЧНО ОГЛЕДАЛНИЯТ СЛУЧАЙ НА РЕЗЕРВАЦИИТЕ (v2.4.57).
+       =================================================================
+       Дотук отчисляването НЕ пипаше catalog_shelf_items. Забелязва се така:
+       документ във витрина „Класика“ се отчислява с утвърден акт, и след това
+
+         • shelves:list продължава да казва „Класика (2)“;
+         • shelves:items показва отчисления документ като редови член на витрината;
+         • публичният katalog.json го изхвърля (buildCatalogPayload в main.js
+           публикува само status != 'отчислен'), тоест витрината на сайта излиза
+           с 1 книга.
+
+       Библиотекарката вижда 2, посетителят на сайта вижда 1, и нищо никъде не
+       казва защо. Дупката е СЪЩАТА като при резервациите и е пробита от същата
+       страна: shelves:addBook отказва отчислен документ (с цели три различни
+       съобщения — отчислен, без статус, служебен), тоест грижата съществува по
+       пътя „първо отчислен, после във витрина“, а обратният път — „първо във
+       витрина, после отчислен“ — стоеше отворен.
+
+       Оттук нататък съставянето на акта МАХА документа от всички витрини. Кои
+       са били те се запомня в реда на акта (както status_before), а не само в
+       одитната следа: витрината е подбор, правен от човек, и при анулиране на
+       акта някой трябва да може да прочете какво да върне обратно. Автоматично
+       НЕ се връща — по същата причина, по която не се връщат и резервациите:
+       анулирането поправя регистъра, а не пресъздава подбора на библиотекаря. */
+    const itemCols = db.prepare('PRAGMA table_info(deaccession_items)').all();
+    if (!itemCols.some(c => c.name === 'shelves_before')) db.exec('ALTER TABLE deaccession_items ADD COLUMN shelves_before TEXT');
     /* АКТЪТ Е ДОКУМЕНТ, НЕ ЗАПИС В ПРОГРАМАТА (v2.4.56).
        =================================================================
        Дотук „анулиране“ означаваше DELETE FROM deaccession_acts, а редовете на
@@ -171,9 +197,35 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   ipcMain.handle('deaccessionActs:get', (e, id) =>
     run(() => {
       const db = getDb();
+      /* Колоните deaccession_act_id/status_before върху holds и shelves_before
+         върху deaccession_items се добавят от ensureLoanActColumn. Четящият път
+         дотук не го викаше, защото не му трябваха; сега му трябват, а базата може
+         да е отворена и прегледана, без изобщо да е съставян акт. Проверката е
+         евтина и се помни за живота на връзката към базата. */
+      ensureLoanActColumn(db);
       const act = db.prepare('SELECT * FROM deaccession_acts WHERE id = ?').get(id);
       if (!act) return null;
       act.items = db.prepare('SELECT * FROM deaccession_items WHERE act_id = ? ORDER BY inv_number').all(id);
+      /* ЧИТАТЕЛИТЕ, ЧИИТО РЕЗЕРВАЦИИ Е ОТКАЗАЛ ТОЗИ АКТ (v2.4.57).
+         Дотук актът се четеше само като списък от инвентарни номера, а хората
+         зад тях нямаше къде да се видят: holds:list показва само активните
+         резервации, тоест отказаната изчезва от екрана в мига на отчисляването.
+         Затова прегледът на акта носи и тях — с име, карта и телефон, за да може
+         библиотекарката да вдигне телефона, а не да чака читателят да дойде за
+         книга, която вече не съществува. Чете се от самите редове в holds, а не
+         от снимка: те носят номера на акта (deaccession_act_id) още от v2.4.54.
+         Читател или документ, изтрит междувременно, отпада от списъка — затова
+         JOIN, а не LEFT JOIN: ред без име и без книга не помага на никого. */
+      act.holds = db.prepare(`
+        SELECT h.id, h.status, h.status_before, h.placed_at, h.resolved_at,
+               b.inv_number, b.title, b.author,
+               r.id AS reader_id, r.name AS reader_name, r.card_no, r.phone
+        FROM holds h
+        JOIN books b ON b.id = h.book_id
+        JOIN readers r ON r.id = h.reader_id
+        WHERE h.deaccession_act_id = ?
+        ORDER BY h.placed_at, h.id
+      `).all(id);
       return act;
     })
   );
@@ -274,9 +326,21 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         });
         const actId = info.lastInsertRowid;
         const insItem = db.prepare(`
-          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language, quantity, status_before)
-          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language, @quantity, @status_before)
+          INSERT INTO deaccession_items (act_id, book_id, inv_number, author, title, volume, year, price, udk, category, language, quantity, status_before, shelves_before)
+          VALUES (@act_id, @book_id, @inv_number, @author, @title, @volume, @year, @price, @udk, @category, @language, @quantity, @status_before, @shelves_before)
         `);
+        /* Витрините на документа — прочитат се ПРЕДИ да бъдат изтрити (виж дългата
+           бележка при ensureLoanActColumn). Имената, а не номерата: редът на акта е
+           документ и трябва да се чете и след като витрината бъде преименувана или
+           изтрита. */
+        const shelvesOf = db.prepare(`
+          SELECT sh.name FROM catalog_shelf_items si
+          JOIN catalog_shelves sh ON sh.id = si.shelf_id
+          WHERE si.book_id = ? ORDER BY sh.sort, sh.name
+        `);
+        const dropFromShelves = db.prepare('DELETE FROM catalog_shelf_items WHERE book_id = ?');
+        let shelfRows = 0;
+        const shelfNames = new Set();
         // Принудително закритите заемания се отбелязват с номера на акта — за да
         // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
         const closeLoans = db.prepare(`UPDATE loans SET date_in = ?, deaccession_act_id = ? WHERE book_id = ? AND date_in IS NULL`);
@@ -295,7 +359,40 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             deaccession_act_id = @act, status_before = status
           WHERE book_id = @book AND status IN ('чака','заделена')
         `);
+        /* ЧИТАТЕЛЯТ, КОЙТО Е ЧАКАЛ, СЕ НАЗОВАВА ПОИМЕННО (v2.4.57).
+           ===============================================================
+           Предишният кръг затвори дупката „резервацията остава жива върху
+           отчислен документ“ и сложи брояч в одитната следа. Останалото
+           счупено беше по-просто и по-скъпо: НИКОЙ ЧОВЕК НЕ НАУЧАВА.
+           createActCore връщаше само actId, броят отказани резервации отиваше
+           единствено в дневника, holds:list показва само активните (отказаната
+           изчезва от екрана още същата секунда), а прозорецът след акта казваше
+           „отчислени са N документа“ и нищо повече. Тоест при АНУЛИРАНЕ на акт
+           програмата изрично предупреждава „N резервации остават отказани —
+           подновете ги“, а по пътя, в който резервациите РЕАЛНО падат, мълчи.
+
+           За читалището това е единственият път, по който човекът, дошъл след
+           две седмици за резервираната книга, може да бъде предупреден по-рано.
+           Затова редовете се СНИМАТ преди отказването — с име, номер на карта и
+           телефон (същите полета, които holds:list вече връща през HOLD_SELECT) —
+           и се връщат на прозореца като списък „обадете се на…“.
+
+           Четат се ПРЕДИ UPDATE-а: след него status вече е 'отказана' и филтърът
+           по активните не би ги намерил. Заглавието и инв. № идват от books още
+           сега, защото след акта документът е отчислен и списъкът трябва да
+           казва ЗА КОЯ книга е бил редът. */
+        const holdsOf = db.prepare(`
+          SELECT h.id, h.status AS status_before, h.placed_at,
+                 b.inv_number, b.title, b.author,
+                 r.id AS reader_id, r.name AS reader_name, r.card_no, r.phone
+          FROM holds h
+          JOIN books b ON b.id = h.book_id
+          JOIN readers r ON r.id = h.reader_id
+          WHERE h.book_id = ? AND h.status IN ('чака','заделена')
+          ORDER BY h.placed_at, h.id
+        `);
         let cancelledHolds = 0;
+        const cancelledHoldRows = [];
         /* Отчетната бройка на всеки документ, с разграничение между „липсващ ред“
            и „изрично нула“ — виж бележката при quantity по-долу. */
         const qStmt = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?');
@@ -352,11 +449,23 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             quantity: invQty.get(b.id),
             // Състоянието ПРЕДИ отчисляването — за да може анулирането да го върне
             // (виж ensureLoanActColumn по-горе).
-            status_before: b.status || null
+            status_before: b.status || null,
+            // Витрините ПРЕДИ отчисляването — по същата причина, но за подбора в
+            // онлайн каталога (виж ensureLoanActColumn). Четат се тук, редът по-долу
+            // ги изтрива.
+            shelves_before: (() => {
+              const names = shelvesOf.all(b.id).map(r => r.name);
+              names.forEach(n => shelfNames.add(n));
+              shelfRows += names.length;
+              return names.length ? names.join('; ') : null;
+            })()
           });
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
           offStmt.run('отчислен', act.date, actId, act.date, b.id);
           closeLoans.run(act.date, actId, b.id);
+          /* Витрината се празни СЛЕД като снимката е записана в реда на акта. */
+          dropFromShelves.run(b.id);
+          cancelledHoldRows.push(...holdsOf.all(b.id));
           cancelledHolds += cancelHolds.run({ act: actId, book: b.id }).changes;
         });
         db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
@@ -378,9 +487,25 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         logAudit('Отчисляване', 'акт № ' + no + '/' + year + ' — ' + docCount + (docCount === 1 ? ' документ' : ' документа')
           + (docCount !== bookIds.length ? ' (' + bookIds.length + ' заглавия)' : '')
           + ', причина: ' + act.reason_text
-          + (cancelledHolds ? (' (' + (cancelledHolds === 1 ? 'отказана 1 резервация' : 'отказани ' + cancelledHolds + ' резервации') + ' на отчислените документи)') : '')
+          /* Следата назовава и ЧИТАТЕЛИТЕ, не само броя (v2.4.57): дневникът е
+             мястото, което библиотекарката чете на другия ден, а прозорецът се
+             затваря. Телефонът НЕ влиза тук — дневникът се изнася и се разпечатва,
+             а за обаждането името и номерът на картата стигат, за да се намери
+             читателят в „Читатели“. */
+          + (cancelledHolds ? (' (' + (cancelledHolds === 1 ? 'отказана 1 резервация' : 'отказани ' + cancelledHolds + ' резервации') + ' на отчислените документи'
+              + (cancelledHoldRows.length
+                  ? ': ' + cancelledHoldRows.map(h => (h.reader_name || 'читател')
+                      + (h.card_no ? ' (карта ' + h.card_no + ')' : '')
+                      + ' — инв. № ' + (h.inv_number ?? '—')).join('; ')
+                  : '') + ')') : '')
+          + (shelfRows ? '; документите излизат от витрините в онлайн каталога ('
+              + [...shelfNames].join('; ') + ') — при анулиране НЕ се връщат автоматично' : '')
           + lostNote);
-        return actId;
+        /* Връща се ОБЕКТ, а не само actId (v2.4.57). Самите IPC обработчици
+           продължават да връщат голото число — така се пази договорът с
+           прозореца и с тестовете — но вътрешно съставянето трябва да може да
+           каже КОЙ е чакал, за да стигне това до екрана. */
+        return { actId, holds: cancelledHoldRows, shelfRows, shelfNames: [...shelfNames] };
       });
       // .immediate() — виж проверката на номера в транзакцията по-горе. Когато
       // createActCore се вика ОТВЪТРЕ в чужда транзакция (утвърждаване на проект),
@@ -413,9 +538,14 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
-      const actId = createActCore(db, act, bookIds);
+      /* Каналът продължава да връща ГОЛОТО id на акта. Поименният списък на
+         чакалите читатели пътува до прозореца през deaccessionActs:get (виж
+         бележката там): така не се пипа договорът на канала, а сведението е
+         ТРАЙНО — може да се прочете и след седмица, при отваряне на акта, а не
+         само в едно съобщение, което библиотекарката може да не е видяла. */
+      const res = createActCore(db, act, bookIds);
       afterActWritten(act);
-      return actId;
+      return res.actId;
     })
   );
   /* ---------- ПРОЕКТ НА АКТ (v2.4.56) ----------
@@ -529,7 +659,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          между двете оставя утвърден акт и жив проект — и второ утвърждаване
          съставя втори акт за същите документи. */
       const tx = db.transaction(() => {
-        const actId = createActCore(db, act, live.map(b => b.id));
+        const actId = createActCore(db, act, live.map(b => b.id)).actId;
         db.prepare('DELETE FROM deaccession_drafts WHERE id = ?').run(id);
         return actId;
       });
@@ -548,7 +678,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       ensureLoanActColumn(db);
       /* Каквото прозорецът трябва да КАЖЕ на библиотекарката след анулирането.
          Стои извън транзакцията, защото се чете след нея. */
-      const revokeInfo = { droppedHolds: 0 };
+      const revokeInfo = { droppedHolds: 0, shelvesToRestore: [] };
       /* Основанието за анулиране е ЗАДЪЛЖИТЕЛНО (v2.4.56). Актът остава в
          документацията завинаги; щом остава, до него трябва да пише ЗАЩО е
          отпаднал — иначе след година никой, включително проверяващият, не може
@@ -566,7 +696,16 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           throw new Error('Акт № ' + act.no + '/' + act.year + ' вече е анулиран на '
             + String(act.revoked_at).slice(0, 10) + ' г. — вторично анулиране няма смисъл.');
         }
-        const items = db.prepare('SELECT book_id, status_before FROM deaccession_items WHERE act_id = ?').all(id);
+        const items = db.prepare('SELECT book_id, inv_number, status_before, shelves_before FROM deaccession_items WHERE act_id = ?').all(id);
+        /* Витрините НЕ се възстановяват автоматично — по същата причина, по която
+           не се възстановяват и резервациите (виж ensureLoanActColumn): витрината
+           е подбор, правен от човек за сайта, а анулирането поправя регистъра, не
+           връща времето. Но щом не се връща само, трябва да се КАЖЕ какво да се
+           върне ръчно — иначе документът се прибира във фонда и мълчаливо изпада
+           от тематичния списък на сайта завинаги. */
+        const shelvesToRestore = items
+          .filter(it => it.shelves_before)
+          .map(it => ({ inv_number: it.inv_number, shelves: it.shelves_before }));
         // Сглобена веднъж, извън обхождането — по същата причина като при съставянето.
         const backStmt = db.prepare(`UPDATE books SET status=?, status_date=date('now'),
           deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`);
@@ -608,8 +747,16 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
               ? '; ' + (droppedHolds === 1
                   ? '1 резервация, отказана с този акт, ОСТАВА отказана — подновете я ръчно, ако читателят още чака'
                   : droppedHolds + ' резервации, отказани с този акт, ОСТАВАТ отказани — подновете ги ръчно, ако читателите още чакат')
+              : '')
+          + (shelvesToRestore.length
+              ? '; ' + (shelvesToRestore.length === 1
+                  ? '1 документ е бил махнат от витрина в онлайн каталога'
+                  : shelvesToRestore.length + ' документа са били махнати от витрини в онлайн каталога')
+                + ' при съставянето и НЕ се връщат автоматично — '
+                + shelvesToRestore.map(s => 'инв. № ' + (s.inv_number ?? '—') + ' → ' + s.shelves).join('; ')
               : ''));
         revokeInfo.droppedHolds = droppedHolds;
+        revokeInfo.shelvesToRestore = shelvesToRestore;
       });
       tx.immediate();
       scheduleCatalogWrite();

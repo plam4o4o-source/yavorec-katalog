@@ -158,6 +158,12 @@ contextBridge.exposeInMainWorld('api', {
   kdbf: {
     report: invoke('kdbf:report')
   },
+  /* Съгласуване на фондовите числа (v2.4.57): сравнява какво показват КДБФ,
+     годишният отчет, таблото и инвентарната книга, и обяснява разликите. */
+  fund: {
+    check: invoke('fund:check'),
+    checkLogged: invoke('fund:checkLogged')
+  },
   print: {
     savePdf: invoke('print:savePdf')
   },
@@ -197,7 +203,11 @@ contextBridge.exposeInMainWorld('api', {
     list: invoke('suggestions:list'),
     create: invoke('suggestions:create'),
     setStatus: invoke('suggestions:setStatus'),
-    delete: invoke('suggestions:delete')
+    delete: invoke('suggestions:delete'),
+    // v2.4.57: „някой искал ли е точно тази книга“ — същото съвпадение, което
+    // books:create вече връща сам при вписване (поле `suggestions` в отговора);
+    // тук е за картона на вече вписан документ.
+    matchBook: invoke('suggestions:matchBook')
   },
   circRules: {
     list: invoke('circRules:list'),

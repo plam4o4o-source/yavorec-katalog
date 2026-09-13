@@ -10,14 +10,50 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     'is_local', 'note'];
   // Източникът се сглобява за показване: или от свързания запис във фонда, или от
   // свободния текст, когато изданието не е налично в библиотеката.
+  /* ИЗТОЧНИКЪТ, КОЙТО ВЕЧЕ ГО НЯМА ВЪВ ФОНДА (v2.4.57).
+     =====================================================================
+     Аналитичното описание сочи статия В КНИГА от фонда. Когато книгата се
+     отчисли с утвърден акт, описанието правилно остава — то описва статията, а
+     не притежанието. Но analytics:list показваше източника като жив: „Вазов,
+     Иван. Под игото (инв. № 5)“, дума по дума същото както преди акта. Списъкът
+     „Аналитични описания“ е и указател, който се РАЗПЕЧАТВА и се дава на
+     читателя; така библиотеката праща човек да иска инвентарен номер, който вече
+     не съществува, и научава за това чак на гишето.
+
+     Белегът се долепя към book_title, а не се връща като отделно поле, и това е
+     съзнателно: същият низ се ползва от прозореца на две места (описанието на
+     източника и полето „Книга от фонда“), а полето „Книга от фонда“ се сравнява
+     ЗНАК ПО ЗНАК с етикета от links:search, за да намери book_id (виж дългата
+     бележка в src/views/analytics.js, одит v2.4.29). Затова белегът е точно
+     същият и точно на същото място, както в links.js — така двата етикета
+     остават еднакви и връзката не се къса при редакция.
+
+     Анулиран акт не се брои: документът по него е върнат във фонда. */
   const ANALYTIC_SELECT = `
     SELECT a.*,
            p.title AS periodical_title,
-           b.title AS book_title, b.author AS book_author, b.inv_number AS book_inv
+           b.title || CASE WHEN b.status = 'отчислен'
+             THEN COALESCE(' (отчислен с акт № ' || da.no || '/' || da.year || ')', ' (отчислен)')
+             ELSE '' END AS book_title,
+           b.author AS book_author, b.inv_number AS book_inv,
+           b.status AS book_status
     FROM analytics a
     LEFT JOIN periodicals p ON p.id = a.periodical_id
     LEFT JOIN books b ON b.id = a.book_id
+    LEFT JOIN deaccession_acts da ON da.id = b.deaccession_act_id AND da.revoked_at IS NULL
   `;
+  /* Дали книгата, към която се сочи, е отчислена — и с кой акт. Ползва се от
+     отказа при НОВО описание (виж analytics:create). Анулираните актове не се
+     броят, както навсякъде. */
+  function deaccNote(db, bookId) {
+    if (!bookId) return null;
+    const b = db.prepare(`
+      SELECT b.status, da.no, da.year FROM books b
+      LEFT JOIN deaccession_acts da ON da.id = b.deaccession_act_id AND da.revoked_at IS NULL
+      WHERE b.id = ?`).get(bookId);
+    if (!b || b.status !== 'отчислен') return null;
+    return b.no != null ? 'отчислен с акт № ' + b.no + '/' + b.year : 'отчислен';
+  }
   function analyticParams(d) {
     const o = {};
     for (const f of ANALYTIC_FIELDS) o[f] = d[f] ?? null;
@@ -51,6 +87,20 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('analytics:create', (e, d) =>
     run(() => {
+      /* НОВО описание към ОТЧИСЛЕН документ се отказва (v2.4.57).
+         Огледалната грижа вече съществува от другата страна: books:delete
+         изрично отказва изтриване на документ, към който има аналитични
+         описания — за да не останат висящи. Тук същото правило липсваше и
+         висящата връзка можеше да се направи НАРОЧНО, без нито дума.
+         Отказът е само за НОВИ описания. Редакцията на вече съществуващо
+         описание не се пипа (виж analytics:update): книгата може да е отчислена
+         години след като статията е описана, а забраната да се поправи правописна
+         грешка в анотацията не помага на никого. */
+      const note = deaccNote(getDb(), d.book_id || null);
+      if (note) {
+        throw new Error('Книгата източник е ' + note + ' и вече не е част от фонда — ново аналитично описание '
+          + 'към нея не се прави. Опишете изданието в полето „Описание на източника със свободен текст“.');
+      }
       const info = getDb().prepare(`INSERT INTO analytics (${ANALYTIC_FIELDS.join(', ')})
         VALUES (${ANALYTIC_FIELDS.map(f => '@' + f).join(', ')})`).run(analyticParams(d));
       logAudit('Аналитично описание', 'нова статия: ' + (d.title || ''));
@@ -59,6 +109,19 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
   );
   ipcMain.handle('analytics:update', (e, d) =>
     run(() => {
+      /* При редакция се проверява само ПРЕНАСОЧВАНЕТО към нова книга. Ако
+         описанието вече сочи отчислен документ, то си остава — виж защо в
+         analytics:create. Но да се ЗАКАЧИ описание за отчислен документ днес е
+         същото решение като новото описание и се отказва по същия начин. */
+      const cur = getDb().prepare('SELECT book_id FROM analytics WHERE id = ?').get(d.id);
+      const nextBook = d.book_id || null;
+      if (nextBook && (!cur || cur.book_id !== nextBook)) {
+        const note = deaccNote(getDb(), nextBook);
+        if (note) {
+          throw new Error('Книгата източник е ' + note + ' и вече не е част от фонда — описанието не може да бъде '
+            + 'пренасочено към нея. Опишете изданието в полето „Описание на източника със свободен текст“.');
+        }
+      }
       /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
          база записът може да е изтрит от другото работно място, а одитната
          следа не бива да твърди редакция, каквато не се е случвала. */

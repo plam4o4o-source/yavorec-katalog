@@ -1509,12 +1509,23 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  stopAutoPushTimer();
   stopAutoBackupTimer();
   // Само ако наистина има насрочен (debounced) запис (одит v2.4.27) — иначе всяко
   // затваряне пренаписваше многомегабайтния каталог в (мрежовата) папка и
   // произвеждаше git commit без промяна във фонда.
   if (catalogWriteDebouncer.pending()) flushCatalogWrite();
+  /* РЕДЪТ ТУК Е ЗНАЧЕЩ (v2.4.57). Дотук stopAutoPushTimer() стоеше НАД записа на
+     каталога: katalog.json се записваше, но публикуването вече беше спряно, а то
+     има само две пътеки — таймера на 5 минути и бутона „Публикувай сега“.
+     Акт в 16:58 ч. и затваряне в 17:00 ч. значеше, че отчисленото остава видимо
+     на сайта до следващия работен ден. Сега първо се записва, после се проверява
+     дали има непубликувано и се казва на библиотекаря (виж
+     warnUnpublishedCatalogOnQuit в handlers/catalog.js — там е и обяснението защо
+     при затваряне НЕ се пуска git: мрежова верига с таймаути би задържала
+     затварянето минути и би изглеждала като повредена програма), и чак накрая се
+     спира таймерът. */
+  warnUnpublishedCatalogOnQuit();
+  stopAutoPushTimer();
   /* Последно копие за деня — ПРЕДИ db.close(), докато връзката още работи (копието
      се прави през db.serialize(), не с четене на файла отстрани). Работният ден на
      библиотекаря приключва с натискане на хиксчето; дотук следващото копие идваше
@@ -1657,7 +1668,12 @@ require('./handlers/author-mark')(ipcMain, {
    подаден на require(), позициониран СЛЕД това място — същият модел, както
    при LOAN_SELECT/firstActiveHold. */
 const { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit } = require('./handlers/books')(ipcMain, {
-  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields, scheduleCatalogWrite, normalizeScanCode
+  getDb: () => db, run, logAudit, today, ftsQuery, cnSortKey, diffFields,
+  /* flushCatalogWrite (v2.4.57) — новото постъпление вече записва публичния
+     каталог СИНХРОННО и вписва провала в дневника, точно както отчисляването
+     (afterBookWritten в handlers/books.js). И двете са hoisted function
+     declarations по-долу в този файл, затова подаването им тук е безопасно. */
+  scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode
 });
 
 /* ---------------- Контрол на авторитетните данни ----------------
@@ -1690,6 +1706,10 @@ require('./handlers/deaccession-acts')(ipcMain, {
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
 require('./handlers/kdbf')(ipcMain, { getDb: () => db, run, yearOf });
+/* Съгласуване на фондовите числа (v2.4.57) — сравнява ключовете, по които
+   различните екрани броят фонда, и казва на библиотекаря КОГА и ЗАЩО се
+   разминават. Виж дългата бележка в handlers/fund-check.js. */
+require('./handlers/fund-check')(ipcMain, { getDb: () => db, run, logAudit, yearOf });
 
 /* ---------------- Читатели ---------------- */
 require('./handlers/readers')(ipcMain, {
@@ -2099,7 +2119,7 @@ function flushCatalogWrite() { return catalogWriteDebouncer.flush(); }
 require('./handlers/shelves')(ipcMain, {
   getDb: () => db, run, logAudit, scheduleCatalogWrite, normalizeScanCode
 });
-const { startAutoPushTimer, stopAutoPushTimer } = require('./handlers/catalog')(ipcMain, {
+const { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit } = require('./handlers/catalog')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, execFile,
   BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
 });
