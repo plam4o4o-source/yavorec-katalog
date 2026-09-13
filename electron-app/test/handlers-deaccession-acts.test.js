@@ -128,8 +128,11 @@ test('deaccessionActs:create marks books as отчислен, closes open loans,
 });
 
 test('deaccessionActs:nextNo returns max(no)+1 per year', async () => {
-  const { ipcMain } = setup();
-  await ipcMain.invoke('deaccessionActs:create', { act: { no: 4, date: '2026-01-01', reason_code: 1, reason_text: 'x' }, bookIds: [] });
+  const { db, ipcMain } = setup();
+  /* Актът иска поне един документ (v2.4.58, чл. 35, ал. 2) — тук се проверява
+     само номерирането, но през редовен акт. */
+  const bookId = insertBook(db, { inv_number: 40 });
+  await ipcMain.invoke('deaccessionActs:create', { act: { no: 4, date: '2026-01-01', reason_code: 1, reason_text: 'x' }, bookIds: [bookId] });
   const next = await ipcMain.invoke('deaccessionActs:nextNo', '2026');
   assert.equal(next.data, 5);
 });

@@ -312,20 +312,26 @@ function setupMzs() {
 
 test('deaccessionActs:create отказва втори акт със същия номер за същата година', async () => {
   const { db, ipcMain } = setupDeacc();
+  /* По един документ на акт: от v2.4.58 createActCore отказва акт с празен
+     списък (чл. 35, ал. 2 — актът съдържа списъка на отчислените екземпляри).
+     Тук се проверява НОМЕРИРАНЕТО, но актът трябва да е редовен, за да се
+     стигне до него. */
+  const mk = (inv) => db.prepare('INSERT INTO books (inv_number, title) VALUES (?, ?)')
+    .run(inv, 'Книга ' + inv).lastInsertRowid;
   const first = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2026-03-01', reason_code: 1, reason_text: 'износени' }, bookIds: []
+    act: { no: 5, date: '2026-03-01', reason_code: 1, reason_text: 'износени' }, bookIds: [mk(51)]
   });
   assert.equal(first.ok, true);
   // Второто работно място е взело същия № 5 при отваряне на формата.
   const second = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2026-04-01', reason_code: 1, reason_text: 'липсващи' }, bookIds: []
+    act: { no: 5, date: '2026-04-01', reason_code: 1, reason_text: 'липсващи' }, bookIds: [mk(52)]
   });
   assert.equal(second.ok, false);
   assert.match(second.error, /Акт № 5\/2026 вече съществува/);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM deaccession_acts WHERE year='2026' AND no=5").get().n, 1);
   // Друга година със същия номер е напълно законна.
   const otherYear = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2025-04-01', reason_code: 1, reason_text: 'износени' }, bookIds: []
+    act: { no: 5, date: '2025-04-01', reason_code: 1, reason_text: 'износени' }, bookIds: [mk(53)]
   });
   assert.equal(otherYear.ok, true);
 });
