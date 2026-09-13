@@ -469,6 +469,42 @@ test('утвърждаването взима номер, отчислява д�
   assert.equal(ipcMain.invoke('deaccessionActs:approveDraft', { id: draftId }).ok, false);
 });
 
+test('акт с ПРАЗЕН списък документи се отказва и по ДВАТА пътя — номерът не се заема напразно (v2.4.58)', () => {
+  /* Намерено с ръчен end-to-end сценарий по каналите, не през екрана: проверката
+     „поне един документ" я имаше на три места от четири — екранът я прави и за
+     прекия акт, и за проекта (src/views/deaccession-acts.js), handler-ът — само
+     в approveDraft. Тоест deaccessionActs:create приемаше bookIds: [] и
+     съставяше акт с нула реда.
+     Цената е трайна: номерът се взима при съставянето и по чл. 35 остава зает
+     завинаги (от v2.4.56 анулирането не го освобождава), редът влиза в КДБФ
+     Приложение № 3, а по чл. 39 актът не се трие никога — празният акт остава
+     необяснима дупка в поредицата на подписван регистър.
+     Затова проверката е в createActCore — общата функция на двата пътя. */
+  const { db, ipcMain } = setup();
+
+  const res = ipcMain.invoke('deaccessionActs:create', { act: ACT({ no: 1 }), bookIds: [] });
+  assert.equal(res.ok, false, 'прекият акт с празен списък се отказва');
+  assert.match(res.error, /нито един документ/, 'и казва защо, с чл. 35, ал. 2');
+  assert.match(res.error, /Чл. 35, ал. 2/, "и се позовава на реквизита, който липсва");
+
+  // Същото и когато списъкът изобщо липсва (по-стар изглед / друго работно място).
+  assert.equal(ipcMain.invoke('deaccessionActs:create', { act: ACT({ no: 1 }) }).ok, false,
+    'липсващ списък се отказва като празен, а не гърми с TypeError');
+
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM deaccession_acts').get().n, 0,
+    'нито един празен акт не е съставен');
+  assert.equal(ipcMain.invoke('deaccessionActs:nextNo', '2026').data, 1,
+    'и номер № 1 е още свободен — отказът не е изгорил номер');
+
+  // Пътят през проекта продължава да отказва със своето, по-точно съобщение.
+  const draftId = ok(ipcMain.invoke('deaccessionActs:saveDraft', {
+    id: null, draft: { date: '2026-06-10', reason_code: 3, reason_text: 'физически изхабени' }, bookIds: []
+  }), 'празен проект се ЗАПИСВА — проектът не е документ и се попълва на етапи');
+  const res2 = ipcMain.invoke('deaccessionActs:approveDraft', { id: draftId });
+  assert.equal(res2.ok, false, 'но утвърждаването му се отказва');
+  assert.match(res2.error, /нито един документ/);
+});
+
 test('утвърждаване на проект, чиито документи вече са отчислени с друг акт, се отказва', () => {
   /* Между подготовката и утвърждаването може да мине седмица, а другото работно
      място да е съставило акт за същите документи. Мълчаливото пропускане би

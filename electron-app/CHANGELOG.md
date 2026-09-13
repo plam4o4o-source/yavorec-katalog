@@ -11,183 +11,217 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
-## v2.4.56
+## v2.4.59
 
-**BG:** Анонимно отчитане на инсталациите — за да се знае на колко компютъра
-реално работи програмата и коя версия ползват. Нищо друго в програмата не е
-пипано.
+**BG:** Малък кръг: една предпазна ограда, която липсваше на едно от четирите
+места, и регистър, който пази всички документи, издавани от програмата.
 
-**Защо изобщо.** Броячът на изтеглянията в GitHub брои ИЗТЕГЛЯНИЯ, не
-инсталации: читалище, което свали инсталатора на три работни места и веднъж
-пак след антивирусна тревога, се брои четири пъти, а библиотека, получила
-файла на флашка, не се брои изобщо. Без реално число не може да се прецени
-нито докога има смисъл да се пази съвместимост със стара версия, нито дали
-автоматичното обновяване изобщо стига до работните места.
+**ПРАЗЕН АКТ НЕ Е АКТ.** Проверката „поне един документ в списъка“ я имаше на
+три места от четири: екранът я прави и за прекия акт, и за проекта, а
+`deaccessionActs:approveDraft` — за утвърждаването. Прекият канал
+`deaccessionActs:create` обаче приемаше празен списък и съставяше акт с нула
+реда. Цената не е козметична: номерът се взима при СЪСТАВЯНЕТО и по чл. 35
+остава зает завинаги (от v2.4.56 анулирането вече не освобождава номер), редът
+влиза в КДБФ Приложение № 3, а по чл. 39 актът не се трие никога — тоест един
+празен акт значи необяснима дупка в поредицата на подписван официален регистър,
+която не може и да се премахне. Възпроизведено преди поправката: акт № 7 с нула
+документа се съставя, следващият свободен номер скача на 8 и редът излиза в Част
+№ 3 с нули. Оттук нататък проверката е в `createActCore` — общата функция и на
+прекия акт, и на утвърждаването на проект, и единственото място в програмата с
+`INSERT INTO deaccession_acts`. По същата причина, поради която фондовите условия
+се събраха на едно място в предишния кръг: правило, написано на две места, се
+разминава. С мишката не се стигаше дотам (екранът спира и двата пътя), затова
+нищо в работата на библиотекаря не се променя.
 
-**Какво излиза от компютъра — това е целият списък:** случаен номер на
-инсталацията, версията на програмата и груб вид на операционната система
-(„Windows 11“). Нищо друго. Номерът се тегли от криптографския генератор на
-системата (`crypto.randomUUID`) при първото пускане и НЕ е производен на
-нищо: не се смята от MAC адрес, сериен номер на диска, име на компютър или
-на потребител — обратен път от него към конкретна библиотека няма. Видът на
-операционната система е нарочно ГРУБ: точният номер на компилацията стеснява
-кръга до шепа машини, а за преценка „още ли се ползва Windows 10“ не носи
-нищо повече.
+**РЕГИСТЪР НА ВСИЧКИ ДОКУМЕНТИ.** Разпечатките се проверяваха или поединично,
+или мимоходом — липсваше отговор на въпроса „всеки документ носи ли реквизитите,
+без които не е документ“. Новият `test/razpechatki.test.js` минава през истинския
+екран и чете текста на самия лист от прегледа преди печат: КДБФ и трите части,
+инвентарната книга, дневникът А и Б, актът за дарение с адреса на дарителя,
+протоколът за придобиване без документ, актът за отчисляване със списъка по
+чл. 35, ал. 2 и анулираният с основанието, протоколът от инвентаризация,
+разписката, квитанцията, читателският картон с декларацията над подписа, картите,
+напомнителните писма, МЗС в двете посоки, краезнанието, етикетите и шестте готови
+справки. Заковани са и три неща, които се развалят тихо: напомнителното писмо се
+вписва в регистъра ЧАК при потвърден печат (отвореният преглед не е изпратено
+писмо), входящата МЗС заявка се печата като извлечение от чуждия регистър, а не
+на наша бланка, и отчислен документ не получава етикет, докато анулирането го
+връща във фонда заедно с етикета му. Последният тест е пазач за пълнота:
+претърсва изгледите за всяка печатна функция и пада, ако някоя не е покрита —
+нов документ не може да влезе непроверен.
 
-**Какво НЕ излиза, никога:** име на потребител или компютър, имейл, IP
-адрес, MAC адрес, сериен номер на диска, какъвто и да е хардуерен отпечатък,
-име на библиотеката, пътища по диска, и НИТО ЕДИН ред от базата данни — нито
-книга, нито читател, нито заемане. Заковано с тест, който изисква в тялото
-на заявката да има ТОЧНО три полета: всяко ново поле чупи теста, вместо да
-се промъкне незабелязано при бъдеща промяна.
+Подредбата на самия този файл се поправя: заради преномерирането при последните
+три кръга записите за v2.4.56 – v2.4.58 стояха във възходящ ред над останалите,
+подредени от новото към старото. Текстовете им не са пипани.
 
-**Кога.** При първо пускане, при смяна на версията, и после най-много веднъж
-на 24 часа. Не при действия на потребителя — програмата се стартира по
-няколко пъти на ден и това не е брояч на стартирания.
+Проверки: 20 нови теста (19 в `test/razpechatki.test.js` + 1 за празния акт),
+двата пътя към акт проверени с мутация, пазачът за пълнота — също (фиктивен нов
+документ проваля теста и го назовава поименно). Пълна поредица: 1652 успешни,
+0 неуспешни, в UTC и Europe/Sofia.
 
-**При липса на интернет не се случва нищо видимо.** Заявката тръгва СЛЕД
-като прозорецът вече е създаден, никой не я чака, таванът ѝ е 4 секунди. При
-липса на връзка, прокси, изтекло време или грешка от сървъра остава един ред
-в дневника (предупреждение, не грешка — липсата на интернет в читалище не е
-повреда на програмата), а опитът се повтаря при следващото стартиране.
-Проверено срещу истинската програма при мъртва мрежа: базата се отваря,
-резервното копие се прави, прозорецът се показва.
+**EN:** A small round: one guard that was missing at one of four places, and a
+register that keeps watch over every document the program issues.
 
-**Къде се пази номерът.** В собствен файл (`installation.json`) в
-потребителската папка — нарочно НЕ в `config.json`, защото той носи пътя до
-базата данни и вече веднъж е бил изтриван от неуспешен прочит. И нарочно НЕ
-в базата: тя често е на мрежов дял, споделен между няколко работни места —
-там номерът щеше да е един за цялото читалище, щеше да пътува с резервните
-копия и да „възкръсва“ при възстановяване върху друга машина.
+**AN EMPTY ACT IS NOT AN ACT.** The "at least one document" check existed at three
+of four places — the screen enforces it for both the direct act and the draft, and
+`deaccessionActs:approveDraft` on approval — but the direct channel
+`deaccessionActs:create` accepted an empty list and produced an act with zero
+rows. The cost is not cosmetic: the number is taken at creation and under art. 35
+stays taken forever (since v2.4.56 revoking no longer frees it), the row enters
+КДБФ Appendix No. 3, and under art. 39 an act is never deleted — so one empty act
+means an unexplainable gap in the sequence of a signed official register that
+cannot be removed either. The check now lives in `createActCore`, the function
+shared by both paths and the only place in the program with `INSERT INTO
+deaccession_acts`. It was not reachable by mouse (the screen blocks both paths),
+so nothing changes in daily work.
 
-**Адрес и изключване.** Адресът на сървъра стои на ЕДНО място в кода
-(`install-report.js`) — `https://invlib.com/api/invlib/install`; смяна на
-адреса значи смяна само на този ред. Празен низ изключва механизма напълно
-(нито заявка, нито дори файл с номер) — това е изходът, ако някога трябва да
-се спре от кода. На конкретна машина се изключва с ред
-`"installReporting": false` в `config.json`. Работи само в инсталираната
-програма, не при разработка и тестове.
+**A REGISTER OF EVERY DOCUMENT.** `test/razpechatki.test.js` walks the librarian's
+path through the real screen and reads the text of the actual sheet in the print
+preview, for every document the program issues, checking the requisites without
+which the document is not a document. It also pins three things that break
+quietly: a reminder letter is recorded only on a CONFIRMED print, an incoming ILL
+request prints as an extract from the other library's register rather than on our
+letterhead, and a deaccessioned document gets no label while revoking returns both
+the document and its label to the fund. The last test is a completeness guard: it
+scans the views for every print function and fails if one is not covered.
 
-**Намерено при прегледа на самата промяна и поправено, преди да излезе:**
+This file's own ordering is fixed: because of the renumbering during the last three
+rounds, the v2.4.56 – v2.4.58 entries sat in ascending order above the rest, which
+runs newest-first. Their texts are untouched.
 
-- **Новият файл не влизаше в инсталатора** (`build.files`). `require()` щеше
-  да хвърли САМО в инсталираната програма — тоест точно там, където никой
-  разработчик не гледа — грешката влизаше в общия предпазител на старта и
-  вместо отчитане показваше „Стартирането пропадна“: броячът на инсталации
-  щеше да СПИРА програмата на всяка библиотека. Хванато от собствения тест
-  на проекта (`build-files-coverage.test.js`). Добавен е и втори пояс: цялото
-  тяло на свързването е в try/catch. Измерено с нарочно скрит модул — с пояса
-  0 диалога и 0 опита за изход, без него: диалог и изход.
-- **Заключен файл се четеше като „първо пускане“.** Под Windows антивирусна
-  програма държи файл за миг постоянно; при това положение номерът се
-  създаваше наново и се записваше ВЪРХУ здравия — едно читалище се броеше за
-  две инсталации, и то при всяко улучване. Точно провалът, заради който този
-  файл е отделен от config.json. Сега „липсва“ и „не се чете“ са различни
-  неща: при нечетим файл не се пипа нищо. Възпроизведено с подменен
-  readFileSync, който хвърля EBUSY.
-- **Незаписан номер въпреки това се пращаше.** При папка без права всяко
-  пускане теглеше нов номер и го изпращаше — един компютър щеше да се брои
-  като десетки. Сега при неуспешен запис не се отчита изобщо.
-- **Бисквитки.** Заявката вече е с `credentials: 'omit'`: иначе отговор със
-  `Set-Cookie` от сървъра би станал ВТОРИ, постоянен белег, при това такъв,
-  който преживява подмяната на самия номер — обратното на обещаното.
-- **Опит при всяко пускане.** Библиотека без интернет правеше по един
-  четирисекунден опит и по ред в дневника при всяко пускане, завинаги. Сега
-  след неуспял опит се изчаква час.
-- Свързването е изнесено в `setImmediate` — синхронната част (require, четене
-  на config.json, при първо пускане и запис) няма работа в тика, който показва
-  прозореца.
-- Дребно: неуспешно преименуване оставяше файл `.tmp` да лежи завинаги;
-  документацията твърдеше „една инсталация = един компютър“, а мярката е
-  потребителски профил на Windows (така се и инсталира програмата).
+Checks: 20 new tests, both paths to an act mutation-verified, the completeness
+guard too. Full suite: 1652 passing, 0 failing, in UTC and Europe/Sofia.
 
-Проверки: 26 нови теста (test/install-report-v2456.test.js), 17 мутации на
-реалния код, всяка с връщане и повторно пускане — всичките уловени; плюс
-контролна мутация, която трябва да мине, и минава. Пет сценария измерени
-срещу ИСТИНСКИЯ main.js: както се разпространява днес (0 заявки, 0 файла),
-с мъртва мрежа, с работещ сървър, повторно стартиране след обновяване на
-версията (същият номер, нова версия), и с нарочно липсващ модул. Пълната
-поредица: 1504 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария
-+ всички проверки при 15 002 записа.
+## v2.4.58
 
-**EN:** Anonymous installation reporting — to learn how many computers
-actually run the program and which version they use. Nothing else in the
-program was touched.
+**BG:** Кръг върху ЕДНО число: колко документа има библиотеката. Оказа се, че
+програмата го смята на дванайсет места с осем различни условия — и че две от тях
+носят едно и също име на екрана, но отговарят на различни въпроси.
 
-**Why.** GitHub's download counter counts DOWNLOADS, not installations: a
-library that fetched the installer on three workstations and once more after
-an antivirus false alarm counts four times, while one that got the file on a
-USB stick does not count at all. Without a real number there is no way to
-judge how long compatibility with an old version is worth keeping, or
-whether automatic updates reach the workstations at all.
+**„БИБЛИОТЕЧЕН ФОНД“ НА ТАБЛОТО И „БИБЛИОТЕЧЕН ФОНД“ В ГОДИШНИЯ ОТЧЕТ СА ДВА
+РАЗЛИЧНИ КЛЮЧА.** И двата са верни за своя въпрос: единият брои по ДАТИТЕ в
+регистъра („какво пише в КДБФ към 31.12“ — може да гледа и назад във времето),
+другият по СЪСТОЯНИЕТО („какво стои на рафта днес“). Грешката не беше, че са два.
+Грешката беше, че се пишеха наново на всяко място и се разминаваха при всяка
+промяна (две от осемте копия бяха забравили, че статус NULL не значи „отчислен“),
+че носеха едно и също име, и че разликата между тях не се проверяваше от нищо.
+Измерено върху един и същ документ: без дата на вписване — 0 срещу 1; отчислен
+без акт — 1 срещу 0; вписан с бъдеща дата — 0 срещу 1.
 
-**What leaves the computer — this is the entire list:** a random
-installation number, the program version, and a coarse operating-system
-label ("Windows 11"). Nothing else. The number comes from the system's
-cryptographic generator (`crypto.randomUUID`) on first launch and is derived
-from NOTHING: not from a MAC address, disk serial, computer or user name —
-there is no path back from it to a particular library. The OS label is
-deliberately coarse: an exact build number narrows the field to a handful of
-machines and adds nothing to "is Windows 10 still in use".
+Условията вече се пишат ВЕДНЪЖ (`db/fund-sql.js`) и всяко място казва кой ключ
+ползва. Тестът брои колко пъти всеки модул взима условието от общия източник —
+без това поправката е еднократна и се разпада при следващата промяна.
 
-**What never leaves:** user or computer name, e-mail, IP address, MAC
-address, disk serial, any hardware fingerprint, the library's name, disk
-paths, and NOT ONE ROW from the database — no book, no reader, no loan.
-Locked down by a test requiring EXACTLY three fields in the request body: any
-new field breaks the test instead of slipping through unnoticed.
+**ДОКУМЕНТ С НЕВАЛИДНА ДАТА НА ВПИСВАНЕ НЕ СЪЩЕСТВУВАШЕ В РЕГИСТЪРА.**
+`books:create` приемаше `register_date` = „НЕВАЛИДНА-99-99“ — в целия handlers/books.js
+нямаше нито едно повикване на `isValidIsoDate`, докато актът, протоколът по чл. 40,
+МЗС и заемането всички го правят изрично. Тоест най-често въвежданият път беше
+единственият непроверен. Документ за 99 лв. се броеше на таблото, можеше да се
+заема — и пропадаше през всичките три мрежи: не е `<= '2026-12-31'` (кирилското
+„Н“ сортира след цифрите), `substr(...,1,4)` не е година, и не се хващаше дори от
+брояча „без дата на вписване“, който търсеше само празно и NULL. Измерено при три
+документа (10, 99 и 50 лв.): КДБФ обявяваше наличност 60 лв. и „0 недатирани“,
+докато таблото броеше три документа. Сега датата се отказва при вписване, а вече
+създадените редове се намират — включително от собствения ред на КДБФ.
 
-**When.** On first launch, on a version change, and after that at most once
-per 24 hours. Not on user actions — the program is started several times a
-day and this is not a launch counter.
+**АВТОМАТИЧНО СЪГЛАСУВАНЕ.** Дотук нямаше НИТО ЕДНО място, което да сравни две от
+дванайсетте фондови числа. Новата проверка (`fund:check`) сравнява четири неща и
+за всяко казва ПРИЧИНАТА на човешки език:
+  • веригата 31.12.(Y−1) → 01.01.Y. Двете събираеми идват от несъвместими
+    източници: наличността се чете живо от документите, а отчисленото — от
+    снимката в акта (чл. 35, ал. 2), която нарочно не се променя. Поправка на
+    „Налични бройки“ на ВЕЧЕ отчислен документ мени затворена, вече отпечатана
+    година със задна дата. Измерено: 31.12.2024 = 3, а 01.01.2025 = 5 — две
+    разпечатки в една папка, които не се връзват, и нищо, което да го каже;
+  • разликата между двата ключа, с точната ѝ причина;
+  • документите без валидна дата на вписване, с бутон „Поправи датата“;
+  • документите, вписани без партида (Част № 1 срещу Част № 2).
+Проверката се показва САМА на таблото, когато има разминаване, и подробно в
+„Проверка на данните“. Нищо не се поправя автоматично — числата в официален
+регистър не се пипат без човека, който подписва.
 
-**With no internet nothing visible happens.** The request starts AFTER the
-window exists, nobody waits for it, and it is capped at 4 seconds. On no
-connection, a proxy, a timeout or a server error, one line goes to the log (a
-warning, not an error — no internet in a village library is not a program
-fault) and the attempt repeats on the next launch. Verified against the real
-program with a dead network: the database opens, the backup is written, the
-window appears.
+**ОТЧИСЛЯВАНЕТО СЕ ПРИСПАДА НАВСЯКЪДЕ.** Документът излиза от витрините в онлайн
+каталога — дотук редът оставаше и библиотекарят виждаше „Класика (2)“, а
+посетителят на сайта една книга; това е точният огледален случай на резервациите,
+който кодът вече беше затворил в едната посока. Краеведските връзки и аналитичните
+описания носят „(отчислен с акт № N/год.)“, а нови връзки към отчислен документ се
+отказват — дотук `links:add` и `analytics:create` към него минаваха, макар
+`books:delete` изрично да отказва изтриване заради същата връзка. Отчисленият не се
+брои в лимита на записите: дотук библиотека на тавана не можеше да добави нищо,
+колкото и да отчислява, защото по чл. 39 отчисленият ред се пази безсрочно и
+`books:delete` отказва да го изтрие — двете правила се заключваха едно друго.
+Изчезва от филтъра по отдели, значката „1/1 налични“ не се рисува до „отчислен“
+(отчисляването дори ВДИГАШЕ наличността от 0 на 1, защото закрива заемането), а
+инвентаризацията брои еднакво на екрана и в подписания протокол — дотук екранът
+обявяваше нормата по чл. 40 за изпълнена, а протоколът за същата сесия гласеше
+„проверени 0“.
 
-**Where the number lives.** In its own file (`installation.json`) in the user
-folder — deliberately NOT in `config.json`, which carries the path to the
-library database and has already once been wiped by a failed read. And
-deliberately NOT in the database: it often sits on a network share used by
-several workstations, where the number would be one per library regardless of
-machine count, would travel with backups, and would "resurrect" when a backup
-is restored onto another machine.
+**ЧАКАЩИЯТ ЧИТАТЕЛ СЕ НАЗОВАВА ПОИМЕННО.** Резервациите се отказваха коректно, но
+броят им отиваше само в одитната следа, а екранът „Резервации“ показва само
+активните — тоест изчезваха безследно. Пътят за АНУЛИРАНЕ вече казваше „N
+резервации остават отказани — подновете ги“; пътят за СЪСТАВЯНЕ, в който те реално
+се отказват, мълчеше. Сега прозорецът показва списък „обадете се на…“ с име, карта
+и телефон, плюс кои витрини са опразнени.
 
-**Address and turning it off.** The server address lives in ONE place in the
-code (`install-report.js`) — `https://invlib.com/api/invlib/install`; changing
-it means changing that one line. An empty string turns the mechanism entirely
-off (no request, not even an identifier file) — the escape hatch if it ever
-needs stopping from the code. On a given machine it is disabled with
-`"installReporting": false` in `config.json`. It runs only in the installed
-program, never during development.
+**ПРИДОБИВАНЕТО СЕ ОТРАЗЯВА НАВСЯКЪДЕ.** Прескочен инвентарен номер оставя следа и
+предупреждение с точния брой — печатна грешка 5000 вместо 500 правеше 4 997 празни
+места в поредицата на официалния регистър безшумно, при това `books:delete` отказва
+изтриване точно с довода, че празното място „при проверка няма с какво да се
+обясни“. Зает номер вече казва „затворете и отворете формата отново, за да получите
+следващия свободен номер“ — същото изречение, което актът, протоколът и партидата
+имат отдавна. Провален запис на онлайн каталога при ново постъпление вече се вписва
+в дневника (дотук цяла партида от 40 книги не стигаше до сайта без нито ред), а при
+затваряне на програмата се предупреждава за непубликувани промени. И предложението
+за покупка от читател се разпознава при вписването по заглавие и автор (търпи
+обърнат ред на имената и инициал) — библиотекарят бива питан дали да го отбележи
+като получено, вместо читателят, поискал книгата, да е последният, който научава.
 
-**Found while reviewing this very change, and fixed before release:** the new
-file was missing from `build.files`, so `require()` would have thrown ONLY in
-the installed program — the error reached the startup guard and showed
-"Стартирането пропадна" instead of reporting, i.e. the installation counter
-would have STOPPED the program at every library (caught by the project's own
-`build-files-coverage.test.js`; a second guard now wraps the whole wiring in
-try/catch). A locked file (antivirus, `EBUSY` — daily reality on Windows) read
-as "first run", minting a new number OVER the healthy one, counting one library
-as two — precisely the failure this file is kept separate from `config.json`
-for. An unwritable folder still sent a fresh number on every launch, counting
-one computer as dozens; now it does not report at all. The request now uses
-`credentials: 'omit'`, since a `Set-Cookie` from the server would be a SECOND,
-permanent marker surviving replacement of the number itself. A library with no
-internet retried on every launch forever; now it waits an hour after a failure.
-The call moved into `setImmediate` so the synchronous part stays out of the tick
-that shows the window.
+Проверки: 45 нови теста в три файла, 57 мутации на реалния код, всяка с връщане и
+повторно пускане — всичките уловени от именуван тест, плюс контролна мутация, която
+трябва да мине, и минава. Две находки на самата мутационна проверка и една при
+писането на наръчника бяха истински дефекти в този кръг и са поправени (собственият
+ред „без дата“ на КДБФ, преписано условие в груповата редакция, и липсващият
+контейнер за предупреждението на таблото). Пълна поредица: 1629 успешни, 0
+неуспешни; сайтът: 8 сценария + всички проверки при 15 002 записа.
 
-Checks: 26 new tests (test/install-report-v2456.test.js), 17 mutations of the
-real code, each reverted and re-run — all caught; plus a control mutation that
-must pass, and does. Five scenarios measured against the REAL main.js: as
-shipped today (0 requests, 0 files), with a dead network, with a working
-server, a restart after a version upgrade (same number, new version), and with
-the module deliberately missing. Full suite: 1,504 passing, 0 failing (UTC and
-Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
+**EN:** A round about ONE number: how many documents the library has. It turned out
+the program computed it in twelve places with eight different conditions — and that
+two of them carry the same name on screen while answering different questions.
+
+**"LIBRARY FUND" ON THE DASHBOARD AND "LIBRARY FUND" IN THE ANNUAL REPORT ARE TWO
+DIFFERENT KEYS.** Both are right for their own question: one counts by the DATES in
+the register ("what the КДБФ says as of 31 December" — it can look back in time),
+the other by STATUS ("what is on the shelf today"). The mistake was not that there
+are two. It was that they were rewritten at every site and drifted apart (two of
+the eight copies had forgotten that a NULL status does not mean "deaccessioned"),
+that they shared a name, and that nothing ever compared them. Measured on one
+document: no entry date — 0 vs 1; deaccessioned without an act — 1 vs 0; future
+entry date — 0 vs 1. The conditions now live in one place (`db/fund-sql.js`).
+
+**A DOCUMENT WITH AN INVALID ENTRY DATE DID NOT EXIST IN THE REGISTER.**
+`books:create` accepted `register_date` = "НЕВАЛИДНА-99-99" — the whole of
+handlers/books.js contained no `isValidIsoDate` call, while the act, the art. 40
+protocol, ILL and lending all do it explicitly. A 99 BGN document counted on the
+dashboard, could be lent — and fell through all three nets, including the
+"undated documents" counter itself.
+
+**AUTOMATIC RECONCILIATION.** `fund:check` compares four things and explains each in
+plain language: the 31 Dec → 1 Jan chain (whose two terms come from incompatible
+sources — live counts vs the frozen snapshot in the act); the gap between the two
+keys, with its cause; documents with no valid entry date; documents entered without
+a batch. It appears on the dashboard by itself when something does not add up.
+Nothing is corrected automatically — numbers in an official register are not touched
+without the person who signs them.
+
+**DEACCESSION NOW PROPAGATES EVERYWHERE** (showcases, local-history links, the record
+limit, the department filter, the availability badge, the inventory count), **THE
+WAITING READER IS NAMED** (call list with name, card and phone), and **ACQUISITION IS
+REFLECTED EVERYWHERE** (skipped inventory numbers logged, a clear message for a taken
+number, catalogue write failures recorded, purchase suggestions matched on entry).
+
+Checks: 45 new tests in three files, 57 mutations — all caught, plus a control
+mutation that must pass, and does. Three real defects found by this round's own
+mutation testing and manual writing were fixed. Full suite: 1629 passing, 0 failing.
 
 ## v2.4.57
 
@@ -375,136 +409,183 @@ each until they failed); plus a control mutation that must pass, and does. Full
 suite: 1584 passing, 0 failing (UTC and Europe/Sofia); the site: 8 scenarios and all checks at 15 002
 records.
 
-## v2.4.58
+## v2.4.56
 
-**BG:** Кръг върху ЕДНО число: колко документа има библиотеката. Оказа се, че
-програмата го смята на дванайсет места с осем различни условия — и че две от тях
-носят едно и също име на екрана, но отговарят на различни въпроси.
+**BG:** Анонимно отчитане на инсталациите — за да се знае на колко компютъра
+реално работи програмата и коя версия ползват. Нищо друго в програмата не е
+пипано.
 
-**„БИБЛИОТЕЧЕН ФОНД“ НА ТАБЛОТО И „БИБЛИОТЕЧЕН ФОНД“ В ГОДИШНИЯ ОТЧЕТ СА ДВА
-РАЗЛИЧНИ КЛЮЧА.** И двата са верни за своя въпрос: единият брои по ДАТИТЕ в
-регистъра („какво пише в КДБФ към 31.12“ — може да гледа и назад във времето),
-другият по СЪСТОЯНИЕТО („какво стои на рафта днес“). Грешката не беше, че са два.
-Грешката беше, че се пишеха наново на всяко място и се разминаваха при всяка
-промяна (две от осемте копия бяха забравили, че статус NULL не значи „отчислен“),
-че носеха едно и също име, и че разликата между тях не се проверяваше от нищо.
-Измерено върху един и същ документ: без дата на вписване — 0 срещу 1; отчислен
-без акт — 1 срещу 0; вписан с бъдеща дата — 0 срещу 1.
+**Защо изобщо.** Броячът на изтеглянията в GitHub брои ИЗТЕГЛЯНИЯ, не
+инсталации: читалище, което свали инсталатора на три работни места и веднъж
+пак след антивирусна тревога, се брои четири пъти, а библиотека, получила
+файла на флашка, не се брои изобщо. Без реално число не може да се прецени
+нито докога има смисъл да се пази съвместимост със стара версия, нито дали
+автоматичното обновяване изобщо стига до работните места.
 
-Условията вече се пишат ВЕДНЪЖ (`db/fund-sql.js`) и всяко място казва кой ключ
-ползва. Тестът брои колко пъти всеки модул взима условието от общия източник —
-без това поправката е еднократна и се разпада при следващата промяна.
+**Какво излиза от компютъра — това е целият списък:** случаен номер на
+инсталацията, версията на програмата и груб вид на операционната система
+(„Windows 11“). Нищо друго. Номерът се тегли от криптографския генератор на
+системата (`crypto.randomUUID`) при първото пускане и НЕ е производен на
+нищо: не се смята от MAC адрес, сериен номер на диска, име на компютър или
+на потребител — обратен път от него към конкретна библиотека няма. Видът на
+операционната система е нарочно ГРУБ: точният номер на компилацията стеснява
+кръга до шепа машини, а за преценка „още ли се ползва Windows 10“ не носи
+нищо повече.
 
-**ДОКУМЕНТ С НЕВАЛИДНА ДАТА НА ВПИСВАНЕ НЕ СЪЩЕСТВУВАШЕ В РЕГИСТЪРА.**
-`books:create` приемаше `register_date` = „НЕВАЛИДНА-99-99“ — в целия handlers/books.js
-нямаше нито едно повикване на `isValidIsoDate`, докато актът, протоколът по чл. 40,
-МЗС и заемането всички го правят изрично. Тоест най-често въвежданият път беше
-единственият непроверен. Документ за 99 лв. се броеше на таблото, можеше да се
-заема — и пропадаше през всичките три мрежи: не е `<= '2026-12-31'` (кирилското
-„Н“ сортира след цифрите), `substr(...,1,4)` не е година, и не се хващаше дори от
-брояча „без дата на вписване“, който търсеше само празно и NULL. Измерено при три
-документа (10, 99 и 50 лв.): КДБФ обявяваше наличност 60 лв. и „0 недатирани“,
-докато таблото броеше три документа. Сега датата се отказва при вписване, а вече
-създадените редове се намират — включително от собствения ред на КДБФ.
+**Какво НЕ излиза, никога:** име на потребител или компютър, имейл, IP
+адрес, MAC адрес, сериен номер на диска, какъвто и да е хардуерен отпечатък,
+име на библиотеката, пътища по диска, и НИТО ЕДИН ред от базата данни — нито
+книга, нито читател, нито заемане. Заковано с тест, който изисква в тялото
+на заявката да има ТОЧНО три полета: всяко ново поле чупи теста, вместо да
+се промъкне незабелязано при бъдеща промяна.
 
-**АВТОМАТИЧНО СЪГЛАСУВАНЕ.** Дотук нямаше НИТО ЕДНО място, което да сравни две от
-дванайсетте фондови числа. Новата проверка (`fund:check`) сравнява четири неща и
-за всяко казва ПРИЧИНАТА на човешки език:
-  • веригата 31.12.(Y−1) → 01.01.Y. Двете събираеми идват от несъвместими
-    източници: наличността се чете живо от документите, а отчисленото — от
-    снимката в акта (чл. 35, ал. 2), която нарочно не се променя. Поправка на
-    „Налични бройки“ на ВЕЧЕ отчислен документ мени затворена, вече отпечатана
-    година със задна дата. Измерено: 31.12.2024 = 3, а 01.01.2025 = 5 — две
-    разпечатки в една папка, които не се връзват, и нищо, което да го каже;
-  • разликата между двата ключа, с точната ѝ причина;
-  • документите без валидна дата на вписване, с бутон „Поправи датата“;
-  • документите, вписани без партида (Част № 1 срещу Част № 2).
-Проверката се показва САМА на таблото, когато има разминаване, и подробно в
-„Проверка на данните“. Нищо не се поправя автоматично — числата в официален
-регистър не се пипат без човека, който подписва.
+**Кога.** При първо пускане, при смяна на версията, и после най-много веднъж
+на 24 часа. Не при действия на потребителя — програмата се стартира по
+няколко пъти на ден и това не е брояч на стартирания.
 
-**ОТЧИСЛЯВАНЕТО СЕ ПРИСПАДА НАВСЯКЪДЕ.** Документът излиза от витрините в онлайн
-каталога — дотук редът оставаше и библиотекарят виждаше „Класика (2)“, а
-посетителят на сайта една книга; това е точният огледален случай на резервациите,
-който кодът вече беше затворил в едната посока. Краеведските връзки и аналитичните
-описания носят „(отчислен с акт № N/год.)“, а нови връзки към отчислен документ се
-отказват — дотук `links:add` и `analytics:create` към него минаваха, макар
-`books:delete` изрично да отказва изтриване заради същата връзка. Отчисленият не се
-брои в лимита на записите: дотук библиотека на тавана не можеше да добави нищо,
-колкото и да отчислява, защото по чл. 39 отчисленият ред се пази безсрочно и
-`books:delete` отказва да го изтрие — двете правила се заключваха едно друго.
-Изчезва от филтъра по отдели, значката „1/1 налични“ не се рисува до „отчислен“
-(отчисляването дори ВДИГАШЕ наличността от 0 на 1, защото закрива заемането), а
-инвентаризацията брои еднакво на екрана и в подписания протокол — дотук екранът
-обявяваше нормата по чл. 40 за изпълнена, а протоколът за същата сесия гласеше
-„проверени 0“.
+**При липса на интернет не се случва нищо видимо.** Заявката тръгва СЛЕД
+като прозорецът вече е създаден, никой не я чака, таванът ѝ е 4 секунди. При
+липса на връзка, прокси, изтекло време или грешка от сървъра остава един ред
+в дневника (предупреждение, не грешка — липсата на интернет в читалище не е
+повреда на програмата), а опитът се повтаря при следващото стартиране.
+Проверено срещу истинската програма при мъртва мрежа: базата се отваря,
+резервното копие се прави, прозорецът се показва.
 
-**ЧАКАЩИЯТ ЧИТАТЕЛ СЕ НАЗОВАВА ПОИМЕННО.** Резервациите се отказваха коректно, но
-броят им отиваше само в одитната следа, а екранът „Резервации“ показва само
-активните — тоест изчезваха безследно. Пътят за АНУЛИРАНЕ вече казваше „N
-резервации остават отказани — подновете ги“; пътят за СЪСТАВЯНЕ, в който те реално
-се отказват, мълчеше. Сега прозорецът показва списък „обадете се на…“ с име, карта
-и телефон, плюс кои витрини са опразнени.
+**Къде се пази номерът.** В собствен файл (`installation.json`) в
+потребителската папка — нарочно НЕ в `config.json`, защото той носи пътя до
+базата данни и вече веднъж е бил изтриван от неуспешен прочит. И нарочно НЕ
+в базата: тя често е на мрежов дял, споделен между няколко работни места —
+там номерът щеше да е един за цялото читалище, щеше да пътува с резервните
+копия и да „възкръсва“ при възстановяване върху друга машина.
 
-**ПРИДОБИВАНЕТО СЕ ОТРАЗЯВА НАВСЯКЪДЕ.** Прескочен инвентарен номер оставя следа и
-предупреждение с точния брой — печатна грешка 5000 вместо 500 правеше 4 997 празни
-места в поредицата на официалния регистър безшумно, при това `books:delete` отказва
-изтриване точно с довода, че празното място „при проверка няма с какво да се
-обясни“. Зает номер вече казва „затворете и отворете формата отново, за да получите
-следващия свободен номер“ — същото изречение, което актът, протоколът и партидата
-имат отдавна. Провален запис на онлайн каталога при ново постъпление вече се вписва
-в дневника (дотук цяла партида от 40 книги не стигаше до сайта без нито ред), а при
-затваряне на програмата се предупреждава за непубликувани промени. И предложението
-за покупка от читател се разпознава при вписването по заглавие и автор (търпи
-обърнат ред на имената и инициал) — библиотекарят бива питан дали да го отбележи
-като получено, вместо читателят, поискал книгата, да е последният, който научава.
+**Адрес и изключване.** Адресът на сървъра стои на ЕДНО място в кода
+(`install-report.js`) — `https://invlib.com/api/invlib/install`; смяна на
+адреса значи смяна само на този ред. Празен низ изключва механизма напълно
+(нито заявка, нито дори файл с номер) — това е изходът, ако някога трябва да
+се спре от кода. На конкретна машина се изключва с ред
+`"installReporting": false` в `config.json`. Работи само в инсталираната
+програма, не при разработка и тестове.
 
-Проверки: 45 нови теста в три файла, 57 мутации на реалния код, всяка с връщане и
-повторно пускане — всичките уловени от именуван тест, плюс контролна мутация, която
-трябва да мине, и минава. Две находки на самата мутационна проверка и една при
-писането на наръчника бяха истински дефекти в този кръг и са поправени (собственият
-ред „без дата“ на КДБФ, преписано условие в груповата редакция, и липсващият
-контейнер за предупреждението на таблото). Пълна поредица: 1629 успешни, 0
-неуспешни; сайтът: 8 сценария + всички проверки при 15 002 записа.
+**Намерено при прегледа на самата промяна и поправено, преди да излезе:**
 
-**EN:** A round about ONE number: how many documents the library has. It turned out
-the program computed it in twelve places with eight different conditions — and that
-two of them carry the same name on screen while answering different questions.
+- **Новият файл не влизаше в инсталатора** (`build.files`). `require()` щеше
+  да хвърли САМО в инсталираната програма — тоест точно там, където никой
+  разработчик не гледа — грешката влизаше в общия предпазител на старта и
+  вместо отчитане показваше „Стартирането пропадна“: броячът на инсталации
+  щеше да СПИРА програмата на всяка библиотека. Хванато от собствения тест
+  на проекта (`build-files-coverage.test.js`). Добавен е и втори пояс: цялото
+  тяло на свързването е в try/catch. Измерено с нарочно скрит модул — с пояса
+  0 диалога и 0 опита за изход, без него: диалог и изход.
+- **Заключен файл се четеше като „първо пускане“.** Под Windows антивирусна
+  програма държи файл за миг постоянно; при това положение номерът се
+  създаваше наново и се записваше ВЪРХУ здравия — едно читалище се броеше за
+  две инсталации, и то при всяко улучване. Точно провалът, заради който този
+  файл е отделен от config.json. Сега „липсва“ и „не се чете“ са различни
+  неща: при нечетим файл не се пипа нищо. Възпроизведено с подменен
+  readFileSync, който хвърля EBUSY.
+- **Незаписан номер въпреки това се пращаше.** При папка без права всяко
+  пускане теглеше нов номер и го изпращаше — един компютър щеше да се брои
+  като десетки. Сега при неуспешен запис не се отчита изобщо.
+- **Бисквитки.** Заявката вече е с `credentials: 'omit'`: иначе отговор със
+  `Set-Cookie` от сървъра би станал ВТОРИ, постоянен белег, при това такъв,
+  който преживява подмяната на самия номер — обратното на обещаното.
+- **Опит при всяко пускане.** Библиотека без интернет правеше по един
+  четирисекунден опит и по ред в дневника при всяко пускане, завинаги. Сега
+  след неуспял опит се изчаква час.
+- Свързването е изнесено в `setImmediate` — синхронната част (require, четене
+  на config.json, при първо пускане и запис) няма работа в тика, който показва
+  прозореца.
+- Дребно: неуспешно преименуване оставяше файл `.tmp` да лежи завинаги;
+  документацията твърдеше „една инсталация = един компютър“, а мярката е
+  потребителски профил на Windows (така се и инсталира програмата).
 
-**"LIBRARY FUND" ON THE DASHBOARD AND "LIBRARY FUND" IN THE ANNUAL REPORT ARE TWO
-DIFFERENT KEYS.** Both are right for their own question: one counts by the DATES in
-the register ("what the КДБФ says as of 31 December" — it can look back in time),
-the other by STATUS ("what is on the shelf today"). The mistake was not that there
-are two. It was that they were rewritten at every site and drifted apart (two of
-the eight copies had forgotten that a NULL status does not mean "deaccessioned"),
-that they shared a name, and that nothing ever compared them. Measured on one
-document: no entry date — 0 vs 1; deaccessioned without an act — 1 vs 0; future
-entry date — 0 vs 1. The conditions now live in one place (`db/fund-sql.js`).
+Проверки: 26 нови теста (test/install-report-v2456.test.js), 17 мутации на
+реалния код, всяка с връщане и повторно пускане — всичките уловени; плюс
+контролна мутация, която трябва да мине, и минава. Пет сценария измерени
+срещу ИСТИНСКИЯ main.js: както се разпространява днес (0 заявки, 0 файла),
+с мъртва мрежа, с работещ сървър, повторно стартиране след обновяване на
+версията (същият номер, нова версия), и с нарочно липсващ модул. Пълната
+поредица: 1504 успешни, 0 неуспешни (UTC и Europe/Sofia); сайтът: 8 сценария
++ всички проверки при 15 002 записа.
 
-**A DOCUMENT WITH AN INVALID ENTRY DATE DID NOT EXIST IN THE REGISTER.**
-`books:create` accepted `register_date` = "НЕВАЛИДНА-99-99" — the whole of
-handlers/books.js contained no `isValidIsoDate` call, while the act, the art. 40
-protocol, ILL and lending all do it explicitly. A 99 BGN document counted on the
-dashboard, could be lent — and fell through all three nets, including the
-"undated documents" counter itself.
+**EN:** Anonymous installation reporting — to learn how many computers
+actually run the program and which version they use. Nothing else in the
+program was touched.
 
-**AUTOMATIC RECONCILIATION.** `fund:check` compares four things and explains each in
-plain language: the 31 Dec → 1 Jan chain (whose two terms come from incompatible
-sources — live counts vs the frozen snapshot in the act); the gap between the two
-keys, with its cause; documents with no valid entry date; documents entered without
-a batch. It appears on the dashboard by itself when something does not add up.
-Nothing is corrected automatically — numbers in an official register are not touched
-without the person who signs them.
+**Why.** GitHub's download counter counts DOWNLOADS, not installations: a
+library that fetched the installer on three workstations and once more after
+an antivirus false alarm counts four times, while one that got the file on a
+USB stick does not count at all. Without a real number there is no way to
+judge how long compatibility with an old version is worth keeping, or
+whether automatic updates reach the workstations at all.
 
-**DEACCESSION NOW PROPAGATES EVERYWHERE** (showcases, local-history links, the record
-limit, the department filter, the availability badge, the inventory count), **THE
-WAITING READER IS NAMED** (call list with name, card and phone), and **ACQUISITION IS
-REFLECTED EVERYWHERE** (skipped inventory numbers logged, a clear message for a taken
-number, catalogue write failures recorded, purchase suggestions matched on entry).
+**What leaves the computer — this is the entire list:** a random
+installation number, the program version, and a coarse operating-system
+label ("Windows 11"). Nothing else. The number comes from the system's
+cryptographic generator (`crypto.randomUUID`) on first launch and is derived
+from NOTHING: not from a MAC address, disk serial, computer or user name —
+there is no path back from it to a particular library. The OS label is
+deliberately coarse: an exact build number narrows the field to a handful of
+machines and adds nothing to "is Windows 10 still in use".
 
-Checks: 45 new tests in three files, 57 mutations — all caught, plus a control
-mutation that must pass, and does. Three real defects found by this round's own
-mutation testing and manual writing were fixed. Full suite: 1629 passing, 0 failing.
+**What never leaves:** user or computer name, e-mail, IP address, MAC
+address, disk serial, any hardware fingerprint, the library's name, disk
+paths, and NOT ONE ROW from the database — no book, no reader, no loan.
+Locked down by a test requiring EXACTLY three fields in the request body: any
+new field breaks the test instead of slipping through unnoticed.
+
+**When.** On first launch, on a version change, and after that at most once
+per 24 hours. Not on user actions — the program is started several times a
+day and this is not a launch counter.
+
+**With no internet nothing visible happens.** The request starts AFTER the
+window exists, nobody waits for it, and it is capped at 4 seconds. On no
+connection, a proxy, a timeout or a server error, one line goes to the log (a
+warning, not an error — no internet in a village library is not a program
+fault) and the attempt repeats on the next launch. Verified against the real
+program with a dead network: the database opens, the backup is written, the
+window appears.
+
+**Where the number lives.** In its own file (`installation.json`) in the user
+folder — deliberately NOT in `config.json`, which carries the path to the
+library database and has already once been wiped by a failed read. And
+deliberately NOT in the database: it often sits on a network share used by
+several workstations, where the number would be one per library regardless of
+machine count, would travel with backups, and would "resurrect" when a backup
+is restored onto another machine.
+
+**Address and turning it off.** The server address lives in ONE place in the
+code (`install-report.js`) — `https://invlib.com/api/invlib/install`; changing
+it means changing that one line. An empty string turns the mechanism entirely
+off (no request, not even an identifier file) — the escape hatch if it ever
+needs stopping from the code. On a given machine it is disabled with
+`"installReporting": false` in `config.json`. It runs only in the installed
+program, never during development.
+
+**Found while reviewing this very change, and fixed before release:** the new
+file was missing from `build.files`, so `require()` would have thrown ONLY in
+the installed program — the error reached the startup guard and showed
+"Стартирането пропадна" instead of reporting, i.e. the installation counter
+would have STOPPED the program at every library (caught by the project's own
+`build-files-coverage.test.js`; a second guard now wraps the whole wiring in
+try/catch). A locked file (antivirus, `EBUSY` — daily reality on Windows) read
+as "first run", minting a new number OVER the healthy one, counting one library
+as two — precisely the failure this file is kept separate from `config.json`
+for. An unwritable folder still sent a fresh number on every launch, counting
+one computer as dozens; now it does not report at all. The request now uses
+`credentials: 'omit'`, since a `Set-Cookie` from the server would be a SECOND,
+permanent marker surviving replacement of the number itself. A library with no
+internet retried on every launch forever; now it waits an hour after a failure.
+The call moved into `setImmediate` so the synchronous part stays out of the tick
+that shows the window.
+
+Checks: 26 new tests (test/install-report-v2456.test.js), 17 mutations of the
+real code, each reverted and re-run — all caught; plus a control mutation that
+must pass, and does. Five scenarios measured against the REAL main.js: as
+shipped today (0 requests, 0 files), with a dead network, with a working
+server, a restart after a version upgrade (same number, new version), and with
+the module deliberately missing. Full suite: 1,504 passing, 0 failing (UTC and
+Europe/Sofia); site: 8 scenarios + all checks at 15,002 records.
 
 ## v2.4.55
 
