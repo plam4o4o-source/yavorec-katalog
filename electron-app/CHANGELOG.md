@@ -11,6 +11,44 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.60
+
+**BG:** Адресът за връзка в „Настройки“ → „Помощ и обратна връзка“ вече е
+**support@invlib.com** — пощенска кутия на домейна на програмата, вместо личния
+адрес, с който картата тръгна във v1.73.0. Разликата не е козметична: библиотеката
+пише на един и същ адрес независимо кой отговаря от другата страна, а адресът
+остава валиден и когато поддръжката се смени или се поеме от повече от един
+човек. Дотук единственият начин за връзка беше личната поща на разработчика —
+което върши работа, докато програмата се ползва от една библиотека, и спира да
+върши работа точно когато се ползва от много.
+
+Сменен е на всички места, откъдето библиотекарят го вижда или употребява:
+надписът в картата, бутонът „Съобщи за грешка…“ (попълва получателя на писмото),
+бутонът „Копирай имейла“, наръчникът и README за библиотекаря. Старите записи в
+този файл НЕ са пипани — те описват какво е било издадено тогава, а не какво е
+вярно днес.
+
+Проверки: трите теста в `test/views-regressions.test.js`, които заковават адреса
+на трите места (картата, получателят на писмото и буферът при копиране), следват
+новия. Пълна поредица: 1652 успешни, 0 неуспешни, в UTC и Europe/Sofia.
+
+**EN:** The contact address in Settings → Help & feedback is now
+**support@invlib.com** — a mailbox on the program's own domain instead of the
+personal address the card shipped with in v1.73.0. The difference is not cosmetic:
+a library writes to the same address regardless of who answers, and the address
+survives a change of hands. Until now the only route was the developer's personal
+mail — which works while one library uses the program, and stops working exactly
+when many do.
+
+Changed everywhere the librarian sees or uses it: the card, the "Report a bug…"
+button (which fills in the recipient), the "Copy the e-mail" button, the manual and
+the librarian's README. Older entries in this file are left untouched — they record
+what was released then, not what is true now.
+
+Checks: the three tests in `test/views-regressions.test.js` that pin the address at
+its three places follow the new one. Full suite: 1652 passing, 0 failing, in UTC
+and Europe/Sofia.
+
 ## v2.4.59
 
 **BG:** Малък кръг: една предпазна ограда, която липсваше на едно от четирите

@@ -560,12 +560,12 @@ test('подсказката в прегледа сочи към „Запази
    подават правилно попълнено писмо/копие, не самата IPC валидация (вече покрита
    в test/handlers-notices.test.js). */
 
-test('картата „Помощ и обратна връзка“ показва имейла на разработчика в Настройки', async () => {
+test('картата „Помощ и обратна връзка“ показва имейла за поддръжка в Настройки', async () => {
   const dom = await settled(buildDom({ 'settings.get': { org: 'НЧ „Васил Левски 1922“', lib_name: '' } }));
   const { window } = dom;
   await window.renderSetup();
   const html = window.document.getElementById('view').innerHTML;
-  assert.match(html, /plam4o\.4o@outlook\.com/, 'картата трябва да показва имейла plam4o.4o@outlook.com');
+  assert.match(html, /support@invlib\.com/, 'картата трябва да показва имейла support@invlib.com');
   assert.ok(window.document.querySelector('button[onclick="reportBug()"]'), 'трябва да има бутон „Съобщи за грешка…“');
   assert.ok(window.document.querySelector('button[onclick="copyDevEmail()"]'), 'трябва да има бутон „Копирай имейла“');
 });
@@ -600,7 +600,7 @@ test('reportBug() отваря пощенския клиент с имейла �
   window.toast = (m, t) => toasts.push([t, m]);
   await window.reportBug();
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].email, 'plam4o.4o@outlook.com');
+  assert.equal(calls[0].email, 'support@invlib.com');
   assert.match(calls[0].subject, /InvLib/);
   assert.match(calls[0].subject, /1\.73\.0/, 'темата съдържа версията на програмата');
   assert.match(calls[0].body, /Библиотека при читалището/, 'тялото съдържа името на библиотеката за контекст');
@@ -631,10 +631,10 @@ test('copyDevEmail() копира имейла на разработчика в 
   const toasts = [];
   window.toast = (m, t) => toasts.push([t, m]);
   await window.copyDevEmail();
-  assert.deepEqual(written, ['plam4o.4o@outlook.com']);
+  assert.deepEqual(written, ['support@invlib.com']);
   assert.equal(toasts.length, 1);
   assert.equal(toasts[0][0], 'ok');
-  assert.match(toasts[0][1], /plam4o\.4o@outlook\.com/);
+  assert.match(toasts[0][1], /support@invlib\.com/);
 });
 
 // Всеки клас за решетка в този CSS носи собствено `display:grid` — няма общо
