@@ -19,7 +19,7 @@ const { isValidIsoDate, resolveScannedBook } = require('../security-utils');
 const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/enum-triggers');
 /* Начислението в читателската сметка минава през handlers/account.js — сметката
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
-const { chargeLost, chargeCoverage, LOST_CHARGE_TYPE } = require('./account');
+const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
 
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
@@ -71,6 +71,90 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);
   }
+  /* Закръгляне до стотинка — ЕДНО за целия модул (v2.4.61). Дотук функцията
+     стоеше по-надолу, при блока за изгубените документи, и я ползваше само той:
+     loans:return, loans:returnByCode и loans:extend записваха суровото
+     произведение „дни × ставка“ в loans.fine и в базата лягаше
+     0.7000000000000001 (7 дни × 0.10 в двоична плаваща запетая). Числото после
+     се печата в напомнителното писмо по чл. 43, ал. 2, събира се в годишния
+     отчет и се изравнява с касата — а сумата, която НЕ е кръгла до стотинка, не
+     може да бъде платена и остава вечен остатък от 1e-16, който боядисва
+     платената сметка в червено (същият дефект, заради който handlers/account.js
+     закръгля баланса — виж бележката при toCents там).
+     Домашното правило е изрично: всяка ЗАПИСАНА или ОТПЕЧАТАНА сума минава през
+     закръгляне до стотинка. Затова функцията се качва тук, над всички
+     обработчици, и се ползва навсякъде, където се пипа loans.fine. */
+  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  /* Датата, както я пише и чете библиотекарят — „18.09.2026“ (v2.4.61). Целият
+     екран, всички печатни документи и всички останали съобщения на гишето са в
+     този вид; ISO низът от базата („2026-09-18“) се показваше само на едно
+     място (виж „вече е зает от … до“ в loans:checkoutByCode) и се четеше като
+     техническа грешка. Форматирането става на ЕДНО място, за да не се повтаря
+     `split('-').reverse().join('.')` по съобщенията. */
+  const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
+  /* ЕДНА ВРАТА ЗА „МОЖЕ ЛИ ТОЗИ ЧОВЕК ДА ЗАЕМА“ (v2.4.61).
+     =====================================================================
+     Дотук преди заемането се питаше единствено дали читателят не е НАКАЗАН
+     (checkSuspended по-долу). Три други, също толкова истински пречки минаваха
+     безпрепятствено — и през двете врати за заемане:
+
+       • ЧИТАТЕЛ СЪС СЪСТОЯНИЕ „ПРЕКРАТЕН“. Полето го има във формуляра, списъкът
+         го показва с етикет, „Читатели“ филтрира по него — а на гишето то не
+         значеше нищо: прекратената регистрация заемаше като активна. Точно това
+         състояние библиотекарката задава, когато читателят се е изнесъл от
+         селото, починал е или сам е поискал да бъде отписан (то е и препоръчаният
+         от програмата път вместо изтриване — виж readers:delete). Ако въпреки
+         това може да заема, полето е украса.
+
+       • ЧИТАТЕЛ БЕЗ ОТБЕЛЯЗАНО СЪГЛАСИЕ по чл. 47, ал. 2 и ОРЗД. Заемането е
+         обработване на лични данни (кой какво чете) и стъпва върху съгласието,
+         което ползвателят дава при записването си. Формата отказва запис без
+         отметка от v2.2.0 насам, но обработчикът readers:create я нямаше, тоест
+         всеки друг път (внос от стара база, мобилният път, второ работно място,
+         API) вкарваше читател без съгласие — и той спокойно заемаше.
+
+       • НЕСЪЩЕСТВУВАЩ ЧИТАТЕЛ. Отказът идваше чак от външния ключ, с общото
+         „Действието е невъзможно, защото записът е свързан с други данни.“ —
+         съобщение, което не казва нищо на гишето. Случаят е напълно реален при
+         две работни места към обща база: другото място е изтрило читателя,
+         докато този екран още го показва. readers:update отдавна казва вярното
+         изречение; заемането — не.
+
+     Проверката е ТУК, в обработчика, а не (само) на екрана, защото екранът е
+     един от четирите пътя. Вика се ПЪРВА в транзакцията — преди документа и
+     преди лимитите: човекът е по-важен от книгата, а и съобщението трябва да е
+     за истинската пречка, не за бройките.
+     Връща реда на читателя, за да не се чете втори път за одитната следа. */
+  const READER_BLOCK_STATUS = 'прекратен';
+  /* Категорията на читателите под 14 години — дословно както я пише формата
+     (KATEG в src/views/core.js) и както я разпознава дневникът (a_age_u14 в
+     handlers/dnevnik.js). Стои като именувана константа, защото по нея се взима
+     решение с последици извън програмата: до кого се адресира напомнителното
+     писмо по чл. 43 (виж loans:overdueByReader). */
+  const CHILD_CATEGORY = 'дете до 14 г.';
+  function checkReaderMayBorrow(db, readerId) {
+    const r = db.prepare('SELECT id, name, card_no, status, gdpr_consent FROM readers WHERE id = ?').get(readerId);
+    if (!r) throw new Error('Читателят не е намерен — вероятно е изтрит от друго работно място.');
+    if (String(r.status || '').trim() === READER_BLOCK_STATUS) {
+      throw new Error('Регистрацията на ' + r.name + ' е прекратена и заемане не се допуска. '
+        + 'Ако читателят се е върнал в библиотеката, върнете състоянието му на „активен“ в картона '
+        + '(и отбележете пререгистрация, ако е за нова година).');
+    }
+    if (!r.gdpr_consent) {
+      throw new Error('За ' + r.name + ' няма отбелязано съгласие по чл. 47, ал. 2 и за обработване на личните данни. '
+        + 'Заемането се вписва на негово име, затова първо отбележете съгласието в картона на читателя '
+        + '(„Читатели“ → редакция) — читателят се подписва на читателския си картон.');
+    }
+    return r;
+  }
+  /* Кой е взел/продължил документа — за одитната следа (v2.4.61). Дотук следата
+     на заемането гласеше само „инв. № 1 — Под игото“, а на продължението дори
+     това го нямаше („заемане № 12 до 2026-10-15 (1/2)“). Одитната следа е
+     документът, който проверяващият чете, когато търси кой какво е правил: ако
+     от нея трябва да се мине през loans, за да се разбере на кого е дадена
+     книгата, тя не върши работа. Виж как го прави следата на изгубения документ
+     (loans:markLost по-долу) — този помощник е точно нейният формат. */
+  const readerTrace = (r) => r ? ('читател ' + r.name + (r.card_no ? ' (карта ' + r.card_no + ')' : '')) : 'читател —';
   function applySuspension(readerId, dueDate, inDate) {
     const db = getDb();
     const rule = circRule(readerCategory(readerId));
@@ -145,7 +229,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            ОТВОРЕНО заемане, а този ред го изхвърляше — екранът „Просрочени“ и
            напомнителното писмо искаха 0.25 лв., а гишето после 2.05 лв. Точно
            трите различни суми, срещу които е бележката по-горе. */
-        r.fine = (Number(r.fine) || 0) + r.daysLate * perDay;
+        // toCents и тук (v2.4.61): числото се ПЕЧАТА в напомнителното писмо и се
+        // сравнява с касата — виж бележката при toCents.
+        r.fine = toCents((Number(r.fine) || 0) + r.daysLate * perDay);
       });
       return rows;
     })
@@ -173,8 +259,17 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const db = getDb();
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
       const perDay = Number(s.fine_per_day) || 0;
+      /* Гарантът пътува заедно с читателя (v2.4.61). Напомнителното писмо по
+         чл. 43 за читател под 14 години се адресира до родителя/настойника, а не
+         до детето — самата форма за читател го казва с думи („отговорността за
+         връщане на заетите документи и контактът при просрочие са на
+         родителя/настойника, не на детето“), но печатното писмо дотук започваше
+         с „До: Ани Детска“ и предупреждаваше седемгодишно дете за преустановяване
+         на достъпа. Полетата се четат тук, за да не се налага печатът да прави
+         втора обиколка за всеки читател. */
       const rows = db.prepare(`
-        SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, COUNT(*) AS n
+        SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, r.category,
+               r.guarantor_name, r.guarantor_relation, r.guarantor_phone, COUNT(*) AS n
         FROM loans l JOIN readers r ON r.id = l.reader_id
         WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
         GROUP BY l.reader_id
@@ -184,8 +279,18 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       rows.forEach(r => {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);
         // Виж бележката при loans:overdue: натрупаното по заемането се добавя.
-        r.loans.forEach(d => { d.fine = (Number(d.fine) || 0) + effectiveDaysLate(d.date_due, now) * perDay; });
-        r.fine = r.loans.reduce((sum, d) => sum + d.fine, 0);
+        r.loans.forEach(d => { d.fine = toCents((Number(d.fine) || 0) + effectiveDaysLate(d.date_due, now) * perDay); });
+        // toCents и на сбора (v2.4.61): това е числото в реда „Общо дължимо
+        // обезщетение“ на напомнителното писмо.
+        r.fine = toCents(r.loans.reduce((sum, d) => sum + d.fine, 0));
+        /* До кого върви писмото (v2.4.61). За читател под 14 години — до
+           родителя/настойника, „чрез“ когото се води и самият читател. Решението
+           се взима ТУК, а не на екрана, защото и печатът (src/views/logo-org.js),
+           и напомнянията по пощата/SMS трябва да стигнат до един и същ човек. */
+        const guardian = (r.category === CHILD_CATEGORY && r.guarantor_name) ? r.guarantor_name : null;
+        r.notice_to = guardian || r.name;
+        r.notice_via_guarantor = guardian ? (r.guarantor_relation || 'родител/настойник') : null;
+        if (guardian && r.guarantor_phone) r.phone = r.guarantor_phone;
       });
       return rows;
     })
@@ -196,8 +301,45 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       if (date_due != null && date_due !== '' && !isValidIsoDate(date_due)) {
         throw new Error('Датата на връщане (' + date_due + ') е невалидна.');
       }
+      /* НЕВЪЗМОЖНИ ДАТИ СЕ ОТКАЗВАТ НА ВРАТАТА (v2.4.61).
+         =================================================================
+         isValidIsoDate() пита само „това дата ли е“, не и „възможна ли е“.
+         Дотук минаваха две невъзможни заемания, и двете с последици, които се
+         поправят трудно, защото програмата няма път за изтриване на заемане:
+
+           • ЗАЕМАНЕ С БЪДЕЩА ДАТА. Най-честата причина е сгрешена година или
+             месец в полето за дата (28.09 вместо 28.08). Заемането не влиза в
+             „Просрочени“ (падежът е още по-напред), събитието се вписва с
+             бъдеща дата и предложенията за Дневника за онзи бъдещ ден вече са
+             попълнени, преди денят да е дошъл, а годишният отчет брои заемане в
+             година, която още не е започнала. Библиотечният документ се дава от
+             ръка в ръка — заемане „за вдругиден“ не съществува.
+
+           • ПАДЕЖ ПРЕДИ ДАТАТА НА ЗАЕМАНЕ. Заемането се ражда просрочено:
+             същия ден влиза в „Просрочени“, трупа обезщетение по чл. 43 и
+             наказание в дни за период, който никога не е текъл, а напомнителното
+             писмо иска пари за него. Равни дати се допускат (документ, зает и
+             върнат в същия ден — дневна читалня), по-ранна дата — не.
+
+         Отказът е тук, в обработчика, защото формата е само един от пътищата
+         (внос, мобилен път, второ работно място, API). Съобщението назовава и
+         двете дати: най-често разликата е една цифра и се вижда веднага. */
+      const nowStr = today();
+      if (date_out > nowStr) {
+        throw new Error('Датата на заемане (' + bgDate(date_out) + ' г.) е в бъдещето — днес е '
+          + bgDate(nowStr) + ' г. Документът се заема в деня, в който излиза от библиотеката. '
+          + 'Проверете датата.');
+      }
+      if (date_due && date_due < date_out) {
+        throw new Error('Срокът за връщане (' + bgDate(date_due) + ' г.) е преди датата на заемане ('
+          + bgDate(date_out) + ' г.). Такова заемане се ражда просрочено и още в същия ден започва да трупа '
+          + 'обезщетение по чл. 43 за период, който не е течал. Поправете срока или го оставете празен, '
+          + 'за да го изчисли програмата.');
+      }
       const db = getDb();
       const tx = db.transaction(() => {
+        // Първо човекът, после документът — виж checkReaderMayBorrow по-горе.
+        const rdr = checkReaderMayBorrow(db, reader_id);
         const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(book_id);
         const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(book_id).n;
         const qty = inv ? inv.quantity : 0;
@@ -234,7 +376,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)
         `).run(reader_id, book_id, date_out, dueStr);
         const b = db.prepare('SELECT title, inv_number FROM books WHERE id = ?').get(book_id);
-        logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : ''));
+        // Следата назовава и ЧИТАТЕЛЯ (v2.4.61) — виж readerTrace по-горе.
+        logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : '')
+          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr));
         logEvent('заемане', { bookId: book_id, readerId: reader_id, date: date_out });
         return info.lastInsertRowid;
       });
@@ -250,12 +394,32 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       }
       const db = getDb();
       const inDate = date_in || today();
+      /* ВРЪЩАНЕ В БЪДЕЩЕТО НЕ СЪЩЕСТВУВА (v2.4.61).
+         =================================================================
+         Дотук датата на връщане се проверяваше само за формат. Бъдещата дата е
+         най-често сгрешена година или месец, а последицата е тежка и невидима:
+         годишният отчет брои ВРЪЩАНИЯТА по date_in (виж handlers/stats.js), тоест
+         книга, „върната“ на 05.01.2027 г., изчезва от отчета за тази година и се
+         появява в следващата — а Дневникът за онзи бъдещ ден получава събитие
+         „връщане“, преди денят да е настъпил. Освен това наказанието и
+         обезщетението се смятат спрямо тази дата: връщане, датирано напред,
+         „изяжда“ реалната забава и читателят излиза изряден.
+         Проверката е преди транзакцията — нищо не се пипа, докато датата е
+         невъзможна. Датата ПРЕДИ заемането се проверява вътре в транзакцията,
+         защото за нея трябва самият ред (виж по-долу). */
+      const nowStr = today();
+      if (inDate > nowStr) {
+        throw new Error('Датата на връщане (' + bgDate(inDate) + ' г.) е в бъдещето — днес е '
+          + bgDate(nowStr) + ' г. Документът се приема в деня, в който се връща на рафта: '
+          + 'бъдеща дата мести връщането в следващата отчетна година и заличава натрупаната забава. '
+          + 'Проверете датата.');
+      }
       /* Редът и глобата се четат ВЪТРЕ в транзакцията (одит v2.4.24). Дотук
          `SELECT date_due` беше извън нея: другото работно място можеше да продължи
          срока между четенето и записа, а `AND date_in IS NULL` не улавя това —
          записваше се глоба за падеж, който вече не съществува. */
       const tx = db.transaction(() => {
-        const before = db.prepare('SELECT date_due, date_in FROM loans WHERE id = ?').get(id);
+        const before = db.prepare('SELECT date_out, date_due, date_in FROM loans WHERE id = ?').get(id);
         /* Защита срещу повторно връщане на едно и също заемане. Пътят през баркод
            (loans:returnByCode) винаги е проверявал за ОТВОРЕН заем; бутонът „Приеми"
            в „Заемане и връщане"/„Просрочени" — не, и не се заключваше след клик.
@@ -266,7 +430,19 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         if (!before) throw new Error('Заемането не е намерено.');
         if (before.date_in) {
           throw new Error('Това заемане вече е върнато на ' +
-            before.date_in.split('-').reverse().join('.') + ' — не се приема втори път.');
+            bgDate(before.date_in) + ' — не се приема втори път.');
+        }
+        /* ВРЪЩАНЕ ПРЕДИ ЗАЕМАНЕТО (v2.4.61). Отрицателен срок на заемане не е
+           възможен: книгата не може да се върне, преди да е излязла. В базата
+           такъв ред е тих — date_in < date_out не пречи на нищо, — но чупи всяко
+           число, което се смята от двете дати: средният срок на заемане, броят
+           „върнати в срок“ (date_in <= date_due е вярно за всяка достатъчно
+           ранна дата) и Дневникът за деня на „връщането“. Пак най-честата
+           причина е сгрешена година. */
+        if (before.date_out && inDate < before.date_out) {
+          throw new Error('Датата на връщане (' + bgDate(inDate) + ' г.) е преди датата на заемане ('
+            + bgDate(before.date_out) + ' г.). Документът не може да се върне, преди да е зает. '
+            + 'Проверете датата.');
         }
         // v1.70.0: тук по-рано fine никога не се пресмяташе/записваше — loans:return
         // (бутон „Приеми“ в Заемане и връщане/Просрочени) и loans:returnByCode
@@ -279,7 +455,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         // effectiveDaysLate() (виж applySuspension по-горе) и еднакво записват fine.
         const daysLate = effectiveDaysLate(before.date_due, inDate);
         const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
-        const fine = daysLate * ((s && s.fine_per_day) || 0);
+        // toCents (v2.4.61): дни × ставка дава 0.7000000000000001 — виж бележката при toCents.
+        const fine = toCents(daysLate * ((s && s.fine_per_day) || 0));
         /* Едно връщане пипа ЧЕТИРИ таблици: loans (затваря заемането), holds
            (активира следващата резервация), events (захранва дневника и годишния
            отчет) и readers (наказанието). Дотук те се записваха едно по едно, без
@@ -303,9 +480,23 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           .run(inDate, fine, id);
         if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
         // Дължимото на гишето е ЦЯЛОТО натрупано по заемането, не само днешната част.
-        const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(id).fine || 0;
+        const fineTotal = toCents(db.prepare('SELECT fine FROM loans WHERE id = ?').get(id).fine || 0);
         const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
         if (l) logAudit('Връщане', 'инв. № ' + l.inv_number + ' — ' + l.title + (daysLate ? ' (забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ')' : ''));
+        /* Начисленото за забава влиза и в ЧИТАТЕЛСКАТА СМЕТКА (v2.4.61) — виж
+           дългата бележка при chargeOverdueFine в handlers/account.js. Вписва се
+           САМО току-що начисленото (fine), не цялото натрупано по заемането
+           (fineTotal), иначе продължение + връщане биха начислили два пъти едни
+           и същи пари. Датата на реда е датата на връщането, а не „днес“:
+           приемането със задна дата трябва да попадне в своя месец и своята
+           отчетна година, точно както попада събитието и самото заемане. */
+        if (l && fine > 0) {
+          chargeOverdueFine(db, {
+            reader_id: l.reader_id, amount: fine, date: inDate,
+            note: 'Забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ' по инв. № '
+              + (l.inv_number ?? '—') + ' — ' + l.title + ' (върнат на ' + bgDate(inDate) + ')'
+          });
+        }
         const hold = l ? activateHoldOnReturn(l.book_id) : null;
         let suspendedUntil = null;
         if (l) {
@@ -343,7 +534,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const tx = db.transaction(() => {
-        const l = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
+        /* ЦЕЛИЯТ ред + документът и читателят с ЕДНО четене (v2.4.61). Дотук тук
+           стоеше `SELECT * FROM loans`, тоест продължението знаеше номера на
+           заемането и нищо друго — и точно това се вписваше в одитната следа
+           („заемане № 12 до 2026-10-15 (1/2)“). LOAN_SELECT добавя заглавието,
+           инвентарния номер, името на читателя и картата му, без втора заявка:
+           данните и без това се четат в същата транзакция. */
+        const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
         if (!l || l.date_in) throw new Error('Заемането не е активно.');
         const s = circRule(readerCategory(l.reader_id));
         const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
@@ -391,15 +588,32 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         let addedFine = 0, suspendedUntil = null;
         if (lateNow > 0) {
           const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
-          addedFine = lateNow * ((cfg && cfg.fine_per_day) || 0);
+          // toCents (v2.4.61) — сумата се ЗАПИСВА, значи е кръгла до стотинка.
+          addedFine = toCents(lateNow * ((cfg && cfg.fine_per_day) || 0));
           if (addedFine) {
             db.prepare('UPDATE loans SET fine = COALESCE(fine, 0) + ? WHERE id = ?').run(addedFine, id);
+            /* И в читателската сметка (v2.4.61) — виж chargeOverdueFine в
+               handlers/account.js. Начислява се САМО добавката от това
+               продължение: при второ продължение по-старата вече си има свой ред,
+               а самото заемане трупа сбора в loans.fine. */
+            chargeOverdueFine(db, {
+              reader_id: l.reader_id, amount: addedFine, date: t,
+              note: 'Забава ' + lateNow + (lateNow === 1 ? ' ден' : ' дни') + ' по инв. № '
+                + (l.inv_number ?? '—') + ' — ' + l.title + ' (начислена при продължение на срока)'
+            });
           }
           suspendedUntil = applySuspension(l.reader_id, l.date_due, t);
         }
         const newDue = nextWorkDay(addDays((l.date_due && l.date_due > t) ? l.date_due : t, s.extension_days || 30));
         db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
-        logAudit('Продължение на заемане', 'заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')'
+        /* Следата назовава ДОКУМЕНТА и ЧИТАТЕЛЯ (v2.4.61): дотук гласеше само
+           „заемане № 12 до 2026-10-15 (1/2)“ — номер на ред от база, който на
+           проверяващия (а и на библиотекаря на другия ден) не говори нищо.
+           Номерът на заемането остава в същия вид, защото по него се свързват
+           записите от един и същи ред. */
+        logAudit('Продължение на заемане', 'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
+          + '; ' + readerTrace({ name: l.reader_name, card_no: l.card_no })
+          + '; заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')'
           + (lateNow ? ' — начислена забава ' + lateNow + ' дни' + (addedFine ? ', ' + addedFine.toFixed(2) + ' €' : '') : ''));
         logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
         return { date_due: newDue, renewals: used + 1, max, daysLate: lateNow, fine: addedFine, suspendedUntil };
@@ -503,7 +717,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     lostSchemaChecked = db;
   }
 
-  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  // toCents живее горе, над всички обработчици (v2.4.61) — виж бележката там.
   function lostPolicy(db) {
     const s = db.prepare('SELECT lost_price_multiplier, lost_fallback_amount FROM settings WHERE id = 1').get() || {};
     const m = Number(s.lost_price_multiplier);
@@ -650,6 +864,22 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           });
           lineId = charge.id;
         }
+        /* Забавата също влиза в сметката (v2.4.61) — виж chargeOverdueFine в
+           handlers/account.js. Реда ѝ е ВТОРИ, след обезщетението за самия
+           документ, и това е нарочно: плащанията се разнасят по реда на
+           възникване (най-старото задължение първо, chargeCoverage), а
+           „обезщетено ли е отчисленото по акт по чл. 30, т. 5“ е въпросът, който
+           стои пред комисията — първите платени пари трябва да отидат по него, а
+           не по забавата. Двете суми си остават РАЗЛИЧНИ задължения и с различни
+           видове начисление, както ги разделя и прозорецът „Документът е
+           изгубен“. */
+        if (addedFine > 0) {
+          chargeOverdueFine(db, {
+            reader_id: l.reader_id, amount: addedFine, date: when,
+            note: 'Забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ' по инв. № '
+              + (l.inv_number ?? '—') + ' — ' + l.title + ' (документът е приключен като невърнат)'
+          });
+        }
         const upd = db.prepare(`
           UPDATE loans SET date_in = ?, lost = 1, lost_date = ?, lost_resolution = ?, lost_amount = ?,
             lost_account_line_id = ?, lost_replacement_book_id = ?, lost_replacement_note = ?, lost_note = ?,
@@ -760,8 +990,18 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       if (date_out != null && date_out !== '' && !isValidIsoDate(date_out)) {
         throw new Error('Датата на заемане (' + date_out + ') е невалидна.');
       }
+      /* Бъдеща дата на заемане — виж дългата бележка при loans:checkout (v2.4.61).
+         ДВЕ ВРАТИ, ЕДНИ ПРАВИЛА: през тази минава гишето с баркод четеца, но
+         датата се подава и от мобилния път, и при внос. */
+      if (date_out && date_out > today()) {
+        throw new Error('Датата на заемане (' + bgDate(date_out) + ' г.) е в бъдещето — днес е '
+          + bgDate(today()) + ' г. Документът се заема в деня, в който излиза от библиотеката. '
+          + 'Проверете датата.');
+      }
       const db = getDb();
       const tx = db.transaction(() => {
+        // Първо човекът, после документът — виж checkReaderMayBorrow по-горе.
+        const rdr = checkReaderMayBorrow(db, reader_id);
         const c = normalizeScanCode(code);
         /* Одит v2.4.24: дотук беше `barcode = ? OR inv_number = CAST(? AS INTEGER)`
            с .get() — при числов баркод, който съвпада с ЧУЖД инвентарен номер,
@@ -790,8 +1030,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const outCount = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(b.id).n;
         if (outCount >= qty) {
           const openLoan = db.prepare(`${LOAN_SELECT} WHERE l.book_id = ? AND l.date_in IS NULL ORDER BY l.date_due`).get(b.id);
+          /* Датата — както се пише на гишето (v2.4.61). Дотук тъкмо това
+             съобщение показваше ISO низа от базата („до 2026-10-01“), докато
+             целият останал екран — таблицата със заетите, журналът, разписката,
+             напомнянията — е с „01.10.2026“. Библиотекарката чете едно и също
+             поле в два вида в един и същи прозорец и се съмнява кое е вярното. */
           throw new Error(qty <= 1 && openLoan
-            ? 'Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + openLoan.date_due + '.'
+            ? 'Инв. № ' + b.inv_number + ' вече е зает от ' + openLoan.reader_name + ' до ' + bgDate(openLoan.date_due) + '.'
             : 'Няма свободна бройка от инв. № ' + b.inv_number + ' — заети са всички ' + qty + '.');
         }
         const s = circRule(readerCategory(reader_id));
@@ -802,7 +1047,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const out = date_out || today();
         const dueStr = nextWorkDay(addDays(out, s.loan_days || 30));
         const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
-        logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title);
+        // Следата назовава и ЧИТАТЕЛЯ (v2.4.61) — виж readerTrace по-горе.
+        logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title
+          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr));
         logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
         return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
       });
@@ -819,6 +1066,15 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const db = getDb();
       const c = normalizeScanCode(code);
       const inDate = date_in || today();
+      /* Бъдеща дата на връщане — виж дългата бележка при loans:return (v2.4.61).
+         ДВЕ ВРАТИ, ЕДНИ ПРАВИЛА: този път минава през баркод четеца и обикновено
+         подава днешната дата, но не и когато повикването идва отвън. */
+      if (inDate > today()) {
+        throw new Error('Датата на връщане (' + bgDate(inDate) + ' г.) е в бъдещето — днес е '
+          + bgDate(today()) + ' г. Документът се приема в деня, в който се връща на рафта: '
+          + 'бъдеща дата мести връщането в следващата отчетна година и заличава натрупаната забава. '
+          + 'Проверете датата.');
+      }
       /* Същата транзакция и същата атомарна защита като при loans:return — това
          е ДРУГИЯТ път за връщане (сканиране на баркод) и на гишето минава по-често
          от бутона. Дотук тук нямаше нито транзакция, нито `AND date_in IS NULL`:
@@ -864,18 +1120,34 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
             + 'за да е ясно кой връща, и проверете реда от „Настройки“ → „Проверка на данните“.');
         }
         const loan = open[0];
+        /* Връщане с дата ПРЕДИ заемането — виж бележката при loans:return
+           (v2.4.61). Проверката е и тук, защото и този път приема дата отвън. */
+        if (loan.date_out && inDate < loan.date_out) {
+          throw new Error('Датата на връщане (' + bgDate(inDate) + ' г.) е преди датата на заемане ('
+            + bgDate(loan.date_out) + ' г.). Документът не може да се върне, преди да е зает. '
+            + 'Проверете датата.');
+        }
         const cfg = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get();
         // v1.70.0: effectiveDaysLate() вместо суров брой календарни дни — виж
         // бележката при loans:return по-горе; наказанието в дни за същото
         // просрочие вече ползваше изчистените от затворени дни.
         const daysLate = effectiveDaysLate(loan.date_due, inDate);
-        const fine = daysLate * ((cfg && cfg.fine_per_day) || 0);
+        // toCents (v2.4.61) — виж бележката при toCents; сумата се записва в базата.
+        const fine = toCents(daysLate * ((cfg && cfg.fine_per_day) || 0));
         // Натрупване, не присвояване — виж бележката при loans:return по-горе.
         const upd = db.prepare('UPDATE loans SET date_in = ?, fine = COALESCE(fine, 0) + ? WHERE id = ? AND date_in IS NULL')
           .run(inDate, fine, loan.id);
         if (upd.changes === 0) throw new Error('Това заемане вече е върнато — не се приема втори път.');
-        const fineTotal = db.prepare('SELECT fine FROM loans WHERE id = ?').get(loan.id).fine || 0;
+        const fineTotal = toCents(db.prepare('SELECT fine FROM loans WHERE id = ?').get(loan.id).fine || 0);
         logAudit('Връщане', 'инв. № ' + b.inv_number + ' — ' + b.title + (daysLate ? ' (забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ')' : ''));
+        // Начисленото за забава влиза и в читателската сметка — виж loans:return.
+        if (fine > 0) {
+          chargeOverdueFine(db, {
+            reader_id: loan.reader_id, amount: fine, date: inDate,
+            note: 'Забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') + ' по инв. № '
+              + (b.inv_number ?? '—') + ' — ' + b.title + ' (върнат на ' + bgDate(inDate) + ')'
+          });
+        }
         logEvent('връщане', { bookId: b.id, readerId: loan.reader_id, date: inDate });
         return {
           title: b.title, inv_number: b.inv_number, reader_name: loan.reader_name, daysLate,

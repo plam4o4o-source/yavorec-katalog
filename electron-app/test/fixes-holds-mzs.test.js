@@ -471,9 +471,11 @@ test('books:delete не се поддава на второ натискане, 
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM loans').get().n, 1);
 });
 
+/* gdpr_consent: 1 (v2.4.61) — readers:create вече отказва читател без отбелязано
+   съгласие по чл. 47, ал. 2 и ОРЗД (assertConsent в handlers/readers.js). */
 test('readers:delete предупреждава първия път и изтрива при повторно натискане', async () => {
   const { db, ipcMain, auditLog } = setupReaders();
-  const readerId = (await ipcMain.invoke('readers:create', { name: 'Дубликат' })).data;
+  const readerId = (await ipcMain.invoke('readers:create', { name: 'Дубликат', gdpr_consent: 1 })).data;
   const bookId = db.prepare("INSERT INTO books (inv_number, title) VALUES (9, 'Книга')").run().lastInsertRowid;
   closedLoan(db, bookId, readerId);
 
@@ -491,7 +493,7 @@ test('readers:delete предупреждава първия път и изтр�
 
 test('readers:delete не се поддава на второ натискане при невърнат документ', async () => {
   const { db, ipcMain } = setupReaders();
-  const readerId = (await ipcMain.invoke('readers:create', { name: 'Държащ' })).data;
+  const readerId = (await ipcMain.invoke('readers:create', { name: 'Държащ', gdpr_consent: 1 })).data;
   const bookId = addBook(db, { inv_number: 10, quantity: 1 });
   lend(db, bookId, readerId);
 

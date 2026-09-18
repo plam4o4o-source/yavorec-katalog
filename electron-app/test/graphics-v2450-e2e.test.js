@@ -52,7 +52,9 @@ test('менюто „⋯“ на реда работи и с истински �
   const A = await bootApp();
   const d = A.document;
   /* Един читател през истинския обработчик, за да има ред в таблицата. */
-  const r = await A.api.readers.create({ name: 'Проверков, Проверко', category: 'възрастен', status: 'активен' });
+  // gdpr_consent (v2.4.61): readers:create вече отказва читател без отбелязано
+  // съгласие по чл. 47, ал. 2 и ОРЗД — виж assertConsent в handlers/readers.js.
+  const r = await A.api.readers.create({ name: 'Проверков, Проверко', category: 'възрастен', status: 'активен', gdpr_consent: 1 });
   assert.ok(r.ok, JSON.stringify(r));
   await A.go('readers'); await A.settle();
   const btn = d.querySelector('#rBody .rowMore');

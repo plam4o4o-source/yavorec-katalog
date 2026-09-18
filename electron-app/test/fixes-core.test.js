@@ -86,8 +86,11 @@ function addBook(db, { inv_number = 1, quantity = 1, status = 'наличен', 
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)').run(id, quantity);
   return id;
 }
+/* gdpr_consent = 1 (v2.4.61): заемането отказва читател без отбелязано съгласие
+   по чл. 47, ал. 2 и ОРЗД (checkReaderMayBorrow в handlers/loans.js), а колоната
+   е с DEFAULT 0. Тук се проверяват бройките и календарът, не съгласието. */
 function addReader(db, name = 'Читател') {
-  return db.prepare('INSERT INTO readers (name, category) VALUES (?, ?)').run(name, 'възрастен').lastInsertRowid;
+  return db.prepare('INSERT INTO readers (name, category, gdpr_consent) VALUES (?, ?, 1)').run(name, 'възрастен').lastInsertRowid;
 }
 
 /* --- Находка 2: втора бройка от заглавие с quantity ≥ 2 --- */

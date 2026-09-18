@@ -408,7 +408,13 @@ test('8. акт за отчисляване чрез сканиране → до
   await h.clickButton('+ Нов акт за отчисляване', '#view');
   await h.waitFor(() => h.$('#actScan'), 'формата за акт');
   await h.sleep(120); // actForm закача слушателя за Enter със setTimeout(60)
-  h.type('#actF [name=reason_code]', '4');
+  /* v2.4.61: причината е т. 5 („Повредени или НЕВЪРНАТИ от ползватели“), а не
+     т. 4. Документът е у читателя (виж checkoutByScan по-горе) и оттук нататък
+     отчисляването на зает документ се приема САМО по т. 5 — комисията не може да
+     опише като „физически изхабен“ екземпляр, който не е виждала. Самата стъпка
+     винаги е описвала точно този случай („невърната от читател — актът я закрива,
+     анулирането я отваря“), само че с чужда причина. */
+  h.type('#actF [name=reason_code]', '5');
   let n = h.toasts.length;
   await h.scan('#actScan', '103');
   assert.match(h.text('#actList'), /103 Неизвестен\. Стара книга 3\.00 €.*ОБЩО 1 документ 3\.00 €/);
@@ -425,8 +431,8 @@ test('8. акт за отчисляване чрез сканиране → до
   assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 1: отчислен е 1 документ.'), JSON.stringify(h.toastsSince(n)));
   const act = q('SELECT * FROM deaccession_acts WHERE no = 1');
   assert.ok(act, 'актът не е записан');
-  assert.equal(act.reason_code, 4);
-  assert.equal(act.reason_text, 'Физически изхабени');
+  assert.equal(act.reason_code, 5);
+  assert.equal(act.reason_text, 'Повредени или невърнати от ползватели');
   const b1 = q('SELECT * FROM books WHERE id = ?', bookId);
   assert.equal(b1.status, 'отчислен');
   assert.equal(b1.deaccession_act_id, act.id);
@@ -439,7 +445,7 @@ test('8. акт за отчисляване чрез сканиране → до
   const closed = q('SELECT * FROM loans WHERE id = ?', lent.id);
   assert.equal(closed.date_in, T, 'заемането на отчисления документ не е закрито от акта');
   assert.equal(closed.deaccession_act_id, act.id);
-  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*т\. 4\. Физически изхабени 1 3\.00 €/);
+  assert.match(h.text('#view tbody'), /1 \/ \d{4}.*т\. 5\. Повредени или невърнати от ползватели 1 3\.00 €/);
 
   // Отчисленият не се заема, не се сканира в акт и се вижда в инвентарната книга и в КДБФ Част № 3.
   await selectReaderAtDesk('1001');
@@ -451,7 +457,7 @@ test('8. акт за отчисляване чрез сканиране → до
   await h.go('kdbf');
   await h.clickButton('Част № 3', '#view');
   await h.waitFor(() => /Приложение № 3/.test(h.viewText()), 'Част № 3');
-  assert.match(h.text('#view tbody'), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' 1 / \\d{4} т\\. 4\\. Физически изхабени 1 3\\.00 €'));
+  assert.match(h.text('#view tbody'), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' 1 / \\d{4} т\\. 5\\. Повредени или невърнати от ползватели 1 3\\.00 €'));
   await h.clickButton('Част № 2', '#view');
   await h.waitFor(() => /Приложение № 2/.test(h.viewText()), 'Част № 2');
   // 101, 110, 102, 103 постъпили; 103 отчислен → наличност 3 (стойност 12.50 + 1 + 12.50).
@@ -623,8 +629,21 @@ test('11. сметка: начисление, плащане, квитанция
   await h.go('readers');
   await h.clickButton('Сметка', `#rBody tr[data-id="${ids.reader1}"]`);
   await h.waitFor(() => /Сметка — Иван Читателов/.test(h.modal()), 'сметката');
-  assert.match(h.modal(), /Карта 1001 0\.00 € \/ 0\.00 лв\./);
-  assert.match(h.modal(), /Няма движения/);
+  /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.61): обезщетението за ЗАБАВА по чл. 43 вече влиза в
+     читателската сметка при самото връщане (chargeOverdueFine в
+     handlers/account.js) — дотук то живееше единствено в loans.fine, тоест
+     „Дължи по сметка“ на гишето, балансът в картона и „Събрани обезщетения“ в
+     годишния отчет не знаеха за него. Иван е връщал със закъснение в стъпки 7–10
+     на този сценарий, затова сметката му вече НЕ е празна. Числата по-долу
+     тръгват от реалното начално салдо, вместо от нула, и така твърдят същото
+     каквото и преди: начислението добавя точно 1.50 €, таксата — точно 5.00 €, а
+     плащането покрива точно платеното. */
+  const money = (n) => E.mny(Math.round(n * 100) / 100);
+  const mrx = (s) => new RegExp(String(s).replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'));
+  const start = Math.round(q('SELECT COALESCE(SUM(amount), 0) AS s FROM account_lines WHERE reader_id = ?', ids.reader1).s * 100) / 100;
+  assert.ok(start > 0, 'начисленото за забава е в сметката: ' + start);
+  assert.match(h.modal(), mrx('Карта 1001 ' + money(start)));
+  assert.match(h.modal(), /Забава .* по инв\. № 101 — Под игото/, 'редовете за забава носят документа');
   assert.equal(h.button('Годишна такса', '#modal').disabled, false);
 
   await h.clickButton('+ Друго начисление', '#modal');
@@ -635,39 +654,42 @@ test('11. сметка: начисление, плащане, квитанция
   let n = h.toasts.length;
   await h.clickButton('Начисли', '#modal2 footer');
   assert.ok(h.toastsSince(n).some(t => t.msg === 'Начислено.'), JSON.stringify(h.toastsSince(n)));
-  await h.waitFor(() => /1\.50 €/.test(h.modal()), 'обновената сметка');
-  assert.match(h.modal(), /1\.50 € \/ 2.93 лв\. \(дължи\)/);
+  await h.waitFor(() => mrx(money(start + 1.5) + ' (дължи)').test(h.modal()), 'обновената сметка');
   assert.match(h.modal(), new RegExp(E.bgDate(T).replace(/\./g, '\\.') + ' обезщетение \\+1\\.50 € \\/ 2.93 лв\\. забава по инв\\. № 101'));
-  const charge = q("SELECT * FROM account_lines WHERE kind = 'начисление'");
+  const charge = q("SELECT * FROM account_lines WHERE kind = 'начисление' ORDER BY id DESC");
   assert.equal(charge.amount, 1.5);
   assert.equal(charge.type, 'обезщетение');
 
   await h.clickButton('Годишна такса', '#modal');
-  await h.waitFor(() => /6\.50 €/.test(h.modal()), 'таксата');
-  assert.match(h.modal(), /6\.50 € \/ 12.71 лв\. \(дължи\)/);
+  await h.waitFor(() => mrx(money(start + 6.5)).test(h.modal()), 'таксата');
+  assert.match(h.modal(), mrx(money(start + 6.5) + ' (дължи)'));
 
   await h.clickButton('Плащане…', '#modal');
   await h.waitFor(() => h.$('#payF'), 'формата за плащане');
-  h.type('#payF [name=amount]', '6.50');
+  // Плаща се ЦЯЛОТО задължение — включително начисленото за забава.
+  const owed = Math.round((start + 6.5) * 100) / 100;
+  h.type('#payF [name=amount]', owed.toFixed(2));
   h.type('#payF [name=note]', 'в брой');
   n = h.toasts.length;
   await h.clickButton('Плати', '#modal2 footer');
   assert.ok(h.toastsSince(n).some(t => t.msg === 'Записано плащане.'), JSON.stringify(h.toastsSince(n)));
   await h.waitFor(() => /КВИТАНЦИЯ/.test(h.printed()), 'квитанцията');
   const pay = q("SELECT * FROM account_lines WHERE kind = 'плащане'");
-  assert.equal(pay.amount, -6.5);
+  assert.equal(pay.amount, -owed);
   assert.equal(Math.round(q('SELECT SUM(amount) AS s FROM account_lines WHERE reader_id = ?', ids.reader1).s * 100), 0);
   const p = h.printed();
   assert.match(p, new RegExp('КВИТАНЦИЯ № ' + pay.id + ' / ' + E.bgDate(T).replace(/\./g, '\\.')));
   assert.match(p, /Читател: Иван Читателов \(карта 1001\)/);
-  assert.match(p, /Платена сума: 6\.50 € \/ 12.71 лв\./);
+  assert.match(p, mrx('Платена сума: ' + money(owed)));
   assert.match(p, /Основание: плащане Бележка: в брой/);
   assert.match(p, /няма задължение \(0\.00 €\)/);
   h.window.ppClose();
   assert.match(h.modal(), /0\.00 € \/ 0\.00 лв\./);
   assert.doesNotMatch(h.modal(), /\(дължи\)/);
-  assert.match(h.modal(), /плащане -6\.50 €/);
+  assert.match(h.modal(), mrx('плащане -' + owed.toFixed(2) + ' €'));
   h.window.closeModal();
+  /* Начисленията за забава НЕ вписват собствен ред в одитната следа (те са част
+     от връщането, което си има своя следа) — затова тук стоят само ръчните. */
   assert.deepEqual(all("SELECT action FROM audit_log WHERE action IN ('Начисление','Плащане') ORDER BY id").map(x => x.action),
     ['Начисление', 'Начисление', 'Плащане']);
   noRendererErrors();
@@ -795,7 +817,7 @@ test('15. одитната следа показва действията от �
   assert.ok(dbActions.has('Заемане') && dbActions.has('Отчисляване') && dbActions.has('Плащане'));
   assert.match(body, /Мария Иванова Нов читател карта 1001 — Иван Читателов/);
   assert.match(body, /Заемане инв\. № 101 — Под игото/);
-  assert.match(body, /Отчисляване акт № 1\/\d{4} — 1 документ, причина: Физически изхабени/);
+  assert.match(body, /Отчисляване акт № 1\/\d{4} — 1 документ, причина: Повредени или невърнати от ползватели/);
   const total = q('SELECT COUNT(*) AS n FROM audit_log').n;
   assert.match(h.text('#oditCount'), new RegExp('^' + total + ' записа$'));
   assert.equal(h.document.querySelectorAll('#oditBody tr').length, total);

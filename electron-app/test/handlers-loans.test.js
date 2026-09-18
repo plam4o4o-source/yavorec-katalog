@@ -80,6 +80,13 @@ function setup(overrides = {}) {
   return { db, ipcMain, auditLog, events, returned };
 }
 
+/* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.61): заемането вече отказва читател без отбелязано
+   съгласие по чл. 47, ал. 2 и ОРЗД, с прекратена регистрация или изобщо
+   несъществуващ (checkReaderMayBorrow в handlers/loans.js — дотук се гледаше само
+   наказанието). Затова всеки читател, вписан в тези фикстури направо със SQL,
+   носи gdpr_consent = 1: колоната е с DEFAULT 0 и без нея заемането се отказва по
+   причина, която тестът не изследва. Самите откази се проверяват в
+   test/zaemane-v2461.test.js. */
 function insertBookWithInventory(db, { inv_number = 1, quantity = 1, status = 'наличен', barcode } = {}) {
   const bookId = db.prepare('INSERT INTO books (inv_number, title, status, barcode) VALUES (?, ?, ?, ?)')
     .run(inv_number, 'Книга ' + inv_number, status, barcode || null).lastInsertRowid;
@@ -100,7 +107,7 @@ test('registerLoansHandlers registers events:localuse plus all ten loans: IPC ch
 test('loans:checkout refuses when there are no free copies, and succeeds otherwise, logging an event and audit entry', async () => {
   const { db, ipcMain, auditLog, events } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 1, quantity: 0 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
 
   const full = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
   assert.equal(full.ok, false);
@@ -117,7 +124,7 @@ test('loans:checkout refuses when there are no free copies, and succeeds otherwi
 test('loans:checkout refuses a suspended reader via checkSuspended', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 2 });
-  const readerId = db.prepare("INSERT INTO readers (name, suspended_until) VALUES ('Наказан', '2030-01-01')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, suspended_until, gdpr_consent) VALUES ('Наказан', '2030-01-01', 1)").run().lastInsertRowid;
   const result = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
   assert.equal(result.ok, false);
   assert.match(result.error, /преустановено/);
@@ -128,7 +135,7 @@ test('loans:checkout defers to consumeHoldOnCheckout, which can block the checko
     consumeHoldOnCheckout: () => { throw new Error('Книгата е резервирана за друг.'); }
   });
   const bookId = insertBookWithInventory(db, { inv_number: 3 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
   const result = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
   assert.equal(result.ok, false);
   assert.match(result.error, /резервирана/);
@@ -139,7 +146,7 @@ test('loans:return closes the loan, logs an event/audit entry, calls activateHol
     activateHoldOnReturn: (bookId) => ({ reader_name: 'Чакащ', card_no: 'C9', phone: '999' })
   });
   const bookId = insertBookWithInventory(db, { inv_number: 4 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Просрочил')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Просрочил', 1)").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
     .run(bookId, readerId, '2026-07-01', '2026-07-15').lastInsertRowid;
 
@@ -159,7 +166,7 @@ test('loans:extend refuses when the extension limit is reached, and refuses when
     circRule: () => ({ extensions_count: 1, extension_days: 14 })
   });
   const bookId = insertBookWithInventory(db, { inv_number: 5 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Продължаващ')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Продължаващ', 1)").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due, renewals) VALUES (?, ?, ?, ?, ?)')
     .run(bookId, readerId, '2026-08-01', '2026-08-15', 1).lastInsertRowid;
 
@@ -171,7 +178,7 @@ test('loans:extend refuses when the extension limit is reached, and refuses when
 test('loans:extend succeeds, advances date_due by extension_days, and increments renewals', async () => {
   const { db, ipcMain, events } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 6 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Продължаващ Б')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Продължаващ Б', 1)").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due, renewals) VALUES (?, ?, ?, ?, ?)')
     .run(bookId, readerId, '2026-08-01', '2026-08-15', 0).lastInsertRowid;
 
@@ -187,7 +194,7 @@ test('loans:extend refuses a hold placed by a different reader', async () => {
     firstActiveHold: () => ({ reader_id: 999999, reader_name: 'Друг читател' })
   });
   const bookId = insertBookWithInventory(db, { inv_number: 7 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Държащ')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Държащ', 1)").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
     .run(bookId, readerId, '2026-08-01', '2026-08-15').lastInsertRowid;
 
@@ -199,7 +206,7 @@ test('loans:extend refuses a hold placed by a different reader', async () => {
 test('loans:checkoutByCode finds the book by barcode/inv_number via BOOK_SELECT, enforces max_books, and computes date_due via nextWorkDay', async () => {
   const { db, ipcMain } = setup({ nextWorkDay: (d) => d === '2026-08-16' ? '2026-08-17' : d });
   insertBookWithInventory(db, { inv_number: 8, barcode: 'BC8' });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Кодов читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Кодов читател', 1)").run().lastInsertRowid;
 
   const result = await ipcMain.invoke('loans:checkoutByCode', { reader_id: readerId, code: 'BC8', date_out: '2026-08-02' });
   assert.equal(result.ok, true);
@@ -210,13 +217,13 @@ test('loans:checkoutByCode finds the book by barcode/inv_number via BOOK_SELECT,
 test('loans:checkoutByCode refuses a deaccessioned book and an already-loaned book', async () => {
   const { db, ipcMain } = setup();
   insertBookWithInventory(db, { inv_number: 9, barcode: 'BC9', status: 'отчислен' });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Х')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Х', 1)").run().lastInsertRowid;
   const deaccResult = await ipcMain.invoke('loans:checkoutByCode', { reader_id: readerId, code: 'BC9', date_out: '2026-08-02' });
   assert.equal(deaccResult.ok, false);
   assert.match(deaccResult.error, /отчислен/);
 
   const bookId = insertBookWithInventory(db, { inv_number: 10, barcode: 'BC10' });
-  const otherReaderId = db.prepare("INSERT INTO readers (name) VALUES ('Друг')").run().lastInsertRowid;
+  const otherReaderId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Друг', 1)").run().lastInsertRowid;
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, otherReaderId, '2026-08-01', '2026-08-15');
   const busyResult = await ipcMain.invoke('loans:checkoutByCode', { reader_id: readerId, code: 'BC10', date_out: '2026-08-02' });
   assert.equal(busyResult.ok, false);
@@ -227,7 +234,7 @@ test('loans:returnByCode computes a fine for late returns and applies suspension
   const { db, ipcMain } = setup();
   db.prepare('UPDATE settings SET fine_per_day = 0.10 WHERE id = 1').run();
   const bookId = insertBookWithInventory(db, { inv_number: 11, barcode: 'BC11' });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Закъснял')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Закъснял', 1)").run().lastInsertRowid;
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, readerId, '2026-07-01', '2026-07-15');
 
   const result = await ipcMain.invoke('loans:returnByCode', { code: 'BC11', date_in: '2026-08-02' });
@@ -243,8 +250,8 @@ test('loans:return computes and stores a fine identical to loans:returnByCode fo
   // резултат за иначе идентично закъснение.
   const { db, ipcMain } = setup();
   db.prepare('UPDATE settings SET fine_per_day = 0.10 WHERE id = 1').run();
-  const readerA = db.prepare("INSERT INTO readers (name) VALUES ('Чрез бутон')").run().lastInsertRowid;
-  const readerB = db.prepare("INSERT INTO readers (name) VALUES ('Чрез баркод')").run().lastInsertRowid;
+  const readerA = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Чрез бутон', 1)").run().lastInsertRowid;
+  const readerB = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Чрез баркод', 1)").run().lastInsertRowid;
   const bookA = insertBookWithInventory(db, { inv_number: 20, barcode: 'BC20A' });
   const bookB = insertBookWithInventory(db, { inv_number: 21, barcode: 'BC20B' });
   const loanIdA = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
@@ -272,7 +279,7 @@ test('loans:return excludes closed days from the fine, matching the suspension c
   const { db, ipcMain } = setup({ closedDaysBetween: () => 3 });
   db.prepare('UPDATE settings SET fine_per_day = 1 WHERE id = 1').run();
   const bookId = insertBookWithInventory(db, { inv_number: 22 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Затворени дни')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Затворени дни', 1)").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
     .run(bookId, readerId, '2026-07-01', '2026-07-15').lastInsertRowid;
 
@@ -304,7 +311,7 @@ test('events:localuse calls logEvent with читалня and returns true', asyn
 test('loans:list filters by onlyOpen, loans:overdue/byReader/byBook return the right subsets', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 13, quantity: 2 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Списъчен')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Списъчен', 1)").run().lastInsertRowid;
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, readerId, '2026-01-01', '2026-01-15');
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due, date_in) VALUES (?, ?, ?, ?, ?)').run(bookId, readerId, '2026-02-01', '2026-02-15', '2026-02-10');
 
@@ -327,7 +334,7 @@ test('loans:overdueByReader groups overdue loans by reader with a computed fine'
   const { db, ipcMain } = setup();
   db.prepare('UPDATE settings SET fine_per_day = 0.20 WHERE id = 1').run();
   const bookId = insertBookWithInventory(db, { inv_number: 14 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Групиран')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Групиран', 1)").run().lastInsertRowid;
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(bookId, readerId, '2026-01-01', '2026-01-15');
 
   const result = await ipcMain.invoke('loans:overdueByReader');
@@ -343,7 +350,7 @@ test('loans:overdueByReader groups overdue loans by reader with a computed fine'
 test('loans:checkout отхвърля липсваща или невалидна date_out, не записва ред', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 20 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
 
   for (const bad of [undefined, '', '0000-00-00', '2026-13-45', 'not-a-date', '2026-02-30']) {
     const r = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: bad });
@@ -356,7 +363,7 @@ test('loans:checkout отхвърля липсваща или невалидна
 test('loans:checkout отхвърля невалидна date_due, но приема липсваща (незадължителна)', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 21 });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
 
   const bad = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02', date_due: '2026-02-30' });
   assert.equal(bad.ok, false);
@@ -370,7 +377,7 @@ test('loans:checkout отхвърля невалидна date_due, но прие
 test('loans:checkoutByCode отхвърля невалидна date_out', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 22, barcode: 'BC22' });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
 
   const r = await ipcMain.invoke('loans:checkoutByCode', { reader_id: readerId, code: 'BC22', date_out: '2026-13-45' });
   assert.equal(r.ok, false);
@@ -381,7 +388,7 @@ test('loans:checkoutByCode отхвърля невалидна date_out', async 
 test('loans:return и loans:returnByCode отхвърлят невалидна date_in', async () => {
   const { db, ipcMain } = setup();
   const bookId = insertBookWithInventory(db, { inv_number: 23, barcode: 'BC23' });
-  const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
+  const readerId = db.prepare("INSERT INTO readers (name, gdpr_consent) VALUES ('Читател', 1)").run().lastInsertRowid;
   const checkout = await ipcMain.invoke('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-02' });
   assert.equal(checkout.ok, true);
   const loanId = checkout.data;

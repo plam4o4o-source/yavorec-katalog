@@ -33,7 +33,8 @@ async function seed(dbFolder, { bookQty = 1, readers = 2 } = {}) {
   const bookId = invokeHandler('books:create', { title: 'Под игото', quantity: bookQty }).data;
   const readerIds = [];
   for (let i = 0; i < readers; i++) {
-    readerIds.push(invokeHandler('readers:create', { name: 'Читател ' + (i + 1) }).data);
+    // gdpr_consent (v2.4.61) — виж assertConsent в handlers/readers.js.
+    readerIds.push(invokeHandler('readers:create', { name: 'Читател ' + (i + 1), gdpr_consent: 1 }).data);
   }
   closeApp();
   return { bookId, readerIds };
@@ -107,7 +108,7 @@ test('40 едновременни заемания на РАЗЛИЧНИ кни�
   for (let i = 0; i < 40; i++) {
     bookIds.push(invokeHandler('books:create', { title: 'Книга ' + i, quantity: 1 }).data);
   }
-  const readerId = invokeHandler('readers:create', { name: 'Многолюден читател' }).data;
+  const readerId = invokeHandler('readers:create', { name: 'Многолюден читател', gdpr_consent: 1 }).data;
   /* Лимитът от документи за читател се вдига ИЗРИЧНО: този тест проверява
      заключването при 40 паралелни записа, а не правилата на обслужването.
      От v2.4.24 loans:checkout спазва max_books наравно с loans:checkoutByCode

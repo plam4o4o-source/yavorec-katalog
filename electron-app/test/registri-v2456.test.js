@@ -96,8 +96,11 @@ function addBook(db, o) {
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(id);
   return id;
 }
+/* gdpr_consent = 1 (v2.4.61): заемането вече отказва читател без отбелязано
+   съгласие по чл. 47, ал. 2 и ОРЗД (checkReaderMayBorrow в handlers/loans.js), а
+   колоната е с DEFAULT 0. Тук се проверяват регистрите, не съгласието. */
 function addReader(db, name) {
-  return db.prepare("INSERT INTO readers (name, card_no, status, category) VALUES (?, ?, 'активен', 'възрастен')")
+  return db.prepare("INSERT INTO readers (name, card_no, status, category, gdpr_consent) VALUES (?, ?, 'активен', 'възрастен', 1)")
     .run(name, 'К' + Math.floor(Math.random() * 1e6)).lastInsertRowid;
 }
 
@@ -589,10 +592,19 @@ test('обезщетението се начислява в читателска
   const loanId = openLoan(t, bookId, readerId);
   ok(t.ipcMain.invoke('loans:markLost', { id: loanId, resolution: 'обезщетение', amount: 36, date: '2026-03-02' }), 'изгубен');
 
-  const line = t.db.prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY id DESC').get(readerId);
+  /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.61): приключването като изгубен начислява ДВА реда —
+     обезщетението за самия документ и обезщетението за забавата до деня на
+     приключването (дотук забавата оставаше само в loans.fine и не стигаше до
+     сметката; виж chargeOverdueFine в handlers/account.js). Затова редът се търси
+     по ВИД, а не „последният вписан“: точно разделянето на двата вида е това,
+     което тестът пази. */
+  const line = t.db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'обезщетение за изгубен документ' ORDER BY id DESC").get(readerId);
   assert.ok(line, 'в сметката на читателя има ред');
   assert.equal(line.type, 'обезщетение за изгубен документ',
     'отделен вид от „обезщетение“ (забавата) — иначе ревизията не може да отговори кое колко е');
+  const lateLine = t.db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'обезщетение'").get(readerId);
+  assert.ok(lateLine, 'забавата до деня на приключването също влиза в сметката (v2.4.61)');
+  assert.ok(lateLine.id > line.id, 'обезщетението за документа е ПЪРВО — плащанията покриват него преди забавата');
   assert.equal(line.amount, 36);
   assert.match(line.note, /инв\. № 701/);
   assert.equal(t.db.prepare('SELECT lost_account_line_id FROM loans WHERE id = ?').get(loanId).lost_account_line_id, line.id,
@@ -756,6 +768,9 @@ test('заемане, приключено като изгубено, не се 
   const again = t.ipcMain.invoke('loans:markLost', { id: loanId, resolution: 'обезщетение', amount: 36, date: '2026-03-03' });
   assert.equal(again.ok, false);
   assert.match(again.error, /вече е приключено/);
-  assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM account_lines WHERE reader_id = ?').get(readerId).n, 1,
+  /* v2.4.61: първото приключване оставя ДВА реда — обезщетение за документа и
+     обезщетение за забавата; същественото тук е, че второто натискане не добавя
+     нито един нов. */
+  assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM account_lines WHERE reader_id = ?').get(readerId).n, 2,
     'второ начисление не се появява');
 });

@@ -218,7 +218,8 @@ test('редакция на читател без дата на регистра
   assert.equal(row.category, 'възрастен');
   assert.equal(row.status, 'активен');
   // Контрол: новият читател получава днешната дата, както винаги.
-  const c = await ipcMain.invoke('readers:create', { name: 'Нов' });
+  // gdpr_consent (v2.4.61) — виж assertConsent в handlers/readers.js.
+  const c = await ipcMain.invoke('readers:create', { name: 'Нов', gdpr_consent: 1 });
   assert.equal(db.prepare('SELECT registered_at FROM readers WHERE id = ?').get(c.data).registered_at, '2026-09-03');
 });
 
