@@ -30,6 +30,35 @@ let INVBOOK_TOTAL = 0;
 let INVBOOK_SUMMARY = null;
 let INVBOOK_REQ = 0; // пореден номер на ПЪЛНОТО зареждане — закъснял отговор на старо търсене не се рисува
 let INVBOOK_GEN = 0; // поколение на списъка в паметта — „Покажи още“ долепя само към същия списък
+/* КОЛОНАТА „ПРОВЕРКИ“ НЕ РАСТЕ БЕЗ КРАЙ (v2.4.61).
+   ===========================================================================
+   ДОТУК клетката изреждаше ВСЯКА отметка от inventory_checks — по една на
+   всяка инвентаризация, при която документът е бил сканиран. Инвентаризация се
+   прави поне веднъж годишно (чл. 40), а библиотеката, за която е писана
+   програмата, работи от 1922 г.; при две проверки годишно за двайсет години
+   това са четирийсет дати в една клетка на Приложение № 4. На екрана редът
+   става висок колкото половин таблица; на хартия — колоната изяжда листа, а
+   останалите единайсет колони на Приложение № 4 се смачкват до нечетливост.
+
+   ЗАЩО ИМЕННО ПОСЛЕДНИТЕ. Въпросът, който тази колона съществува да отговори,
+   е „кога документът е видян за последно“ — точно него задава и проверяващият.
+   По-старите отметки не изчезват от базата и се виждат в картона на документа;
+   тук се показват последните INVBOOK_CHECKS_SHOWN и се КАЗВА колко са всичко,
+   вместо мълчаливо да се отрежат (същото правило като при читателския картон и
+   при „Показани са N от M“ в Просрочени — срязване без надпис е по-лошо от
+   срязване). Подредбата идва подредена по дата от handlers/inv-book.js. */
+const INVBOOK_CHECKS_SHOWN = 3;
+/* Последните отметки + общият им брой, като списък от вече форматирани дати. */
+function invBookChecksShown(checks) {
+  const all = checks || [];
+  return { dates: all.slice(-INVBOOK_CHECKS_SHOWN).map(c => bg(c)), total: all.length };
+}
+/* За разпечатката — обикновен текст. */
+function invBookChecksText(checks) {
+  const c = invBookChecksShown(checks);
+  if (!c.total) return '';
+  return c.dates.join(' ') + (c.total > c.dates.length ? ' (общо ' + c.total + ')' : '');
+}
 /* Показателите над таблицата от пълен списък в паметта (старият път). */
 function invBookSummaryOf(rows) {
   const active = rows.filter(r => r.status !== 'отчислен');
@@ -192,7 +221,12 @@ function invBookRowsHtml(rows) {
     return `<tr class="${off ? 'ibOff' : ''}" data-id="${r.id}">
       <td class="num">${bg(r.register_date)}</td>
       <td class="num"><b>${r.inv_number ?? ''}</b></td>
-      <td style="font-size:11px">${(r.checks || []).map(c => `<span class="badge ok" style="font-size:10px">${bg(c)}</span>`).join(' ')}</td>
+      <td style="font-size:11px">${(() => {
+        const c = invBookChecksShown(r.checks);
+        return c.dates.map(d => `<span class="badge ok" style="font-size:10px">${d}</span>`).join(' ')
+          + (c.total > c.dates.length
+            ? ` <span class="hint" title="Показани са последните ${INVBOOK_CHECKS_SHOWN} отметки от ${c.total}">(общо ${c.total})</span>` : '');
+      })()}</td>
       <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
       <td class="num">${esc(r.year || '')}</td><td class="num">${mnyCell(r.price)}</td>
       <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
@@ -429,7 +463,14 @@ async function printInvBookDoc(range) {
           едно и също число. Второто изречение излиза САМО ако базата все още носи
           стар запис с друга бройка — тогава мълчанието би било по-лошо от
           повторението (виж „Настройки“ → „Проверка на данните“). */''}
-    Фонд по инвентарната книга (без отчислените): <b>${copies}</b> библиотечни документа на стойност <b>${mny(value)}</b>.${
+    ${/* БЕЗ ВТОРА ТОЧКА СЛЕД СУМАТА (v2.4.61). mny() връща „177.98 € / 348.15 лв.“
+          — низ, който ВЕЧЕ завършва със съкращението „лв.“, тоест и с точка.
+          Шаблонът добавяше още една и на прошнурования, номериран и заверен по
+          чл. 26, ал. 2 лист стоеше „… 348.15 лв..“. Дребно — но това е
+          регистърът, който се подписва и подпечатва, и печатната грешка в него
+          се чете като небрежност в целия документ. Изречението вече свършва с
+          точката на съкращението, както се пише и на ръка. */''}
+    Фонд по инвентарната книга (без отчислените): <b>${copies}</b> библиотечни документа на стойност <b>${mny(value)}</b>${
       copies !== active.length ? `<br><b>Внимание:</b> ${active.length} инвентарни номера дават ${copies} документа —
       един инвентарен номер отговаря на един екземпляр. Проверете „Настройки“ → „Проверка на данните“.` : ''}${
       notOnShelf.length ? `<br>От тях със състояние, различно от „наличен“: ${
@@ -439,7 +480,7 @@ async function printInvBookDoc(range) {
     <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Бр.</th><th>Цена</th>
     <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th>Забележка</th></tr></thead><tbody>
     ${rows.map(r => `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
-      <td>${(r.checks || []).map(c => bg(c)).join(' ')}</td>
+      <td>${invBookChecksText(r.checks)}</td>
       <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
       <td>${esc(r.year || '')}</td><td>${qtyOf(r)}</td><td>${mny(r.price)}</td>
       <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(r.call_number || '')}</td>

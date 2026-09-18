@@ -1,35 +1,59 @@
 'use strict';
-/* ВСИЧКИ ДОКУМЕНТИ, КОИТО ПРОГРАМАТА ИЗДАВА — регистър на разпечатките.
+/* ВСИЧКИ ДОКУМЕНТИ, КОИТО ПРОГРАМАТА ИЗДАВА — ДВА РЕГИСТЪРА.
  * =====================================================================
  * Другите файлове проверяват ПОТОЦИ (e2e-workflows.test.js) или отделни кръгове
  * поправки (docs-v2454, docs-v2455). Тук въпросът е друг и е само един:
  *
- *     всеки документ, който излиза от принтера, носи ли реквизитите, без които
- *     не е документ?
+ *     всеки документ, който излиза от програмата, носи ли реквизитите, без
+ *     които не е документ?
  *
  * Защото точно това е, което библиотекарят подава на проверяващия, и точно това
- * никой не забелязва, че липсва, докато не му потрябва. Разпечатката се чете
- * КАТО ТЕКСТ (#ppSheet, истинският преглед преди печат) след като пътят до нея е
- * изминат през истинския екран — както го изминава човек.
+ * никой не забелязва, че липсва, докато не му потрябва.
  *
- * Последният тест е ПАЗАЧ ЗА ПЪЛНОТА: претърсва src/views/*.js за всяка функция,
- * която вика setPrintPage(), и пада, ако някоя не е изброена тук. Без него
- * файлът остарява тихо — нов документ се добавя, никой не сеща да го допише, и
- * регистърът лъже, че всичко е покрито.
+ * ОБХВАТЪТ Е КАЗАН ИЗРИЧНО (v2.4.61). Дотук файлът се наричаше „регистър на
+ * всички документи, които програмата издава“, а всъщност покриваше само
+ * РАЗПЕЧАТКИТЕ — 22 функции, които минават през преглед преди печат. Извън него
+ * оставаха седем ИЗНАСЯНИЯ, които също произвеждат документ и също отиват при
+ * външен получател: списъкът с читателите, дневникът, целият фонд в CSV,
+ * каталогът (JSON), UNIMARC/MARCXML, Dublin Core и одитната следа. Точно те са
+ * най-чувствителните: CSV-то на фонда носи ВСЯКА цена, а одитната следа — имена
+ * на служители. „Не сме мислили за тях“ е по-лошо от „не ги покриваме“, затова
+ * регистрите вече са два и всеки казва какво обхваща:
+ *
+ *   РЕГИСТЪР 1 — РАЗПЕЧАТКИ (PRINTED): всичко, което стига до хартия или PDF
+ *   през doPrint()/printLabelSheet(). Чете се КАТО ТЕКСТ (#ppSheet, истинският
+ *   преглед преди печат) след като пътят до него е изминат през истинския екран
+ *   — както го изминава човек.
+ *
+ *   РЕГИСТЪР 2 — ИЗНАСЯНИЯ (EXPORTED): всичко, което излиза като ФАЙЛ. Проверява
+ *   се самият файл: BOM (иначе Excel на Windows чете кирилицата като йероглифи),
+ *   заглавен ред на човешки език, цитиране на всяка клетка (защита срещу
+ *   формули), че ЕГН и № на лична карта НЕ изтичат, и че бройката и цената са
+ *   такива, каквито ги брои фондовата аритметика (цена × бройка).
+ *
+ * Последният тест е ПАЗАЧ ЗА ПЪЛНОТА за двата регистъра: претърсва
+ * src/views/*.js за всяко ПОВИКВАНЕ, което издава документ, и пада, ако някое не
+ * е изброено тук. Без него файлът остарява тихо — нов документ се добавя, никой
+ * не сеща да го допише, и регистърът лъже, че всичко е покрито.
  *
  * Обхватът е по Наредба № 3 от 18.11.2014 г.: КДБФ (чл. 13), актът за
  * отчисляване (чл. 35 – 39), актът за дарение (чл. 6, ал. 5), протоколът за
  * придобиване (чл. 3, ал. 2), инвентарната книга (чл. 16, Приложение № 4),
  * протоколът от инвентаризация (чл. 40), дневникът, читателският картон
- * (чл. 47, ал. 2), плюс МЗС, краезнанието, етикетите и готовите справки.
+ * (чл. 47, ал. 2), плюс периодиката, МЗС, краезнанието, етикетите, готовите
+ * справки и изнасянията.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const E = require('./helpers/e2e-app');
 
 const VIEWS_DIR = path.join(__dirname, '..', 'src', 'views');
+/* Изнасянията пишат истински файл през заглушения диалог за запис — затова им
+   трябва истинска папка, която се маха след файла. */
+const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'razpechatki-'));
 
 let h;                 // харнесът — едно приложение и една база за целия файл
 const T = E.today();
@@ -37,7 +61,13 @@ const Y = T.slice(0, 4);
 const ids = {};        // каквото един тест създава и следващият ползва
 
 test.before(async () => { h = await E.bootApp(); });
-test.after(() => { if (h) h.stop(); });
+test.after(() => {
+  if (h) h.stop();
+  // Изнесените файлове не преживяват теста; неуспехът при триене не е повод да
+  // падне пакетът, но се казва — иначе в /tmp тихо се трупат папки.
+  try { fs.rmSync(SCRATCH, { recursive: true, force: true }); }
+  catch (e) { console.warn('временната папка ' + SCRATCH + ' не се изтри: ' + e.message); }
+});
 
 const q = (sql, ...a) => h.db.prepare(sql).get(...a);
 /* Всеки тест приключва с това: тиха грешка в екранния слой (необработено
@@ -388,10 +418,15 @@ test('15. Краезнание — аналитично описание, лет
 test('16. Етикети — фонд (всички и по диапазон) и сигнатурни; отчисленият не получава етикет', async () => {
   /* Актът от тест 6 е анулиран в тест 7, тоест инв. № 1000 се е ВЪРНАЛ във фонда
      и пак му се полага етикет. За проверката трябва документ, който наистина е
-     извън фонда сега — затова тук се съставя втори акт, за инв. № 1002. */
+     извън фонда сега — затова тук се съставя втори акт, за инв. № 1002.
+     v2.4.61: инв. № 1002 е ЗАЕТ от читател, а зает документ се отчислява само по
+     чл. 30, т. 5 („повредени или невърнати от ползватели“) — по всяка друга
+     причина актът се отказва, защото комисията не може да огледа документ, който
+     е в дома на читателя. За етикета това няма значение: важното е документът да
+     е извън фонда. */
   ok(await h.api.deaccessionActs.create({
     act: {
-      no: 2, date: Y + '-07-01', reason_code: 4, reason_text: 'физически изхабени',
+      no: 2, date: Y + '-07-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели',
       disposal: 'унищожени', committee1: 'Мария Иванова', committee2: 'Петър Петров', committee3: 'Елена Георгиева'
     },
     bookIds: [ids.b3]
@@ -459,15 +494,110 @@ test('17. Готовите справки — всяка от каталога �
 });
 
 /* ==================================================================
-   5. ПАЗАЧ ЗА ПЪЛНОТА
+   5. ИЗНАСЯНИЯТА — вторият вид документ, който програмата издава
    ================================================================== */
-test('18. всяка печатна функция в src/views/ е покрита от този файл', () => {
-  /* Регистърът лъже в мига, в който някой добави нов документ и не го допише
-     тук. Затова списъкът не се поддържа на ръка: изходният код се претърсва за
-     всяка функция, която вика setPrintPage() — тя е входът към прегледа преди
-     печат, тоест към хартията. Нова такава функция пада този тест, докато не
-     бъде или покрита, или изрично обяснена по-долу. */
-  const covered = new Set([
+test('18. изнасянията в CSV — читатели (без ЕГН), дневник, фонд (бройка × цена)', async () => {
+  /* Дотук нито едно изнасяне не беше проверявано тук, макар всяко от тях да
+     произвежда файл за ВЪНШЕН получател — точно като разпечатка. Проверява се
+     самият файл, а не обещанието на екрана.
+
+     Подготовка за двата ръба, заради които този тест съществува:
+       • ЕГН и № на лична карта се вписват ПРАВО в базата. Така проверката „не
+         изтичат“ е независима от това дали защитата на личните данни е
+         настроена: readers:exportCsv не бива да ги изнася при никакви условия,
+         защото списъкът върви към читалищното настоятелство и към проверяващия.
+       • Стар неразделен запис (3 екземпляра под инв. № 1003). Без колона за
+         бройка сборът на цените в Excel дава стойност на фонда, занижена с
+         всеки втори и следващ екземпляр. */
+  h.db.prepare('UPDATE readers SET egn = ?, id_card_no = ? WHERE id = ?')
+    .run('8005051234', '640123456', ids.reader);
+  h.db.prepare('UPDATE inventory SET quantity = 3 WHERE book_id = ?').run(ids.b4);
+  const bom = '﻿';
+
+  h.dialogs.savePath = path.join(SCRATCH, 'chitateli.csv');
+  await h.go('readers');
+  await h.window.exportReadersCsv();
+  await h.settle();
+  const rd = fs.readFileSync(h.dialogs.savePath, 'utf8');
+  assert.ok(rd.startsWith(bom), 'без BOM Excel на Windows чете кирилицата като йероглифи');
+  const rdLines = rd.slice(1).split('\r\n');
+  assert.equal(rdLines[0], 'Читателска карта;Име;Телефон;Адрес;Имейл;Категория;Състояние;'
+    + 'Дата на регистрация;Дата на пререгистрация;Забележка', 'заглавният ред на списъка с читателите');
+  assert.ok(!rd.includes('8005051234'), 'ЕГН изтече в изнесения списък с читателите');
+  assert.ok(!rd.includes('640123456'), '№ на лична карта изтече в изнесения списък с читателите');
+  assert.match(rd, /"0042";"Иван Читателов";/, 'всяка клетка се огражда в кавички (защита срещу формули в Excel)');
+  noRendererErrors();
+
+  h.dialogs.savePath = path.join(SCRATCH, 'dnevnik.csv');
+  await h.go('dnevnik');
+  await h.window.exportDnevnikCsv();
+  await h.settle();
+  const dn = fs.readFileSync(h.dialogs.savePath, 'utf8');
+  assert.ok(dn.startsWith(bom), 'дневникът в CSV е без BOM');
+  const dnLines = dn.slice(1).split('\r\n');
+  const unq = (s) => String(s).replace(/^"|"$/g, '');
+  assert.equal(unq(dnLines[0].split(';')[0]), 'Дата', 'заглавният ред на дневника не започва с „Дата“');
+  assert.ok(!/^"?a_/.test(dnLines[0]), 'заглавният ред носи имената на колоните в базата, не човешки етикети');
+  assert.equal(unq(dnLines[dnLines.length - 2].split(';')[0]), 'Всичко за месеца');
+  assert.equal(unq(dnLines[dnLines.length - 1].split(';')[0]), 'Всичко от началото на годината');
+  noRendererErrors();
+
+  h.dialogs.savePath = path.join(SCRATCH, 'fond.csv');
+  await h.go('catalog');
+  await h.window.exportCatalogCsv();
+  await h.settle();
+  const fd = fs.readFileSync(h.dialogs.savePath, 'utf8');
+  assert.ok(fd.startsWith(bom), 'фондът в CSV е без BOM');
+  const fdLines = fd.slice(1).split('\r\n');
+  assert.match(fdLines[0], /^Инв\. №;.*;Бройки;Цена \(€\);Цена \(лв\.\);Обща стойност \(€\);Състояние$/,
+    'заглавният ред на фонда: ' + fdLines[0]);
+  const row1003 = fdLines.find(l => l.startsWith('"1003";'));
+  assert.ok(row1003, 'инв. № 1003 липсва в изнесения фонд');
+  // 3 екземпляра по 12.00 € → 36.00 € обща стойност (и 23.47 лв. единична цена).
+  assert.match(row1003, /;"3";"12\.00";"23\.47";"36\.00";/,
+    'бройката и цена × бройка в изнесения фонд: ' + row1003);
+  assert.equal(fdLines.length - 1, h.db.prepare('SELECT COUNT(*) AS n FROM books').get().n,
+    'изнесеният фонд не съдържа по един ред на документ');
+  h.dialogs.savePath = null;
+  noRendererErrors();
+});
+
+/* ==================================================================
+   6. ПАЗАЧ ЗА ПЪЛНОТА
+   ================================================================== */
+test('19. всеки документ, издаден от src/views/, е покрит от някой от двата регистъра', () => {
+  /* ПАЗАЧЪТ СЕ ЗАКРЕПВА ЗА ПОВИКВАНЕТО, НЕ ЗА ИМЕТО (v2.4.61).
+     =====================================================================
+     ДОТУК този пазач търсеше само `function printXxx` — тоест разчиташе на
+     ДВЕ неща наведнъж: че новият документ е написан като декларирана функция и
+     че името ѝ започва с „print“. Шест са естествените начини да се напише нов
+     документ и старият израз хващаше ЕДИН от тях:
+
+       1. function printNov()                         — хващаше се
+       2. const printNov = async () => { … }          — НЕ
+       3. window.printNov = async function () { … }   — НЕ
+       4. функция с друго име (spravkaPrint)          — НЕ
+       5. печат през помощник (printNov → emitDoc)    — НЕ
+       6. метод в обект ({ printNov() { … } })        — НЕ
+
+     И трите от 2, 3 и 6 вече СЪЩЕСТВУВАТ другаде в програмата, тоест не са
+     измислени случаи. Пазач, който пропуска пет от шест, не пази нищо: той
+     подсказва, че регистърът е пълен, докато не е.
+
+     ЗАТОВА закрепването е за МЯСТОТО НА ПОВИКВАНЕ. Всяко doPrint() и
+     printLabelSheet() в src/views/*.js (без core.js — там живее самата
+     инфраструктура: doPrint, ppPrint, printLabelSheet) се свързва с
+     НАЙ-БЛИЗКАТА ПРЕДХОЖДАЩА декларация на най-горно ниво, каквато и да е
+     формата ѝ, и полученото име се сверява с регистъра. Ако новият документ е
+     написан по който и да е от шестте начина, името му няма да е в регистъра и
+     тестът пада. Ако не е написан в никаква декларация (гол doPrint на най-горно
+     ниво), пада също.
+
+     Низовете и коментарите се маскират ПРЕДИ претърсването. Без това дългите
+     обяснителни коментари в този проект (в които се пише „printLabelSheet()“ и
+     „doPrint()“) се четат като повиквания, а името се закача за случайна
+     съседна променлива. */
+  const PRINTED = new Set([
     'printKdbfDoc',                 // 1
     'printInvBookDoc',              // 2
     'printDnevnikDoc',              // 3
@@ -484,38 +614,124 @@ test('18. всяка печатна функция в src/views/ е покрит
     'printAnalytics', 'printChronicle', 'printPersons', // 15
     'printLabelsAll', 'printLabelsRange',
     'printSignatureLabelsAll', 'printSignatureLabelsRange', // 16
-    'printReportDoc'                // 17
+    'printReportDoc',               // 17
+    /* Периодиката (v2.4.61): абонаментният списък за годината и картонът на
+       изданието (кардекс). Двата документа се проверяват по същество в
+       test/periodika-v2461.test.js — тук стоят, за да не лъже регистърът. */
+    'printPeriodikaYear', 'printPeriodicalCard'
   ]);
-  /* printLabelSheet е общият двигател за всички етикети и карти — стига се до него
-     само през шестте обвивки по-горе, затова се проверява през тях, не поотделно. */
-  const viaOthers = new Set(['printLabelSheet']);
+  /* Вторият регистър — ИЗНАСЯНИЯТА. Те не минават през преглед преди печат, но
+     произвеждат файл за външен получател и затова са документи. Трите в CSV се
+     проверяват по същество в тест 18 по-горе; каталогът (JSON), UNIMARC и
+     Dublin Core се проверяват в test/handlers-catalog.test.js — тук стоят, за да
+     не изчезне нито едно изнасяне от полезрението. */
+  const EXPORTED = new Set([
+    'exportReadersCsv', 'exportDnevnikCsv', 'exportCatalogCsv',  // 18
+    'exportCatalog', 'exportMarc', 'exportDc',                   // handlers-catalog
+    'exportAuditCSV'                                             // fixes-audit-v2414
+  ]);
 
-  /* Признакът е повикване на doPrint() или printLabelSheet() — те са входът към
-     прегледа преди печат, тоест към хартията. Обхватът е конвенцията на проекта:
-     всеки документ се издава от функция на име printXxx. Така вътрешната
-     инфраструктура на core.js (doPrint, ppPrint, ppConfirmed…) остава настрана,
-     без да се поддържа списък с изключения, който сам би отслабил пазача. */
-  const found = [];
-  for (const file of fs.readdirSync(VIEWS_DIR).filter(f => f.endsWith('.js'))) {
-    const src = fs.readFileSync(path.join(VIEWS_DIR, file), 'utf8');
-    const re = /(?:^|\n)(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/g;
-    const starts = [];
-    let m;
-    while ((m = re.exec(src))) starts.push({ name: m[1], at: m.index });
-    starts.forEach((f, i) => {
-      if (!/^print/.test(f.name)) return;
-      const body = src.slice(f.at, i + 1 < starts.length ? starts[i + 1].at : src.length);
-      if (/\b(doPrint|printLabelSheet)\s*\(/.test(body)) found.push({ name: f.name, file });
-    });
+  /* Маскира низовете и коментарите с интервали. Дължината и редовете се пазят,
+     за да остават позициите в текста верни. */
+  function maskStringsAndComments(src) {
+    const out = src.split('');
+    const n = src.length;
+    const ctx = [{ t: 'code', depth: 0 }];
+    let i = 0;
+    while (i < n) {
+      const c = src[i], top = ctx[ctx.length - 1];
+      if (top.t === 'code') {
+        if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') { out[i] = ' '; i++; } continue; }
+        if (c === '/' && src[i + 1] === '*') {
+          while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] !== '\n') out[i] = ' '; i++; }
+          if (i < n) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
+          continue;
+        }
+        if (c === "'" || c === '"' || c === '`') { ctx.push({ t: c }); out[i] = ' '; i++; continue; }
+        if (c === '{') { top.depth++; i++; continue; }
+        if (c === '}') {
+          if (top.depth === 0 && ctx.length > 1) { ctx.pop(); out[i] = ' '; i++; continue; }
+          top.depth--; i++; continue;
+        }
+        i++; continue;
+      }
+      if (c === '\\') { out[i] = ' '; if (src[i + 1] && src[i + 1] !== '\n') out[i + 1] = ' '; i += 2; continue; }
+      if (c === top.t) { ctx.pop(); out[i] = ' '; i++; continue; }
+      // ${…} вътре в шаблонен низ е пак код — там живеят и вложените шаблони.
+      if (top.t === '`' && c === '$' && src[i + 1] === '{') {
+        out[i] = ' '; out[i + 1] = ' '; ctx.push({ t: 'code', depth: 0 }); i += 2; continue;
+      }
+      if (c !== '\n') out[i] = ' ';
+      i++;
+    }
+    return out.join('');
   }
-  assert.ok(found.length >= 20, 'претърсването намери подозрително малко печатни функции: ' + found.length);
-  const missing = found.filter(f => !covered.has(f.name) && !viaOthers.has(f.name));
-  assert.deepEqual(missing.map(f => f.file + ':' + f.name), [],
-    'нов документ без проверка в този файл — допишете го или обяснете защо се проверява другаде');
+
+  /* Декларациите на най-горно ниво — тоест започващи в началото на ред. Вътре
+     във функция всичко е с отстъп, затова помощна променлива в тялото (напр.
+     `const logNotices = …` в printOverdueNotices) не открадва името. */
+  const DECL = /(?:^|\n)(?:(?:async\s+)?function\s+([A-Za-z0-9_$]+)|(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=|window\.([A-Za-z0-9_$]+)\s*=)/g;
+  /* Какво прави един документ: преглед преди печат (doPrint/printLabelSheet)
+     или изнесен файл (изнасяне през IPC, или пряко сваляне през <a download>). */
+  const EMITS = /\b(?:doPrint|printLabelSheet)\s*\(|window\.api\.[A-Za-z0-9_$]+\.export[A-Za-z0-9_$]*\s*\(|\.download\s*=/g;
+
+  function emittersIn(src) {
+    const masked = maskStringsAndComments(src);
+    const decls = [];
+    let m;
+    DECL.lastIndex = 0;
+    while ((m = DECL.exec(masked))) decls.push({ name: m[1] || m[2] || m[3], at: m.index });
+    const out = [];
+    EMITS.lastIndex = 0;
+    while ((m = EMITS.exec(masked))) {
+      let owner = null;
+      for (const d of decls) { if (d.at < m.index) owner = d; else break; }
+      const line = masked.slice(0, m.index).split('\n').length;
+      out.push({ name: owner ? owner.name : '(извън декларация, ред ' + line + ')', line });
+    }
+    return out;
+  }
+
+  const found = [];
+  for (const file of fs.readdirSync(VIEWS_DIR).filter(f => f.endsWith('.js') && f !== 'core.js')) {
+    const src = fs.readFileSync(path.join(VIEWS_DIR, file), 'utf8');
+    for (const e of emittersIn(src)) found.push({ name: e.name, file, line: e.line });
+  }
+  assert.ok(found.length >= 25,
+    'претърсването намери подозрително малко места, издаващи документ: ' + found.length);
+
+  const known = new Set([...PRINTED, ...EXPORTED]);
+  const missing = found.filter(f => !known.has(f.name));
+  assert.deepEqual(missing.map(f => f.file + ':' + f.line + ' → ' + f.name), [],
+    'нов документ без проверка в този файл — допишете го в единия от двата регистъра '
+    + 'или обяснете тук защо се проверява другаде');
   // И обратната посока: изброен тук, но вече премахнат от кода.
   const names = new Set(found.map(f => f.name));
-  const stale = [...covered].filter(n => !names.has(n));
-  assert.deepEqual(stale, [], 'изброени тук функции, които вече не съществуват в src/views/');
+  assert.deepEqual([...known].filter(n => !names.has(n)), [],
+    'изброени тук функции, които вече не съществуват в src/views/');
+
+  /* СИЛАТА НА ПАЗАЧА СЕ ДОКАЗВА, А НЕ СЕ ТВЪРДИ. Шестте начина да се напише нов
+     документ се подават на същия претърсвач; всеки от тях трябва да излезе с
+     име, което го няма в регистрите. Ако утре някой „опрости“ израза по-горе,
+     тези редове падат преди регистърът да е излъгал. */
+  const mutations = {
+    'обикновена function printNov()': '\nasync function printNov() { doPrint("<div/>"); }\n',
+    'стрелкова функция const printNov2 = () => doPrint()': '\nconst printNov2 = async () => { doPrint("<div/>"); };\nwindow.printNov2 = printNov2;\n',
+    'window.printNov3 = async function () {…}': '\nwindow.printNov3 = async function () { doPrint("<div/>"); };\n',
+    'функция с друго име (spravkaPrint) — извън конвенцията': '\nfunction spravkaPrint() { doPrint("<div/>"); }\n',
+    'печат през помощник (printNov4 → emitDoc → doPrint)': '\nfunction printNov4() { emitDoc("<div/>"); }\nfunction emitDoc(html) { doPrint(html); }\n',
+    'метод в обект ({ printNov5() { doPrint() } })': '\nconst DOCS = { printNov5() { doPrint("<div/>"); } };\n',
+    'ново изнасяне (exportNovo → window.api.x.exportCsv())': '\nasync function exportNovo() { await window.api.knigi.exportCsv(); }\n'
+  };
+  for (const [what, src] of Object.entries(mutations)) {
+    const names2 = emittersIn(src).map(e => e.name);
+    assert.ok(names2.length > 0, 'пазачът не вижда документа изобщо: ' + what);
+    assert.deepEqual(names2.filter(n => known.has(n)), [],
+      'пазачът НЕ хваща нов документ, написан като „' + what + '“');
+  }
+  /* Коментар, в който ПИШЕ „doPrint()“, не е документ — иначе пазачът би падал
+     върху собствените си обяснения (точно това ставаше в logo-org.js). */
+  assert.deepEqual(emittersIn('\n/* тук се вика doPrint() за етикетите */\nconst X = 1;\n'), []);
 });
 
 /* Партидата се отваря ПОИМЕННО, по същия път като бутона „Отвори“ на реда

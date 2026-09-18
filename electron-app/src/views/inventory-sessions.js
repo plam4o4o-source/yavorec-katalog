@@ -1,4 +1,17 @@
 /* ---------------- Инвентаризация ---------------- */
+/* БРОЙКАТА НА ЕДИН РЕД — навсякъде в този екран (v2.4.61).
+   Инвентаризацията по чл. 40 – 41 брои библиотечни ДОКУМЕНТИ, не инвентарни
+   номера (виж дългата бележка в handlers/inventory-sessions.js). Бройката идва
+   от обработчика като COALESCE(inventory.quantity, 1); правилото за липсващата
+   стойност се повтаря и тук по същата причина, поради която е COALESCE в SQL:
+   ред без записана бройка е ПОНЕ един документ, не нула. Изричната нула се
+   уважава — тя е разминаване в данните и трябва да си личи, а не да се
+   „поправя“ мълчаливо на екрана. */
+function invQty(x) {
+  const q = Number(x && x.quantity);
+  return Number.isFinite(q) && q >= 0 ? q : 1;
+}
+function invQtySum(rows) { return (rows || []).reduce((n, x) => n + invQty(x), 0); }
 let INVENT_SESSION = null;
 async function renderInvent() {
   if (INVENT_SESSION) return renderInventRun();
@@ -46,11 +59,20 @@ async function renderInvent() {
                в handlers/dashboard.js), но не бива да носят едно и също име —
                пред проверяващ това изглежда като разминаване в отчета. -->
           <div><span title="Брой инвентарни номера — по един на ред в инвентарната книга. Различава се от броя екземпляри във фонда, когато едно заглавие е в няколко екземпляра.">Инвентарни номера във фонда</span><b>${req.active.toLocaleString('bg-BG')}</b></div>
+          ${/* ДВЕТЕ МЕРКИ СЕ ПОКАЗВАТ ЕДНА ДО ДРУГА (v2.4.61). Нормата по чл. 40,
+               т. 2 се мери в инвентарни номера (проверката е сканиране на номер),
+               а нормативът по чл. 41 и целият протокол — в библиотечни документи.
+               Двете съвпадат във всяка база, в която програмата сама е давала
+               номерата; разминават се при заварен неразделен запис. Редът излиза
+               само тогава — иначе би повтарял същото число два пъти. */''}
+          ${req.activeDocs != null && req.activeDocs !== req.active
+            ? `<div><span title="Броят библиотечни документи (екземпляри) — мярката на чл. 13, чл. 16 и чл. 40 – 41. Различава се от инвентарните номера при заварен запис с няколко екземпляра под един номер.">Библиотечни документи във фонда</span><b>${Number(req.activeDocs).toLocaleString('bg-BG')}</b></div>`
+            : ''}
           <div><span>Изискван процент</span><b>${req.pct}%</b></div>
           <div><span>Допустими загуби</span><b>${req.naturalLoss.toFixed(1)}</b></div>
         </div>
         <div class="hint" style="margin-top:10px">Допустимите загуби по чл. 41 се изчисляват спрямо фонда
-        и дела на свободния достъп.</div>
+        (в библиотечни документи) и дела на свободния достъп.</div>
       </div>
     </div>
 
@@ -69,7 +91,14 @@ async function renderInvent() {
         <b class="num">${s.scanned || 0}</b>
         <div class="chartTrack" style="flex:1;min-width:60px;height:7px"><div class="chartFill" style="width:${sp}%"></div></div>
         <span class="hint">${sp}%</span></div></td>
-      <td class="num">${s.closed ? `<b style="color:${s.missing ? 'var(--red)' : 'var(--green)'}">${s.missing || 0}</b>` : '<span class="hint">—</span>'}</td>
+      ${/* Липсите се броят в ДОКУМЕНТИ (v2.4.61) — същата мярка като в
+           протокола, до който води бутонът на този ред. Когато редовете в
+           таблицата на протокола са по-малко (заварен запис с няколко
+           екземпляра под един номер), се казва и това: иначе „5“ на екрана
+           срещу „3 реда“ на хартия изглежда като грешка. */''}
+      <td class="num">${s.closed ? `<b style="color:${s.missing ? 'var(--red)' : 'var(--green)'}">${s.missing || 0}</b>${
+        s.missing_rows != null && s.missing_rows !== s.missing
+          ? `<br><span class="hint">${s.missing_rows} инв. №</span>` : ''}` : '<span class="hint">—</span>'}</td>
       <td style="font-size:12px">${[s.committee1, s.committee2, s.committee3].filter(Boolean).map(esc).join(', ')}</td>
       <td>${s.closed
         ? `<button class="btn sm" onclick="printInventProtocol(${s.id})">Протокол</button>
@@ -158,7 +187,12 @@ async function renderInventRun() {
     toast('Проверката не се зареди — вероятно базата е заета от друг компютър. Опитайте отново.', 'err');
     return renderInvent();
   }
-  const found = s.scans.length, pool = s.pool_size || 0;
+  /* „Намерени“ се брои в БИБЛИОТЕЧНИ ДОКУМЕНТИ (v2.4.61), както обхватът
+     (pool_size) и както целият протокол по чл. 40. Дотук тук стоеше
+     s.scans.length — брой сканирани редове — а обхватът вече беше в документи:
+     заварен запис с 3 екземпляра под един номер даваше „В обхвата 10 ·
+     Намерени 1“ след като комисията физически е проверила три документа. */
+  const found = invQtySum(s.scans), pool = s.pool_size || 0;
   const left = Math.max(0, pool - found);
   const pct = pool ? Math.min(100, Math.round(found / pool * 100)) : 0;
   $('#view').innerHTML = `
@@ -200,12 +234,16 @@ async function renderInventRun() {
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`);
       return;
     }
+    const qty = invQty(res.data);
     log.insertAdjacentHTML('afterbegin',
-      `<div class="scanlog ok"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}</div>`);
+      `<div class="scanlog ok"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}${
+        /* Неразделен стар запис се казва на глас още при сканирането: комисията
+           трябва да провери ТРИ документа под този номер, не един. */
+        qty !== 1 ? ` <span class="badge warn">${qty} екз. под един инв. №</span>` : ''}</div>`);
     markSaved();
     // Броячите се обновяват на място. Пълно пречертаване тук би изтрило дневника
     // на сканиранията, който току-що беше допълнен.
-    scanned++;
+    scanned += qty;
     const nLeft = Math.max(0, pool - scanned);
     const nPct = pool ? Math.min(100, Math.round(scanned / pool * 100)) : 0;
     const f = $('#ivFound'), l = $('#ivLeft'), rg = $('#ivRing');
@@ -222,16 +260,20 @@ async function renderInventRun() {
 async function closeInvent() {
   const s = await call(window.api.inventorySessions.get(INVENT_SESSION.id));
   if (!s) return;
-  const unchecked = Math.max(0, (s.pool_size || 0) - s.scans.length);
+  /* Диалогът брои в библиотечни документи — същото, което ще влезе в протокола
+     (v2.4.61). Дотук тук се показваше броят СКАНИРАНИЯ срещу обхват в документи
+     и при заварен неразделен запис числата не се връзваха още преди печата. */
+  const scannedDocs = invQtySum(s.scans);
+  const unchecked = Math.max(0, (s.pool_size || 0) - scannedDocs);
   modal('Какъв е видът на тази инвентаризация?', `
-    <div class="note" style="margin-top:0">Проверени са <b>${s.scans.length.toLocaleString('bg-BG')}</b>
+    <div class="note" style="margin-top:0">Проверени са <b>${scannedDocs.toLocaleString('bg-BG')}</b>
     от <b>${(s.pool_size || 0).toLocaleString('bg-BG')}</b> документа в обхвата.
     Останалите <b>${unchecked.toLocaleString('bg-BG')}</b> не са сканирани.</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <label class="chk" style="align-items:flex-start">
         <input type="radio" name="ivMode" value="representative" checked>
         <span><b>Представителна проверка</b> (чл. 40, т. 2) — минимум 10% от фонда годишно.
-        Протоколът важи <b>само за проверените</b> ${s.scans.length.toLocaleString('bg-BG')} документа.
+        Протоколът важи <b>само за проверените</b> ${scannedDocs.toLocaleString('bg-BG')} документа.
         Несканираните <b>не се пипат</b> — те просто не са влизали в тазгодишната извадка.</span>
       </label>
       <label class="chk" style="align-items:flex-start">
@@ -266,6 +308,15 @@ async function doCloseInvent() {
       <div class="card"><div class="num">${r.missing}</div><div class="lbl">Липсващи</div></div>
       <div class="card"><div class="num">${r.allowedLoss.toFixed(1)}</div><div class="lbl">Допустими</div></div>
     </div>
+    ${/* Числата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ (v2.4.61) — мярката на чл. 40 – 41 и
+         на акта, който ще се състави от тези липси. Когато инвентарните номера
+         са по-малко (заварен неразделен запис), се казва изрично: иначе
+         таблицата в протокола ще изброи по-малко реда, отколкото пише тук. */''}
+    ${r.missingRows != null && r.missingRows !== r.missing
+      ? `<div class="note">Липсващите ${r.missing} библиотечни документа стоят под
+         ${r.missingRows} инвентарни номера — един стар запис носи няколко екземпляра.
+         Протоколът изброява номерата и показва бройката до цената.</div>`
+      : ''}
     ${r.outOfScope
       ? `<div class="note">${r.outOfScope === 1
           ? 'Един сканиран документ е излязъл от обхвата, докато проверката е течала'
@@ -346,9 +397,29 @@ async function printInventProtocol(id) {
      отчислен или преместен в друг отдел, докато проверката тече, излиза от него.
      Печатаният брой сканирания правеше протокола несъбираем: „в обхвата 9 ·
      проверени 6 · липсващи 4“. Стари сесии нямат снимка и падат обратно. */
-  const scanned = s.scanned_final != null ? s.scanned_final : s.scans.length;
-  const missing = s.missing.length;
-  const missingValue = s.missing.reduce((n, m) => n + (Number(m.price) || 0), 0);
+  const scanned = s.scanned_final != null ? s.scanned_final : invQtySum(s.scans);
+  /* ПРОТОКОЛЪТ БРОИ БИБЛИОТЕЧНИ ДОКУМЕНТИ (v2.4.61).
+     =====================================================================
+     Дотук този лист броеше РЕДОВЕ и събираше ЕДИНИЧНИ цени. Актът по чл. 30,
+     т. 6, съставен от същите тези липси (бутонът „Проект за акт от липсите“),
+     брои документи и сумира цена × бройка. Върху заварен запис с 3 екземпляра
+     по 4.00 € и още един документ за 3.50 € двата листа излизаха така:
+
+       протокол : „Липсващи: 3 … ОБЩО 3 документа — 16.50 €“
+       акт      : „4 библиотечни документа … 15.50 €“
+
+     Числата не си приличат по нищо, а описват едно и също събитие. И чл. 40 –
+     41, и чл. 13/чл. 16 броят библиотечни ДОКУМЕНТИ — виж db/fund-sql.js.
+     Затова: бройката идва от handler-а (COALESCE(inventory.quantity, 1)),
+     стойността е Σ(единична цена × бройка), закръглена до цент при СЪБИРАНЕТО
+     (иначе редът ОБЩО не съвпада със сбора на собствените си редове), а
+     клетката с цената носи означението „бройка × цена“ — точно както
+     actQtyMark() в акта, за да се четат двата документа еднакво. */
+  const mQtyMark = (m) => invQty(m) !== 1 ? invQty(m) + ' × ' : '';
+  const missing = invQtySum(s.missing);
+  const missingRows = s.missing.length;
+  const missingValue = Math.round(
+    s.missing.reduce((n, m) => n + (Number(m.price) || 0) * invQty(m), 0) * 100) / 100;
   /* ПУЛЪТ КЪМ ПРИКЛЮЧВАНЕТО, не снимката от започването. Одит на документите
      v2.4.17: печаташе се pool_size — числото, снето при започването — докато
      липсващите се смятат от пула НАЖИВО при приключване. Книга, вписана докато
@@ -392,10 +463,20 @@ async function printInventProtocol(id) {
       ? `<br><b>Заети от читатели към деня на проверката:</b> ${onLoan} — не се проверяват на място и не се смятат за липсващи.` : ''}${
       atBinder != null && atBinder > 0
       ? `<br><b>За реставрация към деня на проверката:</b> ${atBinder} — при подвързвача, не се проверяват на място и не се смятат за липсващи.` : ''}</div>
-    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Стойност, € / лв.</th></tr></thead><tbody>
+    ${missing ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th>${
+      /* Колоната „Бр.“ излиза САМО когато някой ред носи бройка, различна от
+         един документ — по същото правило като в акта (showQty там). При
+         редовни данни един инвентарен номер е един екземпляр и колоната би
+         била константа 1; при заварен неразделен запис без нея документът се
+         сумира на едно число, а твърди друго. */''
+      }${missing !== missingRows ? '<th>Бр.</th>' : ''}<th>Стойност, € / лв.</th></tr></thead><tbody>
     ${s.missing.map((m, n) => `<tr><td>${n + 1}</td><td>${m.inv_number ?? ''}</td>
-      <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td><td>${m.price == null ? '—' : mny(m.price)}</td></tr>`).join('')}
-    <tr><td colspan="3"><b>ОБЩО ${missing} ${missing === 1 ? 'документ' : 'документа'}</b></td><td><b>${mny(missingValue)}</b></td></tr>
+      <td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td>${
+      missing !== missingRows ? `<td>${invQty(m)}</td>` : ''}<td>${
+      m.price == null ? '—' : mQtyMark(m) + mny(m.price)}</td></tr>`).join('')}
+    <tr><td colspan="${missing !== missingRows ? 4 : 3}"><b>ОБЩО ${missing} ${missing === 1 ? 'документ' : 'документа'}${
+      missing !== missingRows ? ` (${missingRows} ${missingRows === 1 ? 'инвентарен номер' : 'инвентарни номера'})` : ''
+      }</b></td><td><b>${mny(missingValue)}</b></td></tr>
     </tbody></table>`
     : '<div class="pmeta">При проверката не са установени липсващи документи.</div>'}
     ${Number.isFinite(allowed) ? `<div class="pmeta">
