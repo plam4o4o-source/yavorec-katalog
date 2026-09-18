@@ -171,9 +171,11 @@ test('books:delete трие невписан документ (без инвен
   assert.equal(db.prepare('SELECT 1 FROM books WHERE id=?').get(bookId), undefined);
 });
 
+/* gdpr_consent: 1 (v2.4.61) — readers:create вече отказва читател без отбелязано
+   съгласие по чл. 47, ал. 2 и ОРЗД (assertConsent в handlers/readers.js). */
 test('readers:delete отказва изтриване на читател с невърнати документи и казва колко са', async () => {
   const { db, ipcMain } = setupReaders();
-  const readerId = (await ipcMain.invoke('readers:create', { name: 'Стар читател' })).data;
+  const readerId = (await ipcMain.invoke('readers:create', { name: 'Стар читател', gdpr_consent: 1 })).data;
   const b1 = db.prepare("INSERT INTO books (inv_number, title) VALUES (11, 'А')").run().lastInsertRowid;
   const b2 = db.prepare("INSERT INTO books (inv_number, title) VALUES (12, 'Б')").run().lastInsertRowid;
   const b3 = db.prepare("INSERT INTO books (inv_number, title) VALUES (13, 'В')").run().lastInsertRowid;
@@ -189,7 +191,7 @@ test('readers:delete отказва изтриване на читател с н
 
 test('readers:delete отказва и при само затворена история, като сочи анонимизирането', async () => {
   const { db, ipcMain } = setupReaders();
-  const readerId = (await ipcMain.invoke('readers:create', { name: 'Отдавнашен читател' })).data;
+  const readerId = (await ipcMain.invoke('readers:create', { name: 'Отдавнашен читател', gdpr_consent: 1 })).data;
   const bookId = db.prepare("INSERT INTO books (inv_number, title) VALUES (21, 'Г')").run().lastInsertRowid;
   lendBook(db, { bookId, readerId, dateOut: '2023-01-01', dateIn: '2023-02-01' });
 
@@ -588,11 +590,16 @@ test('анулирането на акт отваря обратно заема�
   const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
   const loanId = lendBook(db, { bookId, readerId, dateOut: '2025-11-01' });
 
+  /* v2.4.61: причината е т. 5 („повредени или невърнати от ползватели“), а не
+     т. 6 — текстът тук винаги е описвал точно нея, но кодът беше на липсите от
+     инвентаризация. Оттогава отчисляването на документ, който е У ЧИТАТЕЛЯ, се
+     приема само по т. 5; по всяка друга причина се отказва, защото комисията не
+     може да опише документ, който не е виждала. */
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели' },
+    act: { no: 1, date: '2026-06-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели' },
     bookIds: [bookId]
   });
-  assert.equal(created.ok, true);
+  assert.equal(created.ok, true, created.error);
   assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId).date_in, '2026-06-01');
 
   const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });

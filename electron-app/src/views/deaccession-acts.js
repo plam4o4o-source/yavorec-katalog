@@ -1,7 +1,24 @@
 /* ---------------- Отчисляване ---------------- */
+/* Коя година показва списъкът с актове (v2.4.61). „всички“ е нарочно
+   подразбиращото се: за разлика от КДБФ, която ВИНАГИ е за една година, тук
+   екранът е регистър на актовете и библиотекарката най-често търси „последния
+   акт“, без да мисли за година. Филтърът е за другия случай — проверка, при
+   която се иска точно една година (чл. 35: номерацията е годишна, тоест „акт
+   № 4“ без година не значи нищо). */
+let ACTS_YEAR = 'всички';
+window.setActsYear = (y) => { ACTS_YEAR = y; renderActs(); };
 async function renderActs() {
-  const rows = await call(window.api.deaccessionActs.list());
-  if (!rows) return;
+  const all = await call(window.api.deaccessionActs.list());
+  if (!all) return;
+  const years = [...new Set(all.map(a => String(a.year)))].sort().reverse();
+  if (ACTS_YEAR !== 'всички' && !years.includes(ACTS_YEAR)) ACTS_YEAR = 'всички';
+  const rows = ACTS_YEAR === 'всички' ? all : all.filter(a => String(a.year) === ACTS_YEAR);
+  /* Сборът брои САМО живите актове — точно както КДБФ Приложение № 2 и по
+     същата причина: анулираният акт остава в регистъра (чл. 39), но не е
+     отчислил нищо и не бива да влиза в никакъв сбор. */
+  const live = rows.filter(a => !a.revoked_at);
+  const sumCount = live.reduce((s, a) => s + (Number(a.item_count) || 0), 0);
+  const sumValue = live.reduce((s, a) => s + (Number(a.item_value) || 0), 0);
   /* Проектите се четат отделно и стоят НАД актовете (v2.4.56). Проектът не е
      документ: няма номер, нищо не е отчислено, документите са във фонда. Виждат
      се първи, защото са недовършена работа и чакат комисията. */
@@ -14,6 +31,11 @@ async function renderActs() {
     <div class="toolbar">
       <button class="btn pri" onclick="actForm()">+ Нов акт за отчисляване</button>
       <button class="btn" onclick="actForm(null, 1)">+ Нов проект</button>
+      ${years.length ? `<label style="margin-left:auto">Година:
+        <select onchange="setActsYear(this.value)">
+          <option value="всички"${ACTS_YEAR === 'всички' ? ' selected' : ''}>всички</option>
+          ${years.map(y => `<option value="${y}"${ACTS_YEAR === y ? ' selected' : ''}>${y}</option>`).join('')}
+        </select></label>` : ''}
     </div>
     ${drafts.length ? `<h3 style="margin:14px 0 6px">Проекти (още не са актове)</h3>
     <div class="wrap"><table class="ledger"><thead><tr><th>Проект №</th><th>Дата</th><th>Причина</th>
@@ -35,7 +57,17 @@ async function renderActs() {
       <td class="num">${a.revoked_at ? '—' : a.item_count}</td>
       <td class="num">${a.revoked_at ? '—' : mny(a.item_value)}</td><td style="font-size:12px">${esc(a.disposal || '')}</td>
       <td><button class="btn sm" onclick="openAct(${a.id})">Отвори</button></td></tr>`).join('')
-      : `<tr><td colspan="7" class="empty">Няма съставени актове.</td></tr>`}
+      : `<tr><td colspan="7" class="empty">Няма съставени актове${ACTS_YEAR === 'всички' ? '' : ' за ' + ACTS_YEAR + ' г.'}.</td></tr>`}
+    ${/* Сборът стои ПОД таблицата по същия образец като КДБФ Приложение № 3 и
+          брои същото, което брои и тя: живите актове на показаната година.
+          Дотук екранът изреждаше актовете, но не сумираше нищо — за въпроса
+          „колко документа излязоха от фонда тази година“ трябваше да се отваря
+          друг раздел, а двете числа задължително трябва да съвпадат. */''}
+    ${rows.length ? `<tr style="background:var(--paper3);font-weight:700">
+      <td colspan="3">ОБЩО${ACTS_YEAR === 'всички' ? ' (всички години)' : ' за ' + ACTS_YEAR + ' г.'}
+        — ${live.length}${live.length === 1 ? ' действащ акт' : ' действащи акта'}${
+          rows.length - live.length ? ' (и ' + (rows.length - live.length) + ' анулирани, които не се броят)' : ''}</td>
+      <td class="num">${sumCount}</td><td class="num">${mny(sumValue)}</td><td colspan="2"></td></tr>` : ''}
     </tbody></table></div>`;
 }
 let ACT_LIST = [];
@@ -69,6 +101,17 @@ async function actForm(draft, asDraft) {
         ${fld('Начин на разпореждане', 'disposal', { type: 'select', val: v.disposal || '', opts: ['предадени за вторични суровини', 'продадени', 'предоставени безвъзмездно на друга библиотека', 'предоставени на организация в обществена полза', 'обменени с друга библиотека', 'унищожени'] })}
         ${fld('Приложен документ', 'attach', { val: v.attach || '' })}
       </div>
+      ${/* БЕЛЕЖКАТА НА ПРОЕКТА СЕ ВИЖДА (v2.4.61).
+            Проектът, направен от протокол за инвентаризация, носи препратката
+            „Съставен от протокол за инвентаризация № 3 от … г.“ — единствената
+            връзка между акта по чл. 30, т. 6 и протокола по чл. 40. Дотук тя не
+            се показваше НИКЪДЕ и се триеше при първия запис от тази форма (виж
+            saveDraft в handlers/deaccession-acts.js). Полето е само за четене:
+            то не е писано от библиотекаря тук, а е дошло с проекта, и се пренася
+            в утвърдения акт, където се и печата. */''}
+      ${v.note ? `<div class="note d"><b>Бележка към проекта:</b> ${esc(v.note)}
+        <div class="hint">Пренася се в утвърдения акт и се печата в него — така актът и протоколът
+        по чл. 40 се четат един през друг при проверка.</div></div>` : ''}
       <fieldset><legend>Списък на отчислените документи — чл. 35, ал. 2</legend>
         <div class="toolbar">
           <input id="actScan" placeholder="Въведете инвентарен № или баркод и натиснете Enter" autocomplete="off">
@@ -92,6 +135,41 @@ async function actForm(draft, asDraft) {
   setTimeout(() => {
     const el = $('#actScan'); if (!el) return; el.focus();
     el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); actAdd(); } });
+    /* НОМЕРЪТ СЛЕДВА ГОДИНАТА НА ДАТАТА, А НЕ ДНЕШНАТА (v2.4.61).
+       =================================================================
+       Дотук номерът се вземаше веднъж, при отваряне на формата, и то за
+       ТЕКУЩАТА година (nextNo(yr())), докато обработчикът записва акта в
+       годината на ДАТАТА му. Библиотекарка, която съставя акт за декември на
+       миналата година (най-обикновен случай — комисията заседава през
+       януари), получаваше № 4 и той влизаше като № 4/минала година в година,
+       в която няма нито един акт: поредицата ѝ започва от 4, а № 1 – 3 ги
+       няма и никога няма да ги има, защото по чл. 39 актове не се трият.
+       Чл. 35 е изричен: номерацията започва от 1 всяка календарна година.
+       Затова смяната на датата преизчислява номера. Ако библиотекарката е
+       въвела номер НА РЪКА (например продължава номерация от хартиен
+       регистър), той не се пипа — само се казва кой е следващият свободен. */
+    const dt = $('#actF [name=date]'), noEl = $('#actF [name=no]');
+    if (dt && noEl) {
+      let offered = String(noEl.value || '');
+      dt.addEventListener('change', async () => {
+        const y = String(dt.value || '').slice(0, 4);
+        if (!/^\d{4}$/.test(y)) return;
+        const next = await call(window.api.deaccessionActs.nextNo(y));
+        if (next == null) return;
+        if (String(noEl.value || '') !== offered) {
+          if (String(noEl.value || '') !== String(next)) {
+            toast('Актът е с дата от ' + y + ' г., а там следващият свободен номер е № ' + next
+              + '. Оставям въведения от вас № ' + noEl.value + ' — чл. 35 иска номерата да текат от 1 всяка година.', 'warn');
+          }
+          return;
+        }
+        if (String(next) === offered) return;
+        noEl.value = String(next);
+        offered = String(next);
+        toast('Датата е от ' + y + ' г. — номерът на акта е преизчислен на № ' + next + ' за ' + y
+          + ' г. (чл. 35: номерацията започва от 1 всяка календарна година).', 'warn');
+      });
+    }
     drawActList();
   }, 60);
 }
@@ -108,7 +186,22 @@ async function actAdd() {
   const b = res.data;
   if (!b) return toast('Няма документ с баркод/инв. № ' + code, 'err');
   if (ACT_LIST.some(x => x.id === b.id)) return toast('Инв. № ' + b.inv_number + ' вече е в списъка.', 'err');
-  if (b.available < b.quantity) toast('Внимание: инв. № ' + b.inv_number + ' в момента е зает от читател.', 'err');
+  /* Заетият документ се казва още при сканирането, а от v2.4.61 се казва и
+     КАКВО СЛЕДВА: обработчикът приема зает документ само по чл. 30, т. 5
+     („повредени или невърнати от ползватели“) и отказва акта по всяка друга
+     причина — документът е в дома на читателя и комисията не го е виждала.
+     По-добре това да се научи сега, при сканирането, отколкото след като
+     списъкът е готов и утвърждаването се откаже. */
+  if (b.available < b.quantity) {
+    // Първото известие е дословно същото, както досега — второто казва какво следва.
+    toast('Внимание: инв. № ' + b.inv_number + ' в момента е зает от читател.', 'err');
+    const rc = ($('#actF [name=reason_code]') || {}).value;
+    if (String(rc) !== '5') {
+      toast('Зает документ се отчислява само по чл. 30, т. 5 (повредени или невърнати от ползватели): '
+        + 'приберете инв. № ' + b.inv_number + ' и тогава съставете акта, или изберете т. 5, ако читателят '
+        + 'няма да го върне. С друга причина утвърждаването ще бъде отказано.', 'warn');
+    }
+  }
   /* Изгубеният документ носи със себе си и обезщетението (v2.4.56). Казва се на
      глас още при добавянето в акта, защото точно това пита счетоводството, щом
      актът е по чл. 30, т. 5, а дотук трите действия не се срещаха никъде. */
@@ -197,13 +290,36 @@ function actHoldLine(h) {
     <div class="hint">чакал${h.status_before === 'заделена' ? 'а (книгата е била ЗАДЕЛЕНА за него)' : 'а'} —
     инв. № ${esc(String(h.inv_number ?? '—'))} · ${esc([h.author, h.title].filter(Boolean).join('. '))}</div></li>`;
 }
+/* Заемането, закрито от акта по чл. 30, т. 5 — с числата (v2.4.61). На читателя
+   се начислява обезщетение за документ, който няма да се върне; това не бива да
+   се случва мълчаливо, защото после той идва на гишето и пита откъде е сумата. */
+function actLoanLine(l) {
+  return `<li><b>${esc(l.reader_name || 'читател')}</b>${l.card_no ? ' · карта № ' + esc(l.card_no) : ''}${
+    l.phone ? ' · тел. ' + esc(l.phone) : ''}
+    <div class="hint">инв. № ${esc(String(l.inv_number ?? '—'))} · ${esc([l.author, l.title].filter(Boolean).join('. '))}
+    — заемането е закрито като НЕвърнато${l.deaccession_fine ? ', забава ' + mny(l.deaccession_fine) : ''}${
+      l.lost_amount ? ', начислено обезщетение ' + mny(l.lost_amount) : ''}</div></li>`;
+}
 async function actAftermath(actId, okMessage) {
   const a = await call(window.api.deaccessionActs.get(actId));
   const holds = (a && a.holds) || [];
+  const loans = (a && a.loans) || [];
   const shelved = ((a && a.items) || []).filter(i => i.shelves_before);
-  if (!holds.length && !shelved.length) return toast(okMessage, 'ok');
+  /* Известието за успех се показва ВИНАГИ (v2.4.61), а прозорецът се отваря
+     САМО когато има какво да се направи след акта. Дотук двете се изключваха
+     взаимно и когато имаше отказана резервация, потвърждението „отчислени са N
+     документа“ просто не се появяваше — тоест най-важното съобщение изчезваше
+     точно в най-сложния случай, а прозорецът се затваря и не оставя нищо. */
+  toast(okMessage, 'ok');
+  if (!holds.length && !shelved.length && !loans.length) return;
   modal('Актът е съставен — остава да се уведомят читателите', `
     <div class="note">${esc(okMessage)}</div>
+    ${loans.length ? `<div class="note w"><b>${loans.length === 1 ? 'Закрито е 1 заемане' : 'Закрити са ' + loans.length + ' заемания'}
+      на невърнат документ (чл. 30, т. 5).</b> Документът е у читателя и заемането е приключено като
+      НЕвърнато, не като върнато: натрупаната забава остава по него, а стойността на документа е
+      начислена в читателската сметка. Ако комисията е решила друг размер (или замяна с друг документ),
+      поправете начислението от картона на читателя.
+      <ul style="margin:8px 0 0 18px">${loans.map(actLoanLine).join('')}</ul></div>` : ''}
     ${holds.length ? `<div class="note w"><b>Обадете се на ${holds.length === 1 ? 'този читател' : 'тези читатели'}</b> —
       ${holds.length === 1 ? 'той е чакал' : 'те са чакали'} отчислен документ. Резервацията е отказана автоматично
       и НЕ се подновява: книгата вече не е част от фонда.</div>
@@ -221,6 +337,22 @@ async function saveAct() {
   const d = formData('#actF');
   if (!ACT_LIST.length) return toast('Добавете поне един документ в списъка.', 'err');
   const p = PRICHINI.find(x => x.k == d.reason_code);
+  /* Номер, който оставя дупка в годината — пита се изрично (v2.4.61). Номерът се
+     заема ЗАВИНАГИ (чл. 39 — актове не се трият), тоест пропуснатият номер
+     остава необясним завинаги. Това не е забрана: библиотека, продължила
+     номерацията си от хартиен регистър, има право на своя начален номер —
+     затова се пита, а не се отказва. Обработчикът от своя страна вписва
+     пропуска в дневника, защото през него минават и другите пътища. */
+  const y = String(d.date || '').slice(0, 4);
+  if (/^\d{4}$/.test(y)) {
+    const next = await call(window.api.deaccessionActs.nextNo(y));
+    if (next != null && Number(d.no) > Number(next)) {
+      const skipped = Number(d.no) - Number(next) === 1 ? '№ ' + next : '№ ' + next + ' – ' + (Number(d.no) - 1);
+      if (!await askConfirm('Акт № ' + d.no + ' за ' + y + ' г. оставя незает ' + skipped
+        + '. Чл. 35 иска номерата да текат последователно от 1 всяка календарна година, а зает номер '
+        + 'не се освобождава (чл. 39). Да съставя ли акта с този номер?', { okLabel: 'Да, с този номер' })) return;
+    }
+  }
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
   if (id) {
@@ -303,7 +435,17 @@ async function openAct(id) {
       Документите по него са върнати във фонда и не се броят никъде. Самият акт остава в документацията
       по чл. 39, а номер ${a.no}/${a.year} остава зает и не се дава на друг акт.</div>` : ''}
     <div class="note d"><b>Причина (чл. 30, т. ${a.reason_code}):</b> ${esc(a.reason_text)}<br>
-    <b>Разпореждане (чл. 36):</b> ${esc(a.disposal || '—')}${a.attach ? ' · ' + esc(a.attach) : ''}</div>
+    <b>Разпореждане (чл. 36):</b> ${esc(a.disposal || '—')}${a.attach ? ' · ' + esc(a.attach) : ''}
+    ${/* Препратката към протокола (чл. 40) и подписът на СЪСТАВЯНЕТО (v2.4.61) —
+          дотук прегледът казваше кой е анулирал акта, но не и кой го е съставил,
+          нито от кой документ е дошъл. */''}
+    ${a.note ? '<br><b>Бележка:</b> ' + esc(a.note) : ''}
+    ${/* Датата се изписва по български (bg()), а не както е записана в базата:
+          ISO низ върху лист, който се подписва, се чете като компютърна следа. */''}
+    ${(a.created_at || a.created_by)
+      ? `<br><span class="hint">Съставен${a.created_at ? ' на ' + bg(String(a.created_at).slice(0, 10)) + ' г.'
+          + ' в ' + esc(String(a.created_at).slice(11, 16)) + ' ч.' : ''}${
+          a.created_by ? ' от ' + esc(a.created_by) : ''}</span>` : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
     ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
     <td class="num">${esc(l.year || '')}</td><td class="num">${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
@@ -315,6 +457,14 @@ async function openAct(id) {
           веднага след съставянето (виж actAftermath): актът се отваря и след
           седмица — например когато читателят дойде да пита за книгата си — и
           тогава отговорът трябва да е тук, а не в дневника. */''}
+    ${(a.loans && a.loans.length) ? `<div class="note w" style="margin-top:10px">
+      <b>Закрити заемания на невърнати документи (${a.loans.length}):</b>
+      <ul style="margin:6px 0 0 18px">${a.loans.map(l => actLoanLine(l)
+        + (l.charge ? `<div class="hint" style="margin-left:18px">начислено ${mny(l.charge.charged || 0)},
+            събрано ${mny(l.charge.covered || 0)}${(l.charge.outstanding || 0) > 0
+              ? ' — остава да се събере ' + mny(l.charge.outstanding) : ''}</div>` : '')).join('')}</ul>
+      ${/* При анулиране заемането се отваря обратно и губи връзката с акта, тоест
+            този списък се изпразва сам — следата остава в дневника. */''}</div>` : ''}
     ${(a.holds && a.holds.length) ? `<div class="note w" style="margin-top:10px">
       <b>Отказани резервации при съставянето на акта (${a.holds.length}):</b>
       <ul style="margin:6px 0 0 18px">${a.holds.map(actHoldLine).join('')}</ul></div>` : ''}
@@ -324,7 +474,7 @@ async function openAct(id) {
         `<li>инв. № ${esc(String(i.inv_number ?? '—'))} — ${esc(i.shelves_before)}</li>`).join('')}</ul>
       ${a.revoked_at ? 'Анулирането на акта НЕ ги връща по витрините — това се прави ръчно.' : ''}</div>` : ''}
     <div class="hint" style="margin-top:10px">Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || '—'}</div>`,
-    `${a.revoked_at ? '' : `<button class="btn l dgr" onclick="revokeAct(${id})">Анулирай акта</button>`}
+    `${a.revoked_at ? '' : `<button class="btn l dgr" onclick="revokeAct(${id}, '${esc(String(a.year))}')">Анулирай акта</button>`}
      <button class="btn" onclick="printActDoc(${id})">Печат на акта / PDF</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
 }
@@ -360,7 +510,7 @@ async function printActDoc(id) {
           а редовете печатат единична цена, и без колоната документът се сумира
           на едно число, а твърди друго. */''}
     <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th>${
-      showQty ? '<th>Бр.</th>' : ''}<th>Стойност, €</th></tr></thead><tbody>
+      showQty ? '<th>Бр.</th>' : ''}<th>Стойност, € / лв.</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
     <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
     <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td>${
@@ -368,7 +518,17 @@ async function printActDoc(id) {
     <tr><td colspan="5"><b>ОБЩО${showQty ? '' : ' ' + actDocs(count)}</b></td>${
       showQty ? `<td><b>${count}</b></td>` : ''}<td><b>${mny(total)}</b></td></tr></tbody></table>
     <div class="pmeta">Начин на разпореждане по чл. 36: <b>${esc(a.disposal || '…………………')}</b>${a.attach ? '<br>Приложен документ: ' + esc(a.attach) : ''}<br>
-    Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.</div>
+    ${/* ПРЕПРАТКАТА КЪМ ПРОТОКОЛА СЕ ПЕЧАТА В САМИЯ АКТ (v2.4.61).
+          Актът по чл. 30, т. 6 се ражда от протокол за инвентаризация по чл. 40.
+          Дотук двата документа излизаха от принтера напълно несвързани и
+          проверяващият нямаше по какво да мине от единия към другия — а точно
+          това е първият въпрос при липси: „по кой протокол са установени“.
+          Печата се в акта, а не само на екрана: от библиотеката излиза хартията. */''}
+    ${a.note ? 'Основание/препратка: ' + esc(a.note) + '<br>' : ''}
+    Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.${
+      (a.created_by || a.created_at)
+        ? '<br>Съставил: ' + esc(a.created_by || '…………………')
+          + (a.created_at ? ' · ' + bg(String(a.created_at).slice(0, 10)) + ' г.' : '') : ''}</div>
     ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printActDoc = printActDoc;
@@ -376,15 +536,29 @@ window.printActDoc = printActDoc;
    Дотук диалогът беше едно „Да продължа?“, а зад него стоеше DELETE — оттам и
    впечатлението, че анулирането „маха“ акта. Сега се пита с формуляр, защото
    основанието влиза в КДБФ Приложение № 3 до самия ред и се чете от проверяващ. */
-function revokeAct(id) {
+function revokeAct(id, actYear) {
+  /* АКТ ОТ ПРИКЛЮЧЕНА ГОДИНА — ВТОРО, ИЗРИЧНО ПОТВЪРЖДЕНИЕ (v2.4.61).
+     Анулирането на акт от минала година преизчислява КДБФ (Приложение № 2 и
+     № 3) за нея — а тя вече е отпечатана, подписана и предадена, и по чл. 39 се
+     съхранява. При следващ печат от програмата ще излезе друг документ. Затова
+     за миналите години се иска отделна отметка: не за да се забрани поправката
+     (сгрешен акт трябва да може да се поправи и след години), а за да не се
+     случи между другото, докато се поправя нещо съвсем друго. */
+  const closedYear = actYear && String(actYear) < yr();
   modal('Анулиране на акт за отчисляване', `
     <div class="note w"><b>Актът не се изтрива.</b> Той е документ по чл. 39: редът остава в регистъра,
     номерът му остава зает завинаги и повече не се дава на друг акт, а в КДБФ Приложение № 3 излиза
     зачертан, с основанието по-долу. Документите се връщат във фонда.</div>
+    ${closedYear ? `<div class="note w"><b>Този акт е от приключената ${esc(String(actYear))} г.</b>
+      Анулирането му променя КДБФ за ${esc(String(actYear))} г. със задна дата: отчислените през годината
+      намаляват, а наличността към 31.12.${esc(String(actYear))} г. се увеличава. Отпечатаният и подписан
+      екземпляр вече няма да отговаря на програмата — преиздайте го и опишете защо.</div>` : ''}
     <form id="revF" onsubmit="return false">
       ${fld('Основание за анулиране', 'reason', { req: 1,
         hint: 'например: сгрешен инвентарен номер; актът е съставен повторно; комисията не го утвърди' })}
       ${fld('Анулирал (име и длъжност)', 'by', {})}
+      ${closedYear ? fld('Потвърждавам, че КДБФ за ' + actYear + ' г. ще бъде преизчислена и преиздадена',
+        'confirmClosedYear', { type: 'checkbox' }) : ''}
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn dgr" onclick="revokeActGo(${id})">Анулирай акта</button>`);
@@ -393,7 +567,11 @@ window.revokeAct = revokeAct;
 async function revokeActGo(id) {
   const d = formData('#revF');
   if (!d.reason || !String(d.reason).trim()) return toast('Основанието за анулиране е задължително.', 'err');
-  const res = await window.api.deaccessionActs.revoke(id, { reason: d.reason, by: d.by });
+  /* Отметката съществува само при акт от приключена година (виж revokeAct).
+     Обработчикът пак проверява — екранът е само един от пътищата към канала. */
+  const res = await window.api.deaccessionActs.revoke(id, {
+    reason: d.reason, by: d.by, confirmClosedYear: !!d.confirmClosedYear
+  });
   if (!res.ok) return toast(res.error, 'err');
   closeModal(); renderActs(); markSaved();
   /* Резервациите, отказани при съставянето на акта, НЕ се възстановяват при

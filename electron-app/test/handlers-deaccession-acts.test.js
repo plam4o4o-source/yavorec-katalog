@@ -87,8 +87,13 @@ test('deaccessionActs:findBook rejects an already-deaccessioned book (cannot dea
   // който тепърва има нужда от акт — виж следващия тест.
   db.prepare("UPDATE books SET barcode=?, deaccession_date='2025-01-01' WHERE id=?").run('BC5', id);
   const result = await ipcMain.invoke('deaccessionActs:findBook', 'BC5');
-  assert.equal(result.ok, true);
-  assert.equal(result.data, undefined, 'already-deaccessioned books should not be findable for a new act');
+  /* v2.4.61: отказът вече НОСИ обяснение. Дотук отчисленият документ и
+     несъществуващият номер връщаха едно и също (undefined) и екранът казваше
+     „Няма документ с този номер“ и за двата — а първото съобщение праща
+     библиотекарката да търси в инвентарната книга номер, който си е на мястото. */
+  assert.equal(result.ok, false, 'already-deaccessioned books should not be findable for a new act');
+  assert.match(result.error, /Инв\. № 5 е отчислен/);
+  assert.match(result.error, /не влиза във втори акт/);
 });
 
 test('deaccessionActs:create marks books as отчислен, closes open loans, records committee members, and schedules a catalog write', async () => {
@@ -100,11 +105,16 @@ test('deaccessionActs:create marks books as отчислен, closes open loans,
   db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)')
     .run(bookId, readerId, '2026-01-01', '2026-01-31');
 
+  /* v2.4.61: документът е У ЧИТАТЕЛЯ (отворено заемане по-горе), а такъв документ
+     се отчислява само по чл. 30, т. 5 — „повредени или невърнати от ползватели“.
+     С друга причина актът вече се отказва: комисията не може да опише като
+     износен екземпляр, който не е виждала. Тестът винаги е проверявал точно
+     затварянето на такова заемане, само че под чужда причина. */
   const result = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-08-01', reason_code: 3, reason_text: 'износени', committee1: 'А', committee2: 'Б', committee3: 'В' },
+    act: { no: 1, date: '2026-08-01', reason_code: 5, reason_text: 'невърнати от ползватели', committee1: 'А', committee2: 'Б', committee3: 'В' },
     bookIds: [bookId]
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.error);
   assert.ok(result.data > 0);
 
   const book = db.prepare('SELECT status, deaccession_act_id FROM books WHERE id=?').get(bookId);
