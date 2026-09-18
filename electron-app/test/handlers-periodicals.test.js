@@ -67,7 +67,11 @@ test('registerPeriodicalsHandlers registers all seven periodicals/periodicalIssu
 
 test('periodicals:create inserts a row and logs an audit entry', async () => {
   const { ipcMain, auditLog } = setup();
-  const result = await ipcMain.invoke('periodicals:create', { title: 'Списание Х', freq: 'месечно', issn: '1234-5678' });
+  /* v2.4.61: ISSN вече се проверява по ISO 3297 (с контролната цифра). „1234-5678“
+     е измисленият номер, който се пише в примери — контролната му цифра е грешна и
+     обработчикът го отказва. Заменен е с валиден, защото фикстурата иска издание
+     с ISSN, а не издание със сгрешен ISSN. */
+  const result = await ipcMain.invoke('periodicals:create', { title: 'Списание Х', freq: 'месечно', issn: '1234-5679' });
   assert.equal(result.ok, true);
   assert.ok(result.data > 0);
   assert.equal(auditLog.length, 1);
