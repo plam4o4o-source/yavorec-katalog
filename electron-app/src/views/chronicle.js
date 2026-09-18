@@ -2,6 +2,7 @@
 let CHR_Q = '', CHR_YEAR = '';
 const CHR_CATS = ['читалище', 'библиотека', 'самодейност', 'дарение', 'строителство', 'юбилей', 'друго'];
 async function renderChronicle() {
+  chrCancelSearch(); // отложеното търсене от предишното влизане няма какво да прави
   const [rows, years] = await Promise.all([
     call(window.api.chronicle.list({ q: CHR_Q, year: CHR_YEAR })),
     call(window.api.chronicle.years())
@@ -120,13 +121,33 @@ function drawChronicleList(rows) {
   return true;
 }
 /* Търсенето пипа само #chrList — полето за търсене НЕ се пресъздава, иначе при
-   пауза над 300 ms курсорът изчезва по средата на думата (моделът от inv-book.js). */
+   пауза над 300 ms курсорът изчезва по средата на думата (моделът от inv-book.js).
+
+   ОТЛОЖЕНОТО ТЪРСЕНЕ НЕ РИСУВА В ЧУЖД РАЗДЕЛ (v2.4.61).
+   =========================================================================
+   Търсачката е с отлагане 300 ms. Ако библиотекарката напише нещо в „Летопис“
+   и веднага мине в „Персоналии“ (а тя точно това прави — сеща се за нещо
+   друго), таймерът се задейства ВЪВ ВЕЧЕ ДРУГИЯ раздел: drawChronicleList не
+   намира #chrList (той е изчезнал заедно с летописа), връща false и резервният
+   път викаше renderChronicle(), който пише направо в #view. Резултатът: под
+   заглавието „Персоналии“ стои летописът. Нищо на екрана не обяснява какво е
+   станало и единственият изход е ново натискане на раздела.
+
+   Затова проверката е на ДВЕ места: веднага при влизане (таймерът е закъснял) и
+   пак след отговора на базата (разделът е сменен, докато заявката е текла).
+   Същата защита стои и в src/views/persons.js, и в src/views/analytics.js.
+   Самият таймер се отменя при всяко ново изчертаване на раздела — виж
+   chrCancelSearch() по-долу; окончателното му отменяне при СМЯНА на раздел е
+   работа на route() (src/views/bootstrap.js), който не се пипа в този кръг. */
 async function refreshChronicle() {
+  if (VIEW !== 'chronicle') return;
   const rows = await call(window.api.chronicle.list({ q: CHR_Q, year: CHR_YEAR }));
-  if (!rows) return;
+  if (!rows || VIEW !== 'chronicle') return;
   if (!drawChronicleList(rows)) renderChronicle();
 }
 window.refreshChronicle = refreshChronicle;
+function chrCancelSearch() { clearTimeout(window._chrT); window._chrT = null; }
+window.chrCancelSearch = chrCancelSearch;
 function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(refreshChronicle, 300); }
 window.chrSearch = chrSearch;
 function chrYear(v) { CHR_YEAR = v; renderChronicle(); }
@@ -138,8 +159,8 @@ async function chronicleForm(id) {
   modal(id ? 'Редакция на запис' : 'Нов запис в летописа', `
     <form id="chrF" onsubmit="return false">
     <div class="grid g4">
-      ${fld('Година', 'year', { val: v.year || '', req: 1 })}
-      ${fld('Точна дата (ако е известна)', 'date', { val: v.date || '', type: 'date' })}
+      ${fld('Година', 'year', { val: v.year || '', req: 1, hint: 'или „ок. 1930“' })}
+      ${fld('Точна дата (ако е известна)', 'date', { val: v.date || '', type: 'date', onchange: 'chrYearFromDate(this)' })}
       ${fld('Раздел', 'category', { type: 'select', val: v.category, opts: CHR_CATS, allowEmpty: false })}
       ${fld('Участници', 'participants', { val: v.participants || '' })}
     </div>
@@ -154,10 +175,37 @@ async function chronicleForm(id) {
      <button class="btn pri" onclick="saveChronicle(${id || 'null'})">Запиши</button>`);
 }
 window.chronicleForm = chronicleForm;
+/* ГОДИНАТА СЛЕДВА ВЪВЕДЕНАТА ТОЧНА ДАТА (v2.4.61).
+   =========================================================================
+   Формата предлага текущата година — правилно, защото повечето нови записи са
+   от тази година. Но когато краеведът впише точната дата на СТАРО събитие
+   (24.05.1922 — основаването на читалището), предложената 2026 г. оставаше и
+   записът попадаше в 2026 г.: под чуждо заглавие на екрана, в чужда група в
+   разпечатания летопис и невидим при филтър по 1922 г. Разминаването се
+   поправяше само на ръка и само ако някой го забележи.
+
+   Затова точната дата води годината — тук, докато полето е още пред очите на
+   човека, и повторно в самия канал (handlers/chronicle.js), където
+   разминаването, което формата не е поправила, се ОТКАЗВА. Свободният текст
+   („ок. 1930“, „1878 – 1880“) не се пипа, когато вече съдържа годината на
+   датата — само празното или сгрешеното поле се презаписва. */
+function chrYearMatches(year, date) {
+  return (String(year || '').match(/\d{3,4}/g) || []).includes(String(date).slice(0, 4));
+}
+function chrYearFromDate(el) {
+  const d = String((el && el.value) || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+  const y = $('#chrF [name=year]');
+  if (y && !chrYearMatches(y.value, d)) y.value = d.slice(0, 4);
+}
+window.chrYearFromDate = chrYearFromDate;
 async function saveChronicle(id) {
   const d = formData('#chrF');
   if (!d.title.trim()) return toast('Заглавието на събитието е задължително.', 'err');
   if (!d.year.trim() && !d.date) return toast('Годината е задължителна.', 'err');
+  // Същото и тук, а не само на onchange: полето за дата може да бъде попълнено
+  // и без събитието „change“ (вмъкване, автодовършване, друг път към формата).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d.date || '') && !chrYearMatches(d.year, d.date)) d.year = d.date.slice(0, 4);
   d.id = id;
   // Затваря се само при успех (v2.2.0) — иначе отказаният запис изтриваше и
   // дългия текст на летописното събитие.
@@ -228,6 +276,26 @@ async function printChronicle() {
     const ka = yearKey(a), kb = yearKey(b);
     return ka !== kb ? ka - kb : String(a).localeCompare(String(b), 'bg');
   });
+  /* ВЪТРЕ В ГОДИНАТА — ВЪЗХОДЯЩО, С НОМЕР И С ИЗТОЧНИК (v2.4.61).
+     =======================================================================
+     Летописната книга по традиция е хронологичен, номериран и посочващ
+     източниците си запис — по номера се цитира („по летописа, 1972 г., № 2“),
+     по източника се проверява. Разпечатката дотук не беше нито едното:
+       • редът вътре в годината идваше направо от chronicle:list, тоест НАЙ-
+         НОВОТО отгоре (ORDER BY date DESC — вярно за екрана, където се търси
+         последното вписано, и точно обратно на вярното за хартията): ремонтът
+         от 15.01.1972 излизаше СЛЕД юбилея от 24.05.1972;
+       • записите нямаха пореден номер — на два съседни реда за една и съща
+         година няма как да се посочи кой от тях се има предвид;
+       • „Източници“ (протокол, вестник, спомен) ги има на екрана, но не и на
+         хартията — а краеведска справка без посочен източник не струва нищо за
+         онзи, който я чете и трябва да я провери;
+       • нямаше сбор за годината, тоест не личи дали листът е пълен.
+     Записите БЕЗ точна дата отиват накрая на своята година: те са верни за
+     годината, но не могат да се подредят в нея. */
+  const dateKey = (c) => c.date || '9999-99-99';
+  years.forEach(y => byYear[y].sort((a, b) => String(dateKey(a)).localeCompare(String(dateKey(b))) || a.id - b.id));
+  const zapisa = (n) => n + (n === 1 ? ' запис' : ' записа');
   setPrintPage({ name: (CHR_YEAR ? `Летопис ${CHR_YEAR} г.` : 'Летопис'), landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">ЛЕТОПИС${CHR_YEAR ? ' — ' + esc(CHR_YEAR) + ' г.' : ''}</h2>
@@ -241,11 +309,13 @@ async function printChronicle() {
         Това НЕ е пълният летопис.`
       : `Пълен летопис — всички <b>${rows.length}</b> вписани записа, към ${bg(today())} г.`}</div>
     ${years.map(y => `<h3 style="margin:10px 0 4px">${esc(y)} г.</h3>
-      ${byYear[y].map(c => `<div style="margin-bottom:7px">
-        <b>${esc(c.title)}</b>${c.date ? ' · ' + esc(bg(c.date)) : ''}${c.category ? ' · ' + esc(c.category) : ''}
+      ${byYear[y].map((c, i) => `<div style="margin-bottom:7px">
+        <b>№ ${i + 1}. ${esc(c.title)}</b>${c.date ? ' · ' + esc(bg(c.date)) : ''}${c.category ? ' · ' + esc(c.category) : ''}
         ${c.body ? `<div style="font-size:11pt">${esc(c.body).replace(/\n/g, '<br>')}</div>` : ''}
         ${c.participants ? `<div style="font-size:10pt"><i>Участници: ${esc(c.participants)}</i></div>` : ''}
-      </div>`).join('')}`).join('')}
+        ${c.sources ? `<div style="font-size:10pt"><i>Източници: ${esc(c.sources)}</i></div>` : ''}
+      </div>`).join('')}
+      <div style="font-size:10pt;margin:2px 0 8px"><b>Общо за ${esc(y)} г.: ${zapisa(byYear[y].length)}.</b></div>`).join('')}
     ${ssig(['Летописец: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
 }
 window.printChronicle = printChronicle;

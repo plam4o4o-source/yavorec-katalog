@@ -1,6 +1,7 @@
 /* ---------------- Персоналии ---------------- */
 let PRS_Q = '';
 async function renderPersons() {
+  prsCancelSearch(); // отложеното търсене от предишното влизане няма какво да прави
   const rows = await call(window.api.persons.list(PRS_Q));
   if (!rows) return;
   $('#view').innerHTML = `
@@ -81,13 +82,19 @@ function drawPersonsList(rows) {
   return true;
 }
 /* Търсенето пипа само #prsList — полето за търсене НЕ се пресъздава, иначе при
-   пауза над 300 ms курсорът изчезва по средата на името (моделът от inv-book.js). */
+   пауза над 300 ms курсорът изчезва по средата на името (моделът от inv-book.js).
+   Проверката VIEW !== 'persons' пази отложеното (300 ms) търсене да не изчертае
+   персоналиите ВЪРХУ вече отворен друг раздел — пълната бележка защо и как стои
+   в src/views/chronicle.js при refreshChronicle(). */
 async function refreshPersons() {
+  if (VIEW !== 'persons') return;
   const rows = await call(window.api.persons.list(PRS_Q));
-  if (!rows) return;
+  if (!rows || VIEW !== 'persons') return;
   if (!drawPersonsList(rows)) renderPersons();
 }
 window.refreshPersons = refreshPersons;
+function prsCancelSearch() { clearTimeout(window._prsT); window._prsT = null; }
+window.prsCancelSearch = prsCancelSearch;
 function personDates(p) {
   const b = p.birth_date ? bg(p.birth_date) : '';
   const d = p.death_date ? bg(p.death_date) : '';
@@ -102,6 +109,20 @@ window.prsSearch = prsSearch;
 async function printPersons() {
   const rows = await call(window.api.persons.list(PRS_Q));
   if (!rows || !rows.length) return toast('Няма записи за печат.', 'err');
+  /* СВЪРЗАНИТЕ МАТЕРИАЛИ ИЗЛИЗАТ И НА ХАРТИЯ (v2.4.61).
+     =======================================================================
+     Картонът на персоналията на екрана завършва със „Свързани материали“ —
+     кои документи от фонда, статии и записи в летописа се отнасят до човека.
+     Точно това е най-полезното в една краеведска справка: не биографията (тя е
+     и в интернет), а „в тази библиотека има ето тези неща за него“. На хартия
+     този раздел липсваше и разпечатката беше справка без препратки — читателят
+     я взема и не знае какво да поиска на гишето.
+     Връзките се теглят по една заявка на персоналия. Това е приемливо, защото
+     разпечатката е рядко действие върху видимия (филтриран) списък, а не
+     непрекъснато опресняван екран; заявките тръгват наведнъж, не една след
+     друга. Запис без връзки не получава ред — празният подзаглавен ред само би
+     удължил листа. */
+  const links = await Promise.all(rows.map(p => call(window.api.links.list({ fromKind: 'персона', fromId: p.id }))));
   setPrintPage({ name: 'Персоналии', landscape: false, margin: '16mm 14mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 class="ptitle">ПЕРСОНАЛИИ</h2>
@@ -111,7 +132,7 @@ async function printPersons() {
     <div class="pmeta">${PRS_Q
       ? `<b>Обхват:</b> само записите, съдържащи „${esc(PRS_Q)}“ — <b>${rows.length}</b> от целия раздел. Това НЕ е пълният списък.`
       : `Пълен списък — всички <b>${rows.length}</b> вписани персоналии към ${bg(today())} г.`}</div>
-    ${rows.map(p => `<div style="margin-bottom:10px">
+    ${rows.map((p, i) => `<div style="margin-bottom:10px">
       <b>${esc(p.name)}</b>${personDates(p) ? ' · ' + esc(personDates(p)) : ''}
       ${p.activity ? `<div style="font-size:11pt"><i>${esc(p.activity)}</i></div>` : ''}
       ${p.bio ? `<div style="font-size:10.5pt">${esc(p.bio).replace(/\n/g, '<br>')}</div>` : ''}
@@ -121,6 +142,8 @@ async function printPersons() {
       ${p.awards ? `<div style="font-size:10pt"><b>Отличия:</b> ${esc(p.awards)}</div>` : ''}
       ${p.sources ? `<div style="font-size:10pt"><b>Източници:</b> ${esc(p.sources)}</div>`
         : `<div style="font-size:10pt;color:#666"><i>Източници: непосочени</i></div>`}
+      ${(links[i] || []).length ? `<div style="font-size:10pt"><b>Свързани материали:</b>
+        ${(links[i] || []).map(l => esc(l.to_kind + ': ' + l.label)).join('; ')}</div>` : ''}
     </div>`).join('')}
     ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
 }
