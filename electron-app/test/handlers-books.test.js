@@ -211,7 +211,13 @@ test('books:delete removes the row and schedules a catalog write', async () => {
 test('books:bulkUpdate only allows whitelisted fields, forbids setting status to "отчислен", and skips already-deaccessioned rows', async () => {
   const { db, ipcMain, auditLog } = setup();
   const id1 = (await ipcMain.invoke('books:create', { title: 'A', department: 'заемна' })).data;
-  const id2 = (await ipcMain.invoke('books:create', { title: 'B', department: 'заемна', status: 'отчислен' })).data;
+  /* v2.4.61: вписването вече ОТКАЗВА нов документ със статус „отчислен“ — документ
+     влиза във фонда и го напуска само с акт (чл. 35), а ред, роден отчислен, няма
+     акт, няма дата на отчисляване и не съществува в Част № 3 на КДБФ. Затова
+     вторият документ се завежда нормално и се отчислява направо в базата:
+     фикстурата иска само вече отчислен ред, който груповата редакция да прескочи. */
+  const id2 = (await ipcMain.invoke('books:create', { title: 'B', department: 'заемна' })).data;
+  db.prepare("UPDATE books SET status = 'отчислен' WHERE id = ?").run(id2);
 
   const badField = await ipcMain.invoke('books:bulkUpdate', { ids: [id1], field: 'title', value: 'x' });
   assert.equal(badField.ok, false);

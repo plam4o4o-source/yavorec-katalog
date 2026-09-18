@@ -46,6 +46,81 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
       return acq;
     })
   );
+  /* ЕДНИ И СЪЩИ ПРАВИЛА ЗА ЗАВЕЖДАНЕ И ЗА ПОПРАВКА (v2.4.61).
+     =====================================================================
+     Дотук acquisitions:update проверяваше датата (isValidIsoDate) и адреса на
+     дарителя, а acquisitions:create — НИТО ЕДНОТО. Тоест по-строгата проверка
+     стоеше на по-рядко ползвания път: партидата се завежда веднъж, поправя се
+     почти никога. Измерено върху прясна база:
+
+       date 'abc'          → yearOf() е slice(0,4), тоест year = 'abc'. Партидата
+                             не излиза в НИТО една година на КДБФ Част № 1 —
+                             вписана е в официален регистър и я няма в него.
+       date ''             → year = текущата, date остава празно: редът се показва
+                             без дата, а „Дата“ е първият реквизит по чл. 14, ал. 2.
+       date '2026-02-30'   → приемаше се дословно; ден, който не съществува.
+       дарение без адрес   → актът по чл. 6 излиза с „Адрес: …………………“.
+       total_count −3      → изваждаше се от ОБЩО на Част № 1.
+       sum −10             → отрицателна обявена стойност на постъпление.
+
+     Проверките са изнесени тук и се викат от ДВАТА обработчика, за да не могат
+     да се разминат отново. */
+  function assertAcqDate(a) {
+    if (!isValidIsoDate(a.date)) {
+      throw new Error('Датата на партидата „' + (a.date == null || a.date === '' ? '—' : a.date)
+        + '“ липсва или не е валидна дата. Тя е първият реквизит по чл. 14, ал. 2 и решава в коя година '
+        + 'партидата влиза в Книгата за движение на фонда, Част № 1 — без нея редът не съществува в нито '
+        + 'една година на регистъра. Въведете деня, месеца и годината на вписването.');
+    }
+  }
+  /* Адресът на дарителя е реквизит на акта за дарение по чл. 6, ал. 5.
+     ИЗКЛЮЧЕНИЕТО е партидата БЕЗ първичен документ (чл. 3, ал. 2): там дарител
+     в правния смисъл няма — документите са намерени при подреждане или оставени
+     анонимно, заместващият документ е протоколът на комисията, не акт за
+     дарение, и той не съдържа ред „Адрес на дарителя“. Изискването на адрес
+     точно там би спряло единствения законен път за завеждане на такива
+     документи, а библиотекарката би вписала измислен адрес, за да продължи. */
+  function assertDonorAddress(a) {
+    const withoutDoc = String(a.doc_type || '').indexOf('без документ') > -1;
+    if (String(a.how || '') === 'дарение' && !withoutDoc && !String(a.donor_address || '').trim()) {
+      throw new Error('При дарение адресът на дарителя е задължителен (чл. 6, ал. 5) — той е реквизит на акта '
+        + 'за приемане на дарение, който се съставя в три екземпляра и единият отива при дарителя. '
+        + 'Попълнете „Адрес на дарителя“. Ако дарителят е неизвестен (намерени при подреждане), изберете '
+        + 'вид на документа „без документ — протокол на комисия“ — тогава се съставя протокол по чл. 3, ал. 2, '
+        + 'а не акт за дарение.');
+    }
+  }
+  /* Общият брой документи по първичния документ: цяло число, не по-малко от нула.
+     Празно поле остава 0, както досега (партидата може да се заведе преди да е
+     преброена). */
+  function parseAcqCount(x) {
+    if (x === undefined || x === null || String(x).trim() === '') return 0;
+    const raw = String(x).trim();
+    if (!/^\d{1,9}$/.test(raw)) {
+      throw new Error('Общият брой документи „' + raw + '“ не е цяло число, по-голямо или равно на нула. '
+        + 'Този брой е обявеното в първичния документ количество и влиза в реда ОБЩО на КДБФ Част № 1 — '
+        + 'отрицателен или нечислов брой изважда документи от регистъра. Въведете броя с цифри.');
+    }
+    return Number(raw);
+  }
+  /* Обявената стойност: празно поле = NULL („документът не обявява стойност“ —
+     виж коментара при вписването по-долу), иначе неотрицателно число, закръглено
+     до стотинки. Запетаята като десетичен знак се приема — старите фактури и
+     българската клавиатура я пишат така (същото правило като при цената на
+     документа, handlers/books.js). */
+  function parseAcqSum(x) {
+    if (x === '' || x === null || x === undefined) return null;
+    const raw = String(x).trim();
+    if (raw === '') return null;
+    const norm = raw.replace(/\s/g, '').replace(',', '.');
+    if (!/^\+?\d+(\.\d+)?$/.test(norm) || !Number.isFinite(Number(norm))) {
+      throw new Error('Обявената стойност „' + raw + '“ не е сума. Тя се пренася в КДБФ Част № 1 и в акта за '
+        + 'дарение / протокола по чл. 3, ал. 2 — отрицателна или нечислова стойност намалява отчетената '
+        + 'стойност на фонда. Въведете сумата с цифри (напр. 25,50) или оставете полето празно, ако '
+        + 'документът не обявява стойност.');
+    }
+    return Math.round(Number(norm) * 100) / 100;
+  }
   ipcMain.handle('acquisitions:nextNo', (e, year) =>
     run(() => {
       const y = year || yearOf();
@@ -57,6 +132,13 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const no = parseRegisterNo(a.no, '№ на вписване');
+      /* Проверките са ПРЕДИ транзакцията и са същите, които прави и поправката —
+         виж assertAcqDate / assertDonorAddress / parseAcqCount / parseAcqSum
+         по-горе за какво точно влизаше в регистъра без тях. */
+      assertAcqDate(a);
+      assertDonorAddress(a);
+      const totalCount = parseAcqCount(a.total_count);
+      const declaredSum = parseAcqSum(a.sum);
       const year = yearOf(a.date);
       /* Номерът се предлага с MAX(no)+1 при ОТВАРЯНЕ на формата, а schema.sql няма
          UNIQUE(year, no) и не може да го получи наготово (съществуващи бази може
@@ -76,7 +158,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
            `a.sum || acqValue(...)`, печаташе изчисления сбор като обявена
            стойност — без да казва, че го прави. Изрична нула вече е възможна и
            се пази като нула. */
-        const declared = (a.sum === '' || a.sum === null || a.sum === undefined) ? null : parseFloat(a.sum);
+        const declared = declaredSum;
         const info = db.prepare(`
           INSERT INTO acquisitions (no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note,
                                     committee1, committee2, committee3)
@@ -85,8 +167,8 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
         `).run({
           no, year, date: a.date, how: a.how || null,
           from_source: a.from_source || null, doc_type: a.doc_type || null, doc_no: a.doc_no || null,
-          doc_date: a.doc_date || null, total_count: parseInt(a.total_count, 10) || 0,
-          sum: Number.isFinite(declared) ? declared : null, donor_address: a.donor_address || null, note: a.note || null,
+          doc_date: a.doc_date || null, total_count: totalCount,
+          sum: declared, donor_address: a.donor_address || null, note: a.note || null,
           /* Снимка на комисията към завеждането — актът за дарение и протоколът по
              чл. 3, ал. 2 се подписват от НЕЯ. Живите Настройки не стават: при всеки
              утвърден акт за отчисляване handlers/deaccession-acts.js ги презаписва. */
@@ -96,7 +178,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
            влизат нормализираните. „№ 007“ с „12бр“ броя се вписваше като партида
            № 7/2026 с 12 бр., а дневникът твърдеше „партида № 007 — 12бр бр.“ —
            номер, който Част № 1 на КДБФ не съдържа. */
-        logAudit('Постъпление', 'партида № ' + no + '/' + year + ' — ' + (parseInt(a.total_count, 10) || 0)
+        logAudit('Постъпление', 'партида № ' + no + '/' + year + ' — ' + totalCount
           + ' бр. от ' + (a.from_source || '—'));
         return info.lastInsertRowid;
       });
@@ -125,22 +207,45 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const a = acq || {};
-      if (!isValidIsoDate(a.date)) throw new Error('Датата на партидата липсва или е невалидна.');
-      /* „Дарение“ изисква адрес на дарителя по чл. 6, ал. 5 — същата проверка
-         като при създаването, иначе поправката е дупка в нея. */
-      if (String(a.how || '') === 'дарение' && !String(a.donor_address || '').trim()) {
-        throw new Error('При дарение адресът на дарителя е задължителен (чл. 6, ал. 5).');
-      }
+      /* Същите проверки като при завеждането — вече на едно място (v2.4.61). */
+      assertAcqDate(a);
+      assertDonorAddress(a);
+      const totalCount = parseAcqCount(a.total_count);
+      const declaredSum = parseAcqSum(a.sum);
       const tx = db.transaction(() => {
         const prev = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(id);
         if (!prev) throw new Error('Партидата не е намерена — вероятно е изтрита от друго работно място.');
-        const declared = (a.sum === '' || a.sum === null || a.sum === undefined) ? null : parseFloat(a.sum);
+        /* ПОПРАВКАТА НЕ МОЖЕ ДА ИЗНЕСЕ ПАРТИДАТА ИЗВЪН ГОДИНАТА Ѝ (v2.4.61).
+           Колоната `year` се попълва ВЕДНЪЖ при завеждането (yearOf(date)) и
+           нарочно не се редактира — тя е мястото на реда в регистъра, а номерът
+           е пореден в рамките на годината. Поправката на датата обаче се
+           записваше, каквато и да е: партида № 7/2025 получаваше дата 03.01.2026
+           и оставаше в КДБФ Част № 1 за 2025 г. с дата от 2026 г. — ред, който
+           проверяващият не може да съгласува с нищо. По-лошо: № 7/2026 може вече
+           да съществува като съвсем друга партида (номерът се предлага с MAX+1 в
+           рамките на годината), тоест на две партиди се пада един и същ номер за
+           годината, в която едната „изглежда“, че е.
+           Затова датата може да се поправя свободно ВЪТРЕ в годината на
+           вписването (сгрешен ден или месец — обичайната поправка), а изнасянето
+           в друга година се отказва с указание кой е верният път: докато по
+           партидата няма инвентирани документи, тя се изтрива и се завежда
+           наново в правилната година (със свой номер за нея). */
+        const newYear = yearOf(a.date);
+        if (String(newYear) !== String(prev.year)) {
+          throw new Error('Партида № ' + prev.no + '/' + prev.year + ' не може да получи дата от ' + newYear + ' г. '
+            + 'Годината на партидата е мястото ѝ в КДБФ Част № 1 и не се променя с поправка — номерът ѝ е пореден '
+            + 'за ' + prev.year + ' г. и в ' + newYear + ' г. същият номер може вече да е зает от друга партида. '
+            + 'Поправете датата в рамките на ' + prev.year + ' г.; ако партидата наистина е от ' + newYear + ' г., '
+            + 'изтрийте я (възможно е, докато по нея няма инвентирани документи) и я заведете наново с номер за '
+            + newYear + ' г.');
+        }
+        const declared = declaredSum;
         const next = {
           id,
           date: a.date, how: a.how || null, from_source: a.from_source || null,
           doc_type: a.doc_type || null, doc_no: a.doc_no || null, doc_date: a.doc_date || null,
-          total_count: parseInt(a.total_count, 10) || 0,
-          sum: Number.isFinite(declared) ? declared : null,
+          total_count: totalCount,
+          sum: declared,
           donor_address: a.donor_address || null, note: a.note || null,
           committee1: a.committee1 || null, committee2: a.committee2 || null, committee3: a.committee3 || null
         };

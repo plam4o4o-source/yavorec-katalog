@@ -12,6 +12,21 @@ function kdbfByKind(rows) {
   (rows || []).forEach(x => { const k = (x && x.category_name) || 'без вид'; m[k] = (m[k] || 0) + qtyOf(x); });
   return Object.entries(m).map(([k, v]) => k + ': ' + v).join(', ');
 }
+/* ВИД, № И ДАТА НА ПЪРВИЧНИЯ ДОКУМЕНТ — БЕЗ ПРАЗНИ ЧАСТИ (v2.4.61).
+   Клетката се сглобяваше като „${doc_type} № ${doc_no} / ${bg(doc_date)}“ с твърдо
+   зашити „№“ и „/“. При партида, придобита БЕЗ първичен документ (чл. 3, ал. 2 —
+   намерени при подреждане, оценени с протокол на комисия), номер и дата няма и в
+   отпечатания регистър излизаше „без документ — протокол на комисия № /“: знак за
+   номер без номер и наклонена черта без дата. Проверяващият чете това като
+   липсващ реквизит на съществуващ документ, а истината е обратната — документ
+   няма и точно затова е съставен протокол.
+   Празните части просто отпадат. Редът на частите и разделителят остават същите,
+   за да не се променя видът на регистъра за партидите, които имат документ
+   („фактура № 0000012345 / 12.03.2026“). */
+function kdbfDocRef(a) {
+  const head = [esc(a.doc_type || ''), a.doc_no ? '№ ' + esc(a.doc_no) : ''].filter(Boolean).join(' ');
+  return [head, a.doc_date ? bg(a.doc_date) : ''].filter(Boolean).join(' / ');
+}
 /* ЗАЩО отделна заявка: колоната „По вид“ е задължителен реквизит на Приложение
    № 1 (чл. 13, ал. 3, т. 1), но kdbf:report връща само общите бройки и стойност
    на партидата — вид документ там няма. Дотогава в кода стоеше дефинирана и
@@ -56,7 +71,8 @@ async function renderKdbf() {
         <th>Общо</th><th>Инвентирани</th><th>Стойност</th><th>Инв. № от–до</th><th>По вид</th></tr></thead><tbody>
       ${r.part1.length ? r.part1.map(a => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no}</td>
         <td>${esc(a.from_source || '')}<div class="hint">${esc(a.how || '')}</div></td>
-        <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}<br>${bg(a.doc_date)}</td>
+        <td style="font-size:12px">${[esc(a.doc_type || ''), a.doc_no ? '№ ' + esc(a.doc_no) : ''].filter(Boolean).join(' ')}${
+          a.doc_date ? '<br>' + bg(a.doc_date) : ''}</td>
         <td class="num">${a.total_count}</td><td class="num">${a.registered_count}</td><td class="num">${mny(a.registered_value)}</td>
         <td class="num">${a.inv_from ? a.inv_from + ' – ' + a.inv_to : '—'}</td>
         <td style="font-size:12px">${esc(a.by_kind || '') || '—'}</td></tr>`).join('')
@@ -70,13 +86,34 @@ async function renderKdbf() {
       <div class="note"><b>Приложение № 3 към чл. 13, ал. 3, т. 3</b> — отчислени документи за ${y} г.</div>
       <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>Акт №</th><th>Причина</th>
         <th>Общо</th><th>Стойност</th></tr></thead><tbody>
-      ${r.part3.length ? r.part3.map(a => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no} / ${esc(a.year || y)}</td>
-        <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}</td><td class="num">${a.item_count}</td><td class="num">${mny(a.item_value)}</td></tr>`).join('')
+      ${/* АНУЛИРАНИЯТ АКТ НЕ ОТЧИСЛЯВА НИЩО — И НА ЕКРАНА (v2.4.61).
+            Разпечатката на Част № 3 отдавна прави вярното: анулираният акт стои
+            ЗАЧЕРТАН, с основанието за анулиране, и участва в сборовете с 0 —
+            актът остава в документацията по чл. 39, но отчисляване по него не е
+            имало и документите са върнати във фонда. Екранът на същия регистър
+            обаче броеше анулираните актове както всички останали: измерено при
+            един анулиран акт от три — на екрана „ОБЩО за годината: 8 / 28.30 €“,
+            на отпечатания лист „7 / 15.80 €“. Два вида на един и същи регистър с
+            различни числа, при това числото на екрана е това, което се гледа
+            всеки ден, а отпечатаното — това, което се подписва.
+            Сега екранът прави дословно същото като разпечатката: зачертан ред
+            (клас revokedRow), думата АНУЛИРАН с датата и основанието, нули в
+            бройката и стойността и същата обяснителна бележка отдолу. */''}
+      ${r.part3.length ? r.part3.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${bg(a.date)}</td>
+        <td class="num">${a.no} / ${esc(a.year || y)}</td>
+        <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
+          ? `<div class="hint"><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+              a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}</div>` : ''}</td>
+        <td class="num">${a.revoked_at ? 0 : a.item_count}</td>
+        <td class="num">${mny(a.revoked_at ? 0 : a.item_value)}</td></tr>`).join('')
           + `<tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО за ${y} г.</td>
-             <td class="num">${r.part3.reduce((s, a) => s + (a.item_count || 0), 0)}</td>
-             <td class="num">${mny(r.part3.reduce((s, a) => s + (a.item_value || 0), 0))}</td></tr>`
+             <td class="num">${r.part3.reduce((s, a) => s + (a.revoked_at ? 0 : (a.item_count || 0)), 0)}</td>
+             <td class="num">${mny(r.part3.reduce((s, a) => s + (a.revoked_at ? 0 : (a.item_value || 0)), 0))}</td></tr>`
         : `<tr><td colspan="5" class="empty">Няма отчисления за ${y} г.</td></tr>`}
-      </tbody></table></div>`
+      </tbody></table></div>
+      ${r.part3.some(a => a.revoked_at) ? `<div class="note">Зачертаните редове са <b>АНУЛИРАНИ</b> актове.
+        Номерът им остава зает и актът остава в документацията по чл. 39, но документите по него са върнати
+        във фонда и не участват в сборовете.</div>` : ''}`
     : `
       <div class="note"><b>Приложение № 2 към чл. 13, ал. 3, т. 2</b> — резултати от движението на фонда към 31.12.${y} г.</div>
       ${kdbfUndatedNote(r) ? `<div class="note d">${kdbfUndatedNote(r)}</div>` : ''}
@@ -129,7 +166,17 @@ function kdbfPart2Html(r, y) {
   const endN = r.stockEnd.n, endV = r.stockEnd.v;
   const accN = r.acquiredYear.n, accV = r.acquiredYear.v;
   const decN = r.deaccYear.n, decV = r.deaccYear.v;
-  const startN = endN - accN + decN, startV = endV - accV + decV;
+  /* ЗАКРЪГЛЯНЕ ДО СТОТИНКИ ПРЕДИ ПОКАЗВАНЕ (v2.4.61).
+     Началното салдо се ИЗВЕЖДА (31.12 − постъпили + отчислени), за да съвпада
+     винаги с крайното. При библиотека в първата ѝ година трите събираеми са едно
+     и също число и разликата е нула — но нула в плаваща запетая: 12.34 − 12.34 в
+     двоичен вид дава −1.4e-15, а mny() форматира това като „-0.00 €“. В
+     Приложение № 2, което се подписва, стои отрицателна стойност на фонда към
+     01.01, каквато не съществува. Къщното правило за пари (Math.round(x*100)/100 —
+     виж db/fund-sql.js и handlers/account.js) се прилага ТУК, преди показването,
+     а не вътре в mny(), за да е видно къде възниква сборът. */
+  const cents2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
+  const startN = endN - accN + decN, startV = cents2(endV - accV + decV);
   const netN = accN - decN;
   const growth = startN ? Math.round(netN / startN * 1000) / 10 : 0;
   return `
@@ -156,8 +203,10 @@ function kdbfPart2Html(r, y) {
         <div class="statRows">
           <div><span>Чист прираст на фонда</span><b style="color:${netN >= 0 ? 'var(--green)' : 'var(--red)'}">
             ${netN >= 0 ? '+' : ''}${netN.toLocaleString('bg-BG')} документа</b></div>
-          <div><span>Изменение на стойността</span><b style="color:${accV - decV >= 0 ? 'var(--green)' : 'var(--red)'}">
-            ${accV - decV >= 0 ? '+' : '−'}${mny(Math.abs(accV - decV))}</b></div>
+          ${/* Същото закръгляне и тук: без него година без движение показва
+                „−0.00 €“ в червено — изменение надолу, каквото не е имало. */''}
+          <div><span>Изменение на стойността</span><b style="color:${cents2(accV - decV) >= 0 ? 'var(--green)' : 'var(--red)'}">
+            ${cents2(accV - decV) >= 0 ? '+' : '−'}${mny(Math.abs(cents2(accV - decV)))}</b></div>
           <div><span>Ръст спрямо началото на годината</span><b>${netN >= 0 ? '+' : ''}${growth}%</b></div>
           <div><span>Средна цена на документ</span><b>${mny(endN ? endV / endN : 0)}</b></div>
         </div>
@@ -190,7 +239,7 @@ function printKdbfDoc() {
      <table><thead><tr><th>Дата</th><th>№</th><th>Откъде и как</th><th>Вид, № и дата на документа</th><th>Общо</th>
      <th>Инвентирани</th><th>Стойност</th><th>Инв. № от – до</th><th>По вид документи</th></tr></thead><tbody>
      ${r.part1.map(a => `<tr><td>${bg(a.date)}</td><td>${a.no}</td><td>${esc(a.from_source || '')} / ${esc(a.how || '')}</td>
-     <td>${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} / ${bg(a.doc_date)}</td><td>${a.total_count}</td><td>${a.registered_count}</td>
+     <td>${kdbfDocRef(a)}</td><td>${a.total_count}</td><td>${a.registered_count}</td>
      <td>${mny(a.registered_value)}</td><td>${a.inv_from ? a.inv_from + '–' + a.inv_to : ''}</td>
      <td>${esc(a.by_kind || '')}</td></tr>`).join('')}
      ${r.part1.length ? `<tr style="font-weight:700"><td colspan="4">ОБЩО за ${y} г.</td>
@@ -199,7 +248,15 @@ function printKdbfDoc() {
        : `<tr><td colspan="9" style="text-align:center">През ${y} г. няма регистрирани постъпления.</td></tr>`}
      </tbody></table>
      ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
-     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+     ${/* ЕДИН И СЪЩ ПОДПИСЕН БЛОК И НА ТРИТЕ ЧАСТИ (v2.4.61).
+          Дотук редът „Счетоводител“ стоеше САМО на Част № 2. Трите части обаче
+          се откъсват и подшиват поотделно — всяка е самостоятелен лист от един и
+          същ регистър по чл. 13 — и всяка носи пари: Част № 1 стойността на
+          постъпленията, Част № 3 стойността на отчисленото. Точно тези две числа
+          отиват в счетоводството (отчисляването намалява отчетната стойност на
+          актива), а листът, на който липсва редът за подпис на счетоводителя, се
+          връща за преподписване. Затова блокът е един и същ навсякъде. */''}
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 3. Регистриране на отчислените книги, периодични издания и други материали</b><br>
@@ -234,13 +291,16 @@ function printKdbfDoc() {
      ${r.part3.some(a => a.revoked_at) ? `<div class="pmeta">Зачертаните редове са АНУЛИРАНИ актове.
        Номерът им остава зает и актът остава в документацията по чл. 39, но документите по него са върнати
        във фонда и не участват в сборовете.</div>` : ''}
-     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+     ${/* Същият подписен блок като на Част № 1 и Част № 2 — виж бележката там. */''}
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
-     <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, €</th></tr></thead><tbody>
+     <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, € / лв.</th></tr></thead><tbody>
+     ${/* Закръгляне до стотинки преди печат — виж бележката при kdbfPart2Html:
+          иначе Приложение № 2 на първата година излиза с „-0.00 €“. */''}
      <tr><td>Наличност към 01.01.${y} г.</td><td>${r.stockEnd.n - r.acquiredYear.n + r.deaccYear.n}</td>
-       <td>${mny(r.stockEnd.v - r.acquiredYear.v + r.deaccYear.v)}</td></tr>
+       <td>${mny(Math.round((r.stockEnd.v - r.acquiredYear.v + r.deaccYear.v) * 100) / 100)}</td></tr>
      <tr><td>Постъпили през ${y} г.</td><td>${r.acquiredYear.n}</td><td>${mny(r.acquiredYear.v)}</td></tr>
      <tr><td>Отчислени през ${y} г.</td><td>${r.deaccYear.n}</td><td>${mny(r.deaccYear.v)}</td></tr>
      <tr style="font-weight:700"><td>Наличност към 31.12.${y} г.</td><td>${r.stockEnd.n}</td><td>${mny(r.stockEnd.v)}</td></tr>
@@ -251,7 +311,7 @@ function printKdbfDoc() {
           данните ги имаше, но не стигаха до документа, и проверяващият нямаше
           как да види от какво точно е съставен фондът. -->
      ${(r.byKind && r.byKind.length) ? `<div class="pmeta" style="margin-top:6mm"><b>Разпределение по видове документи към 31.12.${y} г.</b></div>
-     <table><thead><tr><th>Вид документ</th><th>Брой</th><th>Стойност, €</th></tr></thead><tbody>
+     <table><thead><tr><th>Вид документ</th><th>Брой</th><th>Стойност, € / лв.</th></tr></thead><tbody>
      ${r.byKind.map(k => `<tr><td>${esc(k.kind || '—')}</td><td>${k.n}</td><td>${mny(k.v)}</td></tr>`).join('')}
      <tr style="font-weight:700"><td>ОБЩО</td><td>${r.byKind.reduce((s, k) => s + (k.n || 0), 0)}</td>
        <td>${mny(r.byKind.reduce((s, k) => s + (k.v || 0), 0))}</td></tr>

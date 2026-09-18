@@ -429,7 +429,13 @@ async function bookForm(id, presetAcqId, prefill) {
     <form id="bookF" onsubmit="return false">
     <fieldset><legend>Инвентиране</legend>
       <div class="grid g3">
-        ${fld('Инвентарен номер', 'inv_number', { val: v.inv_number ?? '', type: 'number', req: 1 })}
+        ${/* min="1" (v2.4.61): полето беше свободно числово и стрелките надолу
+              стигаха до 0 и до отрицателни номера, каквито инвентарната книга
+              няма — поредицата по чл. 16, ал. 2 започва от 1. Истинската
+              преграда е в обработчика (books:create/update минават през
+              parseRegisterNo), тук стои само за да не предлага екранът стойност,
+              която после ще бъде отказана. */''}
+        ${fld('Инвентарен номер', 'inv_number', { val: v.inv_number ?? '', type: 'number', req: 1, min: 1 })}
         ${fld('Дата на вписване', 'register_date', { val: v.register_date, type: 'date', req: 1 })}
         ${fld('Баркод', 'barcode', { val: v.barcode || '', hint: 'празно = инв. номер' })}
       </div>
@@ -924,13 +930,22 @@ async function saveBook(id, andNew) {
   // но формата вече беше затворена и всички попълнени полета — изгубени.
   let savedId = id;
   let after = null;
-  if (id) { if (await call(window.api.books.update(d), 'Книгата е обновена.') === null) return; }
+  if (id) {
+    /* Редакцията вече може да носи предупреждение за прескочени инвентарни номера
+       (v2.4.61): смяната на инвентарния номер мести брояча точно както вписването
+       и оставя същите празни места в поредицата. call() връща res.data, а тя е
+       { invGap } или undefined при по-стар обработчик — затова се чете предпазливо. */
+    const upd = await call(window.api.books.update(d), 'Книгата е обновена.');
+    if (upd === null) return;
+    if (upd && upd.invGap) toast(upd.invGap.message, 'warn');
+  }
   else {
-    /* Вписването вече връща и ТРИ СВЕДЕНИЯ покрай id-то (v2.4.57), затова тук се
-       вика направо, а не през call(): call() връща само res.data и трите
-       сведения се губеха по пътя. Всяко от тях е нещо, което библиотекарят няма
-       как да научи по друг начин:
+    /* Вписването вече връща и ЧЕТИРИ СВЕДЕНИЯ покрай id-то (v2.4.57; dateWarning
+       от v2.4.61), затова тук се вика направо, а не през call(): call() връща само
+       res.data и сведенията се губеха по пътя. Всяко от тях е нещо, което
+       библиотекарят няма как да научи по друг начин:
          invGap         — колко инвентарни номера са останали празни завинаги;
+         dateWarning    — че датата на вписване е в бъдещето (сгрешена година);
          suggestions    — кой читател е поискал точно тази книга и чака;
          catalogWarning — че новото постъпление НЕ е стигнало до сайта. */
     const res = await window.api.books.create(d);
@@ -965,6 +980,10 @@ window.saveBook = saveBook;
 async function bookAftermath(res, bookId) {
   if (res.catalogWarning) toast(res.catalogWarning, 'warn');
   if (res.invGap) toast(res.invGap.message, 'warn');
+  /* Дата на вписване в бъдещето (v2.4.61) — най-често сгрешена година. Документът
+     е вписан, но до тази дата не влиза в КДБФ и в годишния отчет; вижда се само
+     ако някой го каже сега, докато човекът е още пред формата. */
+  if (res.dateWarning) toast(res.dateWarning, 'warn');
   const sug = res.suggestions || [];
   if (!sug.length) return;
   /* Читателят, поискал книгата, е единственият човек, за когото със сигурност
