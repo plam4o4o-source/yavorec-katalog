@@ -11,6 +11,75 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.62
+
+**BG:** Актът за отчисляване вече отчислява **само екземпляра с инвентарния
+номер, записан в него**. Инвентарната книга вписва всеки библиотечен документ със
+свой номер (чл. 16 от Наредба № 3), а актът по чл. 35 изброява отчислените
+документи поотделно, по номер — затова от фонда излиза точно книгата, която
+комисията държи в ръка, и нищо друго.
+
+Програмата спазва правилото „един инвентарен номер = един екземпляр“ за всяко
+вписване от v2.4.21 насам: вторият екземпляр от едно заглавие е втори запис със
+следващия номер. Оставаше един случай, който идва отвън — стар запис от внесена
+база, в който няколко екземпляра стоят под **един** номер. Сканиран в акт, такъв
+запис отчисляваше всичките си екземпляри наведнъж: библиотеката вадеше една
+скъсана книга, а от фонда, от КДБФ (Част № 3) и от инвентарната книга излизаха
+три. Двете здрави оставаха на рафта, невидими за програмата, и изплуваха чак при
+следващата инвентаризация като документи без запис.
+
+Сега такъв запис не влиза в акт, докато не бъде разделен. При сканиране екранът
+за акта пита и при съгласие го разделя — същото действие като „Раздели на отделни
+записи“ в „Проверка на данните“, което не променя нито бройката, нито стойността
+на фонда: сканираният номер остава за екземпляра, който се отчислява, а останалите
+получават следващите свободни номера и остават във фонда. Съобщението изброява
+новите номера, за да се надпишат екземплярите. Проектът за акт от липсите при
+инвентаризация прави същото, но включва в проекта **всички** номера на изцяло
+липсващ стар запис — нито един от екземплярите му не е намерен, значи липсват
+всички; протоколът и актът казват едно и също число, само че актът — поименно.
+Проект, записан преди тази версия, показва неразделения ред с бутон „Раздели —
+отчисли само този“ и не се утвърждава, докато редът не е разделен. Ядрото на акта
+отказва неразделен запис по всеки път — екран, проект, пряк канал, второ работно
+място — и не пише нищо. Вече утвърдените актове не се пипат: снимката им по
+чл. 35, ал. 2 остава каквато е била.
+
+Проверки: седем нови теста в `test/ekzemplyar-v2462.test.js` — отказът на ядрото,
+отчисляването на един екземпляр след разделяне (фондът намалява с един, КДБФ отчита
+един, другите остават „наличен“), три отделни екземпляра от едно заглавие,
+разделянето при сканиране с потвърждение и без, проектът отпреди версията и
+проектът от липсите. Тестовете, които заковаваха старото поведение („актът снима
+3 документа, частично отчисляване няма“), са обновени заедно с обяснението защо.
+Пълна поредица: 1893 успешни, 0 неуспешни.
+
+**EN:** A deaccession act now removes **only the copy whose inventory number is
+written in it**. The inventory book records every library document under its own
+number (Art. 16 of Ordinance No. 3), and the act under Art. 35 lists the removed
+documents one by one, by number — so exactly the book the committee holds in hand
+leaves the collection, and nothing else.
+
+The program has followed "one inventory number = one copy" for every new entry
+since v2.4.21. One case still came from outside: a legacy record from an imported
+database with several copies under a **single** number. Scanned into an act, it
+removed all of its copies at once: the library withdrew one torn book, while three
+left the collection, the ledger (Part 3) and the inventory book. The two good
+copies stayed on the shelf, invisible to the program, until the next stocktaking.
+
+Such a record no longer enters an act until it is split. On scanning, the act
+screen asks and, on confirmation, splits it — the same action as "Split into
+separate records" under Data check, which changes neither the count nor the value
+of the collection: the scanned number stays with the copy being removed, the others
+get the next free numbers and remain in the collection, and the message lists the
+new numbers so the copies can be relabelled. The draft built from stocktaking
+shortages does the same but includes **all** numbers of a legacy record that was
+missing entirely. A draft saved before this version shows the unsplit line with a
+"Split — remove only this one" button and cannot be approved until it is split.
+The act core refuses an unsplit record on every path and writes nothing. Acts
+already approved are untouched: their Art. 35(2) snapshot stays as it was.
+
+Checks: seven new tests in `test/ekzemplyar-v2462.test.js`; the tests that pinned
+the old behaviour are updated together with the reasoning. Full suite: 1893
+passing, 0 failing.
+
 ## v2.4.61
 
 **BG:** Най-големият одит след v2.4.57. Шест сценария минаха през ИСТИНСКИЯ екран
