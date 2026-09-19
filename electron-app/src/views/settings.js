@@ -589,12 +589,15 @@ async function loadAvEditors() {
       </div>
     </div>`).join('');
 }
-/* ---------------- Авторски знак (v2.4.36) ----------------
-   Таблицата с числата е чуждо печатно издание и НЕ идва с програмата — тук се
-   внася файлът на самата библиотека. Внасянето минава през преглед: първо се
-   казва колко реда и кои букви са разчетени и се показва мостра, и чак след
-   изричното „Запиши“ таблицата влиза в базата. Груповото попълване е отделно
-   действие, също с преглед, и никога не пипа вече попълнен знак. */
+/* ---------------- Авторски знак (v2.4.36; вградена таблица от v2.4.63) -------
+   Числата идват с програмата и се зареждат при първото пускане. Библиотека със
+   СВОЕ издание внася своя файл върху тях — внасянето минава през преглед: първо
+   се казва колко реда и кои букви са разчетени и се показва мостра, и чак след
+   изричното „Запиши“ таблицата влиза в базата. Екранът казва КОЯ таблица стои в
+   момента (вградената или внесена), защото двете издания дават различни числа за
+   една и съща фамилия и библиотекарката трябва да знае по коя подрежда рафта.
+   Груповото попълване е отделно действие, също с преглед, и никога не пипа вече
+   попълнен знак. */
 async function loadAuthorMarkBox() {
   const box = $('#amBox'); if (!box) return;
   const st = await call(window.api.authorMark.status());
@@ -602,20 +605,49 @@ async function loadAuthorMarkBox() {
   const ex = st.example && st.example.ok
     ? `<div class="hint">Проба: фамилия „${esc(st.example.basis)}“ → ред „${esc(st.example.prefix)}“ → <b>${esc(st.example.mark)}</b></div>` : '';
   box.innerHTML = st.rows ? `
-    <div class="note" style="margin-top:0">Внесена таблица: <b>${st.rows}</b> ${st.rows === 1 ? 'ред' : 'реда'},
+    <div class="note" style="margin-top:0">${st.isBuiltin ? 'Вградената таблица' : 'Внесена таблица'}:
+      <b>${st.rows}</b> ${st.rows === 1 ? 'ред' : 'реда'},
       ${st.letters} ${st.letters === 1 ? 'буква' : 'букви'}. Разделителят се взима от вече въведените знаци —
       сега е „${st.separator === '' ? 'без разделител' : esc(st.separator)}“.</div>
     ${ex}
     <div class="hint">Мостра: ${st.sample.map(r => esc(r.prefix) + ' ' + esc(r.mark)).join(' · ')}</div>
     <div class="toolbar" style="margin-top:8px">
       <button class="btn" onclick="authorMarkChoose()">Внеси друг файл…</button>
+      ${st.isBuiltin ? '' : `<button class="btn" onclick="authorMarkBuiltin()">Върни вградената таблица…</button>`}
       <button class="btn" onclick="authorMarkFill()">Попълни празните знаци…</button>
       <button class="btn dgr" onclick="authorMarkClear()">Изтрий таблицата</button>
-    </div>`
-    : `<div class="note d" style="margin-top:0">Няма внесена таблица — копчето „Предложи“ до полето
-      „Авторски знак“ още няма откъде да предлага. Изберете файла на библиотеката.</div>
-    <div class="toolbar"><button class="btn pri" onclick="authorMarkChoose()">Избери файл с авторската таблица…</button></div>`;
+    </div>
+    ${st.isBuiltin ? `<div class="hint" style="margin-top:6px">Библиотека, която работи по свое издание на
+      авторските таблици, може да внесе своя файл — той застава върху вградената.</div>` : ''}`
+    : `<div class="note d" style="margin-top:0">Няма таблица — копчето „Предложи“ до полето
+      „Авторски знак“ още няма откъде да предлага.</div>
+    <div class="toolbar">
+      <button class="btn pri" onclick="authorMarkBuiltin()">Зареди вградената таблица</button>
+      <button class="btn" onclick="authorMarkChoose()">Избери файл на библиотеката…</button>
+    </div>`;
 }
+/* Връщане към таблицата, която идва с програмата. Пита се изрично: върху внесена
+   таблица това е презапис, а знаците по вече описаните книги са правени по нея. */
+async function authorMarkBuiltin() {
+  const st = await call(window.api.authorMark.status());
+  if (!st) return;
+  if (st.rows && !await askConfirm('Да заредя ли вградената таблица (' + st.builtinRows + ' реда)?\n\n'
+    + 'Сегашната таблица в базата (' + st.rows + ' реда) се заменя. Вече записаните авторски знаци по '
+    + 'документите НЕ се променят — сменя се само таблицата, по която се правят предложенията.\n\n'
+    + 'Ако библиотеката работи по свое издание на авторските таблици, откажете: двете издания дават '
+    + 'различни числа за една и съща фамилия.',
+    /* kind: 'danger' — фокусът да е на „Отказ“. Текстът не съдържа нито една от
+       думите, по които askConfirm сам разпознава опасно действие („изтрий“,
+       „необратимо“…), тоест по подразбиране би бил обикновен въпрос с фокус
+       върху копчето за потвърждение — и един Enter презаписва таблицата, по
+       която библиотеката е описала фонда си. */
+    { kind: 'danger', okLabel: 'Зареди вградената' })) return;
+  const r = await call(window.api.authorMark.loadBuiltin());
+  if (!r) return;
+  toast('Заредена е вградената таблица — ' + r.rows + ' реда.', 'ok');
+  loadAuthorMarkBox();
+}
+window.authorMarkBuiltin = authorMarkBuiltin;
 async function authorMarkChoose() {
   const pv = await call(window.api.authorMark.choose());
   if (!pv) return;                       // отказ или негоден файл — call() вече каза какво
