@@ -1062,6 +1062,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
            с каквото е имал. */
         const perCopyReset = { status: 'наличен', status_date: null, description: null };
         const created = [];
+        /* И номерата на новите РЕДОВЕ (v2.4.62), не само инвентарните им номера.
+           Нужни са на проекта за акт от липсите (src/views/inventory-sessions.js):
+           стар запис с три екземпляра под един номер, който изцяло липсва при
+           инвентаризацията, влиза в акта като ТРИ документа с три инвентарни
+           номера — а проектът се пише по номерата на редовете. */
+        const createdIds = [];
         for (let k = 1; k < n; k++) {
           while (taken.get(next)) next++;   // никога върху зает номер
           const row = { inv_number: next };
@@ -1076,6 +1082,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
              Новият екземпляр получава свой етикет от „Баркод етикети“. */
           db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
           created.push(next);
+          createdIds.push(Number(info.lastInsertRowid));
           next++;
         }
         db.prepare('UPDATE inventory SET quantity = 1 WHERE book_id = ?').run(id);
@@ -1083,7 +1090,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         logAudit('Разделяне на екземпляри',
           'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + n + ' екземпляра станаха '
           + n + ' отделни записа; нови инвентарни номера: ' + created.join(', '));
-        return { created, inv_number: b.inv_number, title: b.title };
+        return { created, createdIds, inv_number: b.inv_number, title: b.title };
       });
       const out = tx.immediate();
       scheduleCatalogWrite();

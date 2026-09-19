@@ -217,10 +217,75 @@ async function actAdd() {
      ACT_LIST и се брои от actQty() по същото правило, по което ще бъде снимано в
      акта: NULL → 1 документ, изрична 0 → 0. Виж бележката при findBook. */
   b.quantity = b.fund_qty;
+  /* Стар запис с няколко екземпляра под един номер се разделя, преди да влезе в
+     акта — виж actSplitLegacy по-долу. Отказът оставя списъка непроменен. */
+  if (!await actSplitLegacy(b)) return;
   ACT_LIST.push(b);
   drawActList();
 }
 window.actAdd = actAdd;
+/* ЕДИН ИНВЕНТАРЕН НОМЕР — ЕДИН ОТЧИСЛЕН ЕКЗЕМПЛЯР (v2.4.62).
+   =====================================================================
+   Дотук стар запис от внесена база, в който три екземпляра стоят под един
+   инвентарен номер, влизаше в акта с бройка 3: библиотеката вадеше една
+   скъсана книга, а от фонда излизаха и трите. Двете здрави оставаха на рафта,
+   но програмата, КДБФ и инвентарната книга вече не ги броят — и това изплува
+   чак при следващата инвентаризация, като „излишни“ документи без запис.
+
+   Инвентарната книга вписва всеки документ със СВОЙ номер (чл. 16), а актът
+   по чл. 35 описва отчислените документи поотделно, по номер. Затова сега
+   такъв запис първо се РАЗДЕЛЯ — същото действие като „Раздели на отделни
+   записи“ в „Проверка на данните“ (books:splitCopies), което не променя нито
+   бройката, нито стойността на фонда. Сканираният номер остава за екземпляра,
+   който комисията държи в ръка и който се отчислява; останалите получават
+   следващите свободни номера и остават във фонда. Пита се изрично, защото
+   библиотекарката трябва да надпише тези екземпляри с новите им номера.
+   Ядрото на акта (createActCore) така или иначе отказва неразделен запис —
+   тук само се прави вярното действие на мястото, където е нужно. */
+function actLegacyCopies(l) {
+  if (!l) return 0;
+  const raw = (l.fund_qty !== undefined && l.fund_qty !== null) ? l.fund_qty : l.quantity;
+  return Number(raw) || 0;
+}
+async function actSplitLegacy(b) {
+  const n = actLegacyCopies(b);
+  if (n <= 1) return true;
+  const ok = await askConfirm('Под инв. № ' + b.inv_number + ' („' + (b.title || '') + '“) са вписани ' + n
+    + ' екземпляра под един номер — стар запис отпреди правилото „един инвентарен номер = един екземпляр“. '
+    + 'Актът отчислява само екземпляра с този номер, не всички наведнъж. '
+    + 'Програмата ще раздели записа: инв. № ' + b.inv_number + ' остава за екземпляра, който отчислявате, '
+    + 'а другите ' + (n - 1) + ' получават нови инвентарни номера и остават във фонда. '
+    + 'Бройката и стойността на фонда не се променят. Да разделя ли записа?',
+    { okLabel: 'Раздели и отчисли само този' });
+  if (!ok) { toast('Инв. № ' + b.inv_number + ' не е добавен в акта.', 'warn'); return false; }
+  const r = await call(window.api.books.splitCopies(b.id));
+  if (!r) return false;
+  toast('Записът е разделен. В акта влиза само инв. № ' + b.inv_number + '. '
+    + (r.created.length === 1 ? 'Другият екземпляр получи инв. № ' : 'Другите екземпляри получиха инв. № ')
+    + r.created.join(', ') + ' и остава' + (r.created.length === 1 ? '' : 'т') + ' във фонда — надпишете '
+    + (r.created.length === 1 ? 'го' : 'ги') + ' с новите номера. Ако и '
+    + (r.created.length === 1 ? 'той се отчислява, сканирайте го' : 'те се отчисляват, сканирайте ги')
+    + ' в акта.', 'ok');
+  b.fund_qty = 1; b.quantity = 1;
+  return true;
+}
+/* Същото за ред, дошъл от проект, записан преди v2.4.62 — там записът може още
+   да е неразделен. Редът остава в списъка, но вече за един екземпляр. */
+async function actSplitLine(n) {
+  const l = ACT_LIST[n]; if (!l) return;
+  if (await actSplitLegacy(l)) drawActList();
+}
+window.actSplitLine = actSplitLine;
+/* Първият неразделен ред в списъка — за да каже екранът точно кой е, преди
+   ядрото да откаже целия акт с общо съобщение. */
+function actFirstLegacy() { return ACT_LIST.find(l => actLegacyCopies(l) > 1); }
+function actLegacyBlock() {
+  const l = actFirstLegacy();
+  if (!l) return false;
+  toast('Под инв. № ' + l.inv_number + ' са вписани ' + actLegacyCopies(l) + ' екземпляра под един номер. '
+    + 'Натиснете „Раздели“ на реда — актът отчислява само екземпляра с този номер.', 'err');
+  return true;
+}
 function actDel(n) { ACT_LIST.splice(n, 1); drawActList(); }
 window.actDel = actDel;
 /* Отчетната бройка на един ред от акта. Снимката (deaccession_items.quantity) е
@@ -253,7 +318,9 @@ function drawActList() {
   el.innerHTML = `<div class="wrap" style="max-height:220px"><table class="ledger"><thead><tr>
     <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th></th></tr></thead><tbody>
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
-    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.lost
+    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${actLegacyCopies(l) > 1
+      ? `<br><span class="badge warn">${actLegacyCopies(l)} екземпляра под един номер</span>
+         <button type="button" class="btn sm" onclick="actSplitLine(${n})">Раздели — отчисли само този</button>` : ''}${l.lost
       ? `<br><span class="badge warn">изгубен</span> <span class="hint">${esc(l.lost.reader_name || 'читател')} · ${
           esc(l.lost.lost_resolution || 'уреждането не е отбелязано')}${l.lost.charge
             ? ' · начислено ' + mny(l.lost.charge.charged || 0) + ', събрано ' + mny(l.lost.charge.covered || 0) : ''}</span>` : ''}</td>
@@ -354,6 +421,7 @@ async function saveAct() {
     }
   }
   const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
+  if (actLegacyBlock()) return;
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
   if (id) {
     closeModal(); renderActs(); markSaved();
@@ -404,6 +472,7 @@ async function approveActDraft() {
   if (!d.date) return toast('Датата на акта е задължителна при утвърждаване.', 'err');
   if (!d.reason_code) return toast('Причината по чл. 30 е задължителна при утвърждаване.', 'err');
   if (!ACT_LIST.length) return toast('Добавете поне един документ в списъка.', 'err');
+  if (actLegacyBlock()) return;
   const p = PRICHINI.find(x => x.k == d.reason_code);
   // Първо се записва това, което е на екрана — иначе утвърденото е старата снимка.
   const draft = Object.assign({}, d, { reason_text: p ? p.t : null });
