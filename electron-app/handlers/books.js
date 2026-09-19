@@ -1022,77 +1022,125 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      така че да отговаря на инвентарната книга.
      Отказва при повече от едно отворено заемане: заеманията сочат към стария
      ред и не може да се знае кой физически екземпляр е у кой читател — първо се
-     приемат върнатите документи. Отказва и за отчислен документ (виж по-горе). */
+     приемат върнатите документи. Отказва и за отчислен документ (виж по-горе).
+
+     ИЗВАДЕНО В ОТДЕЛНА ФУНКЦИЯ, БЕЗ СОБСТВЕНА ТРАНЗАКЦИЯ (v2.4.62, преглед на
+     кръга): books:splitCopiesBatch по-долу разделя НЯКОЛКО записа в ЕДНА
+     транзакция — тя трябва да може да извика тази стъпка N пъти и, ако K-тата
+     хвърли грешка, целият опит (включително първите K-1 успешни разделяния) да
+     се отмени. С отделна транзакция ВЪТРЕ във всяко повикване това не е
+     възможно: better-sqlite3 НЕ поддържа влагане на db.transaction(), а и дори
+     да поддържаше, всяко вътрешно завършване веднага се записва трайно. */
+  function splitOneCopy(db, id) {
+    const b = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
+    if (!b) throw new Error('Документът не е намерен.');
+    if (b.status === 'отчислен' || b.deaccession_date) {
+      throw new Error('Инв. № ' + (b.inv_number ?? '—') + ' е отчислен. Отчисленият запис е история — бройката му '
+        + 'стои в самия акт за отчисляване и не се разделя.');
+    }
+    const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {};
+    const n = parseInt(inv.quantity, 10) || 0;
+    if (n <= 1) throw new Error('Този запис вече е за един екземпляр — няма какво да се разделя.');
+    const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(id).n;
+    if (open > 1) {
+      throw new Error('По този запис има ' + open + ' незавършени заемания, а те сочат към стария общ ред — '
+        + 'не може да се определи кой читател кой екземпляр държи. Приемете върнатите документи (да остане '
+        + 'най-много едно заемане) и разделете записа отново.');
+    }
+    const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
+    let next = parseInt(s.next_inv_number, 10) || 1;
+    const taken = db.prepare('SELECT 1 FROM books WHERE inv_number = ?');
+    const cols = BOOK_FIELDS.filter(f => f !== 'inv_number' && f !== 'barcode');
+    const insert = db.prepare(`
+      INSERT INTO books (inv_number, ${cols.join(',')})
+      VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
+    `);
+    /* Одит v2.4.22 (преглед на поправката от v2.4.21): status/status_date/
+       description описват СЪСТОЯНИЕТО НА ЕДИН ФИЗИЧЕСКИ ЕКЗЕМПЛЯР — стар
+       неразделен запис с бележка „скъсана корица, липсва том 2“ или
+       status='липсващ' я носи най-много за ЕДИН от N-те екземпляра под номера,
+       не за всичките. Копирането им непроменени (каквото правеше кодът дотук)
+       обявява N-1 здрави екземпляра за повредени/липсващи в инвентарната книга
+       и КДБФ. Ръчният път „+ Още екземпляр“ (bookCopyForm в src/views/books.js)
+       вече нулира точно тези три полета за новия запис — тук се прави същото,
+       а ОРИГИНАЛНИЯТ ред (същия id, само с бройка вече 1) си остава непипнат
+       с каквото е имал. */
+    const perCopyReset = { status: 'наличен', status_date: null, description: null };
+    const created = [];
+    /* И номерата на новите РЕДОВЕ (v2.4.62), не само инвентарните им номера.
+       Нужни са на проекта за акт от липсите (src/views/inventory-sessions.js):
+       стар запис с три екземпляра под един номер, който изцяло липсва при
+       инвентаризацията, влиза в акта като ТРИ документа с три инвентарни
+       номера — а проектът се пише по номерата на редовете. */
+    const createdIds = [];
+    for (let k = 1; k < n; k++) {
+      while (taken.get(next)) next++;   // никога върху зает номер
+      const row = { inv_number: next };
+      cols.forEach(f => {
+        row[f] = Object.prototype.hasOwnProperty.call(perCopyReset, f)
+          ? perCopyReset[f]
+          : (b[f] === undefined ? null : b[f]);
+      });
+      const info = insert.run(row);
+      /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
+         дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
+         Новият екземпляр получава свой етикет от „Баркод етикети“. */
+      db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
+      created.push(next);
+      createdIds.push(Number(info.lastInsertRowid));
+      next++;
+    }
+    db.prepare('UPDATE inventory SET quantity = 1 WHERE book_id = ?').run(id);
+    db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(next);
+    logAudit('Разделяне на екземпляри',
+      'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + n + ' екземпляра станаха '
+      + n + ' отделни записа; нови инвентарни номера: ' + created.join(', '));
+    return { created, createdIds, inv_number: b.inv_number, title: b.title };
+  }
   ipcMain.handle('books:splitCopies', (e, id) =>
     run(() => {
       const db = getDb();
-      const tx = db.transaction(() => {
-        const b = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
-        if (!b) throw new Error('Документът не е намерен.');
-        if (b.status === 'отчислен' || b.deaccession_date) {
-          throw new Error('Инв. № ' + (b.inv_number ?? '—') + ' е отчислен. Отчисленият запис е история — бройката му '
-            + 'стои в самия акт за отчисляване и не се разделя.');
+      const out = db.transaction(() => splitOneCopy(db, id)).immediate();
+      scheduleCatalogWrite();
+      return out;
+    })
+  );
+  /* Разделя НЯКОЛКО записа в ЕДНА транзакция (v2.4.62, преглед на кръга).
+     =====================================================================
+     Проектът от липсите при инвентаризация (draftFromMissing в
+     src/views/inventory-sessions.js) може да трябва да раздели повече от един
+     стар запис наведнъж — всеки изцяло липсващ многоекземплярен ред. Дотук
+     екранът викаше books:splitCopies ПО ЕДИН, в отделни IPC заявки: ако вторият
+     запис откажеше (например се появят нови заемания по него между
+     приключването на проверката и съставянето на проекта), първият вече беше
+     разделен и записан трайно, а проектът така и не се съставяше — библиотеката
+     оставаше с наполовина разделени записи и без обяснение. При повторен опит
+     снимката на липсата (inventory_session_missing.quantity, чл. 35, ал. 2)
+     още сочи старата бройка, разделеният вече запис минава по пътя „вече е
+     разделен“ и новите му номера отпадат от проекта БЕЗ следа — точно
+     документите, за които актът съществува, изчезват от него.
+     Тук всички поискани разделяния стават в ЕДНА транзакция: ако кое да е от тях
+     хвърли истинска грешка (не „вече е разделен“ — това не е грешка, а вече
+     свършена работа), нищо от партидата не се записва — нито току-що
+     разделеното по-рано в същото повикване. Вече разделен запис не спира
+     останалите: пропуска се и се връща в `skipped`, за да го каже екранът. */
+  ipcMain.handle('books:splitCopiesBatch', (e, ids) =>
+    run(() => {
+      const db = getDb();
+      const out = db.transaction(() => {
+        const results = [];
+        const skipped = [];
+        for (const id of (ids || [])) {
+          const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {};
+          if ((parseInt(inv.quantity, 10) || 0) <= 1) {
+            const b = db.prepare('SELECT inv_number, title FROM books WHERE id = ?').get(id);
+            skipped.push({ id, inv_number: b ? b.inv_number : null, title: b ? b.title : null });
+            continue;
+          }
+          results.push(Object.assign({ id }, splitOneCopy(db, id)));
         }
-        const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {};
-        const n = parseInt(inv.quantity, 10) || 0;
-        if (n <= 1) throw new Error('Този запис вече е за един екземпляр — няма какво да се разделя.');
-        const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(id).n;
-        if (open > 1) {
-          throw new Error('По този запис има ' + open + ' незавършени заемания, а те сочат към стария общ ред — '
-            + 'не може да се определи кой читател кой екземпляр държи. Приемете върнатите документи (да остане '
-            + 'най-много едно заемане) и разделете записа отново.');
-        }
-        const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
-        let next = parseInt(s.next_inv_number, 10) || 1;
-        const taken = db.prepare('SELECT 1 FROM books WHERE inv_number = ?');
-        const cols = BOOK_FIELDS.filter(f => f !== 'inv_number' && f !== 'barcode');
-        const insert = db.prepare(`
-          INSERT INTO books (inv_number, ${cols.join(',')})
-          VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
-        `);
-        /* Одит v2.4.22 (преглед на поправката от v2.4.21): status/status_date/
-           description описват СЪСТОЯНИЕТО НА ЕДИН ФИЗИЧЕСКИ ЕКЗЕМПЛЯР — стар
-           неразделен запис с бележка „скъсана корица, липсва том 2“ или
-           status='липсващ' я носи най-много за ЕДИН от N-те екземпляра под номера,
-           не за всичките. Копирането им непроменени (каквото правеше кодът дотук)
-           обявява N-1 здрави екземпляра за повредени/липсващи в инвентарната книга
-           и КДБФ. Ръчният път „+ Още екземпляр“ (bookCopyForm в src/views/books.js)
-           вече нулира точно тези три полета за новия запис — тук се прави същото,
-           а ОРИГИНАЛНИЯТ ред (същия id, само с бройка вече 1) си остава непипнат
-           с каквото е имал. */
-        const perCopyReset = { status: 'наличен', status_date: null, description: null };
-        const created = [];
-        /* И номерата на новите РЕДОВЕ (v2.4.62), не само инвентарните им номера.
-           Нужни са на проекта за акт от липсите (src/views/inventory-sessions.js):
-           стар запис с три екземпляра под един номер, който изцяло липсва при
-           инвентаризацията, влиза в акта като ТРИ документа с три инвентарни
-           номера — а проектът се пише по номерата на редовете. */
-        const createdIds = [];
-        for (let k = 1; k < n; k++) {
-          while (taken.get(next)) next++;   // никога върху зает номер
-          const row = { inv_number: next };
-          cols.forEach(f => {
-            row[f] = Object.prototype.hasOwnProperty.call(perCopyReset, f)
-              ? perCopyReset[f]
-              : (b[f] === undefined ? null : b[f]);
-          });
-          const info = insert.run(row);
-          /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
-             дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
-             Новият екземпляр получава свой етикет от „Баркод етикети“. */
-          db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
-          created.push(next);
-          createdIds.push(Number(info.lastInsertRowid));
-          next++;
-        }
-        db.prepare('UPDATE inventory SET quantity = 1 WHERE book_id = ?').run(id);
-        db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(next);
-        logAudit('Разделяне на екземпляри',
-          'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + n + ' екземпляра станаха '
-          + n + ' отделни записа; нови инвентарни номера: ' + created.join(', '));
-        return { created, createdIds, inv_number: b.inv_number, title: b.title };
-      });
-      const out = tx.immediate();
+        return { results, skipped };
+      }).immediate();
       scheduleCatalogWrite();
       return out;
     })

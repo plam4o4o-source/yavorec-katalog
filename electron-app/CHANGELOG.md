@@ -43,13 +43,31 @@ for full detail.
 място — и не пише нищо. Вече утвърдените актове не се пипат: снимката им по
 чл. 35, ал. 2 остава каквато е била.
 
-Проверки: седем нови теста в `test/ekzemplyar-v2462.test.js` — отказът на ядрото,
-отчисляването на един екземпляр след разделяне (фондът намалява с един, КДБФ отчита
-един, другите остават „наличен“), три отделни екземпляра от едно заглавие,
-разделянето при сканиране с потвърждение и без, проектът отпреди версията и
-проектът от липсите. Тестовете, които заковаваха старото поведение („актът снима
-3 документа, частично отчисляване няма“), са обновени заедно с обяснението защо.
-Пълна поредица: 1893 успешни, 0 неуспешни.
+**Преглед след кръга: разделянето на няколко стари записа вече е ЕДНА транзакция.**
+Прегледът на кода намери процеп в проекта от липсите, когато той разделя ПОВЕЧЕ ОТ
+ЕДИН стар многоекземплярен запис наведнъж: дотук всеки запис се разделяше с
+отделна заявка към базата. Ако вторият откажеше — например между приключването на
+проверката и съставянето на проекта някой заеме част от „липсващите“ екземпляри на
+този запис, което нищо в програмата не пречи (документ със статус „липсващ“ си
+остава заемаем) — първият вече беше разделен и записан трайно, а проектът така и
+не се съставяше. При повторен опит снимката на липсата още сочи старата бройка;
+вече разделеният запис минава по пътя „вече е разделен“ и новите му номера
+отпадат от проекта БЕЗ следа — точно документите, за които актът съществува,
+изчезваха от него, а екранът твърдеше грешна, по-малка бройка с пълна увереност.
+Нов канал `books:splitCopiesBatch` разделя всички поискани записи в ЕДНА
+транзакция: истинска грешка по кой да е от тях отменя цялата партида, а вече
+разделен запис не е грешка — просто се пропуска и се казва на глас, както дотук.
+
+Проверки: осем теста в `test/ekzemplyar-v2462.test.js` (седем от кръга плюс един
+от прегледа) — отказът на ядрото, отчисляването на един екземпляр след разделяне
+(фондът намалява с един, КДБФ отчита един, другите остават „наличен“), три
+отделни екземпляра от едно заглавие, разделянето при сканиране с потвърждение и
+без, проектът отпреди версията, проектът от липсите, и разделянето на два стари
+записа наведнъж, при което истинска грешка по единия не оставя другия наполовина
+разделен. Тестовете, които заковаваха старото поведение („актът снима 3 документа,
+частично отчисляване няма“), са обновени заедно с обяснението защо. Всяка нова
+теза е проверена и с връщане на поправката. Пълна поредица: 1894 успешни,
+0 неуспешни, в UTC и Europe/Sofia.
 
 **EN:** A deaccession act now removes **only the copy whose inventory number is
 written in it**. The inventory book records every library document under its own
@@ -76,9 +94,30 @@ missing entirely. A draft saved before this version shows the unsplit line with 
 The act core refuses an unsplit record on every path and writes nothing. Acts
 already approved are untouched: their Art. 35(2) snapshot stays as it was.
 
-Checks: seven new tests in `test/ekzemplyar-v2462.test.js`; the tests that pinned
-the old behaviour are updated together with the reasoning. Full suite: 1893
-passing, 0 failing.
+**Post-review fix: splitting several legacy records is now ONE transaction.**
+Code review found a gap in the stocktaking-shortage draft when it splits MORE
+THAN ONE legacy multi-copy record at once: each record was split with its own
+database call. If the second one failed — say, between closing the check and
+building the draft, someone borrows part of that record's "missing" copies,
+which nothing in the program prevents (a "missing"-status document can still be
+lent) — the first was already split and permanently committed, yet no draft was
+created. On retry, the shortage snapshot still shows the old count; the
+already-split record takes the "already split" path and its new numbers drop
+out of the draft without a trace — exactly the documents the act exists for
+disappear from it, while the screen confidently states a smaller, wrong count.
+A new `books:splitCopiesBatch` channel splits every requested record in ONE
+transaction: a real failure on any of them rolls back the whole batch, and an
+already-split record is not an error — it's skipped and announced, as before.
+
+Checks: eight tests in `test/ekzemplyar-v2462.test.js` (seven from the round
+plus one from the review) — the core's refusal, removing one copy after
+splitting (the collection drops by one, КДБФ counts one, the others stay
+"available"), three separate copies of one title, splitting on scan with and
+without confirmation, a pre-version draft, the shortage draft, and splitting two
+legacy records at once where a real failure on one does not leave the other
+half-split. The tests that pinned the old behaviour are updated together with
+the reasoning. Each new claim was also verified by reverting the fix. Full
+suite: 1894 passing, 0 failing, in UTC and Europe/Sofia.
 
 ## v2.4.61
 
