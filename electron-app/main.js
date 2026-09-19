@@ -878,10 +878,20 @@ const MIGRATIONS = [
     for (const [name, code] of seeded) setCode.run(code, name, code);
     /* Резервното разпознаване за преименуван вид на периодиката: ако никой ред
        няма код 'periodical', но във фонда вече има инвентирани годишни комплекти,
-       техният вид Е видът на периодиката — както и да се казва днес. */
+       техният вид Е видът на периодиката — както и да се казва днес.
+       ГЛЕДА СЕ САМО СРЕД ВИДОВЕТЕ БЕЗ КОД (поправка след прегледа на кръга).
+       Заварена база, в която част от годишните комплекти са вписани по погрешка
+       под вида „книга“, даваше на познаването точно него — и UPDATE-ът отнемаше
+       кода 'book', за да сложи 'periodical' на негово място. От този миг
+       Дневникът брои ВСЯКО заемане на книга в реда „Периодични издания“ на
+       Раздел Б (handlers/dnevnik.js чете вида през кода), а нищо на екрана не
+       подсказва защо. Кодът на вече разпознат вид не се пипа; ако всички
+       кандидати са с код, периодиката просто остава без код — точно както при
+       всеки друг преименуван вид, и всичко продължава да работи по име. */
     if (!db.prepare("SELECT 1 FROM categories WHERE code = 'periodical'").get()) {
       const guess = db.prepare(`SELECT b.category_id AS id, COUNT(*) AS n FROM books b
-        WHERE b.volume = 'годишен комплект' AND b.category_id IS NOT NULL
+        JOIN categories c ON c.id = b.category_id
+        WHERE b.volume = 'годишен комплект' AND c.code IS NULL
         GROUP BY b.category_id ORDER BY n DESC LIMIT 1`).get();
       if (guess) {
         db.prepare("UPDATE categories SET code = 'periodical' WHERE id = ?").run(guess.id);

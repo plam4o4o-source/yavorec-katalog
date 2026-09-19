@@ -263,13 +263,37 @@ LIKE без оглед на регистъра САМО за латиницат�
 указател, а единственият ѝ читател е човекът, който отваря архива, без да е виждал
 програмата.
 
+**ПЕТ ПОПРАВКИ СЛЕД ПРЕГЛЕДА НА САМИЯ КРЪГ.** Одитът беше прегледан втори път и
+намери пет неща в новото. Разпознаването на преименувания вид „продължаващо
+издание“ (по вече инвентираните годишни комплекти) можеше да ОТНЕМЕ кода на вече
+разпознат вид: в база, където част от комплектите са вписани по погрешка под
+„книга“, точно „книга“ печелеше познаването и оставаше без своя код — от този миг
+Дневникът брои ВСЯКО заемане на книга в реда „Периодични издания“ на Раздел Б.
+Сега се гледа само сред видовете без код. Списъкът с проверки сумираше живата
+наличност вместо снимката, която печата протоколът по чл. 40 — поправка на
+„Налични бройки“ на вече липсващ документ разминаваше екрана („липсващи 1“) с
+подписаната хартия („липсващи 3“) за една и съща проверка. В акта по чл. 30, т. 5
+забавата се начисляваше ПРЕДИ обезщетението за самия документ, обратно на реда на
+гишето: плащанията се разнасят по реда на възникване, тоест първите платени пари
+отиваха по забавата, а актът продължаваше да се чете като необезщетен. Уникалният
+индекс на кардекса („един брой — един ред“) беше сложен в schema.sql, който минава
+при ВСЯКО стартиране и преди миграциите — върху заварена база с повтарящи се
+броеве (единствената, заради която проверката съществува) целият файл падаше;
+мястото му е в миграция 16, където провалът се хваща и се обяснява. И колоната
+„Инвентирани комплекти“ питаше състоянието с `status <> 'отчислен'` — за ред с
+непопълнено състояние това дава NULL и комплектът изпадаше, тоест изданието
+получаваше предупредителната нула „не влиза в КДБФ“, макар да влиза; сега се ползва
+общият NULL-безопасен ключ на фонда от `db/fund-sql.js`.
+
 **Съзнателно не е правено в този кръг.** Частичното отчисляване на отделни
 екземпляри от многоекземплярен запис (чл. 30, т. 2) иска бройка на реда в акта и
 намаляване на наличността и е предложено за отделен кръг; автоматичното попълване
 на Дневника от посещенията и заеманията е анализирано, но решението е на
 библиотекаря; настройката „не заемай при просрочени документи“ остава отворена.
 
-Проверки: пълна поредица 1881 успешни, 0 неуспешни, в UTC и Europe/Sofia. 124
+Проверки: пълна поредица 1886 успешни, 0 неуспешни, в UTC и Europe/Sofia. Всяка
+от петте поправки след прегледа е възпроизведена преди поправянето и е закована с
+именуван тест в `test/pregled-v2461.test.js`, проверен с връщане на стария ред. 124
 мутации на реалния код, всяка приложена в копие, пусната и веднага върната —
 всичките уловени от именуван тест, плюс контролна мутация, която трябва да мине,
 и минава. Шест сценарийни файла минават през истинския екран върху празна база
@@ -436,11 +460,34 @@ signature block, and "type, No. and date of document" no longer carries a dangli
 exports and its completeness guard now catches all six ways a new print function is
 written.
 
+**Five fixes after reviewing the round itself.** A second pass over the audit found
+five problems in the new code. The fallback that recognises a renamed "continuing
+resource" category (by the annual sets already inventoried) could STEAL the code of
+an already-recognised category: in a database where some sets were filed under
+"book" by mistake, "book" won the guess and lost its own code — from that moment the
+daily register counted every book loan in the "periodicals" row of section B. The
+guess is now restricted to categories without a code. The inventory-check list summed
+live quantities instead of the snapshot the art. 40 protocol prints, so editing a
+missing document's quantity made the screen ("1 missing") disagree with the signed
+paper ("3 missing") for the same check. In an act under art. 30(5) the overdue fine
+was charged BEFORE the compensation for the document itself, the reverse of the
+counter's order: payments are applied oldest first, so the first money paid went to
+the fine while the act still read as uncompensated. The kardex unique index ("one
+issue, one row") was placed in schema.sql, which runs on every start and before the
+migrations — on an existing database with duplicate issues (the only reason the check
+exists) the whole file failed; it belongs in migration 16, where the failure is caught
+and explained. And the "inventoried sets" column asked the status with
+`status <> 'отчислен'`, which is NULL for a row with no status, so such a set dropped
+out and the title got the warning zero "not included in КДБФ" although it is; it now
+uses the shared NULL-safe fund key from `db/fund-sql.js`.
+
 **Deliberately not done this round:** partial deaccession of individual copies of a
 multi-copy record (art. 30(2)), automatic filling of the daily register from visits
 and loans, and a "do not lend while overdue" setting.
 
-Checks: full suite 1881 passing, 0 failing, in UTC and Europe/Sofia. 124 mutations
+Checks: full suite 1886 passing, 0 failing, in UTC and Europe/Sofia. Each of the five
+post-review fixes was reproduced before being fixed and is pinned by a named test in
+`test/pregled-v2461.test.js`, verified by reverting the fix. 124 mutations
 of the real code, each applied to a copy, run and immediately reverted — all caught
 by a named test, plus a control mutation that must pass, and does. Six scenario
 files run through the real screen on an empty database

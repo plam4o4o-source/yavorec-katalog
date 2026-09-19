@@ -656,6 +656,26 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                което по-ранно продължение вече е начислило, стои в сметката отпреди
                и не се повтаря. */
             let fineLineId = null;
+            /* РЕДЪТ НА ДВАТА РЕДА В СМЕТКАТА Е ЧАСТ ОТ СМИСЪЛА ИМ (поправка след
+               прегледа на кръга). Обезщетението за самия документ се начислява
+               ПЪРВО, забавата — второ, точно както го прави и „Документът е
+               изгубен“ на гишето (handlers/loans.js, дългата бележка при
+               chargeOverdueFine там). Причината: плащанията се разнасят по реда
+               на възникване (chargeCoverage — най-старото задължение първо, а в
+               рамките на един ден решава id-то на реда), а въпросът, който стои
+               пред комисията по чл. 30, т. 5, е „обезщетен ли е отчисленият
+               документ“. Първите платени пари трябва да отидат по него.
+               С обратния ред първата вноска покриваше забавата, а самият акт
+               продължаваше да се чете като необезщетен — и двата пътя към една и
+               съща сметка (гишето и актът) даваха различен отговор за едни и
+               същи пари. */
+            if (l.reader_id) {
+              lineId = chargeLost(db, {
+                reader_id: l.reader_id, amount: comp.amount, date: act.date,
+                note: 'Невърнат документ инв. № ' + (b.inv_number ?? '—') + ' — ' + (b.title || '')
+                  + '; отчислен с акт № ' + no + '/' + year
+              }).id;
+            }
             if (l.reader_id && addedFine) {
               const fl = chargeOverdueFine(db, {
                 reader_id: l.reader_id, amount: addedFine, date: act.date,
@@ -663,13 +683,6 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                   + '; отчислен с акт № ' + no + '/' + year
               });
               fineLineId = fl ? fl.id : null;
-            }
-            if (l.reader_id) {
-              lineId = chargeLost(db, {
-                reader_id: l.reader_id, amount: comp.amount, date: act.date,
-                note: 'Невърнат документ инв. № ' + (b.inv_number ?? '—') + ' — ' + (b.title || '')
-                  + '; отчислен с акт № ' + no + '/' + year
-              }).id;
             }
             closeLoanStmt.run({
               id: l.id, date: act.date, act: actId,

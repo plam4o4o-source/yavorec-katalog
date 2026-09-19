@@ -69,7 +69,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
                       (SELECT COALESCE(SUM(${QTY_MISSING}), 0) FROM inventory_session_scans sc
                          LEFT JOIN inventory inv ON inv.book_id = sc.book_id
                         WHERE sc.session_id = s.id)) AS scanned,
-             (SELECT COALESCE(SUM(${QTY_MISSING}), 0) FROM inventory_session_missing m
+             /* СЪЩАТА СНИМКА, КОЯТО ЧЕТЕ И ПРОТОКОЛЪТ (поправка след прегледа на
+                кръга). Дотук този ред сумираше ЖИВАТА бройка, а
+                inventorySessions:get и протоколът по чл. 40 — записаната
+                m.quantity. Едно поправено „Налични бройки“ на вече липсващ
+                документ разминаваше екрана и хартията за една и съща проверка:
+                „липсващи 1“ в списъка срещу „липсващи 3“ в подписания протокол.
+                COALESCE-ът пази заварените редове без снимка — за тях живата
+                бройка е единственото, което има. */
+             (SELECT COALESCE(SUM(COALESCE(m.quantity, ${QTY_MISSING})), 0) FROM inventory_session_missing m
                 LEFT JOIN inventory inv ON inv.book_id = m.book_id
                WHERE m.session_id = s.id) AS missing,
              /* Редовете се връщат ОТДЕЛНО: екранът казва „5 документа (3 записа)“

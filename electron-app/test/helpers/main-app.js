@@ -51,12 +51,19 @@ function stubModule(id, exports) {
    всеки тестов ФАЙЛ в отделен процес, затова това не пречи на изолацията. */
 let started = null;
 
-function startMainApp() {
+/* seedDb(dbPath) — незадължителна кука за ЗАВАРЕНА база. Вика се след
+   създаването на папката и ПРЕДИ require('../../main.js'), тоест преди initDb()
+   и преди миграциите: така тест може да опише база, каквато я заварва
+   обновяването (стара PRAGMA user_version, данни от предишни версии), и да
+   провери какво прави с нея истинската миграция, вместо да преписва SQL-а ѝ в
+   теста. Без нея всичко работи както преди — с празна нова база. */
+function startMainApp(opts) {
   if (started) return started;
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-main-app-'));
   const userData = path.join(dir, 'userData');
   fs.mkdirSync(userData, { recursive: true });
+  if (opts && typeof opts.seedDb === 'function') opts.seedDb(path.join(userData, 'library.db'));
 
   const handlers = new Map();          // канал → обработчик (ipcMain.handle)
   const sent = [];                     // webContents.send(channel, data)

@@ -5,6 +5,8 @@
 // читалищна библиотека: само следващата очаквана дата, без пълен календар от
 // предвидени броеве и без рекламации).
 const { isValidIsoDate } = require('../security-utils');
+// Ключовете на фонда се пишат на едно място — виж db/fund-sql.js.
+const F = require('../db/fund-sql');
 
 module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
@@ -337,12 +339,20 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
          Сверява се и по status, и по deaccession_date: първото е състоянието на
          картона, второто е фактът на акта, а анулирането на акт (revokeAct в
          handlers/deaccession-acts.js) връща и двете — така редът се брои отново,
-         щом документът се върне във фонда. */
+         щом документът се върне във фонда.
+         Състоянието се пита през ОБЩИЯ ключ fundByStatus от db/fund-sql.js
+         (поправка след прегледа на кръга). Първият вариант написа условието
+         наново като `b.status <> 'отчислен'`, а то е NULL-небезопасно: за ред с
+         NULL състояние (внесени данни, никога отваряни) сравнението дава NULL,
+         редът изпада и колоната показва предупредителната нула — „това издание не
+         влиза в КДБФ“ — за комплект, който си е във фонда и влиза. Точно този
+         капан е описан в db/fund-sql.js и заради него двата ключа се пишат на
+         едно място. */
       const rows = db.prepare(`
         SELECT p.*, (SELECT COUNT(*) FROM periodical_issues i WHERE i.periodical_id = p.id) AS issue_count,
                (SELECT MAX(date) FROM periodical_issues i WHERE i.periodical_id = p.id) AS last_issue_date,
                (SELECT COUNT(*) FROM periodical_volumes v JOIN books b ON b.id = v.book_id
-                 WHERE v.periodical_id = p.id AND b.status <> 'отчислен' AND b.deaccession_date IS NULL) AS volume_count
+                 WHERE v.periodical_id = p.id AND ${F.fundByStatus} AND b.deaccession_date IS NULL) AS volume_count
         FROM periodicals p ORDER BY p.title
       `).all();
       for (const p of rows) Object.assign(p, periodicalPrediction(p));

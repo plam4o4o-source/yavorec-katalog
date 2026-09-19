@@ -184,11 +184,16 @@ test('находка 4: един и същ брой (номер и дата) н�
   assert.equal(t.db.prepare('SELECT COUNT(*) AS n FROM periodical_issues').get().n, 1);
   // Същият номер с ДРУГА дата е друг физически брой и минава.
   ok(await addIssue(t, pid, '2', '2026-02-21', 3.5), 'притурка/повторно издание');
-  // И базата пази същото правило — двете работни места не се виждат едно друго.
-  assert.ok(t.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_per_issue_unique'").get(),
-    'уникалният индекс го има в схемата');
-  assert.throws(() => t.db.prepare("INSERT INTO periodical_issues (periodical_id, issue_no, date, price) VALUES (?, '2', '2026-02-14', 3.5)").run(pid),
-    /UNIQUE/, 'заобикалянето на обработчика също се отказва');
+  /* И базата пази същото правило — двете работни места не се виждат едно друго.
+     Уникалният индекс обаче се създава от МИГРАЦИЯ 16, не от schema.sql: върху
+     заварена база с повтарящи се броеве CREATE UNIQUE INDEX се проваля, а
+     schema.sql минава при всяко стартиране и db.exec() спира на първата грешка
+     (виж дългата бележка при periodical_issues в db/schema.sql). Тази фикстура
+     вдига само схемата, без миграциите — затова тук се проверява, че индексът
+     НЕ идва от схемата, а работата му върху истински стартирала програма се
+     проверява в test/pregled-v2461.test.js през истинския main.js. */
+  assert.equal(t.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_per_issue_unique'").get(),
+    undefined, 'индексът не бива да се създава от schema.sql — мястото му е в миграция 16');
 });
 
 test('находка 5: брой с дата от бъдещето се отказва и не заглушава предупреждението на таблото', async () => {
