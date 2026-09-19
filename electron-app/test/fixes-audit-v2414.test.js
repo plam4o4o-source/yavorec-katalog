@@ -833,15 +833,31 @@ test('одитната следа за отчисляване брои доку�
     db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 3)').run(id);
     ids.push(id);
   }
+  /* v2.4.62: стар запис с 3 екземпляра под един номер вече НЕ влиза в акта
+     наведнъж — актът отчислява само екземпляра с номера, записан в него, а не
+     и другите два, които стоят здрави на рафта (чл. 16: всеки документ има свой
+     инвентарен номер). Ядрото отказва и не пише нищо — нито акт, нито ред в
+     следата, който после да се разминава с каквото и да е. */
+  const refused = ipcMain.invoke('deaccessionActs:create', {
+    act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени' }, bookIds: ids
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /Под инв\. № 1 .* са вписани 3 екземпляра/);
+  assert.equal(audit.filter(x => x.a === 'Отчисляване').length, 0, 'отказаният акт не оставя следа за отчисляване');
+  assert.equal(ipcMain.invoke('deaccessionActs:list').data.length, 0);
+  /* След разделяне (тук — направо в базата: бройката на реда става 1, а другите
+     екземпляри вече са отделни записи) актът с трите номера отчислява ТРИ
+     документа, и следата, и списъкът казват същото число като самия акт. */
+  db.prepare('UPDATE inventory SET quantity = 1').run();
   const res = ipcMain.invoke('deaccessionActs:create', {
     act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени' }, bookIds: ids
   });
   assert.equal(res.ok, true, res.error);
   const line = audit.find(x => x.a === 'Отчисляване');
-  assert.match(line.d, /9 документа/, 'следата трябва да казва 9, както казва актът');
-  assert.match(line.d, /\(3 заглавия\)/);
+  assert.match(line.d, /3 документа/, 'следата казва 3, както казва актът');
+  assert.doesNotMatch(line.d, /заглавия/, 'един ред = един документ: пояснение за заглавия няма какво да пояснява');
   const listed = ipcMain.invoke('deaccessionActs:list').data[0];
-  assert.equal(listed.item_count, 9, 'и списъкът брои същото');
+  assert.equal(listed.item_count, 3, 'и списъкът брои същото');
 });
 
 test('един повреден ред НЕ убива сесията — останалите читатели остават четими', () => {

@@ -127,16 +127,28 @@ test('F1: листът на протокола — „Липсващи: 4“, к
 test('F1: актът, съставен от същите липси, дава СЪЩИТЕ числа като протокола', async () => {
   /* Това е самата находка: два листа за едно и също събитие. Актът по чл. 30,
      т. 6 се ражда от протокола по чл. 40 и проверяващият ги слага един до друг. */
+  const actHead = {
+    no: 1, date: T, reason_code: 6, reason_text: 'констатирани като липсващи при инвентаризация',
+    disposal: 'отписани като липсващи', committee1: 'Мария Иванова', committee2: 'Петър Петров',
+    committee3: 'Ана Счетоводителка'
+  };
+  /* v2.4.62: неразделеният запис (3 екземпляра под инв. № 1001) вече НЕ влиза в
+     акта наведнъж — актът описва всеки отчислен документ поотделно, с неговия
+     инвентарен номер (чл. 16, чл. 35). Прекият опит се отказва и не пише нищо. */
+  const refused = await h.api.deaccessionActs.create({ act: actHead, bookIds: [ids.b2, ids.b3] });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /Под инв\. № 1001/);
+  /* Протоколът казва, че липсват и ТРИТЕ екземпляра под инв. № 1001 (нито един
+     не е намерен). Затова записът се разделя — точно както го прави „Проект за акт
+     от липсите“ — и в акта влизат трите номера. Числата остават същите като в
+     протокола: 4 документа за 15.50 €, само че поименно. */
+  const split = ok(await h.api.books.splitCopies(ids.b2), 'разделяне на стария запис');
   const act = ok(await h.api.deaccessionActs.create({
-    act: {
-      no: 1, date: T, reason_code: 6, reason_text: 'констатирани като липсващи при инвентаризация',
-      disposal: 'отписани като липсващи', committee1: 'Мария Иванова', committee2: 'Петър Петров',
-      committee3: 'Ана Счетоводителка'
-    },
-    bookIds: [ids.b2, ids.b3]
+    act: actHead, bookIds: [ids.b2, ...split.createdIds, ids.b3]
   }), 'акт по липсите');
-  const t = q('SELECT SUM(COALESCE(quantity,1)) AS n, SUM(price*COALESCE(quantity,1)) AS v FROM deaccession_items WHERE act_id = ?', act);
+  const t = q('SELECT COUNT(*) AS rows, SUM(COALESCE(quantity,1)) AS n, SUM(price*COALESCE(quantity,1)) AS v FROM deaccession_items WHERE act_id = ?', act);
   assert.equal(t.n, 4, 'актът брои 4 документа');
+  assert.equal(t.rows, 4, 'всеки документ е отделен ред с отделен инвентарен номер');
   assert.equal(t.v, 15.5, 'и 15.50 € — точно това, което пише и в протокола');
 });
 

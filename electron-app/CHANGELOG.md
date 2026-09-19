@@ -11,6 +11,114 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.62
+
+**BG:** Актът за отчисляване вече отчислява **само екземпляра с инвентарния
+номер, записан в него**. Инвентарната книга вписва всеки библиотечен документ със
+свой номер (чл. 16 от Наредба № 3), а актът по чл. 35 изброява отчислените
+документи поотделно, по номер — затова от фонда излиза точно книгата, която
+комисията държи в ръка, и нищо друго.
+
+Програмата спазва правилото „един инвентарен номер = един екземпляр“ за всяко
+вписване от v2.4.21 насам: вторият екземпляр от едно заглавие е втори запис със
+следващия номер. Оставаше един случай, който идва отвън — стар запис от внесена
+база, в който няколко екземпляра стоят под **един** номер. Сканиран в акт, такъв
+запис отчисляваше всичките си екземпляри наведнъж: библиотеката вадеше една
+скъсана книга, а от фонда, от КДБФ (Част № 3) и от инвентарната книга излизаха
+три. Двете здрави оставаха на рафта, невидими за програмата, и изплуваха чак при
+следващата инвентаризация като документи без запис.
+
+Сега такъв запис не влиза в акт, докато не бъде разделен. При сканиране екранът
+за акта пита и при съгласие го разделя — същото действие като „Раздели на отделни
+записи“ в „Проверка на данните“, което не променя нито бройката, нито стойността
+на фонда: сканираният номер остава за екземпляра, който се отчислява, а останалите
+получават следващите свободни номера и остават във фонда. Съобщението изброява
+новите номера, за да се надпишат екземплярите. Проектът за акт от липсите при
+инвентаризация прави същото, но включва в проекта **всички** номера на изцяло
+липсващ стар запис — нито един от екземплярите му не е намерен, значи липсват
+всички; протоколът и актът казват едно и също число, само че актът — поименно.
+Проект, записан преди тази версия, показва неразделения ред с бутон „Раздели —
+отчисли само този“ и не се утвърждава, докато редът не е разделен. Ядрото на акта
+отказва неразделен запис по всеки път — екран, проект, пряк канал, второ работно
+място — и не пише нищо. Вече утвърдените актове не се пипат: снимката им по
+чл. 35, ал. 2 остава каквато е била.
+
+**Преглед след кръга: разделянето на няколко стари записа вече е ЕДНА транзакция.**
+Прегледът на кода намери процеп в проекта от липсите, когато той разделя ПОВЕЧЕ ОТ
+ЕДИН стар многоекземплярен запис наведнъж: дотук всеки запис се разделяше с
+отделна заявка към базата. Ако вторият откажеше — например между приключването на
+проверката и съставянето на проекта някой заеме част от „липсващите“ екземпляри на
+този запис, което нищо в програмата не пречи (документ със статус „липсващ“ си
+остава заемаем) — първият вече беше разделен и записан трайно, а проектът така и
+не се съставяше. При повторен опит снимката на липсата още сочи старата бройка;
+вече разделеният запис минава по пътя „вече е разделен“ и новите му номера
+отпадат от проекта БЕЗ следа — точно документите, за които актът съществува,
+изчезваха от него, а екранът твърдеше грешна, по-малка бройка с пълна увереност.
+Нов канал `books:splitCopiesBatch` разделя всички поискани записи в ЕДНА
+транзакция: истинска грешка по кой да е от тях отменя цялата партида, а вече
+разделен запис не е грешка — просто се пропуска и се казва на глас, както дотук.
+
+Проверки: осем теста в `test/ekzemplyar-v2462.test.js` (седем от кръга плюс един
+от прегледа) — отказът на ядрото, отчисляването на един екземпляр след разделяне
+(фондът намалява с един, КДБФ отчита един, другите остават „наличен“), три
+отделни екземпляра от едно заглавие, разделянето при сканиране с потвърждение и
+без, проектът отпреди версията, проектът от липсите, и разделянето на два стари
+записа наведнъж, при което истинска грешка по единия не оставя другия наполовина
+разделен. Тестовете, които заковаваха старото поведение („актът снима 3 документа,
+частично отчисляване няма“), са обновени заедно с обяснението защо. Всяка нова
+теза е проверена и с връщане на поправката. Пълна поредица: 1894 успешни,
+0 неуспешни, в UTC и Europe/Sofia.
+
+**EN:** A deaccession act now removes **only the copy whose inventory number is
+written in it**. The inventory book records every library document under its own
+number (Art. 16 of Ordinance No. 3), and the act under Art. 35 lists the removed
+documents one by one, by number — so exactly the book the committee holds in hand
+leaves the collection, and nothing else.
+
+The program has followed "one inventory number = one copy" for every new entry
+since v2.4.21. One case still came from outside: a legacy record from an imported
+database with several copies under a **single** number. Scanned into an act, it
+removed all of its copies at once: the library withdrew one torn book, while three
+left the collection, the ledger (Part 3) and the inventory book. The two good
+copies stayed on the shelf, invisible to the program, until the next stocktaking.
+
+Such a record no longer enters an act until it is split. On scanning, the act
+screen asks and, on confirmation, splits it — the same action as "Split into
+separate records" under Data check, which changes neither the count nor the value
+of the collection: the scanned number stays with the copy being removed, the others
+get the next free numbers and remain in the collection, and the message lists the
+new numbers so the copies can be relabelled. The draft built from stocktaking
+shortages does the same but includes **all** numbers of a legacy record that was
+missing entirely. A draft saved before this version shows the unsplit line with a
+"Split — remove only this one" button and cannot be approved until it is split.
+The act core refuses an unsplit record on every path and writes nothing. Acts
+already approved are untouched: their Art. 35(2) snapshot stays as it was.
+
+**Post-review fix: splitting several legacy records is now ONE transaction.**
+Code review found a gap in the stocktaking-shortage draft when it splits MORE
+THAN ONE legacy multi-copy record at once: each record was split with its own
+database call. If the second one failed — say, between closing the check and
+building the draft, someone borrows part of that record's "missing" copies,
+which nothing in the program prevents (a "missing"-status document can still be
+lent) — the first was already split and permanently committed, yet no draft was
+created. On retry, the shortage snapshot still shows the old count; the
+already-split record takes the "already split" path and its new numbers drop
+out of the draft without a trace — exactly the documents the act exists for
+disappear from it, while the screen confidently states a smaller, wrong count.
+A new `books:splitCopiesBatch` channel splits every requested record in ONE
+transaction: a real failure on any of them rolls back the whole batch, and an
+already-split record is not an error — it's skipped and announced, as before.
+
+Checks: eight tests in `test/ekzemplyar-v2462.test.js` (seven from the round
+plus one from the review) — the core's refusal, removing one copy after
+splitting (the collection drops by one, КДБФ counts one, the others stay
+"available"), three separate copies of one title, splitting on scan with and
+without confirmation, a pre-version draft, the shortage draft, and splitting two
+legacy records at once where a real failure on one does not leave the other
+half-split. The tests that pinned the old behaviour are updated together with
+the reasoning. Each new claim was also verified by reverting the fix. Full
+suite: 1894 passing, 0 failing, in UTC and Europe/Sofia.
+
 ## v2.4.61
 
 **BG:** Най-големият одит след v2.4.57. Шест сценария минаха през ИСТИНСКИЯ екран

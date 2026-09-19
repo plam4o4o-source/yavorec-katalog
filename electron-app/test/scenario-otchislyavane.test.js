@@ -354,48 +354,60 @@ test('3. номерация по чл. 35: започва от 1 всяка го
 });
 
 /* ==================================================================
-   4. Многоекземплярен запис (бройка 3) — актът брои документи, не заглавия
+   4. Стар запис с 3 екземпляра под един номер — отчислява се САМО екземплярът
+      с номера в акта (v2.4.62)
    ================================================================== */
-test('4. запис с 3 бройки: актът снима 3 документа, КДБФ брои 3, инвентарната бройка остава; частично отчисляване няма', async () => {
+test('4. запис с 3 бройки: при сканиране се разделя, актът отчислява само екземпляра с номера в акта, другите два остават във фонда', async () => {
+  /* Дотук тази стъпка заковаваше обратното — „актът снима 3 документа, частично
+     отчисляване няма“: сканираният стар запис изваждаше от фонда и трите си
+     екземпляра, макар комисията да държи в ръка един. Инвентарната книга вписва
+     всеки документ със СВОЙ номер (чл. 16), а актът по чл. 35 описва отчислените
+     поотделно, по номер — затова от v2.4.62 записът се разделя при сканирането
+     (с потвърждение), инв. № 5 остава за екземпляра, който се отчислява, а
+     другите два получават нови номера и остават във фонда. */
   await openActForm();
   assert.equal(h.$('#actF [name=no]').value, '4');
   h.type('#actF [name=reason_code]', '2');
-  await h.scan('#actScan', '5');
-  assert.match(h.text('#actList'), /5 Учебник по математика 1990 3 × 4\.00 €.*ОБЩО 3 документа \(1 заглавие\) 12\.00 €/, h.text('#actList'));
+  h.hooks.confirmAnswer = true;
+  const c0 = h.hooks.confirms.length;
   let n = h.toasts.length;
+  await h.scan('#actScan', '5');
+  assert.match(h.hooks.confirms.slice(c0).join('\n'), /Под инв\. № 5 \(„Учебник по математика“\) са вписани 3 екземпляра под един номер/);
+  ids.split5 = q("SELECT group_concat(inv_number) AS g FROM (SELECT inv_number FROM books WHERE title = 'Учебник по математика' AND id <> ? ORDER BY inv_number)", ids.b5).g.split(',').map(Number);
+  assert.equal(ids.split5.length, 2, 'другите два екземпляра получиха свои номера');
+  assert.ok(h.toastsSince(n).some(t => t.msg.includes('Другите екземпляри получиха инв. № ' + ids.split5.join(', '))), JSON.stringify(h.toastsSince(n)));
+  assert.match(h.text('#actList'), /5 Учебник по математика 1990 4\.00 €.*ОБЩО 1 документ 4\.00 €/, h.text('#actList'));
+  n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
-  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 4: отчислени са 3 документа (1 заглавие).'), JSON.stringify(h.toastsSince(n)));
+  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 4: отчислен е 1 документ.'), JSON.stringify(h.toastsSince(n)));
   await closeAnyModal();
   const act = q('SELECT * FROM deaccession_acts WHERE no = 4 AND year = ?', Y);
   ids.act4 = act.id;
-  const it = q('SELECT * FROM deaccession_items WHERE act_id = ?', act.id);
-  assert.equal(it.quantity, 3, 'снимката носи трите бройки');
-  assert.equal(it.price, 4);
+  const items = h.db.prepare('SELECT * FROM deaccession_items WHERE act_id = ?').all(act.id);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].inv_number, 5);
+  assert.equal(items[0].quantity, 1, 'в акта е един екземпляр — този с инв. № 5');
+  assert.equal(items[0].price, 4);
   const b = book(ids.b5);
   assert.equal(b.status, 'отчислен');
-  assert.equal(b.qty, 3, 'inventory.quantity остава 3 — записът е снимка, не се „намалява“');
-  assert.match(lastAudit('Отчисляване').detail, /^акт № 4\/\d{4} — 3 документа \(1 заглавия\), причина/, 'следата брои документи, не заглавия');
+  assert.equal(b.qty, 1);
+  for (const inv of ids.split5) {
+    assert.equal(q('SELECT status FROM books WHERE inv_number = ?', inv).status, 'наличен', 'инв. № ' + inv + ' остава във фонда');
+  }
+  assert.match(lastAudit('Отчисляване').detail, /^акт № 4\/\d{4} — 1 документ, причина/, 'следата брои един документ');
   const list = ok(await h.api.deaccessionActs.list(), 'списък');
   const row = list.find(x => x.id === act.id);
-  assert.equal(row.item_count, 3); assert.equal(row.item_value, 12);
+  assert.equal(row.item_count, 1); assert.equal(row.item_value, 4);
   const f = await assertFundCoherent('4');
-  assert.equal(f.k.part3.find(x => x.no === 4).item_count, 3, 'КДБФ Част № 3 брои екземпляри, не заглавия');
-  assert.equal(f.dash.fundCount, 7, '14 − 2 (акт 1) − 1 (акт 2) − 1 (акт 3) − 3 (акт 4) = 7; инв. № 10 е върнат от анулирания акт');
-  // Разпечатката показва колоната „Бр.“ само при бройка ≠ 1 и сумира цена × бройка.
+  assert.equal(f.k.part3.find(x => x.no === 4).item_count, 1, 'КДБФ Част № 3 отчита един документ');
+  assert.equal(f.dash.fundCount, 9, '14 − 2 (акт 1) − 1 (акт 2) − 1 (акт 3) − 1 (акт 4) = 9; другите два екземпляра на инв. № 5 са във фонда');
+  // Разпечатката: един ред, без колона „Бр.“ — всеки ред е един документ.
   await h.window.printActDoc(act.id);
   await h.settle();
   const p = h.printed();
-  assert.match(p, /Бр\./, 'колоната „Бр.“ е налице');
-  assert.match(p, /отчислява от библиотечния фонд 3 библиотечни документа \(1 заглавие\) на обща стойност 12\.00 €/);
-  assert.match(p, /5 Учебник по математика 1990 821\.163\.2 3 3 × 4\.00 €/);
-  assert.match(p, /ОБЩО 3 12\.00 €/);
-  /* Частично отчисляване (2 от 3 екземпляра по чл. 30, т. 2 „многоекземплярност“)
-     няма как да се направи: findBook връща целия запис, а снимката взима цялата
-     бройка. Пътят е books:splitCopies (разделяне на отделни инв. номера) ПРЕДИ
-     акта — само че записът вече е отчислен и не може да се разделя. */
-  const split = await h.api.books.splitCopies(ids.b5);
-  assert.equal(split.ok, false, 'отчислен запис не се разделя');
-  assert.match(split.error, /отчислен/);
+  assert.doesNotMatch(p, /Бр\./, 'колоната „Бр.“ е излишна, когато всеки ред е един документ');
+  assert.match(p, /отчислява от библиотечния фонд 1 библиотечен документ/);
+  assert.match(p, /5 Учебник по математика 1990 821\.163\.2 4\.00 €/);
   noRendererErrors();
 });
 
@@ -479,7 +491,7 @@ test('5. зает (просрочен) и резервиран документ:
      него. Твърдението е махнато оттук, за да не пада сценарият за чужд файл;
      находката е предадена в доклада на кръга. */
   const f = await assertFundCoherent('5a');
-  assert.equal(f.dash.fundCount, 6);
+  assert.equal(f.dash.fundCount, 8, 'v2.4.62: двата екземпляра, отделени от инв. № 5, са във фонда');
 
   // Анулиране през екрана: основанието е задължително.
   await h.go('acts');
@@ -540,8 +552,8 @@ test('5. зает (просрочен) и резервиран документ:
   assert.ok(revRow.classList.contains('revokedRow'));
   assert.match(h.text(revRow), /АНУЛИРАН .* — читателят върна книгата — —/);
   const f2 = await assertFundCoherent('5b');
-  assert.equal(f2.k.deaccYear.n, 7, 'Част № 2: анулираният акт не се брои (2+1+1+3)');
-  assert.equal(f2.dash.fundCount, 7);
+  assert.equal(f2.k.deaccYear.n, 5, 'Част № 2: анулираният акт не се брои (2+1+1+1)');
+  assert.equal(f2.dash.fundCount, 9);
   assert.equal(f2.chk.findings.filter(x => x.key !== 'nobatch').length, 0, JSON.stringify(f2.chk.findings));
   await h.go('kdbf');
   await h.clickButton('Част № 3', '#view');
@@ -550,17 +562,18 @@ test('5. зает (просрочен) и резервиран документ:
   await soft('НАХОДКА: екранната Част № 3 брои анулирания акт', async () => {
     // НАХОДКА 3: src/views/kdbf.js (раздел p3) не гледа revoked_at — редът на акт № 5
     // излиза с 1 документ / 12.50 € и влиза в „ОБЩО за годината“ (8 / 42.80 €),
-    // докато Част № 2 и разпечатката дават 7 / 30.30 €.
+    // докато Част № 2 и разпечатката дават 7 / 30.30 €. (От v2.4.62 акт № 4 отчислява
+    // един екземпляр, не три — затова сборът по-долу е 5 документа / 7.80 €.)
     assert.match(p3, new RegExp('5 / ' + Y + ' т\\. 5\\. .*(АНУЛИРАН|—|0 0\\.00)'), 'редът на анулирания акт не е отбелязан: ' + p3);
-    assert.match(p3, new RegExp('ОБЩО за ' + Y + ' г\\. 7 15\\.80 €'), 'сборът на екрана включва анулирания акт: ' + p3);
+    assert.match(p3, new RegExp('ОБЩО за ' + Y + ' г\\. 5 7\\.80 €'), 'сборът на екрана включва анулирания акт: ' + p3);
   });
   await h.window.printKdbfDoc();
   await h.settle();
   const pk = h.printed();
   assert.match(pk, new RegExp('№ 5 / ' + Y + ' т\\. 5\\. Повредени или невърнати от ползватели АНУЛИРАН на ' + rx(E.bgDate(T)) + ' г\\. — читателят върна книгата 0 0\\.00 €'), 'разпечатката зачертава акта с нула');
-  assert.match(pk, new RegExp('ОБЩО за ' + Y + ' г\\. 7 15\\.80 €'), 'разпечатката: сборът без анулирания');
+  assert.match(pk, new RegExp('ОБЩО за ' + Y + ' г\\. 5 7\\.80 €'), 'разпечатката: сборът без анулирания');
   assert.match(pk, /Зачертаните редове са АНУЛИРАНИ актове/);
-  assert.match(pk, new RegExp('Отчислени през ' + Y + ' г\\. 7 15\\.80 €'), 'Част № 2 = Част № 3');
+  assert.match(pk, new RegExp('Отчислени през ' + Y + ' г\\. 5 7\\.80 €'), 'Част № 2 = Част № 3');
   await soft('НАХОДКА: КДБФ Част № 2 печата „-0.00 €“ за наличността към 01.01', async () => {
     // НАХОДКА: startV = endV − accV + decV с плаваща запетая дава −1e-15 → toFixed(2) = „-0.00“.
     assert.ok(!/-0\.00/.test(pk), 'подписваният документ съдържа „-0.00 €“: ' + pk.slice(pk.indexOf('Наличност към 01.01'), pk.indexOf('Наличност към 01.01') + 60));
@@ -609,8 +622,8 @@ test('6. изгубен документ: приключване с обезще
   assert.equal(ok(await h.api.loans.lost({}), 'списък').length, 0, 'след акта изгубеният излиза от списъка за акт');
   assert.equal(ok(await h.api.loans.lost({ includeActed: true }), 'списък').find(r => r.book_id === ids.b7).acted, true);
   const f = await assertFundCoherent('6');
-  assert.equal(f.dash.fundCount, 6);
-  assert.equal(f.k.deaccYear.n, 8);
+  assert.equal(f.dash.fundCount, 8);
+  assert.equal(f.k.deaccYear.n, 6);
   noRendererErrors();
 });
 
@@ -621,14 +634,15 @@ test('7. инвентаризация: липсващите стават про�
   const sid = ok(await h.api.inventorySessions.start({ date: T, scope: 'пълна проверка', order_no: 'З-40',
     committee1: 'Мария Иванова', committee2: 'Петър Петров', committee3: 'Ана Счетоводителка' }), 'сесия');
   // Сканират се всички налични освен 8 и 9; 6 е заета (извинена), отчислените (3,4,5,7,11,12) са извън обхвата.
-  for (const code of ['1', '2', '10']) ok(await h.api.inventorySessions.scan({ sessionId: sid, code }), 'скан ' + code);
+  // v2.4.62: двата екземпляра, отделени от инв. № 5 при акт № 4, стоят на рафта с новите си номера.
+  for (const code of ['1', '2', '10', ...ids.split5.map(String)]) ok(await h.api.inventorySessions.scan({ sessionId: sid, code }), 'скан ' + code);
   const offScan = await h.api.inventorySessions.scan({ sessionId: sid, code: '3' });
   assert.equal(offScan.ok, false); assert.match(offScan.error, /отчислен и не е част от фонда/);
   const closed = ok(await h.api.inventorySessions.close({ sessionId: sid, mode: 'full' }), 'приключване');
-  assert.equal(closed.pool, 6, 'обхватът: 1,2,6,8,9,10');
-  assert.equal(closed.scanned, 3); assert.equal(closed.onLoan, 1); assert.equal(closed.missing, 2);
+  assert.equal(closed.pool, 8, 'обхватът: 1,2,6,8,9,10 и двата отделени екземпляра на инв. № 5');
+  assert.equal(closed.scanned, 5); assert.equal(closed.onLoan, 1); assert.equal(closed.missing, 2);
   assert.equal(book(ids.b8).status, 'липсващ'); assert.equal(book(ids.b9).status, 'липсващ');
-  assert.equal(ok(await h.api.dashboard.full(), 'табло').fundCount, 6, 'липсващият остава във фонда до акт');
+  assert.equal(ok(await h.api.dashboard.full(), 'табло').fundCount, 8, 'липсващият остава във фонда до акт');
 
   // Пътят от протокола: „Проект за акт от липсите“.
   await h.go('invent');
@@ -720,7 +734,7 @@ test('7. инвентаризация: липсващите стават про�
   ok(await h.api.deaccessionActs.deleteDraft(dEmpty), 'изтриване на проекта');
   assert.match(lastAudit('Проект за отчисляване').detail, /изтрит проект № \d+ с 1 заглавие — нищо не е отчислявано/);
   const f = await assertFundCoherent('7');
-  assert.equal(f.dash.fundCount, 6, 'акт 7 е анулиран и инв. № 8 е намерен — фондът е пак 6');
+  assert.equal(f.dash.fundCount, 8, 'акт 7 е анулиран и инв. № 8 е намерен — фондът е пак 8');
   assert.equal(f.chk.findings.filter(x => x.key !== 'nobatch').length, 0, JSON.stringify(f.chk.findings));
   noRendererErrors();
 });
