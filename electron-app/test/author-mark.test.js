@@ -213,7 +213,15 @@ function setup(prefix) {
 
 test('внасяне: преглед преди запис, отказ при негоден файл, и чак тогава предложения', async () => {
   const s = setup('am-import');
-  assert.deepEqual(await s.ok('authorMark:status'), { rows: 0, letters: 0, separator: '-', example: null, sample: [] });
+  /* Фикстурата вдига САМО схемата, без миграциите — тоест базата тук е празна и
+     без вградената таблица (нея я зарежда миграция 17, виж
+     test/avtorska-tablica-v2463.test.js). Точно това е състоянието, в което се
+     проверява внасянето. `builtinRows`/`isBuiltin` (v2.4.63) казват на екрана
+     дали в базата стои таблицата на програмата, или внесена. */
+  const { builtinRows } = require(MOD).pure;
+  assert.deepEqual(await s.ok('authorMark:status'),
+    { rows: 0, letters: 0, separator: '-', example: null, sample: [],
+      builtinRows: builtinRows().length, isBuiltin: false });
   assert.match(await s.err('authorMark:suggest', { author: 'Вазов, Иван' }), /Няма внесена таблица/);
   assert.match(await s.err('authorMark:confirm'), /Няма разчетена таблица/, 'запис без преглед не бива да минава');
 
@@ -600,7 +608,11 @@ test('Настройки → Фонд: внасянето минава през 
   await settle();
   const box = d.getElementById('amBox');
   assert.ok(box, 'в „Фонд“ трябва да има раздел за авторския знак');
-  assert.match(box.textContent, /Няма внесена таблица/);
+  /* v2.4.63: празната таблица вече предлага ДВА пътя — вградената таблица на
+     програмата и файл на библиотеката. Дотук пишеше „Няма внесена таблица“ и
+     единственият изход беше чужд файл. */
+  assert.match(box.textContent, /Няма таблица/);
+  assert.match(box.textContent, /Зареди вградената таблица/);
 
   window.confirm = () => false;                       // библиотекарката не разпознава мострата
   await window.authorMarkChoose();

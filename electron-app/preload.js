@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('api', {
     choose: invoke('authorMark:choose'),
     confirm: invoke('authorMark:confirm'),
     clear: invoke('authorMark:clear'),
+    loadBuiltin: invoke('authorMark:loadBuiltin'),
     suggest: invoke('authorMark:suggest'),
     audit: invoke('authorMark:audit'),
     fillPreview: invoke('authorMark:fillPreview'),

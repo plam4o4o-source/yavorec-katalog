@@ -11,6 +11,81 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.63
+
+**BG:** Таблицата за авторски знак вече **идва с програмата**. Дотук тя не идваше:
+докато библиотекарката не посочи свой файл, копчето „Предложи“ до полето „Авторски
+знак“ нямаше откъде да предлага и сигнатурата — реквизит на инвентарната книга по
+чл. 16 от Наредба № 3 — се пишеше на ръка за всяка книга. Сега числата са вътре
+(2398 реда, 28 букви) и се зареждат при първото пускане: натискате „Предложи“ и
+получавате знака заедно с обяснение откъде идва („фамилия «Йовков» → ред «ИОВК» →
+Й се търси от буква И → **Й-77**“).
+
+**Внесеното има предимство и нищо не се подменя мълчаливо.** Библиотека, която вече
+е внесла СВОЕ издание на авторските таблици, не губи нищо: вградената се зарежда
+САМО в празна таблица. Двете издания дават различни числа за една и съща фамилия, а
+по вашите числа е подреден вашият рафт — тиха подмяна би значела, че от този ден
+новите книги застават на друго място от старите със същия автор. Затова и „Внеси
+друг файл…“ остава: внесеното застава върху вграденото по всяко време. Обратният
+път е ново копче „Върни вградената таблица“, което пита изрично, с фокус върху
+„Отказ“. Вече записаните авторски знаци по документите не се променят от нищо тук.
+
+**Защо не е миграция на схемата.** Засяването стои в стартирането, до официалните
+празници, а не сред миграциите: миграцията вдига версията на схемата, а пазачът
+спира всяка станция, която познава по-ниска. Тук по схемата не се променя нищо —
+това са редове в таблица, с които станция на предишната версия работи без проблем.
+Вдигане на версията би заключило второто работно място в деня на обновяването
+заради нещо, което изобщо не го засяга. Зареждането е в една транзакция: при
+прекъсване по средата не остава наполовина пълна таблица (липсващите редове не
+личат никъде, а дават мълчаливо други числа) — следващото пускане опитва пак.
+
+**Една грешка в източника, оставена както е.** В буква Л източникът изписва „Лес“
+два пъти, с 48 и с 49. Приема се първото и числото 49 остава неизползвано за Л.
+Не се поправя наум: кое от двете е сгрешено се вижда само в печатното издание, а
+измислено буквосъчетание би подредило чужди книги на грешно място.
+
+Проверки: седем нови теста в `test/avtorska-tablica-v2463.test.js` и
+`test/avtorska-tablica-vnesena-v2463.test.js` — цялост на самите данни (числата във
+всяка буква вървят без пропуски, освен описаното), зареждането в празна база през
+истинския main.js, запазването на внесена таблица, ръчното връщане към вградената,
+предложението по истинското правило (включително „Й се търси от буква И“) и пазач,
+че файлът е в списъка за пакетиране — иначе го няма в инсталатора и засяването пада
+само при потребителя. Всяка теза е проверена и с връщане на поправката. Пълна
+поредица: 1901 успешни, 0 неуспешни, в UTC и Europe/Sofia.
+
+**EN:** The author-mark (Cutter) table now **ships with the program**. Until now it
+did not: until the librarian pointed at a file of their own, the "Suggest" button
+next to the author-mark field had nothing to suggest from, and the shelf mark — a
+required element of the inventory book under Art. 16 of Ordinance No. 3 — was typed
+by hand for every book. The numbers are now built in (2398 rows, 28 letters) and
+load on first start, with the suggestion explaining where it comes from.
+
+**An imported table wins, and nothing is swapped silently.** A library that has
+already imported ITS OWN edition loses nothing: the built-in table is loaded ONLY
+into an empty one. Two editions give different numbers for the same surname, and
+your shelf is ordered by your numbers. "Import another file…" therefore stays, and
+a new "Restore the built-in table" button is the way back — it asks explicitly,
+with focus on Cancel. Author marks already recorded on documents are never changed.
+
+**Why it is not a schema migration.** The seeding sits in startup, next to the
+public-holiday seeding, not among the migrations: a migration raises the schema
+version, and the guard refuses to open a database for any workstation that knows a
+lower one. Nothing about the schema changes here — these are rows in a table that a
+workstation on the previous version handles perfectly. Raising the version would
+lock out the second workstation on upgrade day over something that does not concern
+it. The load runs in one transaction, so an interruption cannot leave a half-filled
+table (missing rows are invisible and silently yield different numbers).
+
+**One error in the source, left as it is.** Under letter Л the source prints "Лес"
+twice, as 48 and 49. The first wins and 49 stays unused for Л; inventing a letter
+group would file other libraries' books in the wrong place.
+
+Checks: seven new tests across two files — integrity of the data itself, loading into
+an empty database through the real main.js, preservation of an imported table, the
+manual restore, the lookup rule (including "Й is looked up from И"), and a guard that
+the file is in the packaging list. Each claim was verified by reverting the fix. Full
+suite: 1901 passing, 0 failing, in UTC and Europe/Sofia.
+
 ## v2.4.62
 
 **BG:** Актът за отчисляване вече отчислява **само екземпляра с инвентарния
