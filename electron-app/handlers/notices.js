@@ -21,7 +21,8 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
 {librarian_line}{library}{place_line}`;
   const DEFAULT_NOTICE_SMS = '{library_short}: имате {count_phrase}{fine_sms}. Моля, върнете {it_them}.';
   const NOTICE_PLACEHOLDERS = [
-    ['reader', 'име на читателя'], ['library', 'име на библиотеката'],
+    ['reader', 'до кого е писмото — читателят, а при читател под 14 г. родителят/настойникът'],
+    ['library', 'име на библиотеката'],
     ['library_short', 'скъсено име (за SMS, до 40 знака)'],
     ['count', 'брой просрочени (само числото)'],
     ['count_phrase', 'напр. „3 просрочени документа“'],
@@ -49,6 +50,38 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
     return tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
   }
   const bgDate = (d) => d ? String(d).split('-').reverse().join('.') : '';
+  /* ЗА ЧИТАТЕЛ ПОД 14 ГОДИНИ ПИШЕМ НА РОДИТЕЛЯ/НАСТОЙНИКА (v2.4.61).
+     =====================================================================
+     КАКВО СТАВАШЕ ДОТУК. Напомнянето се вадеше с r.phone/r.email на самия
+     читател и започваше с „Уважаем(а) <име на детето>“, а при трета степен —
+     „При ново неизпълнение достъпът до заемане ще бъде временно преустановен.“
+     Тоест библиотеката пращаше искане за обезщетение по чл. 43 и предупреждение
+     за санкция на седемгодишно дете, при това на телефон, който то по правило
+     няма. Формата за читател казва обратното с думи: „За читатели под 14 г.
+     отговорността за връщане на заетите документи и контактът при просрочие са
+     на родителя/настойника, не на детето“ — и точно затова има полета за име,
+     отношение и телефон на гаранта. Те просто не участваха никъде.
+     КАКВО ПРАВИ ПОПРАВКАТА. Писмото се адресира до гаранта, „чрез“ когото се
+     води детето (името на детето остава в текста — иначе родителят няма да
+     разбере за кого е), а телефонът за SMS е неговият. Имейлът остава този от
+     картона на читателя: полето е едно и при дете то и без това се попълва с
+     пощата на родителя.
+     ГРАНИЦАТА е категорията „дете до 14 г.“ (същата, по която се иска гарант във
+     формата и по която дневникът брои по възраст), а не самото наличие на
+     гарант: ученик или възрастен с вписан гарант получава писмото на СВОЕ име —
+     той отговаря сам за заетите документи. */
+  const CHILD_CATEGORY = 'дете до 14 г.';
+  function noticeAddressee(r) {
+    const guardian = (r.category === CHILD_CATEGORY && r.guarantor_name) ? String(r.guarantor_name).trim() : '';
+    if (!guardian) return { to: r.name, viaGuarantor: null, phone: r.phone };
+    return {
+      to: guardian,
+      viaGuarantor: (r.guarantor_relation || 'родител/настойник'),
+      // Телефонът на гаранта, ако го има; иначе остава записаният при читателя —
+      // по-добре стар номер, отколкото никакъв начин да се съобщи.
+      phone: r.guarantor_phone || r.phone
+    };
+  }
   function reminderTexts(r, s) {
     const lib = s.lib_name || s.org || 'библиотеката';
     const list = (r.loans || []).map(l =>
@@ -57,8 +90,20 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
     const fine = Number(r.fine || 0);
     const one = r.n === 1;
     const shortLib = lib.length > 40 ? lib.slice(0, 37).trim() + '…' : lib;
+    /* „Уважаема Петя Детска (родител/настойник на Ани Детска)“ — цялото
+       обръщение е в {reader}, а не в нов заместител, защото шаблонът на писмото
+       се редактира от Настройки и библиотеките, които вече са си го пренаписали,
+       нямаше да получат новия заместител никога (същият капан, заради който
+       степента на напомнянето се вмъква в {level_line}, а не в нов ред от
+       текста). Така поправката стига и до шаблоните, писани преди нея. */
+    const addr = r.notice_to
+      ? { to: r.notice_to, viaGuarantor: r.notice_via_guarantor }
+      : noticeAddressee(r);
+    const readerLine = addr.viaGuarantor
+      ? `${addr.to} (${addr.viaGuarantor} на ${r.name})`
+      : addr.to;
     const vars = {
-      reader: r.name, library: lib, library_short: shortLib,
+      reader: readerLine, library: lib, library_short: shortLib,
       count: r.n, count_phrase: `${r.n} просрочен${one ? ' документ' : 'и документа'}`,
       it_them: one ? 'го' : 'ги', list,
       /* Обезщетението е ЗАПИСАНО в евро от v2.4.51 — не се дели повторно по
@@ -92,8 +137,10 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
          в 09:00 и в 17:00, искаше различни суми — и двете различни от касовата. */
       const fpd = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
       const perDay = Number(fpd.fine_per_day) || 0;
+      /* Гарантът се чете заедно с читателя — виж noticeAddressee по-горе. */
       const rows = db.prepare(`
-        SELECT l.reader_id, r.name, r.phone, r.email, COUNT(*) AS n,
+        SELECT l.reader_id, r.name, r.phone, r.email, r.category,
+               r.guarantor_name, r.guarantor_relation, r.guarantor_phone, COUNT(*) AS n,
                MIN(l.date_due) AS oldest_due
         FROM loans l JOIN readers r ON r.id = l.reader_id
         WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
@@ -118,6 +165,15 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
            0,25 лв., гишето 2,05 лв. Точно трите различни суми, обявени за затворени. */
         r.loans.forEach(d => { d.fine = (Number(d.fine) || 0) + effectiveDaysLate(d.date_due, today()) * perDay; });
         r.fine = r.loans.reduce((sum, d) => sum + d.fine, 0);
+        /* До кого е писмото и на кой телефон (v2.4.61) — решава се тук, за да е
+           еднакво за екрана „Напомняния“, за имейла, за SMS-а и за печатното
+           писмо. `phone` нарочно се ПОДМЕНЯ с телефона на гаранта: точно този
+           номер набира библиотекарката, и точно него показва прозорецът. */
+        const addr = noticeAddressee(r);
+        r.notice_to = addr.to;
+        r.notice_via_guarantor = addr.viaGuarantor;
+        r.reader_phone = r.phone;      // телефонът от картона на самия читател
+        r.phone = addr.phone;
         const overdueDays = Math.round((new Date(today()) - new Date(r.oldest_due)) / 864e5);
         r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
         const last = lastNoticeQ.get(r.reader_id);

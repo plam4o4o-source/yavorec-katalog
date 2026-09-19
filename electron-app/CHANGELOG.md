@@ -11,6 +11,491 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.61
+
+**BG:** Най-големият одит след v2.4.57. Шест сценария минаха през ИСТИНСКИЯ екран
+срещу ИСТИНСКИТЕ обработчици, върху празна база: въвеждане на книги, водене на
+вестник, придобиване без съпроводителен документ, отчисляване, заемане и връщане,
+краезнание и всички издавани документи. Осемдесет и четири находки; поправени са
+всички освен три, изрично оставени за отделен кръг.
+
+**ЦЕНАТА, ИНВЕНТАРНИЯТ НОМЕР И ДАТАТА НА ВПИСВАНЕ.** Цялата обработка на цената
+беше един ред — `parseFloat` — и през него минаваха три различни начина да се
+повреди фондът, без нищо да се види на екрана. Отрицателна цена влизаше във
+фонда (полето носи `min="0"`, но в тази програма браузърът не проверява формата
+и атрибутът е украса) и от този миг НАМАЛЯВАШЕ стойността на фонда във всеки
+сбор — КДБФ Част № 2, годишния отчет, инвентарната книга, акта за отчисляване; а
+отрицателна оценка на документ по Наредбата не съществува — безплатният документ
+е с оценка 0 или се оценява от комисия по чл. 3, ал. 2. Цена „abc“ ставаше NaN,
+а better-sqlite3 записва NaN като NULL — документът излизаше с празна стойност и
+просто ИЗПАДАШЕ от всеки сбор, което е по-лошо от липсваща стойност, защото
+липсващата поне може да се потърси. Цена „12,50“ (българската клавиатура и всяка
+стара фактура пишат десетичната част със запетая) ставаше 12 — петдесетте
+стотинки изчезваха и разликата излизаше чак когато счетоводството сверява
+фактурата с КДБФ. Сега цената се чете с едно правило, запетаята се приема,
+резултатът се закръгля до стотинки, а отказът обяснява какво щеше да стане.
+Инвентарният номер минава през същата врата като всички останали номера в
+регистрите: № 0, № −4 и „12.7“ (което `parseInt` мълчаливо режеше до 12, тоест
+документът се вписваше под ЧУЖД номер) вече се отказват — номерът е реквизит по
+чл. 16, ал. 2 и мястото на документа в поредицата. Смяната на инвентарния номер
+при РЕДАКЦИЯ прави точно каквото прави вписването: сверява кой държи номера и
+го назовава, мести брояча и отбелязва прескочените номера в дневника. Дотук
+нищо от това не се правеше и редакция към номера на брояча вкарваше програмата в
+задънена улица — всяко следващо „+ Нова книга“ предлагаше зает номер, падаше и
+при повторно отваряне предлагаше същия. Дата на вписване в БЪДЕЩЕТО (почти
+винаги сгрешена година) вече не минава мълчешком: тя не се отказва, защото
+законен случай има, но прозорецът я казва — документът се брои на таблото и в
+инвентарната книга, а в КДБФ и в годишния отчет за тази година го няма.
+
+**ПАРТИДАТА, ДАРЕНИЕТО И ПРИДОБИВАНЕТО БЕЗ ДОКУМЕНТ.** По-строгите проверки
+стояха на по-рядко ползвания път: `acquisitions:update` проверяваше датата и
+адреса на дарителя, а самото ЗАВЕЖДАНЕ — нито едното. Партида с дата „abc“
+получаваше година „abc“ и не излизаше в НИТО една година на КДБФ Част № 1 —
+вписана в официален регистър и невидима в него; празна дата я оставяше без
+първия реквизит по чл. 14, ал. 2; „2026-02-30“ се приемаше дословно; дарение без
+адрес на дарителя се завеждаше, макар адресът да е реквизит на акта по чл. 6,
+ал. 5, чийто трети екземпляр отива при дарителя; отрицателни брой и обявена
+стойност се изваждаха от ОБЩО на Част № 1. Проверките са изнесени на едно място
+и се правят и от двата пътя, а изключението за партидата без първичен документ
+(чл. 3, ал. 2) е изрично: там дарител в правния смисъл няма и заместващият
+документ е протокол на комисия, не акт за дарение. Поправката на датата вече не
+може да изнесе партидата в ДРУГА година — годината е мястото на реда в регистъра
+и номерът е пореден за нея, а в другата година същият номер може вече да е зает
+от съвсем друга партида. За същата партида без документ формата вече оставя
+празни и заключени номера и датата на документа: дотук се предпопълваше днешната
+дата и в КДБФ Част № 1 излизаше „без документ — протокол на комисия № <празно>
+17.09.2026“ — дата на документ, който по определение не съществува. Актът за
+дарение получи длъжността до „УТВЪРДИЛ“ (единственият печатен документ, който
+подписваше без нея) и вярно заглавие на колоната със стойността, която от
+v2.4.51 съдържа две валути.
+
+**ЕДИН ДОКУМЕНТ — ЕДНО ЧИСЛО.** `books:update` приемаше отчислен с акт документ
+обратно като „наличен“, докато датата на отчисляване и връзката към акта
+оставаха на място — документ ЕДНОВРЕМЕННО във фонда и отчислен, който таблото и
+инвентарната книга броят, а КДБФ и годишният отчет не броят. Оттук нататък
+такъв документ се връща във фонда САМО с анулиране на акта (чл. 39), защото
+единствено то връща и датата, и реда в Приложение № 3. „Съгласуване на фонда“
+научи този случай поименно — дотук, когато той беше единствената причина за
+разликата, находката излизаше като бележка с обяснение („документи, вписани след
+31.12“), което за такъв ред е просто невярно и праща библиотекаря да търси дати.
+`books:create` пък приемаше статус „отчислен“ без акт — вписването е постъпление
+и документ напуска фонда само с акт по чл. 35, ал. 2. А груповата редакция
+отказваше състояние „изгубен“ (то е в номенклатурата и се предлага и в картона,
+и в самото меню) със съобщението за ОТЧИСЛЯВАНЕ: библиотекарка, отбелязала
+дванайсет невърнати книги след инвентаризация, оставаше с усещането, че
+програмата е повредена.
+
+**ПЕРИОДИКАТА.** Най-често срещаната периодика в едно читалище — ежедневният
+вестник — нямаше своя периодичност: списъкът започваше от „седмично“ и двата
+възможни избора бяха грешни („нередовно“ изключва предвиждането изобщо, тоест
+таблото НИКОГА не казва, че липсва брой; „седмично“ прави всеки редовно доставен
+вестник да свети като закъснял с шест дни, докато предупреждението спре да се
+чете). Стойността „ежедневно“ вече я има и в трите места, които трябва да
+съвпадат — изчислението, формата и номенклатурата на базата. Второ издание със
+същото заглавие или ISSN се завеждаше без дума и оттам нататък броевете се
+разпръсваха между два картона, а годишният комплект се инвентираше по погрешния;
+сега повторението се отказва, а ISSN се проверява по ISO 3297 (форматът и
+контролната цифра), защото по него се поръчва абонаментът и се сверява списъкът
+на регионалната библиотека. Един и същ брой се вписваше два пъти — а сборът на
+цените за годината се предлага и почти винаги се приема като ЦЕНА НА ГОДИШНИЯ
+КОМПЛЕКТ, тоест дубликатът влизаше в инвентарната книга по чл. 16 като стойност,
+по-висока от платената по фактурата. Брой с дата в бъдещето избутваше
+предвиждането напред и изданието изчезваше от предупреждението за липсващ брой —
+точно за изданието, за което е сгрешено. Кардексът чертаеше всичките броеве
+наведнъж (300 реда след първата година на един вестник, 3000 след десетата) и
+нямаше нито страници, нито филтър, нито търсене; сега се отваря ПО ГОДИНА —
+както хартиеният кардекс, както се подвързва комплектът и както пита всяка
+проверка, — с надпис „показани N от M“ и с търсене по номер и дата в рамките на
+годината. Годишен комплект за година без нито един вписан брой и без въведена
+цена вече не влиза във фонда като документ за 0,00 €; комплект за 2026 г. не
+може да се впише с дата от 2025 г. (регистър, който вече е приключен и
+подписан); изтрит комплект вече не оставя „призрачна“ неинвентирана година
+завинаги; след отчисляване годината може да бъде инвентирана наново със
+заместващ том; цената на комплекта се закръгля до цент, вместо да влиза в
+инвентарната книга като 255.85000000000005; а ръчно въведеният инвентарен номер
+оставя същата следа за прескочените номера, каквато оставя и вписването на
+книга. Преименуването на вида „продължаващо издание“ разпадаше Дневника (заетият
+вестник се броеше в „Книги“) и раждаше ВТОРА категория със старото име при
+следващото инвентиране — фондът излизаше с два вида за една и съща периодика в
+КДБФ Приложение № 2 и в годишния отчет. Поправено е в корена: началните видове
+носят непроменлив вътрешен код и програмата ги намира по него, а не по името —
+тоест преименуването вече е безопасно и остава право на библиотекаря. Накрая:
+екранът „Периодика“ беше ЕДИНСТВЕНИЯТ регистър в програмата без нито един печатен
+документ. Сега има два, защото това са два различни документа — **абонаментен
+списък за годината** (всички заглавия, получени броеве, платена стойност,
+състояние на годишните комплекти, сборове; той се подава на счетоводството при
+подновяване на абонамента) и **картон на изданието (кардекс)** за избраната
+година заедно с годишните комплекти във фонда. И двата носят главата на
+читалището, цитата на чл. 13, ал. 3, т. 1, чл. 14 и чл. 16 и редовете за подпис.
+
+**АКТЪТ ЗАКРИВА НЕВЪРНАТИЯ ДОКУМЕНТ КАТО НЕВЪРНАТ.** Дотук единственото, което
+актът правеше със заемането, беше да сложи дата на връщане. Тоест чл. 30, т. 5
+казва „повредени или НЕВЪРНАТИ от ползватели“, а в програмата заемането оставаше
+неразличимо от нормално връщане в деня на акта: натрупаната забава изчезваше
+(читател с два месеца просрочие излизаше чист), в читателската сметка не влизаше
+нищо — библиотеката отписваше документ, без никъде да остане, че някой ѝ дължи
+стойността му, — годишният отчет броеше книгата като ВЪРНАТА, а читателският
+картон печаташе „Върнат на <датата на акта>“ за книга, която е в дома на
+читателя. Оттук нататък актът затваря заемането така, както го затваря и
+„Документът е изгубен“: документът се бележи като невърнат, забавата до деня на
+акта се начислява, обезщетението по чл. 43, ал. 2 влиза в читателската сметка
+през същата функция, която ползва и гишето, а събитието е от вид „изгубен“, не
+„връщане“. Наказанието в дни нарочно НЕ се налага — актът е комисийно действие и
+може да се състави месеци по-късно, а наказание „от днес“ би наказало читателя
+за датата на заседанието на комисията. Анулирането връща всичко това: заемането
+се отваря, начислената от акта забава се маха от сметката, а начислението, по
+което ВЕЧЕ е плащано, остава и се назовава поименно — платеното не се пипа,
+парите са в касата. Колоната „Върнат на“ в читателския картон вече пише
+„изгубен“ или „невърнат (акт за отчисляване)“, а дата остава само там, където
+документът наистина се е върнал; картонът е хартиеният документ, с който
+библиотеката доказва какво е дала и какво ѝ е върнато, и това беше най-лошото
+място, на което програмата можеше да сгреши.
+
+**АКТЪТ ОПИСВА ВЪЗМОЖНО СЪБИТИЕ.** Акт с дата в бъдещето се приемаше — и веднага
+скарваше двата начина, по които се брои фондът: по състояние документът излизаше
+от фонда ДНЕС, а по дати КДБФ го броеше наличен до 31.12; комисия не може да
+отчисли документ на дата, на която още не е заседавала (чл. 35). Акт с дата
+ПРЕДИ вписването на документа също минаваше — Приложение № 2 показваше
+„отчислени 1“ срещу наличност 0, веригата между годините се късаше, а актът
+заемаше номер в приключена година. Акт за минала година получаваше номер от
+ТЕКУЩАТА и оставяше необяснима дупка в поредицата, макар чл. 35 да изисква
+номерата да текат последователно от едно всяка календарна година; сега екранът
+преизчислява номера при смяна на датата, а дупката, дошла по друг път, се
+записва в дневника с числа (отказ няма — библиотека, започнала номерацията си на
+хартия от друг номер, има право да продължи от него). Актът вече отказва
+документ, който в момента е ЗАЕТ, по всяко основание освен чл. 30, т. 5:
+комисията описваше като „физически изхабена“ книга, която никой от нея не е
+виждал, защото е в дома на читателя. Сканирането на вече отчислен документ казва
+кой акт го е отчислил, вместо „Няма документ с този номер“ — две напълно различни
+неща за библиотекаря. Актът вече носи и „Съставил“ с дата на съставяне (дотук за
+отпадналия акт се знаеше повече, отколкото за действащия) и препратката към
+протокола от инвентаризация по чл. 40, която дотук умираше заедно с проекта —
+формата дори не я показваше и първият ѝ запис я изтриваше завинаги; сега тя се
+пренася в акта и се ПЕЧАТА в него, тоест двата документа за едно и също събитие
+вече са свързани в двете посоки. Анулирането на акт от ПРИКЛЮЧЕНА година иска
+изрично второ потвърждение и се вписва с числа: подписаното Приложение № 2 и № 3
+за онази година се преизчисляват и отпечатаният екземпляр (чл. 39) вече няма да
+отговаря на програмата.
+
+**ГИШЕТО.** Преди заемането се питаше единствено дали читателят не е наказан.
+Читател със състояние „прекратен“ — точно състоянието, което библиотекарката
+задава при изнасяне от селото, смърт или отписване, и което програмата съветва
+вместо изтриване — заемаше като активен, тоест полето беше украса. Читател без
+отбелязано съгласие по чл. 47, ал. 2 и ОРЗД също заемаше: формата отказваше
+такъв запис още от v2.2.0, но обработчикът не, а формата е един от четирите
+пътя към таблицата (внос, мобилен път, второ работно място, API). Сега и двете
+се проверяват в обработчика, преди документа и преди лимитите, а оттеглянето на
+съгласието остава възможно — то е право на гражданина — и спира само по-нататъшното
+заемане. Заемане с дата в бъдещето и падеж ПРЕДИ датата на заемане (заемане,
+което се ражда просрочено и още същия ден трупа обезщетение за период, който
+никога не е текъл), както и връщане в бъдещето или преди заемането, вече се
+отказват с обяснение и с двете дати, защото разликата почти винаги е една цифра.
+Обезщетението за забава по чл. 43 се записваше единствено в реда на заемането —
+колона, която никоя сметка не чете, — тоест „Дължи по сметка“ на гишето не го
+включваше (библиотекарката приемаше книга с 2,40 € забава и екранът веднага
+твърдеше, че читателят не дължи нищо), „Събрани обезщетения“ в годишния отчет не
+можеше да го отчете никога, а читател с дължима глоба се триеше без дума. Сега
+забавата влиза в читателската сметка при връщането, при продължението и при
+приключването като изгубен, през едно и също място, което пише в нея; всички
+суми се закръглят до стотинка, вместо да лягат в базата като 0.7000000000000001.
+Одитната следа на заемането и на продължението вече назовава читателя и
+документа, а не само номера на реда. Снемането на наказание на несъществуващ
+читател връщаше успех и вписваше в следата действие, което не се е случило.
+Напомнителното писмо получи дата на съставяне (дотук искаше обезщетение „към
+днешна дата“ и предупреждаваше за преустановяване на достъпа, без никъде по листа
+да пише кой е този ден) и — най-важното — за читател под 14 години се адресира до
+РОДИТЕЛЯ/НАСТОЙНИКА, чрез когото се води детето, на неговия телефон. Самата форма
+за читател казва това с думи и точно затова има полета за гарант; те просто не
+участваха никъде, а библиотеката пращаше искане за обезщетение и предупреждение
+за санкция на седемгодишно дете.
+
+**КРАЕЗНАНИЕТО.** Търсенето минаваше през обикновено `LIKE`, а SQLite сравнява
+LIKE без оглед на регистъра САМО за латиницата: „яворец“ не намираше „Яворец през
+вековете“, „основаване“ не намираше „Основаване на читалището“. Библиотекарката,
+която пише с малки букви, получаваше „няма намерени“ за запис, който стои два реда
+под нея, и заключаваше, че краеведският ѝ масив не е вписан. Освен това „%“ и „_“
+в текста на търсенето са ЗАМЕСТИТЕЛИ за LIKE, а не знаци — търсене на „100%“
+връщаше целия летопис, а „Н_ва“ намираше „Нова читалня“, тоест тихо грешен
+резултат, който не изглежда като грешка. И двете са поправени в четирите
+краеведски раздела, а обхватът на търсенето е разширен натам, накъдето краеведът
+всъщност пита: източниците и забележката в летописа, подзаглавието, УДК и броя в
+аналитичното описание, инвентарният номер при търсене на документ. Летописен
+запис с точна дата 24.05.1922 попадаше в 2026 г., защото формата предлага текущата
+година и предложението оставаше — запис в грешната година е загубен запис, а
+грешката личи чак когато някой чете разпечатката; сега точната дата води годината
+и в самата форма, и в канала, а разминаването се отказва, вместо да се поправя
+мълчаливо. Никъде в краеведския дял не се проверяваше нито една дата, докато
+фондът, заемането и актовете всички го правят: „24.05.1926“ в ISO поле даваше
+година „24.0“, смърт преди раждане се приемаше без дума, а персоналията е справка,
+която се преписва в юбилейни издания и оттам живее собствен живот. Отложеното
+търсене (300 ms) изчертаваше летописа върху вече отворен ДРУГ раздел, ако
+библиотекарката смени екрана веднага след писане. Аналитично описание с вид
+източник „книга“, но без избрана книга и без свободен текст, се записваше и
+излизаше на хартия с източник „—“ — а описание без източник не е библиографски
+запис, а бележка. И най-важното за краезнанието на хартия: летописът се печаташе в
+ОБРАТЕН ред вътре в годината (вярно за екрана, точно обратно на вярното за
+хартията), без пореден номер, по който записът да се цитира, без „Източници“
+(протокол, вестник, спомен — те са на екрана, но не и на листа) и без сбор за
+годината, тоест не личеше дали листът е пълен. Сега е хронологичен, номериран, с
+източниците и с итог за всяка година.
+
+**ИНВЕНТАРИЗАЦИЯТА И ИЗДАВАНИТЕ ДОКУМЕНТИ.** Протоколът по чл. 40 броеше РЕДОВЕ, а
+актът по същата проверка — ДОКУМЕНТИ. Върху стар неразделен запис с три екземпляра
+двата листа излизаха от принтера с различни числа за едно и също събитие, при това
+актът се ражда ОТ протокола с един бутон, тоест проверяващият ги слага един до
+друг. Чл. 40 – 41 (както чл. 13 и чл. 16) говорят за библиотечни документи, затова
+сега целият екран, следата и протоколът броят в документи — обхватът, проверените,
+заетите, тези за реставрация и липсващите, — и четирите числа продължават да се
+събират точно до обхвата; нормативът за допустимия отпад по чл. 41 се смята от
+същата мярка. Бройката на всеки липсващ документ вече се СНИМА при приключването,
+както снимката по чл. 35, ал. 2 в акта: иначе по-късна поправка на „Налични
+бройки“ променяше вече отпечатания и подписан протокол със задна дата. Имената на
+записваните PDF файлове вече не завършват с втора точка („КДБФ 2026 г..pdf“) и
+поправката е на двете места, през които минава всичко — Windows мълчаливо маха
+крайните точки, тоест предложеното и записаното име се разминаваха. Трите части на
+КДБФ получиха един и същ подписен блок, а редът „Вид, № и дата на документа“ вече
+не носи висящо „№“ за партида без първичен документ. Регистърът на всички издавани
+документи от v2.4.59 беше разширен: седемте изнасяния на данни (CSV с цените на
+фонда и с имената на служителите) не бяха покрити, а пазачът за пълнота хващаше
+само една от шестте форми, по които се пише нова печатна функция — тоест нов
+документ можеше да влезе непроверен. Редът „Полезни връзки“ в пълния износ беше
+преименуван: в тази таблица няма нито един интернет адрес, тя е краеведският
+указател, а единственият ѝ читател е човекът, който отваря архива, без да е виждал
+програмата.
+
+**ПЕТ ПОПРАВКИ СЛЕД ПРЕГЛЕДА НА САМИЯ КРЪГ.** Одитът беше прегледан втори път и
+намери пет неща в новото. Разпознаването на преименувания вид „продължаващо
+издание“ (по вече инвентираните годишни комплекти) можеше да ОТНЕМЕ кода на вече
+разпознат вид: в база, където част от комплектите са вписани по погрешка под
+„книга“, точно „книга“ печелеше познаването и оставаше без своя код — от този миг
+Дневникът брои ВСЯКО заемане на книга в реда „Периодични издания“ на Раздел Б.
+Сега се гледа само сред видовете без код. Списъкът с проверки сумираше живата
+наличност вместо снимката, която печата протоколът по чл. 40 — поправка на
+„Налични бройки“ на вече липсващ документ разминаваше екрана („липсващи 1“) с
+подписаната хартия („липсващи 3“) за една и съща проверка. В акта по чл. 30, т. 5
+забавата се начисляваше ПРЕДИ обезщетението за самия документ, обратно на реда на
+гишето: плащанията се разнасят по реда на възникване, тоест първите платени пари
+отиваха по забавата, а актът продължаваше да се чете като необезщетен. Уникалният
+индекс на кардекса („един брой — един ред“) беше сложен в schema.sql, който минава
+при ВСЯКО стартиране и преди миграциите — върху заварена база с повтарящи се
+броеве (единствената, заради която проверката съществува) целият файл падаше;
+мястото му е в миграция 16, където провалът се хваща и се обяснява. И колоната
+„Инвентирани комплекти“ питаше състоянието с `status <> 'отчислен'` — за ред с
+непопълнено състояние това дава NULL и комплектът изпадаше, тоест изданието
+получаваше предупредителната нула „не влиза в КДБФ“, макар да влиза; сега се ползва
+общият NULL-безопасен ключ на фонда от `db/fund-sql.js`.
+
+**Съзнателно не е правено в този кръг.** Частичното отчисляване на отделни
+екземпляри от многоекземплярен запис (чл. 30, т. 2) иска бройка на реда в акта и
+намаляване на наличността и е предложено за отделен кръг; автоматичното попълване
+на Дневника от посещенията и заеманията е анализирано, но решението е на
+библиотекаря; настройката „не заемай при просрочени документи“ остава отворена.
+
+Проверки: пълна поредица 1886 успешни, 0 неуспешни, в UTC и Europe/Sofia. Всяка
+от петте поправки след прегледа е възпроизведена преди поправянето и е закована с
+именуван тест в `test/pregled-v2461.test.js`, проверен с връщане на стария ред. 124
+мутации на реалния код, всяка приложена в копие, пусната и веднага върната —
+всичките уловени от именуван тест, плюс контролна мутация, която трябва да мине,
+и минава. Шест сценарийни файла минават през истинския екран върху празна база
+(`test/scenario-knigi.test.js`, `test/scenario-periodika.test.js`,
+`test/scenario-otchislyavane.test.js`, `test/scenario-zaemane.test.js`,
+`test/scenario-kraeznanie.test.js`, `test/scenario-dokumenti.test.js`), а към всеки
+от тях стои по един файл, който заковава поправките му поотделно. Сайтът: всички
+проверки минават.
+
+**EN:** The largest audit since v2.4.57. Six scenarios ran through the REAL screen
+against the REAL handlers on an empty database — entering books, running a
+newspaper, acquisition without a primary document, deaccession, lending and
+returns, local-studies records and every document the program issues. Eighty-four
+findings; all fixed except three deliberately deferred.
+
+**Price, inventory number and registration date.** Price handling was a single
+`parseFloat`: a negative price entered the fund and REDUCED its value in every
+total (КДБФ Part 2, the annual report, the inventory book, the deaccession act),
+although a negative valuation does not exist under the regulation — a free
+document is valued at 0 or by a commission under art. 3(2); "abc" became NaN,
+which SQLite stores as NULL, so the document silently DROPPED OUT of every sum;
+and "12,50" became 12, because a Bulgarian keyboard and every older invoice write
+the decimal with a comma. All three are now read by one rule, rounded to the
+cent. The inventory number goes through the same gate as every other register
+number — 0, −4 and "12.7" (which `parseInt` quietly truncated to 12, filing the
+document under someone else's number) are refused, since the number is a
+requisite under art. 16(2). Changing the number on EDIT now does what creation
+does: it names the holder of a taken number, moves the counter and records
+skipped numbers — without which an edit onto the counter's own number left the
+program in a dead end where every new book was offered a number already taken. A
+registration date in the FUTURE is no longer silent: it is not refused, but the
+window says that until it arrives the document counts on the dashboard and in the
+inventory book while being absent from КДБФ and the annual report.
+
+**Batches, donations and acquisition without a document.** The stricter checks sat
+on the rarer path: `acquisitions:update` validated the date and the donor's
+address, creation validated neither. A batch dated "abc" got year "abc" and
+appeared in NO year of КДБФ Part 1; an empty date left it without the first
+requisite of art. 14(2); a donation without the donor's address was recorded
+although the address is a requisite of the act under art. 6(5), one copy of which
+goes to the donor; negative counts and declared values were subtracted from the
+Part 1 total. The checks now live in one place and run from both paths, with an
+explicit exception for the batch without a primary document (art. 3(2)), where
+there is no donor in the legal sense. Correcting the date can no longer move a
+batch into ANOTHER year, and a batch without a primary document no longer prints
+"protocol No. <blank> 17.09.2026" — a date for a document that by definition does
+not exist. The donation act gained the approver's role next to "УТВЪРДИЛ" and a
+truthful heading for the two-currency value column.
+
+**One document, one number.** `books:update` accepted a document deaccessioned by
+an act back as "available" while its deaccession date and act link stayed in
+place — a document simultaneously in the fund and out of it, counted by the
+dashboard and the inventory book and not counted by КДБФ. It now returns to the
+fund only by revoking the act (art. 39). The fund reconciliation names this cause
+explicitly instead of explaining it with a sentence that is simply untrue for such
+a row. `books:create` no longer accepts status "deaccessioned" without an act, and
+bulk edit no longer refuses "lost" — a value it offers itself — with the message
+about deaccession.
+
+**Periodicals.** The commonest periodical in a community library, the daily
+newspaper, had no frequency of its own: "irregular" turns prediction off entirely,
+so the dashboard NEVER reports a missing issue, and "weekly" makes every normally
+delivered paper glow six days late until the warning stops being read. "Daily" now
+exists in all three places that must agree. A second title with the same name or
+ISSN is refused, and the ISSN is validated against ISO 3297, check digit included.
+The same issue could be entered twice — and the year's total is offered, and almost
+always accepted, as the PRICE OF THE ANNUAL VOLUME, so a duplicate entered the
+inventory book at more than the invoice. An issue dated in the future pushed the
+prediction forward and the title vanished from the missing-issue warning. The
+kardex now opens BY YEAR — as the paper kardex does, as the volume is bound and as
+every check asks — with "showing N of M" and a search within the year, instead of
+drawing all 3 000 issues on every entry. A volume for a year with no issues and no
+price no longer enters the fund at 0.00 €; a 2026 volume cannot be dated 2025;
+a deleted volume no longer leaves a ghost year forever; a year can be re-inventoried
+with a replacement volume after deaccession; the price is rounded to the cent; and a
+manually typed number leaves the same skipped-numbers trace as a book does.
+Renaming the document type "продължаващо издание" broke the daily register (a lent
+newspaper counted as a book) and spawned a SECOND category at the next
+inventorying; the initial types now carry an immutable internal code, so renaming
+is safe and stays the librarian's right. Finally, "Periodicals" was the ONLY
+register in the program with no printed document at all. It now has two: the
+**annual subscription list** (titles, issues received, amount paid, state of the
+annual volumes, totals — the sheet accounting asks for at renewal) and the
+**title's card (kardex)** for the chosen year together with its annual volumes in
+the fund. Both carry the library's letterhead, the citation of art. 13(3)(1),
+art. 14 and art. 16, and the signature lines.
+
+**The act closes an unreturned document as UNRETURNED.** Until now the act merely
+set a return date, so art. 30(5) — "damaged or NOT RETURNED by users" — produced a
+loan indistinguishable from an ordinary return: the accrued overdue compensation
+vanished, nothing entered the reader's account, the annual report counted the book
+as RETURNED, and the reader's card printed "Returned on <date of the act>" for a
+book in his home. The act now closes the loan the way "the document is lost" does:
+it is marked unreturned, the delay up to the day of the act is charged, the
+compensation under art. 43(2) enters the reader's account through the same function
+the desk uses, and the event is of kind "lost". A suspension in days is
+deliberately NOT applied — the act is a commission action and may be drawn up
+months later. Revoking reverses all of it, except a charge already paid against,
+which stays and is named. The card's "Returned on" column now reads "lost" or
+"unreturned (deaccession act)".
+
+**The act describes a possible event.** An act dated in the future was accepted,
+setting the two ways of counting the fund against each other; an act dated before
+the document's own registration was accepted too, showing "deaccessioned 1"
+against a holding of 0 and breaking the year-to-year chain. An act for a past year
+took a number from the CURRENT one and left an unexplainable gap, although art. 35
+requires numbers to run consecutively from one each calendar year. The act now
+refuses a document currently ON LOAN on any ground other than art. 30(5). Scanning
+an already deaccessioned document says which act deaccessioned it instead of "no
+such number". The act now records who drew it up and when, and carries the
+reference to the inventory protocol under art. 40, which until now died with the
+draft — the form did not even show it and the first save erased it forever.
+Revoking an act from a CLOSED year requires an explicit second confirmation and is
+recorded with figures: the signed appendices for that year no longer match.
+
+**The desk.** Only suspension was checked before lending. A reader whose
+registration is "terminated" borrowed as if active, and a reader with no recorded
+consent under art. 47(2) and GDPR borrowed too — the form has refused such a record
+since v2.2.0, but the handler did not, and the form is one of four paths. Both are
+now checked in the handler; withdrawing consent stays possible and stops further
+lending only. Lending dated in the future, a due date before the loan date,
+returns in the future or before the loan are all refused with both dates named.
+Overdue compensation under art. 43 was written only to the loan row, which no
+account reads: the desk's "owes on account" excluded it, "compensation collected"
+in the annual report could never account for it, and a reader with an unpaid fine
+was deleted without a word. It now enters the reader's account on return, on
+renewal and on closing as lost, through the one place that writes there, and every
+sum is rounded to the cent. The audit trail of a loan and of a renewal now names
+the reader and the document. Lifting a suspension for a non-existent reader
+returned success. The reminder letter gained a date, and for a reader under 14 it
+is addressed to the PARENT OR GUARDIAN, on their telephone — the reader form says
+exactly this in words, which is why the guarantor fields exist; they simply took
+part nowhere, and the library was sending a demand for compensation and a warning
+of suspension to a seven-year-old.
+
+**Local studies.** Search went through plain `LIKE`, and SQLite folds case for
+ASCII ONLY: "яворец" did not find "Яворец през вековете". "%" and "_" are LIKE
+wildcards, not characters, so searching "100%" returned the whole chronicle —
+quietly wrong results that do not look wrong. Both are fixed across the four
+local-studies sections, and search now covers where the researcher actually asks:
+sources and notes in the chronicle, subtitle, UDC and issue in analytic
+descriptions, inventory number when picking a document. A chronicle entry dated
+24.05.1922 landed in 2026 because the form's suggested year stayed; the exact date
+now leads the year and a mismatch is refused. No date anywhere in local studies was
+validated, so "24.05.1926" in an ISO field produced year "24.0" and a death before
+a birth passed without a word. The debounced search no longer draws the chronicle
+over an already-opened different section. An analytic description of kind "book"
+with no book and no free text is refused — a description without a source is a note,
+not a bibliographic record. And the printed chronicle, which came out in REVERSE
+order within the year, without entry numbers, without "Sources" and without a
+yearly total, is now chronological, numbered, sourced and totalled.
+
+**Inventory and the documents the program issues.** The protocol under art. 40
+counted ROWS while the act from the same check counted DOCUMENTS — and the act is
+created FROM the protocol with one button, so the inspector lays the two sheets side
+by side. Art. 40 – 41 (like art. 13 and art. 16) speak of library documents, so the
+screen, the trail and the protocol now all count documents, and the four figures
+still add up exactly to the scope; the permissible loss under art. 41 is computed
+from the same measure. Each missing document's count is now SNAPSHOTTED at closing,
+as art. 35(2) does in the act. Saved PDF names no longer end in a second dot, fixed
+at both places everything passes through. The three parts of КДБФ share one
+signature block, and "type, No. and date of document" no longer carries a dangling
+"№". The register of issued documents from v2.4.59 was extended to the seven data
+exports and its completeness guard now catches all six ways a new print function is
+written.
+
+**Five fixes after reviewing the round itself.** A second pass over the audit found
+five problems in the new code. The fallback that recognises a renamed "continuing
+resource" category (by the annual sets already inventoried) could STEAL the code of
+an already-recognised category: in a database where some sets were filed under
+"book" by mistake, "book" won the guess and lost its own code — from that moment the
+daily register counted every book loan in the "periodicals" row of section B. The
+guess is now restricted to categories without a code. The inventory-check list summed
+live quantities instead of the snapshot the art. 40 protocol prints, so editing a
+missing document's quantity made the screen ("1 missing") disagree with the signed
+paper ("3 missing") for the same check. In an act under art. 30(5) the overdue fine
+was charged BEFORE the compensation for the document itself, the reverse of the
+counter's order: payments are applied oldest first, so the first money paid went to
+the fine while the act still read as uncompensated. The kardex unique index ("one
+issue, one row") was placed in schema.sql, which runs on every start and before the
+migrations — on an existing database with duplicate issues (the only reason the check
+exists) the whole file failed; it belongs in migration 16, where the failure is caught
+and explained. And the "inventoried sets" column asked the status with
+`status <> 'отчислен'`, which is NULL for a row with no status, so such a set dropped
+out and the title got the warning zero "not included in КДБФ" although it is; it now
+uses the shared NULL-safe fund key from `db/fund-sql.js`.
+
+**Deliberately not done this round:** partial deaccession of individual copies of a
+multi-copy record (art. 30(2)), automatic filling of the daily register from visits
+and loans, and a "do not lend while overdue" setting.
+
+Checks: full suite 1886 passing, 0 failing, in UTC and Europe/Sofia. Each of the five
+post-review fixes was reproduced before being fixed and is pinned by a named test in
+`test/pregled-v2461.test.js`, verified by reverting the fix. 124 mutations
+of the real code, each applied to a copy, run and immediately reverted — all caught
+by a named test, plus a control mutation that must pass, and does. Six scenario
+files run through the real screen on an empty database
+(`test/scenario-knigi.test.js`, `test/scenario-periodika.test.js`,
+`test/scenario-otchislyavane.test.js`, `test/scenario-zaemane.test.js`,
+`test/scenario-kraeznanie.test.js`, `test/scenario-dokumenti.test.js`), each with a
+companion file pinning the fixes. The site: all checks pass.
+
 ## v2.4.60
 
 **BG:** Адресът за връзка в „Настройки“ → „Помощ и обратна връзка“ вече е

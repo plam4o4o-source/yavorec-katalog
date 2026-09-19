@@ -88,8 +88,12 @@ function addBook(db, { inv_number = 1, barcode = 'BC1', quantity = 1 } = {}) {
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)').run(id, quantity);
   return id;
 }
+/* gdpr_consent = 1 (v2.4.61): заемането вече отказва читател без отбелязано
+   съгласие по чл. 47, ал. 2 и ОРЗД (checkReaderMayBorrow в handlers/loans.js), а
+   колоната е с DEFAULT 0. Тук се проверява календарът, не съгласието — затова
+   фикстурата вписва редовен читател. */
 function addReader(db, name = 'Иван Петров') {
-  return db.prepare("INSERT INTO readers (name, card_no, category, status) VALUES (?, ?, 'възрастен', 'активен')")
+  return db.prepare("INSERT INTO readers (name, card_no, category, status, gdpr_consent) VALUES (?, ?, 'възрастен', 'активен', 1)")
     .run(name, 'K-' + name.length + Math.random().toString(36).slice(2, 6)).lastInsertRowid;
 }
 

@@ -86,9 +86,16 @@ test('registerReadersHandlers registers all seven readers: IPC channels (v1.70.0
   }
 });
 
+/* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.61): readers:create вече отказва читател без
+   отбелязано съгласие по чл. 47, ал. 2 и ОРЗД — дотук това правило важеше само за
+   екранната форма, тоест вносът, мобилният път и API-то вкарваха читатели без
+   съгласие (виж assertConsent в handlers/readers.js). Затова повикванията тук
+   носят gdpr_consent: 1; самият отказ се проверява в test/zaemane-v2461.test.js.
+   readers:update нарочно НЕ е засегнат: оттеглянето на съгласието е право на
+   гражданина и трябва да остане възможно. */
 test('readers:create inserts a row with sensible defaults and logs an audit entry', async () => {
   const { ipcMain, auditLog } = setup();
-  const result = await ipcMain.invoke('readers:create', { name: 'Иван Иванов', card_no: 'C1' });
+  const result = await ipcMain.invoke('readers:create', { name: 'Иван Иванов', card_no: 'C1', gdpr_consent: 1 });
   assert.equal(result.ok, true);
   assert.ok(result.data > 0);
   assert.equal(auditLog.length, 1);
@@ -102,7 +109,7 @@ test('readers:create inserts a row with sensible defaults and logs an audit entr
 
 test('readers:create calls checkRecordLimit before inserting (throws stop the insert)', async () => {
   const { ipcMain } = setup({ checkRecordLimit: () => { throw new Error('Достигнат е лимитът.'); } });
-  const result = await ipcMain.invoke('readers:create', { name: 'Спрян' });
+  const result = await ipcMain.invoke('readers:create', { name: 'Спрян', gdpr_consent: 1 });
   assert.equal(result.ok, false);
   assert.match(result.error, /лимит/);
   const list = await ipcMain.invoke('readers:list');
@@ -119,7 +126,7 @@ test('readers:create calls checkRecordLimit before inserting (throws stop the in
    истинският diffFields, а твърдението гледа полето field. */
 test('readers:update изчислява diff през истинския diffFields и НИКОГА не вкарва ЕГН в одитната следа', async () => {
   const { ipcMain, auditLog } = setup();
-  const id = (await ipcMain.invoke('readers:create', { name: 'Мария', phone: '111', egn: '1234567890' })).data;
+  const id = (await ipcMain.invoke('readers:create', { name: 'Мария', phone: '111', egn: '1234567890', gdpr_consent: 1 })).data;
   auditLog.length = 0;
   await ipcMain.invoke('readers:update', { id, name: 'Мария', phone: '222', egn: '0000000000' });
   assert.equal(auditLog.length, 1);
@@ -137,7 +144,7 @@ test('readers:update изчислява diff през истинския diffFie
 
 test('readers:update calls preparePiiForWrite with the previous row for PII handling', async () => {
   const { ipcMain, piiCalls } = setup();
-  const id = (await ipcMain.invoke('readers:create', { name: 'Петър' })).data;
+  const id = (await ipcMain.invoke('readers:create', { name: 'Петър', gdpr_consent: 1 })).data;
   piiCalls.prepareWrite.length = 0;
   await ipcMain.invoke('readers:update', { id, name: 'Петър Петров' });
   assert.equal(piiCalls.prepareWrite.length, 1);
@@ -146,7 +153,7 @@ test('readers:update calls preparePiiForWrite with the previous row for PII hand
 
 test('readers:clearSuspension nulls suspended_until and logs the reader name', async () => {
   const { db, ipcMain, auditLog } = setup();
-  const id = (await ipcMain.invoke('readers:create', { name: 'Георги' })).data;
+  const id = (await ipcMain.invoke('readers:create', { name: 'Георги', gdpr_consent: 1 })).data;
   db.prepare('UPDATE readers SET suspended_until = ? WHERE id = ?').run('2030-01-01', id);
   await ipcMain.invoke('readers:clearSuspension', id);
   const row = db.prepare('SELECT suspended_until FROM readers WHERE id = ?').get(id);
@@ -156,7 +163,7 @@ test('readers:clearSuspension nulls suspended_until and logs the reader name', a
 
 test('readers:byCard finds a reader by card_no', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('readers:create', { name: 'Търсен', card_no: 'ABC123' });
+  await ipcMain.invoke('readers:create', { name: 'Търсен', card_no: 'ABC123', gdpr_consent: 1 });
   const result = await ipcMain.invoke('readers:byCard', 'ABC123');
   assert.equal(result.data.name, 'Търсен');
 });
@@ -168,7 +175,7 @@ test('readers:byCard finds a reader by card_no', async () => {
 // живо). normalizeScanCode() връща буквите обратно към латиница.
 test('readers:byCard намира читателя дори кодът да пристигне с кирилски букви от четеца (v1.70.1)', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('readers:create', { name: 'Мария', card_no: 'B00108' });
+  await ipcMain.invoke('readers:create', { name: 'Мария', card_no: 'B00108', gdpr_consent: 1 });
   const result = await ipcMain.invoke('readers:byCard', 'Б00108');
   assert.ok(result.data, 'читателят трябва да се намери въпреки кирилския вход');
   assert.equal(result.data.name, 'Мария');
@@ -176,7 +183,7 @@ test('readers:byCard намира читателя дори кодът да пр
 
 test('readers:delete removes the row', async () => {
   const { db, ipcMain } = setup();
-  const id = (await ipcMain.invoke('readers:create', { name: 'За изтриване' })).data;
+  const id = (await ipcMain.invoke('readers:create', { name: 'За изтриване', gdpr_consent: 1 })).data;
   await ipcMain.invoke('readers:delete', id);
   const row = db.prepare('SELECT * FROM readers WHERE id = ?').get(id);
   assert.equal(row, undefined);
@@ -185,8 +192,8 @@ test('readers:delete removes the row', async () => {
 test('readers:list without a query returns all readers ordered by name, masked via maskReaderRows', async () => {
   let maskedCount = 0;
   const { ipcMain } = setup({ maskReaderRows: (rows) => { maskedCount = rows.length; return rows; } });
-  await ipcMain.invoke('readers:create', { name: 'Борис' });
-  await ipcMain.invoke('readers:create', { name: 'Ана' });
+  await ipcMain.invoke('readers:create', { name: 'Борис', gdpr_consent: 1 });
+  await ipcMain.invoke('readers:create', { name: 'Ана', gdpr_consent: 1 });
   const list = await ipcMain.invoke('readers:list');
   assert.equal(list.data.length, 2);
   assert.equal(list.data[0].name, 'Ана', 'should be ordered by name');
@@ -195,8 +202,8 @@ test('readers:list without a query returns all readers ordered by name, masked v
 
 test('readers:list with a query uses ftsQuery for the FTS5 match and LIKE for phone/card_no', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('readers:create', { name: 'Специално Име', phone: '0888123456' });
-  await ipcMain.invoke('readers:create', { name: 'Друг', phone: '111' });
+  await ipcMain.invoke('readers:create', { name: 'Специално Име', phone: '0888123456', gdpr_consent: 1 });
+  await ipcMain.invoke('readers:create', { name: 'Друг', phone: '111', gdpr_consent: 1 });
   const byPhone = await ipcMain.invoke('readers:list', '0888123456');
   assert.equal(byPhone.data.length, 1);
   assert.equal(byPhone.data[0].name, 'Специално Име');
@@ -206,8 +213,8 @@ test('readers:list with a query uses ftsQuery for the FTS5 match and LIKE for ph
 
 test('readers:exportCsv writes a semicolon-separated CSV with a BOM, one row per reader, ordered by name', async () => {
   const { ipcMain, auditLog } = setup();
-  await ipcMain.invoke('readers:create', { name: 'Борислав Петров', card_no: 'C2', phone: '0888', category: 'възрастен' });
-  await ipcMain.invoke('readers:create', { name: 'Ана Иванова', card_no: 'C1', phone: '0899', category: 'дете до 14 г.' });
+  await ipcMain.invoke('readers:create', { name: 'Борислав Петров', card_no: 'C2', phone: '0888', category: 'възрастен', gdpr_consent: 1 });
+  await ipcMain.invoke('readers:create', { name: 'Ана Иванова', card_no: 'C1', phone: '0899', category: 'дете до 14 г.', gdpr_consent: 1 });
 
   const result = await ipcMain.invoke('readers:exportCsv');
   assert.equal(result.ok, true);
@@ -227,7 +234,7 @@ test('readers:exportCsv writes a semicolon-separated CSV with a BOM, one row per
 
 test('readers:exportCsv omits egn/id_card_no columns entirely (справочен документ, не заместител на защитата на личните данни)', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('readers:create', { name: 'С лични данни', egn: '1234567890', id_card_no: '999888777' });
+  await ipcMain.invoke('readers:create', { name: 'С лични данни', egn: '1234567890', id_card_no: '999888777', gdpr_consent: 1 });
   const result = await ipcMain.invoke('readers:exportCsv');
   const raw = fs.readFileSync(result.data, 'utf8');
   assert.doesNotMatch(raw, /1234567890/);
@@ -243,8 +250,8 @@ test('readers:exportCsv omits egn/id_card_no columns entirely (справоче�
    „readers:exportCsv спира да вика csvCell" оцеляваше незабелязано. */
 test('readers:exportCsv неутрализира формули в CSV (водещи =, +, -, @) и правилно вади кавичките', async () => {
   const { ipcMain } = setup();
-  await ipcMain.invoke('readers:create', { name: '=SUM(1+1)', note: '+79', phone: '-1', address: '@cmd' });
-  await ipcMain.invoke('readers:create', { name: 'Кавички "вътре"', note: 'ред;с;точка и запетая' });
+  await ipcMain.invoke('readers:create', { name: '=SUM(1+1)', note: '+79', phone: '-1', address: '@cmd', gdpr_consent: 1 });
+  await ipcMain.invoke('readers:create', { name: 'Кавички "вътре"', note: 'ред;с;точка и запетая', gdpr_consent: 1 });
   const result = await ipcMain.invoke('readers:exportCsv');
   assert.equal(result.ok, true, result.error);
   const raw = fs.readFileSync(result.data, 'utf8');

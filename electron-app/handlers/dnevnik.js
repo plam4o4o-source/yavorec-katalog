@@ -188,6 +188,26 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
     'картографско издание': 'b_type_carto', 'нотно издание': 'b_type_music', 'аудиодокумент': 'b_type_audio',
     'видеодокумент': 'b_type_video', 'електронен документ': 'b_type_electronic'
   };
+  /* ВИДЪТ СЕ ПОЗНАВА ПО КОД, А ИМЕТО Е САМО РЕЗЕРВА (одит v2.4.61, находка 19).
+     =====================================================================
+     ДОТУК редът на Раздел Б се избираше от картата по-горе, тоест по БУКВАЛНОТО
+     име на вида документ, каквото е било записано в събитието. Името обаче е на
+     библиотекаря: екранът „Категории“ позволява преименуване и Наредба № 3 не
+     предписва етикетите. Достатъчно е някой да напише „периодично издание“
+     вместо „продължаващо издание“ — и заетият годишен комплект на вестник почва
+     да се брои в „Книги“ (резервната стойност на add() по-долу). Числото, което
+     влиза в официалния дневник и оттам в годишния отчет, става грешно, а на
+     екрана нищо не се променя.
+     От v2.4.61 началните видове носят непроменлив `code` в `categories` (виж
+     db/schema.sql и миграция 16 в main.js). Тук се чете той — през книгата на
+     заемането, тоест през ЖИВАТА категория на документа, — а името остава само
+     резерва за събития, чиято книга вече е изтрита (тогава помним само снимката
+     `events.book_category`) и за бази отпреди миграцията. */
+  const DNEVNIK_TYPE_BY_CODE = {
+    book: 'b_type_books', periodical: 'b_type_period', graphic: 'b_type_graphic',
+    cartographic: 'b_type_carto', music: 'b_type_music', audio: 'b_type_audio',
+    video: 'b_type_video', electronic: 'b_type_electronic'
+  };
   const DNEVNIK_LANG_MAP = {
     'български': 'b_lang_bg', 'руски': 'b_lang_ru', 'английски': 'b_lang_en',
     'немски': 'b_lang_de', 'френски': 'b_lang_fr'
@@ -243,27 +263,60 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   ipcMain.handle('dnevnik:suggest', (e, { date }) =>
     run(() => {
       const db = getDb();
-      const events = db.prepare('SELECT * FROM events WHERE date = ?').all(date);
+      /* Категорията се чете ЖИВА през книгата (виж DNEVNIK_TYPE_BY_CODE по-горе):
+         `events.book_category` е снимка на името към деня на заемането и не знае
+         нищо за по-късно преименуване. Колоната `code` може да липсва в база
+         отпреди миграция 16 — тогава подзаявката просто не се добавя и всичко
+         работи както преди, по име. */
+      const hasCode = db.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('categories') WHERE name = 'code'").get().n > 0;
+      const events = db.prepare(hasCode
+        ? `SELECT ev.*, (SELECT c.code FROM books b JOIN categories c ON c.id = b.category_id
+             WHERE b.id = ev.book_id) AS book_category_code
+           FROM events ev WHERE ev.date = ?`
+        : 'SELECT * FROM events WHERE date = ?').all(date);
       const out = {};
       const add = (k, n) => { if (k) out[k] = (out[k] || 0) + (n == null ? 1 : n); };
       const seenReaders = new Set();
-      let unclassified = 0; // заемания на книги без разпознат УДК — виж по-долу
+      let unclassified = 0;          // заемания на КНИГИ без разпознат УДК — виж по-долу
+      let periodicalsByType = 0;     // заети периодични издания — броят се по ВИД, не по съдържание
       for (const ev of events) {
         if (ev.kind === 'читалня') { add('a_visit_reading'); continue; }
         if (ev.kind === 'дома') { add('a_visit_home'); continue; }
         if (ev.kind !== 'заемане') continue;
         // Раздел Б — по вид, език и съдържание, само за реално заетите този ден.
-        add(DNEVNIK_TYPE_MAP[ev.book_category] || 'b_type_books');
+        const typeKey = DNEVNIK_TYPE_BY_CODE[ev.book_category_code] || DNEVNIK_TYPE_MAP[ev.book_category] || 'b_type_books';
+        add(typeKey);
         add(DNEVNIK_LANG_MAP[ev.book_language] || 'b_lang_other');
         /* Книга без попълнен УДК не може да бъде подредена по съдържание. Да бъде
            набутана в „Общ отдел“ би било по-лошо от това да не бъде броена — числото
            щеше да изглежда вярно и никой не би проверил. Затова тук се брои отделно
            и се връща на изгледа, за да каже на библиотекаря колко реда трябва да
            допълни ръчно, вместо трите „Всичко“ да се разминават необяснимо. */
+        /* ПЕРИОДИКАТА НЕ Е „КНИГА БЕЗ УДК“ (одит v2.4.61, находка 13).
+           =====================================================================
+           ДОТУК всяко заемане без разпознат УДК влизаше в `unclassified`, а
+           екранът го изписваше дословно: „1 заемане е на книга без УДК … допълнете
+           го ръчно“. От v2.4.56 насам обаче през тази бройка минава и годишният
+           комплект на вестник или списание — а той НЯМА и не бива да има УДК:
+           периодичното издание не се класира по съдържание, защото съдържанието му
+           е различно във всеки брой. Съобщението пращаше библиотекарката да търси
+           УДК за вестник — работа, която не съществува, и която, ако бъде свършена
+           „както трябва“, вкарва вестника в отраслов ред на Раздел Б, където му
+           няма мястото.
+           Затова заетата периодика се брои ОТДЕЛНО: тя си е напълно отчетена в
+           „по вид“ (ред „Периодични издания“) и единственото вярно нещо, което
+           може да се каже за нея, е че по съдържание не се брои. Числото се връща
+           като `periodicalsByType`, за да може изгледът да го изпише със СОБСТВЕН
+           текст (описано е в доклада — src/views/dnevnik.js се пипа от друг).
+           Периодика с попълнен УДК (среща се при годишниците на институти) се
+           класира нормално — тогава указанието на библиотекаря е меродавно. */
         const udk = String(ev.book_udk || '').trim();
         const fiction = udk ? dnevnikFictionColumn(udk) : null;
         const hit = !fiction && udk ? DNEVNIK_UDK_PREFIXES.find(([p]) => udk.startsWith(p)) : null;
-        if (fiction) add(fiction); else if (hit) add(hit[1]); else unclassified++;
+        if (fiction) add(fiction);
+        else if (hit) add(hit[1]);
+        else if (typeKey === 'b_type_period') periodicalsByType++;
+        else unclassified++;
         // Раздел А — всеки читател се брои веднъж на ден, по категорията му към момента.
         const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
         if (!seenReaders.has(rk)) {
@@ -272,7 +325,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
           if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
         }
       }
-      return { date, suggestions: out, eventsCount: events.length, unclassified };
+      return { date, suggestions: out, eventsCount: events.length, unclassified, periodicalsByType };
     })
   );
   ipcMain.handle('dnevnik:exportCsv', async (e, { year, month }) => {

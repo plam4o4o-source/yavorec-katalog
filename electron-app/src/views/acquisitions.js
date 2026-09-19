@@ -13,7 +13,10 @@ let ACQ_PAINTED = 0;
 function acqRowsHtml(rows) {
   return rows.length ? rows.map(a => `<tr><td class="num">${a.no} / ${a.year}</td><td class="num">${bg(a.date)}</td>
       <td>${esc(a.from_source || '')}</td><td>${esc(a.how || '')}</td>
-      <td style="font-size:12px">${esc(a.doc_type || '')} № ${esc(a.doc_no || '')}</td>
+      ${/* Празните части отпадат (v2.4.61): партида по чл. 3, ал. 2 няма номер на
+            документ и клетката излизаше „без документ — протокол на комисия № “ —
+            висящ знак „№“ без нищо след него. Същото е поправено и в КДБФ. */''}
+      <td style="font-size:12px">${[esc(a.doc_type || ''), a.doc_no ? '№ ' + esc(a.doc_no) : ''].filter(Boolean).join(' ')}</td>
       <td class="num">${a.total_count}</td><td class="num${
         /* Същото, което картата вече казва с „+N“ (виж acqLeftCard): инвентирани
            повече от обявеното е разминаване между КДБФ Част № 1 и първичния
@@ -84,10 +87,28 @@ async function acqForm(acq) {
         ${fld('Общ брой документи', 'total_count', { val: v.total_count != null ? v.total_count : '', type: 'number', req: 1 })}
       </div>
       ${fld('Откъде (доставчик / дарител)', 'from_source', { val: v.from_source || '', req: 1 })}
+      ${/* ПАРТИДА БЕЗ ПЪРВИЧЕН ДОКУМЕНТ НЕ НОСИ НОМЕР И ДАТА НА ДОКУМЕНТ (v2.4.61).
+            Дотук полето „Дата на документа“ се предпопълваше с днешната дата
+            БЕЗУСЛОВНО — включително при вид „без документ — протокол на комисия“,
+            тоест при партидата, чийто смисъл е, че такъв документ ЛИПСВА
+            (чл. 3, ал. 2). Резултатът стои после в официалния регистър: в КДБФ
+            Част № 1 колоната „Вид, № и дата на документа“ излиза като
+            „без документ — протокол на комисия № <празно> 17.09.2026“ — дата на
+            документ, който не съществува, и висящ знак „№“. Проверяващият чете
+            това като „има документ, но реквизитите му са непопълнени“ — точно
+            обратното на истината.
+            Затова при този вид документ двете полета се оставят празни и се
+            заключват, а промяната на вида ги чисти веднага (onchange по-долу);
+            saveAcq() ги чисти и при запис, защото стойност може да е останала от
+            предишен избор или от поправка на стара партида. */''}
       <div class="grid g3">
-        ${fld('Вид първичен документ', 'doc_type', { type: 'select', opts: PARV_DOK, val: v.doc_type || '' })}
-        ${fld('Номер на документа', 'doc_no', { val: v.doc_no || '' })}
-        ${fld('Дата на документа', 'doc_date', { val: v.doc_date || today(), type: 'date' })}
+        ${fld('Вид първичен документ', 'doc_type', { type: 'select', opts: PARV_DOK, val: v.doc_type || '',
+          onchange: 'acqDocTypeChanged(this)' })}
+        ${fld('Номер на документа', 'doc_no',
+          { val: acqWithoutDoc(v.doc_type) ? '' : (v.doc_no || ''), ro: acqWithoutDoc(v.doc_type) ? 1 : 0 })}
+        ${fld('Дата на документа', 'doc_date',
+          { val: acqWithoutDoc(v.doc_type) ? '' : (v.doc_date || today()), type: 'date',
+            ro: acqWithoutDoc(v.doc_type) ? 1 : 0 })}
       </div>
       <div class="grid g2">
         ${mnyField('Обща стойност по документа', 'sum', { val: v.sum, min: 0, hint: 'оставете празно, ако документът не обявява стойност' })}
@@ -108,10 +129,32 @@ async function acqForm(acq) {
      <button class="btn pri" onclick="saveAcq(${edit ? acq.id : 'null'})">${edit ? 'Запиши поправката' : 'Заведи партидата'}</button>`);
 }
 window.acqForm = acqForm;
+/* „Без документ — протокол на комисия“ е единственият вид, при който първичен
+   документ НЯМА (чл. 3, ал. 2) — разпознава се по началото на названието, за да
+   продължи да работи и ако списъкът PARV_DOK получи по-подробен текст. */
+function acqWithoutDoc(docType) { return String(docType || '').indexOf('без документ') > -1; }
+window.acqWithoutDoc = acqWithoutDoc;
+function acqDocTypeChanged(sel) {
+  const form = sel && sel.form ? sel.form : $('#acqF');
+  if (!form) return;
+  const no = form.querySelector('[name=doc_no]'), dt = form.querySelector('[name=doc_date]');
+  const without = acqWithoutDoc(sel.value);
+  /* Полетата се чистят и се заключват, вместо просто да се чистят: иначе
+     библиотекарката ги попълва наново, без да ѝ е ясно защо са се изпразнили. */
+  [no, dt].forEach(el => {
+    if (!el) return;
+    if (without) { el.value = ''; el.readOnly = true; el.title = 'Партида без първичен документ — номер и дата няма'; }
+    else { el.readOnly = false; el.title = ''; }
+  });
+}
+window.acqDocTypeChanged = acqDocTypeChanged;
 async function saveAcq(id) {
   const missing = firstMissingRequired('#acqF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#acqF');
+  /* Вж. дългата бележка при полетата по-горе: при вид „без документ“ номерът и
+     датата на документа не съществуват и не бива да влизат в регистъра. */
+  if (acqWithoutDoc(d.doc_type)) { d.doc_no = ''; d.doc_date = ''; }
   if (id) {
     const changed = await call(window.api.acquisitions.update({ id, acq: d }));
     if (changed === null) return;
@@ -271,6 +314,7 @@ window.openAcq = openAcq;
 async function printDonationDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
+  const s = SETTINGS_CACHE || {};
   const declared = acqDeclared(a);
   setPrintPage({ name: `Акт за дарение № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
   doPrint(`<div class="pdoc">${shead()}
@@ -293,13 +337,28 @@ async function printDonationDoc(id) {
     ${acqCountNote(a)}
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th>${
-      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Стойност, €</th></tr></thead><tbody>
+      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}${/* ЗАГЛАВИЕТО НА КОЛОНАТА КАЗВА КАКВО Е В НЕЯ (v2.4.61).
+        Колоната беше озаглавена „Стойност, €“, а всяка клетка под нея се пълни от
+        mny(), която от v2.4.51 печата ДВЕ валути: „4.00 € / 7.82 лв.“. Актът отива
+        подписан в счетоводството, а там колона с едно название и две числа във всяка
+        клетка се чете като грешка. Протоколът от инвентаризация вече е озаглавен
+        „Стойност, € / лв.“ — тук се пише същото, за да се четат двата документа
+        еднакво. */''}<th>Стойност, € / лв.</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${
       acqHasMultiples(a.items) ? '<td></td>' : ''}<td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>` : ''}
     <div class="pmeta">Актът е съставен в три екземпляра — за счетоводството, за библиотеката и за дарителя.</div>
-    ${ssig(['Дарител: …………………', 'Комисия: ' + acqSigNames(a), 'УТВЪРДИЛ: …………………'])}</div>`);
+    ${/* ДЛЪЖНОСТТА СТОИ ДО „УТВЪРДИЛ“ (v2.4.61). Актът за отчисляване, протоколът
+          от инвентаризация и протоколът по чл. 3, ал. 2 подписват реда като
+          „УТВЪРДИЛ, <длъжност от Настройки>: …“; актът за дарение беше
+          единственият с голо „УТВЪРДИЛ: …“. Един екземпляр от него отива при
+          дарителя, а друг — в счетоводството: подпис без длъжност не казва кой
+          има право да утвърди приемането на дарението, а длъжността вече е
+          въведена веднъж в Настройки („Председател“, „Директор“, „Кмет“ —
+          читалищата и общинските библиотеки я пишат различно). */''}
+    ${ssig(['Дарител: …………………', 'Комисия: ' + acqSigNames(a),
+      'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printDonationDoc = printDonationDoc;
 async function printAcqNoDocDoc(id) {
@@ -331,7 +390,7 @@ async function printAcqNoDocDoc(id) {
           ред е свободната бележка на самата партида. */''}
     ${a.note ? '<b>Забележка по партидата:</b> ' + esc(a.note) : ''}</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th>${
-      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Оценена стойност</th></tr></thead><tbody>
+      acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Оценена стойност, € / лв.</th></tr></thead><tbody>
     ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${

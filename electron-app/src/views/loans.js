@@ -91,6 +91,20 @@ async function renderCirc() {
       ${r.guarantor_name ? `<div class="hint">👪 Родител/настойник: <b>${esc(r.guarantor_name)}</b>${r.guarantor_phone ? ' · тел. ' + esc(r.guarantor_phone) : ''}</div>` : ''}
       ${r.suspended_until && r.suspended_until > today() ? `<div class="note w">⛔ Заемането е преустановено до <b>${bg(r.suspended_until)}</b>.
         <button class="btn sm" style="margin-left:8px" onclick="clearSuspension(${r.id})">Снеми</button></div>` : ''}
+      ${/* ДВЕТЕ ДРУГИ ПРЕЧКИ ПРЕД ЗАЕМАНЕТО СЕ КАЗВАТ ВЕДНАГА (v2.4.61).
+            Наказанието се вижда на гишето от самото начало, а прекратената
+            регистрация и липсващото съгласие по чл. 47, ал. 2 — не: те се
+            обаждаха чак след сканирането на книгата, като червен ред в журнала
+            (а до v2.4.61 не се обаждаха изобщо — виж checkReaderMayBorrow в
+            handlers/loans.js). Библиотекарката стои с читателя и с книгата в
+            ръка; отказът трябва да е ясен, преди да е взела книгата, и да казва
+            какво се прави оттук нататък. Бутонът отваря картона, където и двете
+            се оправят с една отметка. */''}
+      ${r.status === 'прекратен' ? `<div class="note w">⛔ Регистрацията на този читател е <b>прекратена</b> — заемане не се допуска.
+        <button class="btn sm" style="margin-left:8px" onclick="readerForm(${r.id})">Отвори картона</button></div>` : ''}
+      ${!r.gdpr_consent ? `<div class="note w">⛔ Няма отбелязано съгласие по <b>чл. 47, ал. 2</b> и за обработване на личните данни —
+        заемане не се допуска. Отбележете го в картона на читателя (ползвателят се подписва на картона си).
+        <button class="btn sm" style="margin-left:8px" onclick="readerForm(${r.id})">Отвори картона</button></div>` : ''}
       ${acc && acc.balance > 0 ? `<div class="hint">💰 Дължи по сметка: <b style="color:var(--red)">${mny(acc.balance)}</b></div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
     const myHolds = (holdsAll || []).filter(h => h.reader_id === CIRC.readerId);
@@ -136,7 +150,7 @@ async function renderCirc() {
       <div class="hint" style="margin-top:6px">След това сканирайте документите един след друг; всяко заемане се записва веднага.</div>`;
     /* v2.4.29: най-често отваряният екран стоеше празен под двете карти. „Днес на
        гишето“ показва какво е свършено през деня (от одитната следа — без нов канал). */
-    table = `<div class="card circToday" id="circToday" style="margin-top:16px"><h3 style="margin-top:0">Днес на гишето</h3><div class="hint">Зарежда се…</div></div>`;
+    table = `<div class="card circToday" id="circToday" style="margin-top:16px"><h3 style="margin-top:0">${CIRC_TODAY_TITLE}</h3><div class="hint">Зарежда се…</div></div>`;
   }
 
   $('#view').innerHTML = tabs + `<div class="grid g2">
@@ -423,6 +437,22 @@ window.logLocaluse = logLocaluse;
 
 /* „Днес на гишето“ (v2.4.29): броят заемания и връщания за деня и последните
    операции — от одитната следа (последните 500 реда), в местно време. */
+/* ЗАГЛАВИЕТО КАЗВА КАКВО НАИСТИНА СЕ БРОИ (v2.4.61).
+   =====================================================================
+   Панелът брои по времето на ВПИСВАНЕТО (audit_log.ts), а не по датата на самата
+   операция — а двете се разминават всеки път, когато библиотекарката навакса
+   заемания със задна дата (обичайно след обслужване по домовете или след ден без
+   ток) или приеме книга с вчерашна дата. „Днес на гишето: 12 заемания“ тогава
+   значеше „днес ВПИСАХ 12 заемания“, а не „днес дадох 12 книги“ — и числото не
+   съвпадаше нито с Дневника за деня, нито с годишния отчет, които броят по
+   датата на операцията. Числото не е грешно, грешен беше надписът над него.
+   ЗАЩО НЕ СЕ СМЕНИ БРОЕНЕТО. Точно „какво съм свършила днес на това работно
+   място“ е въпросът, на който панелът отговаря — и той включва наваксаното със
+   задна дата, а изключва вписаното вчера за днес. За „колко книги са дадени на
+   дата Х“ има Дневник и годишен отчет, които броят по датата на операцията.
+   Затова се сменя надписът, а не смисълът, и под чиповете стои изречение, което
+   го обяснява с думи. */
+const CIRC_TODAY_TITLE = 'Вписано днес на гишето';
 async function circTodayPanel() {
   const box = $('#circToday'); if (!box) return;
   const rows = await call(window.api.audit.list('')) || [];
@@ -440,12 +470,15 @@ async function circTodayPanel() {
     .filter(r => r.at && r.at.date === t && (r.action === 'Заемане' || r.action === 'Връщане'));
   if (!$('#circToday')) return; // междувременно е избран читател
   const out = ops.filter(r => r.action === 'Заемане').length, back = ops.length - out;
-  box.innerHTML = `<h3 style="margin-top:0">Днес на гишето</h3>
+  box.innerHTML = `<h3 style="margin-top:0">${CIRC_TODAY_TITLE}</h3>
     <div class="setupChips" style="margin-bottom:${ops.length ? 10 : 0}px">
       <span class="chip ${out ? 'ok' : ''}">${pl(out, 'заемане', 'заемания')}</span>
       <span class="chip ${back ? 'ok' : ''}">${pl(back, 'връщане', 'връщания')}</span>
       ${rows.length >= 500 ? '<span class="chip" title="Одитната следа се чете до 500 реда назад">последните 500 записа</span>' : ''}
     </div>
+    <div class="hint" style="margin:-4px 0 8px">Броят се операциите, ВПИСАНИ днес на това работно място —
+      включително заемания и връщания със задна дата. Колко документа са заети на определена дата
+      показват „Дневник“ и годишният отчет.</div>
     ${ops.length ? `<div class="circOps">${ops.slice(0, 8).map(r => `<div class="circOp">
         <span class="num">${r.at.time}</span>
         <span class="badge ${r.action === 'Заемане' ? 'ok' : ''}">${r.action === 'Заемане' ? 'заемане' : 'връщане'}</span>

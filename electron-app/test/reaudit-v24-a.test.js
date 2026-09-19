@@ -47,7 +47,9 @@ test('два реални процеса, продължение (loans:extend) 
        заемане стига един екземпляр, а тестът е за две едновременни ПРОДЪЛЖЕНИЯ на
        едно и също заемане. */
     const bookId = invokeHandler('books:create', { title: 'Под игото', quantity: 1 }).data;
-    const readerId = invokeHandler('readers:create', { name: 'Читател 1' }).data;
+    /* gdpr_consent (v2.4.61): readers:create отказва читател без отбелязано
+       съгласие по чл. 47, ал. 2 и ОРЗД, а заемането — читател без него. */
+    const readerId = invokeHandler('readers:create', { name: 'Читател 1', gdpr_consent: 1 }).data;
     const co = invokeHandler('loans:checkout', { reader_id: readerId, book_id: bookId, date_out: '2026-08-01' });
     assert.equal(co.ok, true, 'заемането трябва да успее при засяването: ' + JSON.stringify(co));
     const loanId = co.data;

@@ -8,6 +8,7 @@
 /* ---------------- Аналитично описание ---------------- */
 let ANL_Q = '', ANL_YEAR = '', ANL_LOCAL = false;
 async function renderAnalytics() {
+  anlCancelSearch(); // отложеното търсене от предишното влизане няма какво да прави
   const [rows, years] = await Promise.all([
     call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL })),
     call(window.api.analytics.years())
@@ -50,12 +51,17 @@ async function renderAnalytics() {
 const ANL_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let ANL_RENDER_LIMIT = ANL_PAGE_SIZE;
 let ANL_PAINTED = 0;
+/* Колоната УДК (v2.4.61). УДК се въвежда в самото описание и е един от
+   реквизитите му, но на екрана го нямаше никъде — библиотекарката не можеше да
+   провери дали го е попълнила, нито да види наведнъж кои описания са без УДК,
+   без да отваря всяко поотделно. */
 function analyticsRowsHtml(rows) {
   return rows.map(a => `<tr>
         <td><b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}
           ${a.author ? `<br><span class="hint">${esc(a.author)}</span>` : ''}
           ${a.is_local ? '<span class="tag tagLocal">краеведски</span>' : ''}</td>
         <td class="hint">${esc(analyticSource(a))}</td>
+        <td class="hint">${esc(a.udk || '')}</td>
         <td class="num">${esc(a.year || '')}</td>
         <td class="num">${esc(a.pages || '')}</td>
         <td><button class="btn sm" onclick="analyticForm(${a.id})">Редакция</button>
@@ -92,7 +98,8 @@ function analyticsListHtml(rows) {
     </div>
 
     ${rows.length ? `<div class="wrap"><table class="ledger"><thead><tr>
-      <th>Автор и заглавие</th><th style="width:30%">Източник</th><th style="width:70px">Год.</th>
+      <th>Автор и заглавие</th><th style="width:26%">Източник</th><th style="width:110px">УДК</th>
+      <th style="width:70px">Год.</th>
       <th style="width:90px">Стр.</th><th style="width:130px"></th></tr></thead>
       <tbody id="anlBody"></tbody></table></div>
       <div class="toolbar" id="anlMore" style="justify-content:center"></div>`
@@ -113,13 +120,19 @@ function drawAnalyticsList(rows) {
   return true;
 }
 /* Търсенето пипа само #anlList — полето за търсене НЕ се пресъздава, иначе
-   курсорът изчезва при всяка пауза над 300 ms (моделът от inv-book.js). */
+   курсорът изчезва при всяка пауза над 300 ms (моделът от inv-book.js).
+   Проверката VIEW !== 'analytics' пази отложеното (300 ms) търсене да не
+   изчертае указателя ВЪРХУ вече отворен друг раздел — пълната бележка защо и
+   как стои в src/views/chronicle.js при refreshChronicle(). */
 async function refreshAnalytics() {
+  if (VIEW !== 'analytics') return;
   const rows = await call(window.api.analytics.list({ q: ANL_Q, year: ANL_YEAR, onlyLocal: ANL_LOCAL }));
-  if (!rows) return;
+  if (!rows || VIEW !== 'analytics') return;
   if (!drawAnalyticsList(rows)) renderAnalytics();
 }
 window.refreshAnalytics = refreshAnalytics;
+function anlCancelSearch() { clearTimeout(window._anlT); window._anlT = null; }
+window.anlCancelSearch = anlCancelSearch;
 function analyticSource(a) {
   if (a.source_kind === 'периодика' && a.periodical_title) {
     return a.periodical_title + (a.issue ? ', бр. ' + a.issue : '') + (a.issue_date ? ' от ' + bg(a.issue_date) : '');
@@ -158,6 +171,14 @@ async function printAnalytics() {
       ${a.is_local ? ' <i>— краеведски</i>' : ''}
       ${a.author ? `<div style="font-size:10.5pt">${esc(a.author)}</div>` : ''}
       <div style="font-size:10.5pt">${esc(analyticSource(a))}${a.pages ? ', стр. ' + esc(a.pages) : ''}</div>
+      ${/* УДК и ключовите думи се ВЪВЕЖДАТ в описанието, а не излизаха на хартия
+            (v2.4.61). Указателят се дава на читателя и се праща на регионалната
+            библиотека: УДК е реквизитът, по който материалът се подрежда
+            тематично, а ключовите думи са единственият вход към краеведския
+            масив по тема („носии“, „кооперация“), когато заглавието не я
+            назовава. Без тях разпечатката е списък от заглавия, а не указател. */''}
+      ${a.udk ? `<div style="font-size:10pt">УДК ${esc(a.udk)}</div>` : ''}
+      ${a.keywords ? `<div style="font-size:10pt"><i>Ключови думи: ${esc(a.keywords)}</i></div>` : ''}
     </div>`).join('')}
     ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
 }
@@ -177,6 +198,10 @@ function bookPickLabel(v) {
 // Сравнението е устойчиво на излишни интервали и на главни/малки букви —
 // баркод четец и ръчно писане не дават един и същ низ до знак.
 const bookPickKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+/* Представката „инв. №“ пред номера. Изразът е ЕДИН за цялата програма и се
+   ползва и от панела „Свързани материали“ (src/views/links.js) — затова стои
+   тук, на видно място, а не скрит в обработчика на полето. */
+const ANL_INV_RE = /^инв\.\s*№\s*(\d+)/i;
 
 async function analyticForm(id) {
   const [a, pers, sug] = await Promise.all([
@@ -195,7 +220,7 @@ async function analyticForm(id) {
       </div>
       <div class="grid g4">
         ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
-        ${fld('Година', 'year', { val: v.year || '' })}
+        ${fld('Година', 'year', { val: v.year || '', hint: 'или „ок. 1930“' })}
         ${fld('Страници', 'pages', { val: v.pages || '', hint: 'напр. „12 – 14“' })}
         ${fld('УДК', 'udk', { val: v.udk || '', list: 'udk' })}
       </div>
@@ -244,7 +269,14 @@ async function analyticForm(id) {
     const hidden = $('#anlF [name=book_id]');
     if (q.length < 2) { hidden.value = ''; return; }
     if (known.has(bookPickKey(q))) { hidden.value = known.get(bookPickKey(q)); return; }
-    const m = /^инв\.\s*№\s*(\d+)/i.exec(q);
+    /* Представката „инв. №“ се маха и оттук нататък на канала се подава самият
+       номер. Същият израз стои и в панела „Свързани материали“
+       (src/views/links.js) — там го нямаше и „инв. № 2“, изписано точно както
+       подсказва полето, не намираше нищо (v2.4.61).
+       Самият канал links:search вече също разпознава представката и — което е
+       по-важното — при чисто число търси ТОЧНО по инвентарен номер, вместо
+       LIKE '%1%' по заглавието (което връщаше и „100% истина…“). */
+    const m = ANL_INV_RE.exec(q);
     const found = await call(window.api.links.search({ kind: 'книга', q: m ? m[1] : q }));
     if (bp.value.trim() !== q) return; // междувременно е писано още — този отговор е стар
     const dl = $('#dl_anlBooks');

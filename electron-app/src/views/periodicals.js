@@ -2,9 +2,17 @@
 async function renderPeriodika() {
   const list = await call(window.api.periodicals.list());
   if (!list) return;
+  /* Годината на разпечатката (v2.4.61, находка 17) стои ДО бутона за печат, а не
+     в отделен диалог: абонаментният списък се вади за конкретна година и
+     годината е единственото, което се избира. По подразбиране — текущата. */
+  const curYear = yr();
+  const years = yearOptions(curYear);
   $('#view').innerHTML = `
     <div class="note">Картотека на периодичните издания и постъпилите броеве към всяко от тях (кардекс).</div>
-    <div class="toolbar"><button class="btn pri" onclick="periodicalForm()">+ Ново периодично издание</button></div>
+    <div class="toolbar"><button class="btn pri" onclick="periodicalForm()">+ Ново периодично издание</button>
+      <select id="perPrintYear" title="Година на абонаментния списък за печат">${
+        years.map(y => `<option ${y === curYear ? 'selected' : ''}>${y}</option>`).join('')}</select>
+      <button class="btn" onclick="printPeriodikaYear()">Печат / PDF</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Заглавие</th><th>Периодичност</th><th>Издател</th>
       <th>ISSN</th><th>Отдел</th><th>Броеве</th><th>Инвентирани комплекти</th><th>Следващ очакван брой</th><th></th></tr></thead><tbody>
     ${list.length ? list.map(p => `<tr><td>${esc(p.title)}</td><td>${esc(p.freq || '')}</td><td>${esc(p.publisher || '')}</td>
@@ -75,9 +83,32 @@ async function savePeriodical(id) {
   closeModal(); renderPeriodika();
 }
 window.savePeriodical = savePeriodical;
-async function openPeriodical(id) {
-  const p = await call(window.api.periodicals.get(id));
+/* КАРДЕКСЪТ СЕ ОТВАРЯ ПО ГОДИНА (v2.4.61, находка 6).
+   ===========================================================================
+   ДОТУК прозорецът чертаеше ВСИЧКИ броеве на изданието — до един, в кутия с
+   превъртане 240 px, и наново след всяко „Добави брой“ и всяко „×“. За
+   ежедневник това са 300 реда след първата година и 3000 след десетата: всяко
+   вписване на днешния вестник пречертава цялата история. И по-лошото — за да се
+   намери „бр. 117“, нямаше нито страници, нито филтър, нито търсене.
+   Хартиеният кардекс също е по година (един картон на година), комплектът се
+   подвързва по година и проверката пита по година — затова разрезът е точно
+   този. Годината идва от обработчика (periodicals:get), а не се реже тук:
+   отрязването в изгледа би оставило IPC-то да носи същите хиляди реда.
+   Търсачката отдолу филтрира вече показаната година по номер и по дата — тя е
+   за „намери ми бр. 117“, докато годината е за „покажи ми 2024“. */
+async function openPeriodical(id, year) {
+  const p = await call(window.api.periodicals.get(id, { year }));
   if (!p) return;
+  const yearsList = p.issue_years || [];
+  const shown = p.issues.length;
+  const total = p.issue_total == null ? shown : p.issue_total;
+  const yearSel = `<select id="perIssueYear" onchange="openPeriodical(${id}, this.value)">
+      ${yearsList.map(y => `<option value="${esc(y.year)}" ${String(y.year) === String(p.issue_year) ? 'selected' : ''}
+        >${esc(y.year)} г. (${y.n})</option>`).join('')}
+      ${yearsList.some(y => String(y.year) === String(p.issue_year)) ? ''
+        : `<option value="${esc(String(p.issue_year))}" selected>${esc(String(p.issue_year))} г. (0)</option>`}
+      <option value="всички" ${String(p.issue_year) === 'всички' ? 'selected' : ''}>всички години (${total})</option>
+    </select>`;
   modal(p.title, `
     <div class="hint" style="margin-bottom:10px">${esc(p.freq || '')} · ${esc(p.publisher || '')}${p.issn ? ' · ISSN ' + esc(p.issn) : ''}</div>
     <fieldset><legend>Нов постъпил брой</legend>
@@ -89,12 +120,20 @@ async function openPeriodical(id) {
       <button type="button" class="btn pri" onclick="addIssue(${id})">Добави брой</button>
     </fieldset>
     ${periodicalVolumesSection(p)}
+    <div class="toolbar" style="margin:8px 0 4px">
+      <label>Година: ${yearSel}</label>
+      <input id="perIssueSearch" type="search" placeholder="търсене по № на брой или дата" oninput="filterIssueRows()">
+      <span class="hint" id="perIssueCount" data-total="${total}" data-year="${esc(String(p.issue_year))}"
+        >${issueCountLabel(shown, shown, total, p.issue_year)}</span>
+    </div>
     ${p.issues.length ? `<div class="wrap" style="max-height:240px"><table class="ledger"><thead><tr>
-      <th>Брой</th><th>Дата</th><th>Цена</th><th></th></tr></thead><tbody>
+      <th>Брой</th><th>Дата</th><th>Цена</th><th></th></tr></thead><tbody id="perIssuesBody">
       ${p.issues.map(i => `<tr><td class="num">${esc(i.issue_no)}</td><td class="num">${bg(i.date)}</td>
       <td class="num">${mny(i.price)}</td><td><button type="button" class="btn sm dgr" onclick="delIssue(${i.id},${id},${jsNum(invNoForIssue(p, i))})">×</button></td></tr>`).join('')}
-      </tbody></table></div>` : '<div class="hint">Все още няма вписани броеве.</div>'}`,
+      </tbody></table></div>`
+      : `<div class="hint">${total ? 'За избраната година няма вписани броеве — изберете друга година.' : 'Все още няма вписани броеве.'}</div>`}`,
     `<button class="btn dgr" onclick="delPeriodical(${id})">Изтрий изданието</button>
+     <button class="btn" onclick="printPeriodicalCard(${id},'${esc(String(p.issue_year))}')">Печат / PDF на картона</button>
      <button class="btn" onclick="closeModal();periodicalForm(${id})">Редактирай</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
   /* Опресняването виси на ЗАТВАРЯНЕТО, а не на един бутон: ✕ и Esc затварят
@@ -109,6 +148,43 @@ window.openPeriodical = openPeriodical;
    „Броеве“ и „Следващ очакван брой“ до повторно влизане в раздела. */
 function periodikaRefreshIfShown() { if (VIEW === 'periodika') renderPeriodika(); }
 window.periodikaRefreshIfShown = periodikaRefreshIfShown;
+/* „Показани N от M“ (v2.4.61) — числото М е това, което дотук се чертаеше НАВЕДНЪЖ.
+   Стои до избора на година, за да е ясно, че списъкът отдолу е разрез, а не целият
+   кардекс: иначе филтърът върши точно обратното на предназначението си и
+   библиотекарката решава, че броевете са изчезнали. */
+function issueCountLabel(visible, shown, total, year) {
+  const scope = year === 'всички' ? 'всички години' : year + ' г.';
+  const base = 'Показани ' + visible + ' от ' + total + (total === 1 ? ' брой' : ' броя') + ' — ' + scope;
+  return visible === shown ? base : base + ' (филтър: ' + visible + ' от ' + shown + ')';
+}
+window.issueCountLabel = issueCountLabel;
+/* Търсенето в рамките на показаната година: по номер на брой и по дата, така
+   както библиотекарката ги чете на реда — без да се ходи до базата, защото
+   годината вече е в прозореца. Редовете се СКРИВАТ, а не се пречертават: така
+   „×“ на всеки ред си остава свързан със своя брой. */
+function filterIssueRows() {
+  const box = $('#perIssueSearch');
+  const body = $('#perIssuesBody');
+  const label = $('#perIssueCount');
+  if (!body) return;
+  const q = String(box ? box.value : '').trim().toLowerCase();
+  const rows = Array.from(body.querySelectorAll('tr'));
+  let visible = 0;
+  for (const tr of rows) {
+    const text = (tr.children[0].textContent + ' ' + tr.children[1].textContent).toLowerCase();
+    const show = !q || text.includes(q);
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  }
+  if (label) {
+    // Общият брой и годината стоят в data-атрибути, а не се вадят обратно от
+    // собствения текст на надписа — иначе второто филтриране би чело число,
+    // което първото вече е пренаписало.
+    const total = Number(label.dataset.total) || rows.length;
+    label.textContent = issueCountLabel(visible, rows.length, total, label.dataset.year || '');
+  }
+}
+window.filterIssueRows = filterIssueRows;
 
 /* ============================================================================
    ГОДИШНИ КОМПЛЕКТИ — периодиката влиза във фонда (v2.4.56)
@@ -143,10 +219,25 @@ function periodicalVolumesSection(p) {
   const vols = p.volumes || [];
   const rows = vols.map(v => {
     const done = v.book_id != null;
+    /* РАЗМИНАВАНЕТО МЕЖДУ КАРДЕКСА И ПОДВЪРЗАНИЯ КОМПЛЕКТ СЕ КАЗВА (v2.4.61, находка 12).
+       ДОТУК редът показваше ЖИВИЯ брой броеве до цената на документа и нищо
+       повече: „3 броя · 7.00 € · инв. № 1“ изглежда като едно съгласувано цяло, а
+       всъщност комплектът е подвързан с 2 броя за 7,00 € и третият е вписан
+       по-късно. periodicals:get отдавна връща registered_issue_count (снимката към
+       инвентирането) — просто никой не я показваше. Разминаването значи, че
+       кардексът и документът на рафта вече не си отговарят: или броят е добавен
+       след подвързването (тогава той е извън комплекта и трябва да влезе в
+       следващия), или е изтрит (тогава документът съдържа брой, който картотеката
+       не помни). И в двата случая при проверка отговаря документът, не програмата,
+       затова разликата трябва да се вижда на самия ред. */
+    const live = Number(v.issue_count) || 0;
+    const snap = v.registered_issue_count == null ? null : Number(v.registered_issue_count);
+    const diverged = done && snap != null && snap !== live;
     const invCell = done
       ? `<b>инв. № ${esc(String(v.inv_number ?? '—'))}</b>${v.register_date ? ' · вписан ' + bg(v.register_date) : ''}`
         + `${v.acq_no ? ' · партида № ' + esc(String(v.acq_no)) + '/' + esc(String(v.acq_year)) : ' · <span class="hint">без партида</span>'}`
         + `${v.deaccession_date ? ' · <span class="badge warn">отчислен</span>' : ''}`
+        + (diverged ? ` · <span class="badge warn" title="Кардексът показва ${live} бр., а комплектът е подвързан и вписан в инвентарната книга с ${snap} бр. на стойност ${mny(v.volume_price)}. Документът във фонда не се променя със задна дата — новите броеве влизат в следващия комплект.">разминаване: подвързан с ${snap} бр. при инвентирането, в кардекса ${live}</span>` : '')
       : '<span class="hint">не е инвентиран</span>';
     return `<tr><td class="num">${esc(String(v.year))}</td><td class="num">${Number(v.issue_count) || 0}</td>
       <td class="num">${mny(done ? v.volume_price : v.issue_sum)}</td><td>${invCell}</td>
@@ -257,6 +348,28 @@ async function saveVolume(periodicalId, year) {
     }), 'Партидата е заведена в КДБФ част 1.');
     if (newId === null) return;
     acquisitionId = newId;
+    /* НОВАТА ПАРТИДА ВЛИЗА В СЕЛЕКТА ВЕДНАГА (v2.4.61, находка 22).
+       ДОТУК изборът оставаше на „__new__“ и след ОТКАЗАНО инвентиране (зает инв.
+       №, изчерпан лимит, грешна година) второто натискане на същия бутон минаваше
+       пак през този клон и завеждаше ВТОРА партида за същия абонамент. В КДБФ
+       Част № 1 се появяваха две партиди „Български пощи — абонамент“, едната с
+       обявен 1 документ и нула инвентирани — регистър, който сам си противоречи,
+       и то за година, която после се подписва. Партидата вече е заведена и е
+       самостоятелно вписване (затова не се трие при отказ) — тя просто трябва да
+       стане ИЗБРАНАТА, точно както ако библиотекарят я беше избрал от списъка.
+       Опцията се добавя ръчно, защото списъкът е построен при отварянето на
+       формата и новото id го няма в него: select без такава опция би приел
+       стойността като празна и документът щеше да остане без партида. */
+    const sel = $('#volF [name=acquisition_id]');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = String(newId);
+      opt.textContent = '№ ' + no + '/' + yr(d.acq_date) + ' — ' + (d.acq_from_source || '');
+      const newOpt = sel.querySelector('option[value="__new__"]');
+      if (newOpt) sel.insertBefore(opt, newOpt); else sel.appendChild(opt);
+      sel.value = String(newId);
+      volumeAcqToggle();
+    }
   }
   const res = await call(window.api.periodicalVolumes.register({
     periodical_id: periodicalId, year, price: d.price,
@@ -266,8 +379,19 @@ async function saveVolume(periodicalId, year) {
   if (res === null) return;
   markSaved();
   toast('Годишният комплект за ' + year + ' г. е вписан в инвентарната книга под инв. № ' + res.inv_number + '.', 'ok');
+  /* Прескочените инвентарни номера (v2.4.61, находка 10) идват от обработчика
+     точно както при books:create и се показват като отделно предупреждение —
+     следата вече е вписана, но човекът пред формата е единственият, който може
+     да поправи номера, докато документът е сам в поредицата. */
+  if (res.invGap) toast(res.invGap.message, 'err');
   closeModal2();
-  openPeriodical(periodicalId);
+  openPeriodical(periodicalId, keptIssueYear());
+}
+/* Годината, на която стои кардексът в момента — за да не отскача към текущата
+   след всяко действие (вписан брой, изтрит брой, инвентиран комплект). */
+function keptIssueYear() {
+  const sel = $('#perIssueYear');
+  return sel ? sel.value : undefined;
 }
 window.saveVolume = saveVolume;
 async function addIssue(periodicalId) {
@@ -278,7 +402,10 @@ async function addIssue(periodicalId) {
   const ok = await call(window.api.periodicalIssues.add(d), 'Брой ' + d.issue_no + ' е вписан в кардекса.');
   if (ok === null) return;
   markSaved();
-  openPeriodical(periodicalId);
+  /* Кардексът се отваря на годината на ТОКУ-ЩО вписания брой (v2.4.61): иначе
+     при отворена стара година новият брой изчезва от екрана и изглежда, че
+     вписването не е станало. */
+  openPeriodical(periodicalId, String(d.date || today()).slice(0, 4));
 }
 window.addIssue = addIssue;
 async function delIssue(id, periodicalId, invNo) {
@@ -298,11 +425,12 @@ async function delIssue(id, periodicalId, invNo) {
     : 'Този брой е част от годишния комплект, инвентиран като инв. № ' + invNo + '.\n\n'
       + 'Комплектът е подвързан и вписан в инвентарната книга — след изтриването кардексът вече няма да отговаря '
       + 'на документа във фонда. Да изтрия ли броя въпреки това?';
+  const year = keptIssueYear();
   if (!await askConfirm(текст)) return;
   const ok = await call(window.api.periodicalIssues.delete(id), 'Броят е изтрит.');
   if (ok === null) return;
   markSaved();
-  openPeriodical(periodicalId);
+  openPeriodical(periodicalId, year);
 }
 window.delIssue = delIssue;
 async function delPeriodical(id) {
@@ -312,3 +440,112 @@ async function delPeriodical(id) {
   closeModal(); renderPeriodika(); toast('Изтрито.', 'ok');
 }
 window.delPeriodical = delPeriodical;
+
+/* ============================================================================
+   РАЗПЕЧАТКИ ЗА ПЕРИОДИКАТА (v2.4.61, находки 17 и 18)
+   ============================================================================
+   ДОТУК екранът „Периодика“ беше ЕДИНСТВЕНИЯТ регистър в програмата без нито
+   един печатен документ: КДБФ, инвентарната книга, партидите, актовете, справките
+   и картонът на читателя се печатат, а картотеката на абонаментите — не.
+   ЗАЩО ЛИПСВАТА Е СКЪПА: абонаментният списък за годината е документът, който се
+   подава на счетоводството при подновяване на абонамента (какво е получено срещу
+   платеното) и на проверката, когато тя пита за периодиката. Дотук той се
+   преписваше на ръка от екрана — а на екрана числата за минала година вече не се
+   виждат наведнъж.
+   ДВЕ РАЗПЕЧАТКИ, защото това са два различни документа:
+     • абонаментен списък за ГОДИНАТА — всички заглавия на един лист, със сборове;
+     • картонът на ЕДНО издание (кардексът) — броевете за избраната година плюс
+       състоянието на годишните комплекти във фонда.
+   И двете минават през общите setPrintPage/doPrint/shead/ssig, тоест носят
+   главата на читалището и редовете за подпис като всеки друг официален документ
+   (образец: printKdbfDoc в src/views/kdbf.js). */
+async function periodikaYearRows(year) {
+  const list = await call(window.api.periodicals.list());
+  if (!list) return null;
+  const rows = [];
+  for (const p of list) {
+    /* По едно четене на заглавие. Заглавията в едно читалище са десетки (не
+       хиляди), а всяко четене връща само избраната година — цената е по-ниска
+       от една справка по фонда и не изисква нов IPC канал. */
+    const d = await call(window.api.periodicals.get(p.id, { year }));
+    if (!d) continue;
+    const issues = d.issues || [];
+    const vol = (d.volumes || []).find(v => String(v.year) === String(year));
+    rows.push({
+      title: d.title, issn: d.issn, freq: d.freq, department: d.department,
+      count: issues.length,
+      sum: issues.reduce((s, i) => s + (Number(i.price) || 0), 0),
+      vol: vol && vol.book_id != null ? vol : null,
+      deacc: !!(vol && vol.deaccession_date)
+    });
+  }
+  return rows;
+}
+async function printPeriodikaYear() {
+  const sel = $('#perPrintYear');
+  const year = sel ? sel.value : yr();
+  const rows = await periodikaYearRows(year);
+  if (!rows) return;
+  const totalCount = rows.reduce((s, r) => s + r.count, 0);
+  // Сборът се закръгля до цент при СЪБИРАНЕТО, а не при показването — иначе
+  // отпечатаният общ ред не съвпада със сбора на собствените си редове.
+  const totalSum = Math.round(rows.reduce((s, r) => s + r.sum, 0) * 100) / 100;
+  const inventoried = rows.filter(r => r.vol).length;
+  setPrintPage({ name: 'Периодични издания ' + year + ' г.', landscape: true, margin: '10mm' });
+  doPrint(`
+    <div class="pdoc">${shead()}<h2>ПЕРИОДИЧНИ ИЗДАНИЯ — АБОНАМЕНТЕН СПИСЪК</h2>
+     <div class="pmeta">за ${esc(String(year))} г. · получени броеве, платена стойност и състояние на годишните комплекти<br>
+       Периодичните издания са библиотечни документи и подлежат на регистрация (чл. 13, ал. 3, т. 1; чл. 14; чл. 16).</div>
+     <table><thead><tr><th>№</th><th>Заглавие</th><th>ISSN</th><th>Периодичност</th><th>Отдел</th>
+       <th>Получени броеве</th><th>Стойност</th><th>Годишен комплект във фонда</th></tr></thead><tbody>
+     ${rows.length ? rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.title)}</td><td>${esc(r.issn || '')}</td>
+       <td>${esc(r.freq || '')}</td><td>${esc(r.department || '')}</td><td>${r.count}</td><td>${mny(r.sum)}</td>
+       <td>${r.vol
+         ? 'инв. № ' + esc(String(r.vol.inv_number ?? '—')) + (r.vol.register_date ? ' / ' + bg(r.vol.register_date) : '')
+           + (r.deacc ? ' — ОТЧИСЛЕН' : '')
+         : (r.count ? 'не е инвентиран' : '—')}</td></tr>`).join('')
+       : `<tr><td colspan="8" style="text-align:center">През ${esc(String(year))} г. няма заведени периодични издания.</td></tr>`}
+     ${rows.length ? `<tr style="font-weight:700"><td colspan="5">ОБЩО за ${esc(String(year))} г.</td>
+       <td>${totalCount}</td><td>${mny(totalSum)}</td>
+       <td>${inventoried} от ${rows.length} ${inventoried === 1 ? 'инвентиран комплект' : 'инвентирани комплекта'}</td></tr>` : ''}
+     </tbody></table>
+     ${rows.some(r => r.count && !r.vol) ? `<div class="pmeta">Заглавията с получени броеве и без инвентиран годишен
+       комплект не влизат нито в КДБФ Част № 1, нито в отчета за фонда за ${esc(String(year))} г.</div>` : ''}
+     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
+}
+window.printPeriodikaYear = printPeriodikaYear;
+async function printPeriodicalCard(id, year) {
+  const p = await call(window.api.periodicals.get(id, { year }));
+  if (!p) return;
+  const issues = p.issues || [];
+  const sum = Math.round(issues.reduce((s, i) => s + (Number(i.price) || 0), 0) * 100) / 100;
+  const scope = String(p.issue_year) === 'всички' ? 'всички години' : p.issue_year + ' г.';
+  setPrintPage({ name: 'Кардекс — ' + p.title + ' ' + scope, margin: '12mm' });
+  doPrint(`
+    <div class="pdoc">${shead()}<h2>КАРТОН НА ПЕРИОДИЧНО ИЗДАНИЕ (КАРДЕКС)</h2>
+     <div class="pmeta"><b>${esc(p.title)}</b>${p.issn ? ' · ISSN ' + esc(p.issn) : ''}
+       ${p.freq ? ' · ' + esc(p.freq) : ''}${p.publisher ? ' · ' + esc(p.publisher) : ''}
+       ${p.department ? ' · отдел ' + esc(p.department) : ''}<br>Постъпили броеве — ${esc(scope)}</div>
+     <table><thead><tr><th>№ на брой</th><th>Дата на постъпване</th><th>Цена</th><th>Забележка</th></tr></thead><tbody>
+     ${issues.length ? issues.map(i => `<tr><td>${esc(i.issue_no)}</td><td>${bg(i.date)}</td>
+       <td>${mny(i.price)}</td><td>${esc(i.note || '')}</td></tr>`).join('')
+       : `<tr><td colspan="4" style="text-align:center">Няма вписани броеве за ${esc(scope)}.</td></tr>`}
+     ${issues.length ? `<tr style="font-weight:700"><td>ОБЩО</td><td>${issues.length} ${issues.length === 1 ? 'брой' : 'броя'}</td>
+       <td>${mny(sum)}</td><td></td></tr>` : ''}
+     </tbody></table>
+     <h3>Годишни комплекти във фонда</h3>
+     <table><thead><tr><th>Година</th><th>Броеве в кардекса</th><th>Стойност</th><th>Инв. №</th>
+       <th>Вписан на</th><th>Състояние</th></tr></thead><tbody>
+     ${(p.volumes || []).length ? p.volumes.map(v => `<tr><td>${esc(String(v.year))}</td>
+       <td>${Number(v.issue_count) || 0}${v.book_id != null && v.registered_issue_count != null
+         && Number(v.registered_issue_count) !== (Number(v.issue_count) || 0)
+         ? ' (подвързан с ' + Number(v.registered_issue_count) + ')' : ''}</td>
+       <td>${mny(v.book_id != null ? v.volume_price : v.issue_sum)}</td>
+       <td>${v.book_id != null ? esc(String(v.inv_number ?? '—')) : '—'}</td>
+       <td>${v.register_date ? bg(v.register_date) : '—'}</td>
+       <td>${v.book_id == null ? 'не е инвентиран' : (v.deaccession_date ? 'отчислен на ' + bg(v.deaccession_date) : 'във фонда')}</td></tr>`).join('')
+       : '<tr><td colspan="6" style="text-align:center">Няма години с вписани броеве.</td></tr>'}
+     </tbody></table>
+     ${ssig(['Библиотекар: …………………'])}</div>`);
+}
+window.printPeriodicalCard = printPeriodicalCard;

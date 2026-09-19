@@ -8,7 +8,49 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
      е точно неговият случай: въпросът по чл. 40 е „какво да проверя ФИЗИЧЕСКИ“,
      а не „какво пише в регистъра към дата“. NULL статусът (стар внос) е във
      фонда — това е и причината условието да не се пише на ръка тук. */
-  const { fundByStatus, fundByStatusPlain } = require('../db/fund-sql');
+  const { fundByStatus, fundByStatusPlain, QTY_JOIN, FROM_BOOKS_INV } = require('../db/fund-sql');
+
+  /* ИНВЕНТАРИЗАЦИЯТА БРОИ БИБЛИОТЕЧНИ ДОКУМЕНТИ, НЕ РЕДОВЕ (v2.4.61).
+     =====================================================================
+     ЗАВАРЕНОТО. Целият този модул броеше РЕДОВЕ в books — един инвентарен
+     номер = една единица. Това е вярно за всеки запис, създаден от програмата
+     (тя дава по един инвентарен номер на екземпляр), но НЕ е вярно за
+     заварените и внесените бази: там един ред може да носи inventory.quantity
+     = 3, тоест три библиотечни документа под един номер.
+
+     ЗАЩО БЕШЕ ГРЕШНО. Два документа за едно и също събитие излизаха от
+     принтера с различни числа. Измерено върху стар запис с 3 екземпляра по
+     4.00 € и още един документ за 3.50 €:
+
+       протокол по чл. 40 (този модул) : „Липсващи: 3 … ОБЩО 3 документа — 16.50 €“
+       акт по чл. 30, т. 6 (същите книги): „4 библиотечни документа … 15.50 €“
+
+     Актът се ражда ОТ протокола (бутонът „Проект за акт от липсите“ по-долу),
+     тоест проверяващият слага двата листа един до друг и вижда две различни
+     истини за една и съща проверка. И двете броения се позовават на едно и
+     също нещо: чл. 40 – 41 говорят за библиотечни документи, както и чл. 13 и
+     чл. 16. Точно това е записано и в db/fund-sql.js — единственият източник
+     на фондовата аритметика: „БРОЯТ Е ПО ДОКУМЕНТИ, НЕ ПО ЗАГЛАВИЯ“.
+
+     ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Пулът, проверените, заетите, тези за
+     реставрация и липсващите се смятат по правилото COALESCE(quantity, 1) —
+     същото, което db/fund-sql.js държи за целия фонд (QTY_JOIN се ползва
+     дословно там, където заявката допуска съединение). Така четирите числа в
+     протокола продължават да се СЪБИРАТ до обхвата (изискване, заковано още в
+     v2.4.24), но вече в мярката, в която ги чете и актът, и КДБФ, и
+     инвентарната книга. Нормативът по чл. 41 се прилага към същата мярка —
+     иначе „допустими 0.5 документа“ би се сравнявало с липси, изброени в
+     редове.
+
+     БРОЙКАТА СЕ СНИМА, НЕ СЕ ЧЕТЕ НАЖИВО. При приключването бройката на всеки
+     липсващ документ се записва в inventory_session_missing.quantity — точно
+     както deaccession_items.quantity пази бройката в акта (чл. 35, ал. 2).
+     Иначе поправка на „Налични бройки“ на вече липсващ документ би променила
+     ВЕЧЕ ОТПЕЧАТАНИЯ и подписан протокол със задна дата. Заварените редове
+     (проверки, приключени преди v2.4.61) нямат снимка и за тях се чете живата
+     бройка — COALESCE в inventorySessions:get; за тях снимка няма откъде да
+     се вземе. */
+  const QTY_MISSING = 'COALESCE(inv.quantity, 1)';
 
   ipcMain.handle('inventorySessions:list', () =>
     run(() => getDb().prepare(`
@@ -19,10 +61,28 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
                 който печата поправеното: „в обхвата 9 · проверени 7 · липсващи
                 4“ на екрана срещу „проверени 6“ на хартия (проверка при
                 прегледа на v2.4.45). Текуща проверка и сесиите отпреди
-                снимката имат NULL и се броят както досега. */
+                снимката имат NULL и се броят както досега.
+                Текущата проверка вече се брои в ДОКУМЕНТИ (виж бележката
+                по-горе) — иначе редът в списъка и протоколът, до който води
+                бутонът на същия ред, пак биха се разминали. */
              COALESCE(s.scanned_final,
-                      (SELECT COUNT(*) FROM inventory_session_scans sc WHERE sc.session_id = s.id)) AS scanned,
-             (SELECT COUNT(*) FROM inventory_session_missing m WHERE m.session_id = s.id) AS missing
+                      (SELECT COALESCE(SUM(${QTY_MISSING}), 0) FROM inventory_session_scans sc
+                         LEFT JOIN inventory inv ON inv.book_id = sc.book_id
+                        WHERE sc.session_id = s.id)) AS scanned,
+             /* СЪЩАТА СНИМКА, КОЯТО ЧЕТЕ И ПРОТОКОЛЪТ (поправка след прегледа на
+                кръга). Дотук този ред сумираше ЖИВАТА бройка, а
+                inventorySessions:get и протоколът по чл. 40 — записаната
+                m.quantity. Едно поправено „Налични бройки“ на вече липсващ
+                документ разминаваше екрана и хартията за една и съща проверка:
+                „липсващи 1“ в списъка срещу „липсващи 3“ в подписания протокол.
+                COALESCE-ът пази заварените редове без снимка — за тях живата
+                бройка е единственото, което има. */
+             (SELECT COALESCE(SUM(COALESCE(m.quantity, ${QTY_MISSING})), 0) FROM inventory_session_missing m
+                LEFT JOIN inventory inv ON inv.book_id = m.book_id
+               WHERE m.session_id = s.id) AS missing,
+             /* Редовете се връщат ОТДЕЛНО: екранът казва „5 документа (3 записа)“
+                само когато двете числа се разминават, вместо да мълчи за разликата. */
+             (SELECT COUNT(*) FROM inventory_session_missing m WHERE m.session_id = s.id) AS missing_rows
       FROM inventory_sessions s ORDER BY s.date DESC
     `).all())
   );
@@ -46,6 +106,18 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          различни неща и не бива да носят едно име; поправено е в етикета
          (src/views/inventory-sessions.js), не в мярката. */
       const active = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE ${fundByStatusPlain}`).get().n;
+      /* СЪЩИЯТ ФОНД, НО В ДОКУМЕНТИ (v2.4.61). Мярката на НОРМАТА по чл. 40,
+         т. 2 остава инвентарни номера — виж дългата бележка точно отгоре и
+         handlers/dashboard.js: проверката се прави чрез сканиране на номер и
+         Таблото мери същото. Но нормативът по чл. 41 (допустим отпад) се
+         сравнява с ЛИПСИТЕ, а те от тази версия се броят в библиотечни
+         документи (виж заглавната бележка на модула). Ако тук останеше старото
+         `naturalLoss(active, …)`, екранът щеше да показва един допустим отпад,
+         а подписаният протокол за същата проверка — друг. Затова числото за
+         чл. 41 се смята от ДОКУМЕНТИТЕ, а числото за нормата — от номерата, и
+         двете се връщат отделно, за да може екранът да каже кое какво е. */
+      const activeDocs = db.prepare(`SELECT COALESCE(SUM(${QTY_JOIN}), 0) AS n ${FROM_BOOKS_INV}
+        WHERE ${fundByStatus}`).get().n;
       const s = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
       const pct = pctRequired(active);
       /* Напредъкът за ГОДИНАТА се смята тук, а не чрез сумиране на сесиите в
@@ -80,8 +152,8 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         JOIN books b ON b.id = sc.book_id
         WHERE substr(s.date,1,4) = ? AND ${fundByStatus}
       `).get(y).n;
-      return { active, pct, target: Math.ceil(active * pct / 100), scannedYear,
-        naturalLoss: naturalLoss(active, s.free_access_pct) };
+      return { active, activeDocs, pct, target: Math.ceil(active * pct / 100), scannedYear,
+        naturalLoss: naturalLoss(activeDocs, s.free_access_pct) };
     })
   );
   ipcMain.handle('inventorySessions:start', (e, s) =>
@@ -93,7 +165,13 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       if (!isValidIsoDate(s && s.date)) throw new Error('Датата на проверката липсва или е невалидна.');
       const db = getDb();
       // Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
-      const pool = db.prepare(`SELECT COUNT(*) AS n FROM books WHERE ${fundByStatusPlain} ${s.department ? 'AND department = @department' : ''}`)
+      /* Обхватът се снима в ДОКУМЕНТИ (v2.4.61) — същата мярка, с която
+         приключването смята pool_final и с която протоколът по чл. 40 брои
+         липсите. Дотук тук се броеше COUNT(*), тоест текущата проверка
+         показваше „В обхвата 8“, а протоколът за същата проверка — 10.
+         Условието и изразът за бройката идват от db/fund-sql.js. */
+      const pool = db.prepare(`SELECT COALESCE(SUM(${QTY_JOIN}), 0) AS n ${FROM_BOOKS_INV}
+        WHERE ${fundByStatus} ${s.department ? 'AND b.department = @department' : ''}`)
         .get(s.department ? { department: s.department } : {});
       /* Номер и година на протокола. Точно както при партидите (acquisitions:create):
          schema.sql няма UNIQUE(year, no) и не може да го получи наготово — съществуващи
@@ -136,11 +214,30 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(id);
       if (!s) return null;
+      /* Бройката пътува с всеки ред (v2.4.61): екранът „проверка в ход“ и
+         протоколът броят библиотечни документи, а не редове — виж заглавната
+         бележка на модула. Стар запис с inventory.quantity = 3 е един сканиран
+         ред, но три проверени документа. */
       s.scans = db.prepare(`
-        SELECT sc.*, b.inv_number, b.title FROM inventory_session_scans sc
-        JOIN books b ON b.id = sc.book_id WHERE sc.session_id = ? ORDER BY sc.scanned_at DESC
+        SELECT sc.*, b.inv_number, b.title, ${QTY_MISSING} AS quantity FROM inventory_session_scans sc
+        JOIN books b ON b.id = sc.book_id
+        LEFT JOIN inventory inv ON inv.book_id = sc.book_id
+        WHERE sc.session_id = ? ORDER BY sc.scanned_at DESC
       `).all(id);
-      s.missing = db.prepare('SELECT * FROM inventory_session_missing WHERE session_id = ?').all(id);
+      /* Подредбата е по инвентарен номер — така се чете списъкът на липсите в
+         протокола и така се сверява с рафта. Дотук редовете излизаха в реда, в
+         който приключването ги е вписало (ред на таблицата books). */
+      s.missing = db.prepare(`
+        SELECT m.*, COALESCE(m.quantity, ${QTY_MISSING}) AS quantity FROM inventory_session_missing m
+        LEFT JOIN inventory inv ON inv.book_id = m.book_id
+        WHERE m.session_id = ? ORDER BY m.inv_number, m.id
+      `).all(id);
+      /* Двете числа за липсите: документи (мярката по чл. 40 – 41) и редове
+         (колко инвентарни номера са изброени в таблицата на протокола). */
+      s.missingDocs = s.missing.reduce((n, m) => {
+        const q = Number(m.quantity);
+        return n + (Number.isFinite(q) && q >= 0 ? q : 1);
+      }, 0);
       /* Допустимите естествени загуби по чл. 41 се смятат ТУК, за да може протоколът
          да ги отпечата. Одит на документите v2.4.17: приключването ги връщаше,
          прозорецът ги показваше и сравняваше с тях, екранът ги показваше — а
@@ -206,7 +303,11 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         }
         throw err;
       }
-      return { inv_number: b.inv_number, title: b.title };
+      /* Бройката се връща на екрана (v2.4.61): броячът „Намерени“ се вдига на
+         място, без пречертаване (иначе дневникът на сканиранията се трие), и
+         трябва да върви с мярката на протокола — библиотечни документи. */
+      const qty = db.prepare('SELECT COALESCE(quantity, 1) AS q FROM inventory WHERE book_id = ?').get(b.id);
+      return { inv_number: b.inv_number, title: b.title, quantity: qty ? qty.q : 1 };
     })
   );
   /* Приключване на сесията. `mode` е задължителен избор на библиотекаря:
@@ -248,6 +349,32 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const pool = db.prepare(`SELECT id, inv_number, title, author, price, status FROM books
           WHERE ${fundByStatusPlain} ${s.department ? 'AND department = ?' : ''}`)
           .all(...(s.department ? [s.department] : []));
+        /* БРОЙКИТЕ — ЕДНА ЗАЯВКА ЗА ЦЕЛИЯ ОБХВАТ (v2.4.61).
+           Протоколът по чл. 40 – 41 брои библиотечни ДОКУМЕНТИ (виж заглавната
+           бележка на модула), тоест на всеки ред трябва inventory.quantity. Тя
+           НЕ се съединява към заявката отгоре нарочно: нейната проекция е
+           изрично изброена и заварена с тест (test/perf-v2448.test.js) — тя е
+           причината приключването да не тегли 14 МБ за шест числа, и не бива да
+           се разваля мимоходом. Затова бройките идват отделно, но пак с ЕДНА
+           заявка върху същия обхват: `SELECT … FROM inventory` вътре в
+           обхождането би било 15 000 компилации на един и същ SQL — точно
+           грешката, срещу която е писан онзи тест.
+           Редовете БЕЗ запис в inventory (стара или внесена база) не се връщат
+           тук и падат на 1 в qtyOf — същото, което прави COALESCE(…, 1) в
+           db/fund-sql.js: ред без бройка е поне един документ. */
+        const qtyById = new Map(db.prepare(`SELECT i.book_id, i.quantity FROM inventory i
+          JOIN books b ON b.id = i.book_id
+          WHERE ${fundByStatus} ${s.department ? 'AND b.department = ?' : ''}`)
+          .all(...(s.department ? [s.department] : [])).map(r => [r.book_id, r.quantity]));
+        /* Мярката на целия протокол: библиотечни документи по чл. 40 – 41.
+           Липсваща бройка е един документ; отрицателна или нечислова стойност от
+           заварена база се брои за един, за да не вади числа от сбора — изричната
+           нула се уважава и си личи в „Настройки“ → „Проверка на данните“. */
+        const qtyOf = (b) => {
+          const q = Number(qtyById.has(b.id) ? qtyById.get(b.id) : 1);
+          return Number.isFinite(q) && q >= 0 ? q : 1;
+        };
+        const docs = (arr) => arr.reduce((n, b) => n + qtyOf(b), 0);
         const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
         const scannedSet = new Set(scannedIds);
         /* Одит v2.4.24: извинени са само заетите. Документ „за реставрация“ е при
@@ -271,12 +398,19 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         // При представителна проверка непроверените НЕ са липсващи — те просто не
         // са влизали в обхвата на тазгодишната извадка.
         const missing = mode === 'full' ? unchecked : [];
+        /* БРОЙКАТА СЕ СНИМА ЗАЕДНО С ЦЕНАТА И ЗАГЛАВИЕТО (v2.4.61).
+           Редът тук е снимка към деня на приключването — затова носи заглавие,
+           автор и цена, а не само book_id. Бройката липсваше от снимката и се
+           четеше наживо от inventory: поправка на „Налични бройки“ на вече
+           липсващ документ променяше вече отпечатания и подписан протокол със
+           задна дата. Сега се пази и тя — точно както deaccession_items.quantity
+           пази бройката в акта (чл. 35, ал. 2). */
         const insMissing = db.prepare(`
-          INSERT INTO inventory_session_missing (session_id, book_id, inv_number, title, author, price)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO inventory_session_missing (session_id, book_id, inv_number, title, author, price, quantity)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         missing.forEach(b => {
-          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price);
+          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price, qtyOf(b));
         });
         /* Отбелязването като „липсващ“ е ЕДНА заявка върху току-що вписаните редове,
            а не по една на документ. Дотук в обхождането стоеше db.prepare(...) —
@@ -305,7 +439,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            по-горе: четирите числа в протокола трябва да се събират до обхвата.
            Заета книга, която все пак е сканирана (върната на гишето, но още
            нерегистрирана), е ПРОВЕРЕНА — тя е била в ръцете на комисията. */
-        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id)).length;
+        const onLoanInPool = docs(pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id)));
         /* „Проверени“ се брои СРЕЩУ ОБХВАТА, а не като брой сканирания. Обхватът
            се смята наново при приключване (книга, отчислена или преместена в друг
            отдел, докато проверката тече, вече не е в него), а сканиранията са
@@ -316,20 +450,35 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            от 9 в подписания протокол по чл. 40. Излезлите от обхвата се връщат
            ОТДЕЛНО (outOfScope), за да ги обяви протоколът, вместо да ги скрие. */
         const poolIds = new Set(pool.map(b => b.id));
-        const scannedInPool = scannedIds.filter(id => poolIds.has(id)).length;
-        const outOfScope = scannedIds.length - scannedInPool;
+        /* Сканираното се брои през ПУЛА, а не през списъка с book_id: така
+           бройката на всеки проверен документ идва от същия ред, от който идва
+           и бройката в обхвата, и „проверени + липсващи + заети + за
+           реставрация“ пак се събира точно до обхвата — вече в документи. */
+        const scannedInPoolRows = pool.filter(b => scannedSet.has(b.id));
+        const scannedInPool = docs(scannedInPoolRows);
+        const outOfScope = scannedIds.length - scannedInPoolRows.length;
+        const poolDocs = docs(pool);
+        const missingDocs = docs(missing);
+        const excusedDocs = docs(excused);
         db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ? WHERE id = ?')
-          .run(mode, pool.length, onLoanInPool, excused.length, scannedInPool, sessionId);
+          .run(mode, poolDocs, onLoanInPool, excusedDocs, scannedInPool, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
-          ' — проверени ' + scannedInPool + ', липсващи ' + missing.length + ' от ' + pool.length +
+          /* Числата в следата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ, както в протокола.
+             Когато инвентарните номера са по-малко (стар неразделен запис), се
+             казва и това — иначе следата и таблицата в протокола изглеждат като
+             две различни проверки. */
+          ' — проверени ' + scannedInPool + ', липсващи ' + missingDocs +
+          (missingDocs !== missing.length ? ' (под ' + missing.length + ' инвентарни номера)' : '') +
+          ' от ' + poolDocs + ' библиотечни документа' +
           (outOfScope ? ', ' + outOfScope + ' сканирани излязоха от обхвата по време на проверката' : '') +
-          (excused.length ? ', ' + excused.length + (excused.length === 1 ? ' документ за реставрация (не се проверява на място)'
+          (excused.length ? ', ' + excusedDocs + (excusedDocs === 1 ? ' документ за реставрация (не се проверява на място)'
             : ' документа за реставрация (не се проверяват на място)') : ''));
         const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
         return {
-          mode, scanned: scannedInPool, missing: missing.length, pool: pool.length, outOfScope,
-          unchecked: unchecked.length, onLoan: onLoanInPool, atBinder: excused.length,
-          allowedLoss: naturalLoss(pool.length, s2.free_access_pct)
+          mode, scanned: scannedInPool, missing: missingDocs, missingRows: missing.length,
+          pool: poolDocs, poolRows: pool.length, outOfScope,
+          unchecked: docs(unchecked), onLoan: onLoanInPool, atBinder: excusedDocs,
+          allowedLoss: naturalLoss(poolDocs, s2.free_access_pct)
         };
       });
       return tx.immediate();

@@ -389,7 +389,13 @@ function initDb() {
      акт, таблото на прясна база гърмеше с „no such column“, преди някой изобщо
      да е отворил „Отчисляване“. */
   ensureColumns('deaccession_acts', {
-    revoked_at: 'TEXT', revoke_reason: 'TEXT', revoked_by: 'TEXT'
+    revoked_at: 'TEXT', revoke_reason: 'TEXT', revoked_by: 'TEXT',
+    /* v2.4.61: препратката към протокола от инвентаризация (чл. 40), пренесена
+       от проекта, и подписът на СЪСТАВЯНЕТО — дотук се знаеше кой е анулирал
+       акта, но не и кой го е съставил. Разпечатката на акта ги чете и двете,
+       затова колоните трябва да ги има още преди първото отваряне на
+       „Отчисляване“, не чак при първия съставен акт. */
+    note: 'TEXT', created_at: 'TEXT', created_by: 'TEXT'
   });
   /* Изгубен/невърнат документ (v2.4.56) — по същата причина като по-горе: тези
      колони се четат и извън handlers/loans.js. Статистиката вади „спазени
@@ -400,11 +406,25 @@ function initDb() {
   ensureColumns('loans', {
     lost: 'INTEGER', lost_date: 'TEXT', lost_resolution: 'TEXT', lost_amount: 'REAL',
     lost_account_line_id: 'INTEGER', lost_replacement_book_id: 'INTEGER',
-    lost_replacement_note: 'TEXT', lost_note: 'TEXT'
+    lost_replacement_note: 'TEXT', lost_note: 'TEXT',
+    /* v2.4.61: колко от loans.fine е начислено от акта за отчисляване по
+       чл. 30, т. 5 — за да върне анулирането точно толкова и забавата да не се
+       начисли два пъти (виж db/schema.sql при самата колона). */
+    deaccession_fine: 'REAL',
+    /* v2.4.61: и редът в account_lines, с който актът е начислил тази забава —
+       за да може анулирането да го върне (виж db/schema.sql при колоната). */
+    deaccession_fine_line_id: 'INTEGER'
   });
   ensureColumns('settings', {
     lost_price_multiplier: 'REAL', lost_fallback_amount: 'REAL'
   });
+  /* v2.4.61: бройката на липсващия документ, снимана при приключването на
+     проверката — протоколът по чл. 40 – 41 брои документи, а не редове, и
+     отпечатаният протокол не бива да се променя, ако някой после поправи
+     „Налични бройки“ (виж db/schema.sql при самата колона). Заварените редове
+     остават NULL и се четат като „наживо“ — за тях снимка няма и не може да
+     има. */
+  ensureColumns('inventory_session_missing', { quantity: 'INTEGER' });
   /* Еднократно допълване на бройките за актовете, съставени ПРЕДИ тази версия.
      Без него КДБФ спира да се връзва между годините: наличността се смята по
      живите бройки на документите (3 екземпляра), а отчисленото по празната
@@ -553,7 +573,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 15;
+const CURRENT_SCHEMA_VERSION = 16;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -812,6 +832,88 @@ const MIGRATIONS = [
     вЕвро('periodical_issues', 'price');
     вЕвро('settings', 'fine_per_day');
     вЕвро('settings', 'annual_fee');
+  } },
+  /* ========================= ПЕРИОДИКАТА (v2.4.61) =========================
+     Четири неща, които новата схема (db/schema.sql) дава на всяка НОВА база, а
+     заварените — тоест всяка работеща библиотека — трябва да получат тук.
+
+     1) ТРИГЕРИТЕ ЗА НОМЕНКЛАТУРИТЕ СЕ ПРИЛАГАТ НАНОВО, защото в списъка влиза
+        нова стойност: периодичност „ежедневно“ (вестникът — най-често срещаната
+        периодика в читалището). applyEnumTriggers() пресъздава тригерите с DROP
+        преди CREATE от v2.4.56 нататък, тоест повторното прилагане наистина
+        обновява списъка; без този ред първото заведено ежедневно издание в
+        заварена база би паднало с „Непозната стойност за periodicals.freq“ —
+        съобщение, което не значи нищо за човека пред екрана.
+
+     2) categories.code — непроменливият ключ на началните видове документи.
+        Попълва се по ИМЕ, но само където кодът още е свободен: библиотека, която
+        вече е преименувала „продължаващо издание“, няма да съвпадне по име и
+        остава без код — затова отдолу има и резервно разпознаване по вида на
+        документите, които вече са вписани като годишни комплекти. Всичко
+        останало си остава без код и нищо в програмата не зависи от него.
+
+     3) UNIQUE(periodical_id, issue_no, date) върху кардекса. Заварена база може
+        да съдържа дубликати от годините, в които програмата ги приемаше — тогава
+        създаването на индекса се проваля. Това НЕ бива да спре стартирането
+        (миграциите текат в транзакция и една грешка би оставила програмата
+        незапускаема), затова провалът се хваща, описва се в конзолата и в
+        одитната следа, и остава проверката в handlers/periodicals.js. Нищо не се
+        трие само: два еднакви реда в кардекса значат или сгрешено вписване, или
+        два действително получени екземпляра, и само библиотекарят знае кое.
+
+     4) Индекс (periodical_id, date) — кардексът вече се отваря ПО ГОДИНА
+        (periodicals:get), тоест датата се пита при всяко отваряне на картон. */
+  { version: 16, run: () => {
+    applyEnumTriggers(db);
+    ensureColumns('categories', { code: 'TEXT' });
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_code ON categories(code)');
+    const seeded = [
+      ['книга', 'book'], ['продължаващо издание', 'periodical'], ['графично издание', 'graphic'],
+      ['картографско издание', 'cartographic'], ['нотно издание', 'music'], ['аудиодокумент', 'audio'],
+      ['видеодокумент', 'video'], ['електронен документ', 'electronic'], ['патент/стандарт', 'patent'],
+      ['друго', 'other']
+    ];
+    const setCode = db.prepare('UPDATE categories SET code = ? WHERE name = ? AND code IS NULL '
+      + 'AND NOT EXISTS (SELECT 1 FROM categories c2 WHERE c2.code = ?)');
+    for (const [name, code] of seeded) setCode.run(code, name, code);
+    /* Резервното разпознаване за преименуван вид на периодиката: ако никой ред
+       няма код 'periodical', но във фонда вече има инвентирани годишни комплекти,
+       техният вид Е видът на периодиката — както и да се казва днес.
+       ГЛЕДА СЕ САМО СРЕД ВИДОВЕТЕ БЕЗ КОД (поправка след прегледа на кръга).
+       Заварена база, в която част от годишните комплекти са вписани по погрешка
+       под вида „книга“, даваше на познаването точно него — и UPDATE-ът отнемаше
+       кода 'book', за да сложи 'periodical' на негово място. От този миг
+       Дневникът брои ВСЯКО заемане на книга в реда „Периодични издания“ на
+       Раздел Б (handlers/dnevnik.js чете вида през кода), а нищо на екрана не
+       подсказва защо. Кодът на вече разпознат вид не се пипа; ако всички
+       кандидати са с код, периодиката просто остава без код — точно както при
+       всеки друг преименуван вид, и всичко продължава да работи по име. */
+    if (!db.prepare("SELECT 1 FROM categories WHERE code = 'periodical'").get()) {
+      const guess = db.prepare(`SELECT b.category_id AS id, COUNT(*) AS n FROM books b
+        JOIN categories c ON c.id = b.category_id
+        WHERE b.volume = 'годишен комплект' AND c.code IS NULL
+        GROUP BY b.category_id ORDER BY n DESC LIMIT 1`).get();
+      if (guess) {
+        db.prepare("UPDATE categories SET code = 'periodical' WHERE id = ?").run(guess.id);
+        const nm = db.prepare('SELECT name FROM categories WHERE id = ?').get(guess.id);
+        logAudit('Видове документи', 'видът „' + (nm ? nm.name : guess.id) + '“ е разпознат като вида за '
+          + 'периодика (по ' + guess.n + ' вече инвентирани годишни комплекта) — Дневникът и инвентирането '
+          + 'вече го намират по вътрешен код, а не по име');
+      }
+    }
+    try {
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_per_issue_unique ON periodical_issues(periodical_id, issue_no, date)');
+    } catch (err) {
+      const dups = db.prepare(`SELECT COUNT(*) AS n FROM (
+        SELECT periodical_id, issue_no, date FROM periodical_issues
+        WHERE date IS NOT NULL GROUP BY periodical_id, issue_no, date HAVING COUNT(*) > 1)`).get().n;
+      console.error('Кардексът на периодиката съдържа повтарящи се броеве — уникалният индекс не е създаден:', err.message);
+      logAudit('Периодика', 'в кардекса има ' + dups + ' повтарящи се броя (един и същ номер и дата на едно издание) '
+        + 'и затова защитата в базата не можа да бъде включена: ' + err.message
+        + '. Новите вписвания се пазят от проверката в програмата; заварените повторения прегледайте в картона на '
+        + 'изданието и изтрийте излишния ред — сборът за годината става цена на годишния комплект в инвентарната книга.');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_per_issue_year ON periodical_issues(periodical_id, date)');
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от
@@ -1701,7 +1803,20 @@ require('./handlers/acquisitions')(ipcMain, { getDb: () => db, run, logAudit, BO
    Извадени в handlers/deaccession-acts.js (Фаза 4, стъпка 15 от разбиването
    на монолита main.js на модули по домейн). */
 require('./handlers/deaccession-acts')(ipcMain, {
-  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode
+  getDb: () => db, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode,
+  /* v2.4.61: актът по чл. 30, т. 5 закрива заемането на НЕвърнат документ така,
+     както го закрива и „Документът е изгубен“ — с начислена забава и събитие от
+     вид „изгубен“. За двете му трябват функции, които живеят по-надолу в този
+     файл:
+       • logEvent е hoisted function declaration (виж бележката при него) и се
+         подава пряко, точно както при handlers/housebound.js;
+       • closedDaysBetween идва от handlers/calendar.js, който се регистрира СЛЕД
+         този ред, затова се подава обвит в стрелкова функция: тя се изпълнява
+         чак при съставяне на акт, когато const-ът отдавна е инициализиран.
+         Смисълът е забавата в акта да е СЪЩОТО число, което екранът „Просрочени“
+         и напомнителното писмо показват — три различни суми за едно просрочие
+         вече веднъж са били дефект (виж бележката при loans:overdue). */
+  logEvent, closedDaysBetween: (a, b) => closedDaysBetween(a, b), today
 });
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
@@ -1876,10 +1991,23 @@ const { dnevnikSumRow } = require('./handlers/dnevnik')(ipcMain, {
 require('./handlers/analytics')(ipcMain, { getDb: () => db, run, logAudit });
 require('./handlers/persons')(ipcMain, { getDb: () => db, run, logAudit });
 require('./handlers/chronicle')(ipcMain, { getDb: () => db, run, logAudit });
+/* logAudit СЕ ПОДАВА И НА ДВАТА ПОСЛЕДНИ КРАЕВЕДСКИ МОДУЛА (v2.4.61).
+   =====================================================================
+   Дотук тези два модула — единствените в цялата програма — се извеждаха БЕЗ
+   logAudit. Одитът на кръг 37 показа какво значи това на практика: добавянето
+   и махането на краеведска връзка и на снимка не оставяха никаква следа, а
+   връзката „личност → документ“ е точно това, което после обосновава една
+   краеведска справка пред проверяващ.
+   От същия кръг двата модула вече вписват следа, но със СОБСТВЕНА резервна
+   функция, която пише направо в audit_log — и затова колоната `user` оставаше
+   празна: името на служителя (CURRENT_USER) живее тук, в main.js, и се долепя
+   именно от logAudit. Един ред на всеки от двата require-а стига следата да
+   бъде подписана с човека, който е направил промяната; модулите ползват
+   deps.logAudit, щом бъде подаден (виж бележките в двата файла). */
 require('./handlers/local-photo')(ipcMain, {
-  getDb: () => db, run, dialog, getMainWindow: () => mainWindow, fs, path, LOGO_MIME, LOCAL_PHOTO_MAX_BYTES
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, LOGO_MIME, LOCAL_PHOTO_MAX_BYTES
 });
-require('./handlers/links')(ipcMain, { getDb: () => db, run });
+require('./handlers/links')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ============================================================================
    ПРИЕМАНЕ НА ДАННИ ОТ ДРУГИ СИСТЕМИ → handlers/data-import.js (Фаза 4,

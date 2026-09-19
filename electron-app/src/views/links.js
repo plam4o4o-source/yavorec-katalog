@@ -26,13 +26,29 @@ function linkListHtml(links) {
   return `<table class="ledger"><tbody>${links.map(l => `<tr>
     <td style="width:110px"><span class="tag">${esc(l.to_kind)}</span></td>
     <td>${esc(l.label)}</td>
-    <td style="width:80px"><button class="btn sm dgr" onclick="lnkDel(${l.id})">Махни</button></td>
+    <td style="width:80px"><button class="btn sm dgr" onclick="lnkDel(${l.id}, '${jsq(l.to_kind + ': ' + l.label)}')">Махни</button></td>
   </tr>`).join('')}</tbody></table>`;
 }
+/* ЕДИН ЗНАК ПАК Е ИНВЕНТАРЕН НОМЕР (v2.4.61).
+   =========================================================================
+   Полето подсказва „заглавие, автор, инв. №…“, но правилото „поне 2 знака“
+   изключваше точно най-краткото истинско питане: документ с инвентарен номер 1
+   (а в новооткрита библиотека първите номера са едноцифрени) изобщо не се
+   търсеше. Обратното също беше счупено: „инв. № 2“, изписано точно както го
+   подсказва полето, не намираше нищо, защото представката се изрязваше само в
+   прозореца „Аналитично описание“, не и тук.
+   Сега представката се разпознава в самия канал links:search (виж бележката
+   там), тоест двата прозореца питат по един и същ начин, а прагът от два знака
+   важи само за ТЕКСТ — при чисто число той няма смисъл. Прагът остава за
+   текста, защото „а“ би върнало целия фонд. */
 async function lnkSearch() {
-  const kind = $('#lnkKind').value, q = $('#lnkQ').value.trim();
+  const kind = $('#lnkKind').value, raw = $('#lnkQ').value.trim();
   const sel = $('#lnkPick');
-  if (q.length < 2) { sel.innerHTML = '<option value="">— въведете поне 2 знака —</option>'; return; }
+  // ANL_INV_RE е същият израз, който ползва и прозорецът „Аналитично описание“
+  // (src/views/analytics.js) — два прозореца, едно правило.
+  const m = kind === 'книга' ? ANL_INV_RE.exec(raw) : null;
+  const q = m ? m[1] : raw;
+  if (!q || (q.length < 2 && !/^\d+$/.test(q))) { sel.innerHTML = '<option value="">— въведете поне 2 знака —</option>'; return; }
   const rows = await call(window.api.links.search({ kind, q }));
   sel.innerHTML = (rows || []).length
     ? (rows || []).map(r => `<option value="${r.id}">${esc(r.label)}</option>`).join('')
@@ -48,10 +64,21 @@ async function lnkAdd(fromKind, fromId) {
   markSaved();
 }
 window.lnkAdd = lnkAdd;
-async function lnkDel(id) {
-  await call(window.api.links.delete(id), 'Връзката е премахната.');
-  const btn = event && event.target;
+/* „МАХНИ“ ПИТА (v2.4.61). Копчето стои на всеки ред в списъка със свързани
+   материали и дотук се изпълняваше от първия клик, без въпрос — а редовете са
+   един под друг и близо един до друг. Връзката не се възстановява с едно
+   натискане: трябва да се намери отново записът в търсачката и да се свърже
+   наново, а бележката към връзката се губи. Всички останали изтривания в
+   програмата питат; това беше единственото, което не питаше. */
+async function lnkDel(id, label) {
+  /* Копчето се запомня ПРЕДИ въпроса: глобалното `event` важи само докато тече
+     самият обработчик, а след await-а (диалогът, после каналът) то вече е
+     празно и резервният път по-долу би останал без панел. */
+  const btn = (typeof event !== 'undefined' && event) ? event.target : null;
   const panel = btn && btn.closest('.card');
+  if (!await askConfirm('Да се махне ли връзката' + (label ? ' „' + label + '“' : '') + '?',
+    { kind: 'delete', okLabel: 'Махни' })) return;
+  await call(window.api.links.delete(id), 'Връзката е премахната.');
   // Опреснява списъка от текущия отворен запис.
   if (window._LINK_CTX) await refreshLinks(window._LINK_CTX.kind, window._LINK_CTX.id);
   else if (panel) panel.querySelector('#linkList').innerHTML = '<div class="hint">Няма свързани материали.</div>';

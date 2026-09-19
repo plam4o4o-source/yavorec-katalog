@@ -6,11 +6,81 @@
 // запис на katalog.json, точно както shelves.js).
 const { isValidIsoDate, parseRegisterNo, resolveScannedBook } = require('../security-utils');
 /* Покритието на начислението за изгубен документ се смята на ЕДНО място — в
-   handlers/account.js, където живее и правилото „най-старото задължение първо“. */
-const { chargeCoverage } = require('./account');
+   handlers/account.js, където живее и правилото „най-старото задължение първо“.
+   chargeLost пише самото начисление — пак там, защото читателската сметка има
+   ЕДНО място, което пише в нея (виж дългата бележка над функцията). */
+const { chargeCoverage, chargeLost, chargeOverdueFine } = require('./account');
+const { EVENT_KIND_LOST } = require('../db/enum-triggers');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode } = deps;
+  const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode,
+    /* Трите допълнителни зависимости (v2.4.61) идват от main.js и са НЕЗАДЪЛЖИТЕЛНИ,
+       защото този модул се регистрира и самостоятелно в тестовете, с ръчно сглобен
+       deps-обект. Всяка от тях има поведение „по подразбиране“ по-долу, което е
+       по-бедно, но никога не гърми. */
+    logEvent, closedDaysBetween, today } = deps;
+
+  /* Днешната дата — през main.js, когато е подадена, за да е ЕДНА и съща с тази,
+     с която се датират заемането, връщането и дневникът. */
+  const todayStr = () => (typeof today === 'function' ? today() : new Date().toISOString().slice(0, 10));
+  const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
+  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  /* Дни забава, изчистени от затворените дни в календара — ОГЛЕДАЛО на
+     effectiveDaysLate() в handlers/loans.js, която ползва същата функция
+     closedDaysBetween() от handlers/calendar.js. Тук тя се подава през deps,
+     а не се смята наново, точно защото програмата вече веднъж е показвала ТРИ
+     различни суми за едно просрочие (виж бележката при loans:overdue): екранът
+     „Просрочени“ иска едно, писмото друго, гишето трето. Актът по чл. 30, т. 5
+     затваря заемане и начислява забава — числото в него ТРЯБВА да е същото,
+     което библиотекарката е видяла в „Просрочени“ минута по-рано.
+     Ако модулът е зареден без календара (самостоятелна регистрация в тест),
+     затворените дни не се вадят — по-добре груб брой дни, отколкото отказ да се
+     начисли каквото и да било. */
+  function effectiveDaysLate(dueDate, inDate) {
+    if (!dueDate || !inDate || inDate <= dueDate) return 0;
+    const raw = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+    let closed = 0;
+    if (typeof closedDaysBetween === 'function') {
+      try { closed = Number(closedDaysBetween(dueDate, inDate)) || 0; }
+      catch (err) {
+        /* Календарът не бива да спира съставянето на акт — но мълчаливо
+           различно число е точно болестта, срещу която е бележката по-горе. */
+        logAudit('Отчисляване', 'ВНИМАНИЕ: затворените дни не можаха да се прочетат от календара ('
+          + err.message + ') — забавата по закритото заемане е смятана по календарни дни.');
+      }
+    }
+    return Math.max(0, raw - closed);
+  }
+  /* Размерът на обезщетението за НЕВЪРНАТ документ — същото правило, по което го
+     предлага и прозорецът „Документът е изгубен“ (handlers/loans.js: lostPolicy +
+     suggestLostAmount): кратно на инвентарната цена, а за документ без вписана
+     цена — резервна сума. Правилото е на библиотеката (вътрешни правила), не на
+     наредбата, затова се чете от настройките и се променя оттам.
+     Числата са преписани, а не внесени, защото handlers/loans.js не изнася нищо
+     навън (целият модул е една регистрационна функция). Ако правилото се промени,
+     двете места ТРЯБВА да се сменят заедно — затова тук стои изричен коментар, а
+     не само константи. */
+  const LOST_MULTIPLIER_DEFAULT = 3;
+  const LOST_FALLBACK_DEFAULT = 10;
+  function lostCompensation(db, price) {
+    let s = {};
+    try { s = db.prepare('SELECT lost_price_multiplier, lost_fallback_amount FROM settings WHERE id = 1').get() || {}; }
+    catch (err) {
+      /* Стара база без двете настройки (добавят се от main.js/ensureColumns и от
+         handlers/loans.js). Правилото пада към подразбиращото се, а следата казва
+         защо — иначе начислена сума без обяснение изглежда като хрумване. */
+      logAudit('Отчисляване', 'ВНИМАНИЕ: правилото за обезщетение не можа да се прочете от настройките ('
+        + err.message + ') — ползвано е подразбиращото се (' + LOST_MULTIPLIER_DEFAULT + '-кратно на цената).');
+    }
+    const m = Number(s.lost_price_multiplier);
+    const f = Number(s.lost_fallback_amount);
+    const mult = Number.isFinite(m) && m > 0 ? m : LOST_MULTIPLIER_DEFAULT;
+    const fallback = Number.isFinite(f) && f > 0 ? f : LOST_FALLBACK_DEFAULT;
+    const p = Number(price);
+    return Number.isFinite(p) && p > 0
+      ? { amount: toCents(p * mult), basis: mult + '-кратно на цената ' + toCents(p).toFixed(2) + ' €' }
+      : { amount: toCents(fallback), basis: 'документ без вписана цена' };
+  }
 
   /* Кои заемания са били ПРИНУДИТЕЛНО закрити от акт за отчисляване. Без този
      белег анулирането на акта връщаше книгата „наличен“, но заемът оставаше
@@ -25,8 +95,30 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   let loanActColumnChecked = null;
   function ensureLoanActColumn(db) {
     if (loanActColumnChecked === db) return;
-    const has = db.prepare('PRAGMA table_info(loans)').all().some(c => c.name === 'deaccession_act_id');
-    if (!has) db.exec('ALTER TABLE loans ADD COLUMN deaccession_act_id INTEGER');
+    const loanCols = db.prepare('PRAGMA table_info(loans)').all();
+    if (!loanCols.some(c => c.name === 'deaccession_act_id')) db.exec('ALTER TABLE loans ADD COLUMN deaccession_act_id INTEGER');
+    /* КОЛКО ОТ ЗАБАВАТА Е НАЧИСЛЕНА ОТ САМИЯ АКТ (v2.4.61).
+       Актът по чл. 30, т. 5 затваря заемането на невърнат документ и начислява
+       забавата до деня на акта (виж closeLoansAsNotReturned по-долу). Анулирането
+       отваря заемането обратно — и ако начислената от акта забава остане в
+       loans.fine, екранът „Просрочени“ я събира ВТОРИ път (той добавя дните от
+       падежа до днес към вече записаното). Затова се помни точно колко е добавил
+       актът и точно толкова се връща при анулиране. Пресмятането наново е
+       по-лошо: тарифата (fine_per_day) и календарът може да са се променили
+       междувременно и връщането нямаше да съвпада с начисленото. */
+    if (!loanCols.some(c => c.name === 'deaccession_fine')) db.exec('ALTER TABLE loans ADD COLUMN deaccession_fine REAL');
+    /* И КЪМ КОЙ РЕД В СМЕТКАТА Е ОТИШЛА ТАЗИ ЗАБАВА (v2.4.61, втора поправка).
+       Първата поправка начисляваше забавата само в loans.fine. Същият кръг обаче
+       намери, че точно това е разликата, заради която обезщетението за забава
+       никога не стигаше до „Дължи по сметка“ на гишето и до справката „Събрани
+       обезщетения“: сметката на читателя се води в account_lines и това е
+       ЕДИНСТВЕНОТО място, което броят и гишето, и годишният отчет. Затова
+       забавата вече се начислява и там — през chargeOverdueFine() в
+       handlers/account.js, същата функция, която ползва и връщането на гишето, за
+       да не се разминат двата пътя — а тук се помни номерът на реда, за да може
+       анулирането да го махне по същото правило, по което маха и начислението за
+       самия документ: само ако по него още не е платено нищо. */
+    if (!loanCols.some(c => c.name === 'deaccession_fine_line_id')) db.exec('ALTER TABLE loans ADD COLUMN deaccession_fine_line_id INTEGER');
     /* Одит v2.4.24: анулирането връщаше ВСЕКИ документ на „наличен“, защото
        предишното състояние не се пазеше никъде. Най-честият ред по чл. 30, т. 6 е
        точно „липсващ“ (установен от инвентаризация) → отчислен: сгрешен акт,
@@ -113,6 +205,28 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     if (!actCols.some(c => c.name === 'revoked_at')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoked_at TEXT');
     if (!actCols.some(c => c.name === 'revoke_reason')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoke_reason TEXT');
     if (!actCols.some(c => c.name === 'revoked_by')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN revoked_by TEXT');
+    /* АКТЪТ НОСИ ПРЕПРАТКАТА КЪМ ПРОТОКОЛА, А АНУЛИРАНЕТО — И СЪСТАВЯНЕТО (v2.4.61).
+       =================================================================
+       Две липси, забелязани заедно, защото са едно и също по същество: за акта се
+       знаеше всичко за края му и нищо за началото му.
+
+       `note` — най-честият акт по чл. 30, т. 6 се ражда от протокол за
+       инвентаризация (чл. 40): екранът „Инвентаризация“ прави проект и записва в
+       него „Съставен от протокол за инвентаризация № 3 от 12.05.2026 г.“. Дотук
+       тази бележка умираше с проекта — deaccession_acts нямаше къде да я сложи, а
+       формата дори не я показваше (виж saveDraft по-долу). Резултатът: два
+       документа, които описват едно и също събитие, стояха несвързани, и
+       проверяващият няма как да мине от акта към протокола, нито обратно.
+       Оттук нататък бележката влиза в акта и се ПЕЧАТА в него.
+
+       `created_at`/`created_by` — анулирането отдавна записва кой и кога
+       (revoked_at/revoked_by), а съставянето — не. Тоест за отпадналия акт се
+       знаеше повече, отколкото за действащия. „Съставил“ е името от настройките
+       (библиотекарят), а не потребител на програмата: тя няма вход с парола и
+       не бива да се преструва, че има. */
+    if (!actCols.some(c => c.name === 'note')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN note TEXT');
+    if (!actCols.some(c => c.name === 'created_at')) db.exec("ALTER TABLE deaccession_acts ADD COLUMN created_at TEXT");
+    if (!actCols.some(c => c.name === 'created_by')) db.exec('ALTER TABLE deaccession_acts ADD COLUMN created_by TEXT');
     /* Проектът живее в СВОЯ таблица, не като ред в deaccession_acts с празен
        номер. Причината е практична: „акт“ се чете от шест места (КДБФ, таблото,
        статистиката, инвентарната книга, справките), а deaccession_acts.no е
@@ -226,6 +340,38 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         WHERE h.deaccession_act_id = ?
         ORDER BY h.placed_at, h.id
       `).all(id);
+      /* ЧИТАТЕЛИТЕ, ЧИИТО ЗАЕМАНИЯ Е ЗАКРИЛ ТОЗИ АКТ (v2.4.61) — по същата
+         причина, по която тук стоят и отказаните резервации: актът по чл. 30,
+         т. 5 начислява обезщетение на конкретен човек, а съобщението след
+         съставянето се затваря и изчезва. Прегледът на акта се отваря и след
+         месец — например когато читателят дойде да плати — и тогава отговорът
+         „какво точно му е начислено с този акт“ трябва да е тук.
+         LEFT JOIN към читателите: заемане на изтрит читател не бива да изчезва
+         от прегледа, защото сумата по него е реална. */
+      act.loans = db.prepare(`
+        SELECT l.id, l.date_out, l.date_due, l.date_in, l.fine, l.deaccession_fine,
+               l.lost_amount, l.lost_resolution, l.lost_account_line_id,
+               b.inv_number, b.title, b.author,
+               r.id AS reader_id, r.name AS reader_name, r.card_no, r.phone
+        FROM loans l
+        LEFT JOIN books b ON b.id = l.book_id
+        LEFT JOIN readers r ON r.id = l.reader_id
+        WHERE l.deaccession_act_id = ?
+        ORDER BY l.date_out, l.id
+      `).all(id);
+      /* Колко от начисленото е СЪБРАНО — същата функция, която ползва и
+         справката, за да не твърдят двете различни неща за едни и същи пари. */
+      act.loans.forEach(l => {
+        if (l.lost_account_line_id && chargeCoverage) {
+          try { l.charge = chargeCoverage(db, l.lost_account_line_id); }
+          catch (err) {
+            /* Прегледът на акта не бива да пада заради сметката — но мълчанието
+               тук би изглеждало като „нищо не е начислявано“. */
+            logAudit('Отчисляване', 'ВНИМАНИЕ: покритието на начислението по заемане № ' + l.id
+              + ' не можа да се прочете: ' + err.message);
+          }
+        }
+      });
       return act;
     })
   );
@@ -264,7 +410,29 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
        таблица — виж books:deaccessionedWithoutAct) влиза: „Проверка на данните“
        съветва „съставете акт от Отчисляване“, а дотук това поле отказваше точно
        него с „Няма документ с баркод/инв. №“ — задънена улица (одит v2.4.25). */
-    if (!b || deaccessionedByAct(b)) return undefined;
+    if (!b) return undefined;
+    /* ОТЧИСЛЕНИЯТ ДОКУМЕНТ СЕ НАЗОВАВА, А НЕ СЕ ОБЯВЯВА ЗА НЕСЪЩЕСТВУВАЩ (v2.4.61).
+       Дотук и двата случая връщаха undefined и екранът казваше едно и също:
+       „Няма документ с баркод/инв. № 3“. За библиотекарката това са два напълно
+       различни отговора: „сгрешила си номера“ (търси пак) срещу „този документ
+       вече е отчислен“ (нищо не се търси — актът е съставен и е в счетоводството).
+       Първото съобщение я праща да рови в инвентарната книга за номер, който си е
+       на мястото. Останалата част от програмата отдавна казва второто с думи —
+       handlers/links.js и handlers/analytics.js изписват буквално „отчислен с акт
+       № 3/2026“ — затова тук се ползва същият текст, дума по дума.
+       Отказът е с изключение (throw), а не с undefined, защото екранът различава
+       двете: при отказ показва обяснението на модула, при undefined — своето
+       общо „няма такъв номер“. */
+    if (deaccessionedByAct(b)) {
+      const a = b.deaccession_act_id
+        ? db.prepare('SELECT no, year, revoked_at FROM deaccession_acts WHERE id = ?').get(b.deaccession_act_id)
+        : null;
+      throw new Error('Инв. № ' + b.inv_number + ' е '
+        + (a && a.no != null ? 'отчислен с акт № ' + a.no + '/' + a.year : 'отчислен')
+        + (b.deaccession_date ? ' на ' + bgDate(b.deaccession_date) + ' г.' : '')
+        + ' и не влиза във втори акт. Ако актът е сгрешен, анулирайте го от „Отчисляване“ — '
+        + 'документът се връща във фонда и чак тогава може да влезе в нов акт.');
+    }
     const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
     b.fund_qty = q ? q.quantity : null;
     /* Ако документът е приключен като ИЗГУБЕН (v2.4.56), актът по чл. 30, т. 5
@@ -288,6 +456,28 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          в тези колони. Проверката е тук, ПРЕДИ транзакцията да пипне базата —
          както при loans.js — за да не се налага частично отменяне. */
       if (!isValidIsoDate(act.date)) throw new Error('Датата на акта липсва или е невалидна.');
+      /* АКТ С ДАТА В БЪДЕЩЕТО (v2.4.61).
+         =================================================================
+         isValidIsoDate() пита само „това дата ли е“, не и „възможна ли е“.
+         Затова акт № 1/2027, съставен днес, минаваше — и веднага скарваше двата
+         начина, по които програмата брои фонда:
+
+           • по СЪСТОЯНИЕ (таблото, инвентарната книга): документът става
+             „отчислен“ в мига на записа, тоест излиза от фонда ДНЕС;
+           • по ДАТИ (КДБФ Приложение № 2, чл. 37): наличността към 31.12 на
+             тази година го брои, защото deaccession_date е чак догодина.
+
+         Разликата се вижда в „Проверка на данните“ като необяснимо разминаване,
+         а КДБФ за СЛЕДВАЩАТА година получава ред за отчисляване, преди тя да е
+         започнала. Комисията не може да отчисли документ на дата, на която още
+         не е заседавала — датата на акта е денят на съставянето му (чл. 35). */
+      const nowStr = todayStr();
+      if (act.date > nowStr) {
+        throw new Error('Датата на акта (' + bgDate(act.date) + ' г.) е в бъдещето — днес е '
+          + bgDate(nowStr) + ' г. Актът се съставя от комисия и носи датата на заседанието ѝ (чл. 35); '
+          + 'бъдеща дата изважда документите от фонда днес, а в КДБФ (Приложение № 2) ги оставя '
+          + 'налични до 31.12. Поправете датата.');
+      }
       /* Причината е ЗАДЪЛЖИТЕЛНА (одит v2.4.25): parseInt('') е NaN, better-sqlite3 го
          записва като NULL, и актът — документ, който се подписва от комисията и отива
          в счетоводството — печаташе „на основание чл. 30, т. null“. Точно една причина
@@ -337,14 +527,45 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           throw new Error('Акт № ' + no + '/' + year + ' вече съществува — най-вероятно е създаден от друго работно място '
             + 'към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
         }
+        /* ДУПКА В ПОРЕДИЦАТА НА ГОДИНАТА (v2.4.61).
+           =================================================================
+           Чл. 35: „актовете се номерират, като номерацията започва всяка
+           календарна година от номер едно“. Формата предлагаше номера за
+           ТЕКУЩАТА година и не го преизчисляваше при смяна на датата — акт,
+           датиран назад към декември на миналата година, получаваше № 4 в
+           година, в която няма нито един акт. Регистърът излизаше с дупка
+           1 – 3, която не може да се обясни с нищо: по чл. 39 актовете не се
+           трият, тоест липсващите номера не са „изтрити“, а просто ги няма.
+           Екранът вече преизчислява номера при смяна на датата (виж
+           src/views/deaccession-acts.js), но екранът е един от четирите пътя
+           (внос, второ работно място, мобилен път, API), затова следата се
+           пише И тук: номерът се заема ЗАВИНАГИ и дупката трябва да е обяснима
+           поне от дневника. Отказ НЕ се прави — библиотека, която е започнала
+           номерацията си на хартия от друг номер, има право да продължи от
+           него; нередността се ЗАПИСВА, не се забранява. */
+        const maxNo = db.prepare('SELECT MAX(no) AS m FROM deaccession_acts WHERE year = ?').get(year).m || 0;
+        const gapNote = no > maxNo + 1
+          ? '; ВНИМАНИЕ: за ' + year + ' г. остават незаети номера '
+            + (maxNo + 1 === no - 1 ? '№ ' + (maxNo + 1) : '№ ' + (maxNo + 1) + ' – ' + (no - 1))
+            + ' — чл. 35 изисква номерата да текат последователно от 1 всяка календарна година'
+          : '';
         const info = db.prepare(`
-          INSERT INTO deaccession_acts (no, year, date, order_no, reason_code, reason_text, disposal, attach, committee1, committee2, committee3)
-          VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach, @committee1, @committee2, @committee3)
+          INSERT INTO deaccession_acts (no, year, date, order_no, reason_code, reason_text, disposal, attach,
+                                        committee1, committee2, committee3, note, created_at, created_by)
+          VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach,
+                  @committee1, @committee2, @committee3, @note, datetime('now'), @created_by)
         `).run({
           no, year, date: act.date, order_no: act.order_no || null,
           reason_code: reasonCode, reason_text: String(act.reason_text).trim(),
           disposal: act.disposal || null, attach: act.attach || null,
-          committee1: act.committee1 || null, committee2: act.committee2 || null, committee3: act.committee3 || null
+          committee1: act.committee1 || null, committee2: act.committee2 || null, committee3: act.committee3 || null,
+          /* Бележката пътува от проекта (препратката към протокола от
+             инвентаризация, чл. 40) — виж ensureLoanActColumn. */
+          note: (act.note != null && String(act.note).trim()) ? String(act.note).trim() : null,
+          /* „Съставил“: подаденото име, иначе библиотекарят от настройките. */
+          created_by: (act.created_by && String(act.created_by).trim())
+            ? String(act.created_by).trim()
+            : ((db.prepare('SELECT librarian FROM settings WHERE id = 1').get() || {}).librarian || null)
         });
         const actId = info.lastInsertRowid;
         const insItem = db.prepare(`
@@ -363,9 +584,131 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         const dropFromShelves = db.prepare('DELETE FROM catalog_shelf_items WHERE book_id = ?');
         let shelfRows = 0;
         const shelfNames = new Set();
-        // Принудително закритите заемания се отбелязват с номера на акта — за да
-        // може анулирането да ги отвори обратно (виж deaccessionActs:revoke).
-        const closeLoans = db.prepare(`UPDATE loans SET date_in = ?, deaccession_act_id = ? WHERE book_id = ? AND date_in IS NULL`);
+        /* ЗАЕМАНЕТО СЕ ЗАКРИВА КАТО НЕВЪРНАТО, А НЕ КАТО ВЪРНАТО (v2.4.61).
+           =================================================================
+           Дотук единственото, което актът правеше със заемането, беше
+           `date_in = датата на акта`. Тоест: документът е у читателя, актът по
+           чл. 30, т. 5 („повредени или НЕВЪРНАТИ от ползватели“) казва точно
+           това — а в програмата заемането оставаше неразличимо от нормално
+           връщане в деня на акта:
+
+             • натрупаната забава изчезваше (loans.fine оставаше 0) — читател с
+               два месеца просрочие излизаше чист;
+             • в читателската сметка не влизаше нищо: библиотеката отписваше
+               документ, без никъде да остане, че някой ѝ дължи стойността му;
+             • нямаше събитие от вид „изгубен“, тоест годишният отчет броеше
+               книгата като ВЪРНАТА;
+             • картонът на читателя печаташе „Върнат на <датата на акта>“ за
+               книга, която е в дома му.
+
+           Оттук нататък актът затваря заемането така, както го затваря и
+           „Документът е изгубен“ (loans:markLost) — със същите колони и същия
+           смисъл: lost = 1, lost_date, забавата до деня на акта се начислява в
+           loans.fine, обезщетението за самия документ влиза в читателската
+           сметка през chargeLost() (handlers/account.js — ЕДИНСТВЕНОТО място,
+           което пише в сметката), а събитието е от вид „изгубен“.
+           lost_resolution НЕ е едно от трите уреждания на прозореца
+           („обезщетение“, двете замени): случаят още не е уреден с читателя,
+           затова там пише „отчислен с акт № N/год.“ — истината към този момент,
+           и тя личи и в справката „Изгубени/невърнати“.
+
+           НАКАЗАНИЕТО В ДНИ (suspend) НЕ се налага тук — нарочно. То живее в
+           handlers/loans.js (applySuspension) и се налага в мига на връщането
+           или на приключването на случая на гишето. Актът е комисийно действие
+           и може да се състави месеци по-късно: наказание „от днес“ за забава
+           отпреди половин година наказва читателя за датата на заседанието на
+           комисията, а не за своето закъснение. Ако библиотеката иска наказание,
+           пътят е „Документът е изгубен“ ПРЕДИ акта — той е и правилният ред. */
+        const openLoansOf = db.prepare(`
+          SELECT l.id, l.reader_id, l.date_out, l.date_due, l.fine,
+                 r.name AS reader_name, r.card_no
+          FROM loans l LEFT JOIN readers r ON r.id = l.reader_id
+          WHERE l.book_id = ? AND l.date_in IS NULL
+          ORDER BY l.date_out, l.id`);
+        const closeLoanStmt = db.prepare(`UPDATE loans SET
+            date_in = @date, deaccession_act_id = @act,
+            lost = 1, lost_date = @date, lost_resolution = @res, lost_amount = @amount,
+            lost_account_line_id = @line, lost_note = @note,
+            fine = COALESCE(fine, 0) + @fine, deaccession_fine = @fine,
+            deaccession_fine_line_id = @fineLine
+          WHERE id = @id AND date_in IS NULL`);
+        const finePerDay = Number((db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {}).fine_per_day) || 0;
+        // Какво да се каже на библиотекарката след акта — пари се начисляват на
+        // хора и това не бива да се случва мълчаливо.
+        const closedLoanRows = [];
+        function closeLoansAsNotReturned(b) {
+          openLoansOf.all(b.id).forEach(l => {
+            const daysLate = effectiveDaysLate(l.date_due, act.date);
+            const addedFine = toCents(daysLate * finePerDay);
+            const comp = lostCompensation(db, b.price);
+            /* Начислението е на ЧИТАТЕЛЯ; заемане без читател (повреден внос) не
+               може да носи задължение — тогава остава само белегът и забавата. */
+            let lineId = null;
+            /* ЗАБАВАТА ВЛИЗА И В СМЕТКАТА НА ЧИТАТЕЛЯ (v2.4.61, втора поправка).
+               Първата поправка я записваше само в loans.fine — както прави и
+               връщането на гишето. Одитът на кръга намери, че точно това е
+               причината обезщетението за забава по чл. 43 никога да не стигне до
+               „Дължи по сметка“ на гишето и до „Събрани обезщетения“ в годишния
+               отчет: и двете четат account_lines. Оттогава гишето начислява
+               забавата през chargeOverdueFine(); тук се вика СЪЩАТА функция, за
+               да не се разминат двата пътя към една и съща сметка.
+               Начислява се САМО новата забава (от падежа до деня на акта) — това,
+               което по-ранно продължение вече е начислило, стои в сметката отпреди
+               и не се повтаря. */
+            let fineLineId = null;
+            /* РЕДЪТ НА ДВАТА РЕДА В СМЕТКАТА Е ЧАСТ ОТ СМИСЪЛА ИМ (поправка след
+               прегледа на кръга). Обезщетението за самия документ се начислява
+               ПЪРВО, забавата — второ, точно както го прави и „Документът е
+               изгубен“ на гишето (handlers/loans.js, дългата бележка при
+               chargeOverdueFine там). Причината: плащанията се разнасят по реда
+               на възникване (chargeCoverage — най-старото задължение първо, а в
+               рамките на един ден решава id-то на реда), а въпросът, който стои
+               пред комисията по чл. 30, т. 5, е „обезщетен ли е отчисленият
+               документ“. Първите платени пари трябва да отидат по него.
+               С обратния ред първата вноска покриваше забавата, а самият акт
+               продължаваше да се чете като необезщетен — и двата пътя към една и
+               съща сметка (гишето и актът) даваха различен отговор за едни и
+               същи пари. */
+            if (l.reader_id) {
+              lineId = chargeLost(db, {
+                reader_id: l.reader_id, amount: comp.amount, date: act.date,
+                note: 'Невърнат документ инв. № ' + (b.inv_number ?? '—') + ' — ' + (b.title || '')
+                  + '; отчислен с акт № ' + no + '/' + year
+              }).id;
+            }
+            if (l.reader_id && addedFine) {
+              const fl = chargeOverdueFine(db, {
+                reader_id: l.reader_id, amount: addedFine, date: act.date,
+                note: 'Забава по невърнат документ инв. № ' + (b.inv_number ?? '—')
+                  + '; отчислен с акт № ' + no + '/' + year
+              });
+              fineLineId = fl ? fl.id : null;
+            }
+            closeLoanStmt.run({
+              id: l.id, date: act.date, act: actId,
+              res: 'отчислен с акт № ' + no + '/' + year,
+              // Сумата се записва САМО ако наистина е начислена на някого — иначе
+              // заемането би твърдяло задължение, което го няма в никоя сметка.
+              amount: lineId ? comp.amount : null, line: lineId, fine: addedFine, fineLine: fineLineId,
+              note: 'Заемането е закрито от акт № ' + no + '/' + year + ' — документът НЕ е върнат'
+                + (daysLate ? '; забава ' + daysLate + (daysLate === 1 ? ' ден' : ' дни') : '')
+                + '; обезщетение по ' + comp.basis
+            });
+            if (l.reader_id) {
+              /* Събитието е от вид „изгубен“, не „връщане“ — по същата причина,
+                 както в loans:markLost: върната книга и невърната книга не бива
+                 да се броят еднакво в годишния отчет. Регистрацията е
+                 незадължителна зависимост: при самостоятелно зареден модул
+                 (тест) няма къде да се впише и това не бива да спира акта. */
+              if (typeof logEvent === 'function') logEvent(EVENT_KIND_LOST, { bookId: b.id, readerId: l.reader_id, date: act.date });
+            }
+            closedLoanRows.push({
+              loan_id: l.id, book_id: b.id, reader_id: l.reader_id, reader_name: l.reader_name, card_no: l.card_no,
+              inv_number: b.inv_number, title: b.title, date_due: l.date_due,
+              daysLate, fine: addedFine, charged: lineId ? comp.amount : 0, basis: comp.basis
+            });
+          });
+        }
         /* Одит v2.3.1 №10: НОВА резервация върху вече отчислена книга правилно се
            отказва (holds:add проверява статуса в JS, виж handlers/holds.js), но обратният път —
            книгата Е БИЛА резервирана и СЛЕД това се отчислява — оставаше пробит:
@@ -454,6 +797,51 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             throw new Error('Инв. № ' + b.inv_number + ' вече е отчислен с акт — вероятно от друго работно място, '
               + 'докато формата е била отворена. Актът НЕ е съставен. Отворете „Отчисляване“ наново.');
           }
+          /* АКТЪТ НЕ МОЖЕ ДА ПРЕДХОЖДА ВПИСВАНЕТО НА ДОКУМЕНТА (v2.4.61).
+             =================================================================
+             Дотук акт с дата 01.06.2025 г. върху документ, вписан в инвентарната
+             книга на 03.09.2026 г., минаваше без дума. Последиците са в самия
+             официален регистър:
+
+               • КДБФ Приложение № 2 за 2025 г. показва „отчислени 1“ срещу
+                 наличност 0 — фондът „отчислява“ документ, който не е имал;
+               • веригата между годините (наличност 31.12.2025 = наличност
+                 01.01.2026) се къса и „Проверка на данните“ я обявява за счупена,
+                 без да може да каже защо;
+               • актът заема номер в ПРИКЛЮЧЕНА година, чиято КДБФ вече е
+                 отпечатана и подписана (чл. 39).
+
+             Най-честата причина е невинна — сгрешена година в полето за дата, —
+             затова съобщението назовава и двете дати, за да се види разминаването. */
+          if (b.register_date && isValidIsoDate(b.register_date) && act.date < b.register_date) {
+            throw new Error('Инв. № ' + b.inv_number + ' е вписан в инвентарната книга на '
+              + bgDate(b.register_date) + ' г., а актът е с дата ' + bgDate(act.date)
+              + ' г. Документ не може да се отчисли, преди да е постъпил: КДБФ за '
+              + yearOf(act.date) + ' г. би отчел отчисляване без наличност и веригата между годините се къса. '
+              + 'Проверете годината в датата на акта. Актът НЕ е съставен.');
+          }
+          /* ДОКУМЕНТ, КОЙТО В МОМЕНТА Е У ЧИТАТЕЛ (v2.4.61, находка от одита на периодиката).
+             =================================================================
+             Актът приемаше зает документ по ЛЮБАЯ причина: с т. 3 („физически
+             изхабени“) комисията описваше като изхабена книга, която никой от
+             комисията не е виждал — тя е в дома на читателя, — а заемането се
+             закриваше мълчаливо. books:delete отдавна отказва точно този случай
+             („документът е зает“), тоест грижата съществуваше за триенето, но не
+             и за отчисляването, което е по-тежкото от двете.
+             Единственото основание, при което наредбата ПРЕДВИЖДА документът да е
+             у ползвателя, е чл. 30, т. 5 — „повредени или невърнати от
+             ползватели“. Затова само то минава, и минава като невърнат документ
+             (виж closeLoansAsNotReturned по-горе). */
+          const openLoan = openLoansOf.all(b.id)[0];
+          if (openLoan && reasonCode !== 5) {
+            throw new Error('Инв. № ' + b.inv_number + ' в момента е зает от '
+              + (openLoan.reader_name || 'читател') + (openLoan.card_no ? ' (карта № ' + openLoan.card_no + ')' : '')
+              + ' от ' + bgDate(openLoan.date_out) + ' г. и не може да се отчисли по чл. 30, т. ' + reasonCode
+              + ': документът не е в библиотеката и комисията не може да го огледа. '
+              + 'Приберете го и тогава съставете акта, или — ако читателят няма да го върне — '
+              + 'приключете заемането с „Документът е изгубен“ и съставете акт по чл. 30, т. 5 '
+              + '(повредени или невърнати от ползватели). Актът НЕ е съставен.');
+          }
           insItem.run({
             act_id: actId, book_id: b.id, inv_number: b.inv_number, author: b.author, title: b.title,
             volume: b.volume, year: b.year, price: b.price, udk: b.udk,
@@ -484,7 +872,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           });
           docCount += invQty.get(b.id) == null ? 1 : (Number(invQty.get(b.id)) || 0);
           offStmt.run('отчислен', act.date, actId, act.date, b.id);
-          closeLoans.run(act.date, actId, b.id);
+          closeLoansAsNotReturned(b);
           /* Витрината се празни СЛЕД като снимката е записана в реда на акта. */
           dropFromShelves.run(b.id);
           cancelledHoldRows.push(...holdsOf.all(b.id));
@@ -497,7 +885,12 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         /* Изгубените документи в акта се назовават поименно в следата (v2.4.56):
            „акт по чл. 30, т. 5“ и „има начислено обезщетение, събрано/несъбрано“
            са двете страни на едно и също събитие и дотук не се срещаха никъде. */
-        const lostLines = bookIds.map(id => lostInfo(db, id)).filter(Boolean);
+        /* Документите, ЗАКРИТИ ОТ САМИЯ АКТ, се изброяват по-долу със своите числа
+           (виж closedLoanRows) и не влизат втори път тук: „изгубени от читатели“
+           означава случаите, уредени ПРЕДИ акта през „Документът е изгубен“ —
+           точно тях счетоводството пита дали са обезщетени. */
+        const closedByThisAct = new Set(closedLoanRows.map(l => l.book_id));
+        const lostLines = bookIds.filter(id => !closedByThisAct.has(id)).map(id => lostInfo(db, id)).filter(Boolean);
         const lostNote = lostLines.length
           ? '; изгубени от читатели: ' + lostLines.length + ' — ' + lostLines.map(l =>
               (l.reader_name || 'читател') + ': ' + (l.lost_resolution || 'уреждане неотбелязано')
@@ -522,12 +915,29 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                   : '') + ')') : '')
           + (shelfRows ? '; документите излизат от витрините в онлайн каталога ('
               + [...shelfNames].join('; ') + ') — при анулиране НЕ се връщат автоматично' : '')
-          + lostNote);
+          + lostNote
+          /* Закритите от акта заемания — поименно и с парите. Дневникът е мястото,
+             където библиотекарката вижда на другия ден КАКВО е начислено на кого;
+             прозорецът се затваря, а начислението остава в сметката на човека. */
+          + (closedLoanRows.length
+              ? '; ' + (closedLoanRows.length === 1
+                  ? 'закрито 1 заемане на невърнат документ'
+                  : 'закрити ' + closedLoanRows.length + ' заемания на невърнати документи')
+                + ' (чл. 30, т. 5): ' + closedLoanRows.map(l => (l.reader_name || 'читател')
+                    + (l.card_no ? ' (карта ' + l.card_no + ')' : '')
+                    + ' — инв. № ' + (l.inv_number ?? '—')
+                    + (l.daysLate ? ', забава ' + l.daysLate + (l.daysLate === 1 ? ' ден' : ' дни')
+                        + ' = ' + l.fine.toFixed(2) + ' €' : '')
+                    + (l.charged ? ', начислено обезщетение ' + l.charged.toFixed(2) + ' € (' + l.basis + ')'
+                        : ', БЕЗ начисление — заемането е без читател')).join('; ')
+                + ' — заеманията са закрити като НЕвърнати, не като върнати'
+              : '')
+          + gapNote);
         /* Връща се ОБЕКТ, а не само actId (v2.4.57). Самите IPC обработчици
            продължават да връщат голото число — така се пази договорът с
            прозореца и с тестовете — но вътрешно съставянето трябва да може да
            каже КОЙ е чакал, за да стигне това до екрана. */
-        return { actId, holds: cancelledHoldRows, shelfRows, shelfNames: [...shelfNames] };
+        return { actId, holds: cancelledHoldRows, shelfRows, shelfNames: [...shelfNames], closedLoans: closedLoanRows };
       });
       // .immediate() — виж проверката на номера в транзакцията по-горе. Когато
       // createActCore се вика ОТВЪТРЕ в чужда транзакция (утвърждаване на проект),
@@ -614,6 +1024,25 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          чл. 30 и чл. 35 (дата, причина, номер) се правят при утвърждаването. */
       const vals = {};
       DRAFT_FIELDS.forEach(k => { vals[k] = (draft && draft[k] !== undefined && draft[k] !== '') ? draft[k] : null; });
+      /* БЕЛЕЖКАТА НЕ СЕ ТРИЕ ОТ ФОРМА, КОЯТО ДОРИ НЕ Я ПОКАЗВА (v2.4.61).
+         =================================================================
+         Проектът, направен от протокол за инвентаризация, носи в note
+         препратката „Съставен от протокол за инвентаризация № 3 от … г.“
+         (src/views/inventory-sessions.js) — единствената връзка между акта по
+         чл. 30, т. 6 и протокола по чл. 40. Формата за проект няма поле „note“,
+         тоест formData() не го връща, а редът по-горе превръща липсващото поле
+         в NULL: ПЪРВИЯТ запис от формата (дори само за да се махне един ред от
+         списъка) изтриваше препратката завинаги — при това без никой да я е
+         видял на екрана нито веднъж.
+         Разликата, която прави поправката: „полето не е подадено“ (undefined)
+         значи „не го пипай“, а „подадено празно“ значи „изтрий го“. Така формата
+         може и да покаже бележката, и да позволи изтриването ѝ, без да я губи
+         при всеки запис. Мястото е тук, а не само на екрана, защото през този
+         канал минават и вносът, и второто работно място. */
+      if (id && (!draft || draft.note === undefined)) {
+        const cur = db.prepare('SELECT note FROM deaccession_drafts WHERE id = ?').get(id);
+        if (cur && cur.note != null) vals.note = cur.note;
+      }
       const tx = db.transaction(() => {
         let draftId = id;
         if (draftId) {
@@ -690,7 +1119,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       logAudit('Проект за отчисляване', 'проект № ' + id + ' е утвърден като акт № '
         + act.no + '/' + yearOf(d.date)
         + (live.length !== rows.length
-            ? ' (' + (rows.length - live.length) + ' от заглавията вече са били отчислени с друг акт и отпаднаха)' : ''));
+            ? ' (' + (rows.length - live.length) + ' от заглавията вече са били отчислени с друг акт и отпаднаха)' : '')
+        /* Препратката от проекта се пренася в акта и се КАЗВА (v2.4.61): така
+           дневникът също свързва акта с протокола по чл. 40, а не само самият акт. */
+        + (d.note ? ' — ' + d.note : ''));
       return actId;
     })
   );
@@ -700,7 +1132,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       ensureLoanActColumn(db);
       /* Каквото прозорецът трябва да КАЖЕ на библиотекарката след анулирането.
          Стои извън транзакцията, защото се чете след нея. */
-      const revokeInfo = { droppedHolds: 0, shelvesToRestore: [] };
+      const revokeInfo = { droppedHolds: 0, shelvesToRestore: [], reopenedLoans: [], closedYear: null };
       /* Основанието за анулиране е ЗАДЪЛЖИТЕЛНО (v2.4.56). Актът остава в
          документацията завинаги; щом остава, до него трябва да пише ЗАЩО е
          отпаднал — иначе след година никой, включително проверяващият, не може
@@ -712,12 +1144,40 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            анулиран (или изобщо несъществуващ) акт се връщаше с ok:true, прозорецът
            обявяваше „Актът е анулиран“, а в дневника се вписваше събитие за акт,
            който никога не е бил съставен. */
-        const act = db.prepare('SELECT no, year, revoked_at FROM deaccession_acts WHERE id = ?').get(id);
+        const act = db.prepare('SELECT no, year, date, revoked_at FROM deaccession_acts WHERE id = ?').get(id);
         if (!act) throw new Error('Актът не е намерен.');
         if (act.revoked_at) {
           throw new Error('Акт № ' + act.no + '/' + act.year + ' вече е анулиран на '
             + String(act.revoked_at).slice(0, 10) + ' г. — вторично анулиране няма смисъл.');
         }
+        /* АНУЛИРАНЕ НА АКТ ОТ ПРИКЛЮЧЕНА ГОДИНА (v2.4.61).
+           =================================================================
+           Анулирането е поправка в РЕГИСТЪРА и досега се правеше еднакво за акт
+           отпреди един час и за акт отпреди три години. Разликата е съществена:
+           КДБФ (Приложение № 2 и № 3) за миналата година вече е отпечатана,
+           подписана и предадена — по чл. 39 тя се съхранява. Анулирането ѝ мени
+           двете най-важни числа със задна дата: отчислените през годината падат,
+           а наличността към 31.12 се вдига. При следващ печат от програмата
+           излиза документ, различен от подписания, без нищо, което да обяснява
+           разликата — а точно този документ проверяващият сравнява с наличния фонд.
+           Затова за минала година се иска ИЗРИЧНО второ потвърждение (екранът го
+           пита с отделна отметка), а какво се променя се вписва в следата с числа.
+           Не е забрана: сгрешен акт от минала година трябва да може да се поправи —
+           но не между другото. */
+        const actYear = act.year || yearOf(act.date);
+        const closedYear = actYear < yearOf(todayStr());
+        const snapshot = db.prepare(`SELECT COALESCE(SUM(COALESCE(quantity,1)),0) AS n,
+            COALESCE(SUM(price * COALESCE(quantity,1)),0) AS v FROM deaccession_items WHERE act_id = ?`).get(id);
+        if (closedYear && !(opts && opts.confirmClosedYear)) {
+          throw new Error('Акт № ' + act.no + '/' + actYear + ' е от ПРИКЛЮЧЕНА година ('
+            + actYear + ' г.). Анулирането му преизчислява КДБФ за ' + actYear + ' г.: отчислените през '
+            + 'годината падат с ' + snapshot.n + (snapshot.n === 1 ? ' документ' : ' документа') + ' / '
+            + (Math.round(snapshot.v * 100) / 100).toFixed(2) + ' €, а наличността към 31.12.' + actYear
+            + ' г. се увеличава със същото. Приложение № 2 и № 3 за ' + actYear + ' г. вече са отпечатани и '
+            + 'подписани (чл. 39) и след анулирането ще излизат различни. Потвърдете изрично, че искате '
+            + 'това, и преиздайте КДБФ за ' + actYear + ' г., като опишете защо.');
+        }
+        revokeInfo.closedYear = closedYear ? actYear : null;
         const items = db.prepare('SELECT book_id, inv_number, status_before, shelves_before FROM deaccession_items WHERE act_id = ?').all(id);
         /* Витрините НЕ се възстановяват автоматично — по същата причина, по която
            не се възстановяват и резервациите (виж ensureLoanActColumn): витрината
@@ -743,9 +1203,77 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         /* Заеманията, закрити принудително от този акт (най-често при причина
            „невърнати от ползватели“), се отварят обратно. Иначе книгата се връща
            във фонда като „наличен“ и свободна за заемане, макар реално да е у
-           първия читател — а следата, че той я държи, е изчезнала. */
-        const reopened = db.prepare('UPDATE loans SET date_in = NULL, deaccession_act_id = NULL WHERE deaccession_act_id = ?')
-          .run(id).changes;
+           първия читател — а следата, че той я държи, е изчезнала.
+
+           ОТ v2.4.61 закриването НЕ е само date_in: актът бележи заемането като
+           невърнато (lost = 1), начислява забавата до деня на акта в loans.fine и
+           вписва обезщетение в читателската сметка (виж closeLoansAsNotReturned).
+           Отварянето обратно трябва да върне ВСИЧКО ТОВА, иначе:
+             • заемането се води едновременно отворено и „изгубено“ — справката
+               „Изгубени/невърнати“ го изрежда, а книгата е пак в „Просрочени“;
+             • забавата се брои ДВА пъти: „Просрочени“ добавя дните от падежа до
+               днес към вече записаното в loans.fine;
+             • читателят остава задължен по акт, който не съществува.
+           Начислението се МАХА само ако по него още не е платено нищо. Платеното
+           не се пипа никога (плащането е факт, парите са в касата) — тогава редът
+           остава и анулирането го КАЗВА, за да се уреди на гишето. */
+        const reopenRows = db.prepare(`SELECT l.id, l.reader_id, l.fine, l.deaccession_fine,
+            l.deaccession_fine_line_id,
+            l.lost_amount, l.lost_account_line_id, b.inv_number, r.name AS reader_name
+          FROM loans l LEFT JOIN books b ON b.id = l.book_id LEFT JOIN readers r ON r.id = l.reader_id
+          WHERE l.deaccession_act_id = ?`).all(id);
+        const reopenStmt = db.prepare(`UPDATE loans SET date_in = NULL, deaccession_act_id = NULL,
+            lost = NULL, lost_date = NULL, lost_resolution = NULL, lost_amount = NULL,
+            lost_account_line_id = NULL, lost_note = NULL,
+            fine = ?, deaccession_fine = NULL, deaccession_fine_line_id = NULL
+          WHERE id = ?`);
+        let reopened = 0;
+        const keptCharges = [];
+        reopenRows.forEach(l => {
+          const back = Math.max(0, Math.round(((Number(l.fine) || 0) - (Number(l.deaccession_fine) || 0)) * 100) / 100);
+          reopenStmt.run(back, l.id);
+          reopened++;
+          /* Начислената от акта ЗАБАВА се връща по същото правило като
+             начислението за самия документ: махa се само ако по нея още не е
+             платено нищо. Двата реда се разглеждат поотделно, защото читателят
+             може да е платил единия и да не е платил другия — а платеното не се
+             пипа никога, парите са в касата. */
+          if (l.deaccession_fine_line_id) {
+            let covFine = null;
+            try { covFine = chargeCoverage(db, l.deaccession_fine_line_id); }
+            catch (err) {
+              logAudit('Анулиране на акт', 'ВНИМАНИЕ: покритието на начислената забава по заемане № ' + l.id
+                + ' не можа да се прочете (' + err.message + ') — начислението остава в сметката.');
+            }
+            if (covFine && !covFine.covered) {
+              db.prepare('DELETE FROM account_lines WHERE id = ?').run(l.deaccession_fine_line_id);
+            } else if (covFine) {
+              keptCharges.push({ reader_name: l.reader_name, inv_number: l.inv_number,
+                charged: covFine.charged, covered: covFine.covered, kind: 'забава' });
+            }
+          }
+          if (l.lost_account_line_id) {
+            let cov = null;
+            try { cov = chargeCoverage(db, l.lost_account_line_id); }
+            catch (err) {
+              /* Без покритието не може да се реши дали редът да падне — затова се
+                 ЗАПАЗВА (по-безопасното) и се казва защо. */
+              logAudit('Анулиране на акт', 'ВНИМАНИЕ: покритието на начислението по заемане № ' + l.id
+                + ' не можа да се прочете (' + err.message + ') — начислението остава в сметката.');
+            }
+            if (cov && !cov.covered) {
+              db.prepare('DELETE FROM account_lines WHERE id = ?').run(l.lost_account_line_id);
+            } else if (cov) {
+              keptCharges.push({ reader_name: l.reader_name, inv_number: l.inv_number,
+                charged: cov.charged, covered: cov.covered });
+            }
+          }
+        });
+        revokeInfo.reopenedLoans = reopenRows.map(l => ({
+          reader_name: l.reader_name, inv_number: l.inv_number,
+          charged: Number(l.lost_amount) || 0
+        }));
+        revokeInfo.keptCharges = keptCharges;
         /* Резервациите, отказани от този акт, НЕ се възкресяват — виж дългата
            бележка при ensureLoanActColumn. Но се БРОЯТ и се вписват в следата:
            дотук те изчезваха безследно и анулирането твърдеше само „документите
@@ -776,6 +1304,31 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                   : shelvesToRestore.length + ' документа са били махнати от витрини в онлайн каталога')
                 + ' при съставянето и НЕ се връщат автоматично — '
                 + shelvesToRestore.map(s => 'инв. № ' + (s.inv_number ?? '—') + ' → ' + s.shelves).join('; ')
+              : '')
+          /* Начисленията, по които вече е плащано, остават — казва се поименно и
+             с вида: от v2.4.61 актът може да е начислил ДВЕ неща на един читател
+             (забавата до деня на акта и стойността на самия документ), а те се
+             уреждат поотделно — читателят може да е платил едното. */
+          + (keptCharges.length
+              ? '; ' + (keptCharges.length === 1 ? 'начислението ОСТАВА' : 'начисленията ОСТАВАТ') + ' в сметката на '
+                + keptCharges.map(c => (c.reader_name || 'читател') + ' (инв. № ' + (c.inv_number ?? '—')
+                    + ', ' + (c.kind === 'забава' ? 'забава' : 'за невърнат документ')
+                    + ', начислено ' + (c.charged || 0).toFixed(2) + ' €, събрано ' + (c.covered || 0).toFixed(2) + ' €)').join('; ')
+                + ' — по '
+                + (keptCharges.length === 1 ? 'него' : 'тях') + ' вече е плащано; уредете '
+                + (keptCharges.length === 1 ? 'го' : 'ги') + ' от картона на читателя'
+              : '')
+          /* ЧЛ. 39: пипа се минала, вече отчетена година — това се вписва с числа,
+             защото подписаният екземпляр на КДБФ остава при счетоводителя и някой
+             трябва да може да обясни разликата година по-късно. */
+          + (closedYear
+              ? '. ВНИМАНИЕ: актът е от ПРИКЛЮЧЕНАТА ' + actYear + ' г. — КДБФ (Приложение № 2 и № 3) за '
+                + actYear + ' г. се преизчислява: отчислените през годината падат с ' + snapshot.n
+                + (snapshot.n === 1 ? ' документ' : ' документа') + ' / '
+                + (Math.round(snapshot.v * 100) / 100).toFixed(2) + ' €, а наличността към 31.12.' + actYear
+                + ' г. се увеличава със същото. Отпечатаният и подписан екземпляр вече не отговаря на програмата — '
+                + 'преиздайте КДБФ за ' + actYear + ' г. Анулирането е потвърдено изрично'
+                + ((opts && opts.by) ? ' от ' + String(opts.by).trim() : '') + '.'
               : ''));
         revokeInfo.droppedHolds = droppedHolds;
         revokeInfo.shelvesToRestore = shelvesToRestore;

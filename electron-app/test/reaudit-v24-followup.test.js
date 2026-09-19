@@ -140,8 +140,9 @@ test('два реални процеса, същият читател резер
       title: 'Под игото', quantity: 1, inv_number: 2000 + round, barcode: 'H' + (2000 + round)
     }).data;
     const readerIds = [
-      invokeHandler('readers:create', { name: 'Читател 1' }).data,
-      invokeHandler('readers:create', { name: 'Читател 2' }).data
+      // gdpr_consent (v2.4.61) — виж assertConsent в handlers/readers.js.
+      invokeHandler('readers:create', { name: 'Читател 1', gdpr_consent: 1 }).data,
+      invokeHandler('readers:create', { name: 'Читател 2', gdpr_consent: 1 }).data
     ];
     // Книгата е заета от читател 2, за да е нужна резервация на читател 1.
     const co = invokeHandler('loans:checkout', { reader_id: readerIds[1], book_id: bookId, date_out: '2026-08-21' });

@@ -464,7 +464,9 @@ function readersSetup(prefix) {
 test('„Бележка при заемане“ наистина се записва — и при създаване, и при редакция', async () => {
   const { db, ipcMain } = readersSetup('v2424-alertnote-');
   const c = await ipcMain.invoke('readers:create',
-    { name: 'Иван', card_no: 'K1', alert_note: 'Носи още старата книга на брат си' });
+    // gdpr_consent (v2.4.61): readers:create вече отказва читател без отбелязано
+    // съгласие по чл. 47, ал. 2 и ОРЗД — виж assertConsent в handlers/readers.js.
+    { name: 'Иван', card_no: 'K1', gdpr_consent: 1, alert_note: 'Носи още старата книга на брат си' });
   assert.equal(c.ok, true, c.error);
   const id = c.data;
   assert.equal(db.prepare('SELECT alert_note FROM readers WHERE id = ?').get(id).alert_note,
