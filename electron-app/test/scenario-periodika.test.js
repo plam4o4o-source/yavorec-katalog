@@ -423,8 +423,17 @@ test('5. ежедневник — 300+ броя, 31.12/01.01 в различни
   assert.ok(h.$('#perIssueYear'), 'има избор на година');
   h.type('#perIssueYear', Y1);
   await h.settle();
-  assert.equal(h.document.querySelectorAll('#modal table.ledger tbody tr button.dgr').length, 301, 'миналата година');
-  assert.match(h.text('#perIssueCount'), rx('Показани 301 от 302 броя — ' + Y1 + ' г.'));
+  /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.64, измерване). Кардексът вече минава през общия
+     прозоречен рендер (paintRowWindow/RENDER_PAGE_SIZE в core.js) — както
+     „Книги“, „Читатели“ и МЗС. Дотук избраната година се чертаеше ЦЯЛАТА, а
+     опцията „всички години“ заобикаляше и самия разрез по година: измерено
+     1 200 броя → 7 295 DOM възела в кутия с превъртане 240 px, от които на
+     екрана се виждат около петнайсет. Затова тук вече стоят първите 300 реда, а
+     под тях — „Покажи още“. Находката, която този тест пази (разрезът по
+     година), не се променя — променя се само колко реда се чертаят наведнъж. */
+  assert.equal(h.document.querySelectorAll('#modal table.ledger tbody tr button.dgr').length, 300, 'миналата година — първата порция');
+  assert.match(h.text('#perIssueCount'), rx('Показани 300 от 302 броя — ' + Y1 + ' г.'));
+  assert.match(h.text('#perIssuesMore'), /Покажи още \(1 от общо 301\)/);
   // Търсене по номер в рамките на годината — „намери ми бр. 117“ без превъртане.
   h.type('#perIssueSearch', '117');
   const visible = Array.from(h.document.querySelectorAll('#modal #perIssuesBody tr')).filter(tr => tr.style.display !== 'none');

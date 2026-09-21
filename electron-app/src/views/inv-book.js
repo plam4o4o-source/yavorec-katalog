@@ -274,9 +274,11 @@ function invBookMatches() {
 /* v2.3.0: append=true (само от бутона „Покажи още“) добавя САМО новата порция
    през paintRowWindow() в core.js. Дотогава всяко натискане презаписваше целия
    <tbody> с rows.slice(0, LIMIT) — и вече показаните редове се изчертаваха
-   наново, тоест работата растеше квадратично: измерено при 15 000 записа,
-   49 натискания от 300 до 15 000 реда = 127 861 ms. Търсенето и програмното
-   филтриране остават пълен рендер — там наборът от редове е друг. */
+   наново, тоест работата растеше квадратично. (Числото, което стоеше тук —
+   „49 натискания = 127 861 ms“ — беше от jsdom и не описваше истинския прозорец;
+   измереното в Chromium и произлизащият от него ТАВАН на общия брой изчертани
+   редове са при paintRowWindow/RENDER_MAX_ROWS в core.js.) Търсенето и
+   програмното филтриране остават пълен рендер — там наборът от редове е друг. */
 let INVBOOK_PAINTED = 0;
 function paintInvBookRows(append) {
   /* В прозоречен режим window._INVBOOK_ROWS са само заредените порции (вече
@@ -286,6 +288,9 @@ function paintInvBookRows(append) {
   const total = INVBOOK_WINDOWED ? INVBOOK_TOTAL : rows.length;
   INVBOOK_PAINTED = paintRowWindow({
     body: '#ibBody', bar: '#ibMore', rows, limit: INVBOOK_WINDOWED ? rows.length : INVBOOK_RENDER_LIMIT,
+    /* total — за тавана на общия брой изчертани редове (RENDER_MAX_ROWS в
+       core.js, v2.4.64): в прозоречен режим `rows` са само изтеглените порции. */
+    total,
     painted: append ? INVBOOK_PAINTED : 0,
     rowsHtml: invBookRowsHtml,
     emptyHtml: INVBOOK_QUERY.trim()
@@ -367,18 +372,86 @@ function invBookSelectRange(all, range) {
   return { rows, label: parts.join('; '), limited: parts.length > 0 };
 }
 window.invBookSelectRange = invBookSelectRange;
+/* ---- Колко струва „цялата книга“ и защо диалогът вече започва с ГОДИНА -------
+   (v2.4.64, измерване в истински Chromium 141 — node /tmp/r41/bench-chromium.js
+   и node /tmp/r41/mem-chromium.js, 5 повторения.)
+
+   ИЗМЕРЕНОТО за печатния лист на цялата инвентарна книга при 15 000 вписвания:
+     195 035 DOM възела · 3 752 КБ HTML
+     140 ms вписване + 2 581 ms оформление = ~2,7 s ЗАМРЪЗНАЛ ПРОЗОРЕЦ
+     +792 МБ RSS на рендера
+   Тоест ~0,18 ms и ~54 КБ памет на ред. Докато трае, програмата не отговаря на
+   нищо — нито на затваряне, нито на Esc; изглежда като увиснала.
+
+   ЗАЩО НЕ СЕ РЕЖЕ НА ПОРЦИИ. Опитано и измерено: същият лист, вписван на порции
+   по 500 реда, струва 3 575 ms общо — ПОВЕЧЕ от 2 581 ms наведнъж, защото всяка
+   порция кара браузъра да преоформи цялата вече построена таблица. Единственото,
+   което порциите печелят, е, че първата се вижда на 98 ms. За документ, който
+   излиза на принтер, това не е печалба, а само по-дълго чакане. Затова печатът
+   НЕ е нарязан — нарязан беше ПОВОДЪТ: в огромното мнозинство от случаите на
+   библиотекаря не му трябва цялата книга, а една година или една партида.
+
+   ЗАТОВА диалогът вече предлага ГОДИНА по подразбиране (текущата — поводът за
+   печат почти винаги е заверката на новите вписвания), казва колко реда е цялата
+   книга и какво струва тя, а „Цялата книга“ минава през изрично потвърждение с
+   тези числа — по същия модел като confirmManyLabels() за етикетите в core.js. */
+const INVBOOK_PRINT_MS_PER_ROW = 2700 / 15000;   // 0,18 ms/ред — измерено (виж горе)
+const INVBOOK_PRINT_MB_PER_ROW = 792 / 15000;    // 0,053 МБ/ред — измерено (виж горе)
+const INVBOOK_PRINT_ROWS_PER_SHEET = 30;         // А4 напряко, при сегашния шрифт на листа
+/* Праг, над който „Цялата книга“ пита. 1 000 реда са ~33 листа и ~0,2 s —
+   под това число въпросът би бил само пречка; над него започва и хартията, и
+   замръзването. Числото е едно, на едно място, както LABEL_CONFIRM_OVER. */
+const INVBOOK_PRINT_CONFIRM_OVER = 1000;
+function invBookPrintCost(n) {
+  return {
+    rows: n,
+    secs: Math.round(n * INVBOOK_PRINT_MS_PER_ROW / 100) / 10, // с една десета
+    mb: Math.round(n * INVBOOK_PRINT_MB_PER_ROW),
+    sheets: Math.ceil(n / INVBOOK_PRINT_ROWS_PER_SHEET)
+  };
+}
+window.invBookPrintCost = invBookPrintCost;
+/* Колко е ЦЯЛАТА книга — числото идва от показателите над таблицата (те са по
+   целия регистър, без търсенето), а при стар обработчик/тестов заместител — от
+   списъка в паметта. */
+function invBookWholeBookRows() {
+  if (INVBOOK_SUMMARY && Number.isFinite(INVBOOK_SUMMARY.rows)) return INVBOOK_SUMMARY.rows;
+  if (INVBOOK_WINDOWED && INVBOOK_TOTAL) return INVBOOK_TOTAL;
+  return (window._INVBOOK_ROWS || []).length;
+}
 function invBookPrintDialog() {
   const q = INVBOOK_QUERY.trim();
+  const whole = invBookWholeBookRows();
+  const c = invBookPrintCost(whole);
+  const curYear = Number(yr());
+  /* По подразбиране — ГОДИНА, а не цялата книга. Текущата, защото поводът за
+     печат почти винаги е заверката на вписаното през нея. Падащото меню обхваща
+     дванайсет години назад; „без ограничение по година“ изчиства двете дати и
+     връща диалога в стария му вид (тогава остава изборът по инвентарен номер). */
+  const years = [];
+  for (let y = curYear; y > curYear - 12; y--) years.push(y);
   modal('Печат на инвентарната книга — кой диапазон', `
     <div class="note">Инвентарната книга се печата на листа, които се прошнуроват, номерират и заверяват с
       подпис (чл. 26, ал. 2). Затова изберете какво точно да съдържа тази разпечатка — диапазонът се изписва
       и върху самия лист. Празно поле не ограничава нищо.</div>
+    ${whole ? `<div class="note w" id="ibPrintCost"><b>Цялата книга е ${whole.toLocaleString('bg-BG')}
+      ${whole === 1 ? 'вписване' : 'вписвания'}</b> — около ${c.sheets.toLocaleString('bg-BG')} листа А4.
+      Подготовката им наведнъж държи прозореца без отговор около ${c.secs < 1 ? 'секунда' : c.secs + ' секунди'}
+      и заема около ${c.mb} МБ памет; докато трае, програмата не реагира на нищо и изглежда увиснала.
+      Затова по подразбиране тук е предложена <b>една година</b> — най-честият повод за печат. Цялата книга
+      си остава на едно натискане, само че с въпрос.</div>` : ''}
     <form id="ibPrintF" onsubmit="return false">
+      <label>Година на вписване
+        <select id="ibPrintYear" onchange="invBookPrintYearChanged(this.value)">
+          ${years.map(y => `<option value="${y}" ${y === curYear ? 'selected' : ''}>${y} г.</option>`).join('')}
+          <option value="">— без ограничение по година —</option>
+        </select>
+      </label>
       <div class="grid g2">
         ${fld('От инвентарен №', 'from', { type: 'number', min: 1 })}
         ${fld('До инвентарен №', 'to', { type: 'number', min: 1 })}
-        ${fld('Вписани от дата', 'dateFrom', { type: 'date' })}
-        ${fld('Вписани до дата', 'dateTo', { type: 'date' })}
+        ${fld('Вписани от дата', 'dateFrom', { type: 'date', val: curYear + '-01-01' })}
+        ${fld('Вписани до дата', 'dateTo', { type: 'date', val: curYear + '-12-31' })}
       </div>
       ${/* По подразбиране — това, което е филтрирано на екрана: ако в полето за
             търсене стои нещо, отметката е сложена и разпечатката излиза точно
@@ -387,10 +460,49 @@ function invBookPrintDialog() {
         <span>Само редовете, които отговарят на търсенето на екрана — „${esc(q)}“</span></label>` : ''}
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
-     <button class="btn" onclick="closeModal();printInvBookDoc()">Цялата книга</button>
+     <button class="btn" onclick="invBookPrintAll()">Цялата книга…</button>
      <button class="btn pri" onclick="invBookPrintRange()">Печат на диапазона</button>`);
 }
 window.invBookPrintDialog = invBookPrintDialog;
+/* Годината само попълва двете дати — самото ограничаване си остава едно и също
+   (invBookSelectRange по датата на вписване), за да няма втори път, по който
+   разпечатката да се реже, и втори надпис в главата ѝ. */
+function invBookPrintYearChanged(y) {
+  const from = $('#ibPrintF [name=dateFrom]'), to = $('#ibPrintF [name=dateTo]');
+  if (!from || !to) return;
+  from.value = y ? y + '-01-01' : '';
+  to.value = y ? y + '-12-31' : '';
+}
+window.invBookPrintYearChanged = invBookPrintYearChanged;
+/* „Цялата книга“ — с изрично потвърждение и с ИЗМЕРЕНИТЕ числа, в думите, с
+   които библиотекарят мисли: листа, секунди замръзнал прозорец, памет. Точно в
+   духа на confirmManyLabels() за етикетите (core.js): не забрана, а информирано
+   решение. Въпросът се задава ПРЕДИ да се тегли каквото и да е от базата — при
+   „не“ нищо не е похабено, а диалогът остава отворен, за да се избере диапазон. */
+async function invBookPrintAll() {
+  const n = invBookWholeBookRows();
+  if (n > INVBOOK_PRINT_CONFIRM_OVER) {
+    const c = invBookPrintCost(n);
+    const ok = await askConfirm(
+      'ПЕЧАТ НА ЦЯЛАТА ИНВЕНТАРНА КНИГА\n\n'
+      + 'Това са ' + n.toLocaleString('bg-BG') + ' вписвания — около '
+      + c.sheets.toLocaleString('bg-BG') + ' листа А4.\n\n'
+      + 'Подготовката на толкова редове наведнъж държи прозореца без отговор около '
+      + (c.secs < 1 ? 'секунда' : c.secs + ' секунди') + ' и заема около ' + c.mb
+      + ' МБ памет. Докато трае, програмата не реагира на нищо — нито на затваряне, нито на Esc — '
+      + 'и изглежда увиснала. Не е — просто рисува всички редове.\n\n'
+      + 'По-добре е книгата да се печата по години или по диапазон от инвентарни номера: '
+      + 'листовете и без това се прошнуроват и заверяват на части, а всяка разпечатка носи '
+      + 'означението какъв диапазон съдържа.\n\n'
+      + 'Да отпечатам ли цялата книга въпреки това?',
+      { kind: 'warn', title: 'Цялата инвентарна книга — ' + n.toLocaleString('bg-BG') + ' реда',
+        okLabel: 'Печатай цялата книга' });
+    if (!ok) return;
+  }
+  closeModal();
+  return printInvBookDoc();
+}
+window.invBookPrintAll = invBookPrintAll;
 async function invBookPrintRange() {
   const d = formData('#ibPrintF');
   if (d.from && d.to && parseInt(d.to, 10) < parseInt(d.from, 10)) {

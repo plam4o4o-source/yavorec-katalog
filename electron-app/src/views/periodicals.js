@@ -96,9 +96,61 @@ window.savePeriodical = savePeriodical;
    отрязването в изгледа би оставило IPC-то да носи същите хиляди реда.
    Търсачката отдолу филтрира вече показаната година по номер и по дата — тя е
    за „намери ми бр. 117“, докато годината е за „покажи ми 2024“. */
+/* …С ЕДНО ИЗКЛЮЧЕНИЕ, КОЕТО ГО ЗАОБИКАЛЯШЕ (v2.4.64, измерване).
+   ===========================================================================
+   Изборът на година има и опция „всички години (N)“ — и точно тя минаваше ПОД
+   ограничението, заради което е писан целият коментар по-горе: обработчикът
+   връща всички броеве на изданието, а прозорецът ги чертаеше до един.
+   ИЗМЕРЕНО: 1 200 броя → 7 295 DOM възела в едно тяло, в кутия с превъртане
+   240 px — тоест библиотекарят вижда от тях около петнайсет. За сравнение,
+   5 400 възела („Книги“, 300 реда) струват +73 МБ RSS на рендера в истински
+   Chromium (node /tmp/r41/mem-chromium.js).
+   Затова „всички години“ вече минава през СЪЩАТА обща машинка, както „Книги“,
+   „Читатели“ и МЗС: paintRowWindow/RENDER_PAGE_SIZE от core.js — 300 реда и
+   бутон „Покажи още“, а при тавана RENDER_MAX_ROWS — честният надпис вместо
+   бутона. Разрезът по ГОДИНА си остава предпочитаният път (той е и хартиеният),
+   но когато библиотекарят поиска всичко, „всичко“ вече не значи „всичко
+   наведнъж“. Прозорецът важи и за отделната година — там той просто рядко се
+   стига до него. */
+const PER_ISSUES_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let PER_ISSUES_LIMIT = PER_ISSUES_PAGE_SIZE;
+let PER_ISSUES_PAINTED = 0;
+/* Редовете на кардекса. Изданието (нужно на invNoForIssue) идва от
+   window._PER_KARDEX, защото rowsHtml() получава само порцията редове. */
+function perIssueRowsHtml(list) {
+  const p = window._PER_KARDEX || {};
+  return list.map(i => `<tr><td class="num">${esc(i.issue_no)}</td><td class="num">${bg(i.date)}</td>
+      <td class="num">${mny(i.price)}</td><td><button type="button" class="btn sm dgr"
+        onclick="delIssue(${i.id},${jsNum(p.id)},${jsNum(invNoForIssue(p, i))})">×</button></td></tr>`).join('');
+}
+function perIssuesMoreHtml(more, total) {
+  return more > 0
+    ? `<button type="button" class="btn" onclick="perIssuesMore()">Покажи още (${more} от общо ${total})</button>` : '';
+}
+function perIssuesMore() {
+  PER_ISSUES_LIMIT += PER_ISSUES_PAGE_SIZE;
+  paintPerIssues(true);
+}
+window.perIssuesMore = perIssuesMore;
+function paintPerIssues(append) {
+  const p = window._PER_KARDEX;
+  if (!p || !$('#perIssuesBody')) return;
+  PER_ISSUES_PAINTED = paintRowWindow({
+    body: '#perIssuesBody', bar: '#perIssuesMore', rows: p.issues || [], limit: PER_ISSUES_LIMIT,
+    painted: append ? PER_ISSUES_PAINTED : 0,
+    rowsHtml: perIssueRowsHtml,
+    moreHtml: perIssuesMoreHtml
+  });
+  /* Надписът „Показани N от M“ се преизчислява от самите редове в тялото — така
+     той брои и порциите, и търсачката, с един и същ код (виж filterIssueRows). */
+  filterIssueRows();
+}
+window.paintPerIssues = paintPerIssues;
 async function openPeriodical(id, year) {
   const p = await call(window.api.periodicals.get(id, { year }));
   if (!p) return;
+  window._PER_KARDEX = p;
+  PER_ISSUES_LIMIT = PER_ISSUES_PAGE_SIZE; // ново отваряне/нова година — пак от първата порция
   const yearsList = p.issue_years || [];
   const shown = p.issues.length;
   const total = p.issue_total == null ? shown : p.issue_total;
@@ -126,11 +178,13 @@ async function openPeriodical(id, year) {
       <span class="hint" id="perIssueCount" data-total="${total}" data-year="${esc(String(p.issue_year))}"
         >${issueCountLabel(shown, shown, total, p.issue_year)}</span>
     </div>
+    ${/* Тялото се пълни от paintPerIssues() след отварянето на прозореца — през
+          общата машинка с прозоречния рендер (виж коментара при
+          PER_ISSUES_PAGE_SIZE по-горе), а не с p.issues.map(...) наведнъж. */''}
     ${p.issues.length ? `<div class="wrap" style="max-height:240px"><table class="ledger"><thead><tr>
-      <th>Брой</th><th>Дата</th><th>Цена</th><th></th></tr></thead><tbody id="perIssuesBody">
-      ${p.issues.map(i => `<tr><td class="num">${esc(i.issue_no)}</td><td class="num">${bg(i.date)}</td>
-      <td class="num">${mny(i.price)}</td><td><button type="button" class="btn sm dgr" onclick="delIssue(${i.id},${id},${jsNum(invNoForIssue(p, i))})">×</button></td></tr>`).join('')}
-      </tbody></table></div>`
+      <th>Брой</th><th>Дата</th><th>Цена</th><th></th></tr></thead><tbody id="perIssuesBody"></tbody>
+      </table></div>
+      <div class="toolbar" id="perIssuesMore" style="justify-content:center;margin-top:6px"></div>`
       : `<div class="hint">${total ? 'За избраната година няма вписани броеве — изберете друга година.' : 'Все още няма вписани броеве.'}</div>`}`,
     `<button class="btn dgr" onclick="delPeriodical(${id})">Изтрий изданието</button>
      <button class="btn" onclick="printPeriodicalCard(${id},'${esc(String(p.issue_year))}')">Печат / PDF на картона</button>
@@ -141,6 +195,7 @@ async function openPeriodical(id, year) {
      „Следващ очакван брой“ — току-що вписан брой продължаваше да се води
      закъснял. */
   onModalClose(periodikaRefreshIfShown);
+  paintPerIssues(); // първата порция броеве — тялото се вписва чак сега (виж горе)
   setTimeout(() => { const f = $('#issueF [name=issue_no]'); if (f) f.focus(); }, 0);
 }
 window.openPeriodical = openPeriodical;

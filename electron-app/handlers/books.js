@@ -13,7 +13,10 @@
 const { resolveScannedBook, rowFingerprint, assertUnchanged, isValidIsoDate, parseRegisterNo } = require('../security-utils');
 /* Общите условия за броене на фонда — едно място за всички (виж db/fund-sql.js). */
 const FUND = require('../db/fund-sql');
-const { fundByStatusPlain } = FUND;
+/* Ключът „НАЛИЧНО ДНЕС“ се взима по ИМЕ от общия източник — и с псевдоним на
+   таблицата (етикетите, v2.4.64), и без него. Никое от двете не се преписва в
+   заявката: test/fond-v2457.test.js брои точно това. */
+const { fundByStatus, fundByStatusPlain } = FUND;
 const { findOpenSuggestionsForBook } = require('./suggestions');
 
 /* Одит v2.4.29: един баркод = един екземпляр. Дублиран баркод се приемаше
@@ -22,11 +25,52 @@ const { findOpenSuggestionsForBook } = require('./suggestions');
    дефект, който се появява седмици по-късно и далеч от причината. Проверката е
    в транзакцията, срещу другите редове. books:findDuplicateBarcodes остава за
    старите данни. */
+/* ТРИТЕ ЗАЯВКИ СЕ КОМПИЛИРАТ ВЕДНЪЖ НА ВРЪЗКА, А НЕ ВЕДНЪЖ НА ДОКУМЕНТ (v2.4.64).
+   =====================================================================
+   КАКВО СТАВАШЕ ДОТУК. При запис на ЕДНА книга от формата трите db.prepare()
+   по-долу не личат — компилацията на низ SQL е под 30 µs. Но същата функция
+   пази и ВНОСА от файл (handlers/data-import.js), а там тя се вика на всеки
+   ред: при файл с попълнена колона „Баркод“ и 5 000 реда това са 10 000
+   компилации на два еднакви низа. Измерено (node /tmp/r41/import-split.js,
+   5 000 реда върху базата от 15 000 документа): вписването с prepare() в
+   цикъла — 463 ms, а при файл С баркодове, тоест с тези две заявки отгоре —
+   586 ms; със заявки, подготвени веднъж — 215 ms. Тоест повече от половината
+   време на вноса отиваше в повторно компилиране на едни и същи четири низа.
+
+   ЗАЩО КЕШЪТ Е ТУК, а не подаден отвън като пети аргумент с готови заявки.
+   (1) Така печелят ВСИЧКИ пътища, а не само вносът: books:create и
+   books:update викат същата функция, а груповата редакция на 200 документа
+   минава по нея 200 пъти. (2) Подписът на функцията остава същият, тоест няма
+   място, което да я вика „по стария начин“ и тихо да остане с компилация на
+   документ — а точно това е дефектът, който се поправя.
+
+   WeakMap ПО ВРЪЗКА, не един модулен обект: подготвената заявка принадлежи на
+   своята връзка към базата и не може да се ползва с друга. Ключът е самият
+   обект на базата, затова смяната на базата („Смяна на папката с данни“,
+   резервно копие, всеки тест със своя временна база) сама изхвърля старите
+   заявки, вместо да ги подаде на чужда връзка. SQLite сам прекомпилира
+   подготвена заявка при промяна на схемата, тоест миграция не я обезсилва. */
+const BARCODE_STMTS = new WeakMap();
+function barcodeStmts(db) {
+  let st = BARCODE_STMTS.get(db);
+  if (!st) {
+    st = {
+      sameCode: db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1'),
+      codeIsInv: db.prepare('SELECT id, inv_number FROM books WHERE inv_number = ? AND id != ? LIMIT 1'),
+      invIsCode: db.prepare(`SELECT id, inv_number, barcode FROM books
+      WHERE id != ? AND (barcode = ? OR (barcode GLOB '0*' AND barcode NOT GLOB '*[^0-9]*' AND length(barcode) <= 9 AND CAST(barcode AS INTEGER) = ?))
+      LIMIT 1`)
+    };
+    BARCODE_STMTS.set(db, st);
+  }
+  return st;
+}
 function assertUniqueBarcode(db, barcode, invNumber, selfId) {
   const code = barcode == null ? '' : String(barcode).trim();
   const self = selfId || -1;
+  const st = barcodeStmts(db);
   if (code) {
-    const other = db.prepare('SELECT id, inv_number FROM books WHERE barcode = ? AND id != ? LIMIT 1').get(code, self);
+    const other = st.sameCode.get(code, self);
     if (other) {
       throw new Error('Баркод ' + code + ' вече е на инв. № ' + (other.inv_number ?? other.id)
         + ' — един баркод се лепи само на един екземпляр. Дайте на този документ друг етикет '
@@ -35,7 +79,7 @@ function assertUniqueBarcode(db, barcode, invNumber, selfId) {
     /* Числов баркод, равен на ЧУЖД инвентарен номер, също прави сканирането
        двусмислено (resolveScannedBook отказва и двата документа). */
     if (/^\d{1,9}$/.test(code)) {
-      const byInv = db.prepare('SELECT id, inv_number FROM books WHERE inv_number = ? AND id != ? LIMIT 1').get(parseInt(code, 10), self);
+      const byInv = st.codeIsInv.get(parseInt(code, 10), self);
       if (byInv) {
         throw new Error('Баркод ' + code + ' съвпада с инвентарния номер на друг документ (инв. № ' + byInv.inv_number
           + ') — при сканиране програмата няма как да различи двата. Дайте на този документ друг етикет.');
@@ -52,9 +96,7 @@ function assertUniqueBarcode(db, barcode, invNumber, selfId) {
        баркод е или точно същият низ (idx_books_barcode), или същото число с
        водещи нули („007“) — само баркодовете, започващи с „0“, минават през
        CAST; GLOB '0*' пак ползва индекса. Резултатът е същият. */
-    const byCode = db.prepare(`SELECT id, inv_number, barcode FROM books
-      WHERE id != ? AND (barcode = ? OR (barcode GLOB '0*' AND barcode NOT GLOB '*[^0-9]*' AND length(barcode) <= 9 AND CAST(barcode AS INTEGER) = ?))
-      LIMIT 1`).get(self, String(invNumber), invNumber);
+    const byCode = st.invIsCode.get(self, String(invNumber), invNumber);
     if (byCode) {
       throw new Error('Инв. № ' + invNumber + ' съвпада с баркода на друг документ (инв. № ' + (byCode.inv_number ?? byCode.id)
         + ') — при сканиране програмата няма как да различи двата. Сменете етикета на другия документ или изберете друг номер.');
@@ -163,8 +205,8 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      Тук са САМО полетата, които реално се ползват от консуматорите на books:list:
        • src/views/books.js — id, inv_number, title, author, category_id/_name,
          department, status, quantity, available, series, series_no, year;
-       • src/views/logo-org.js → lblCard (barcode, inv_number) и sigLblCard
-         (call_number, author_mark, udk), плюс status за филтъра „действащ фонд".
+       • етикетите (src/views/logo-org.js) ВЕЧЕ НЕ минават оттук — те имат своя,
+         още по-лека проекция със своя диапазон: виж LABEL_SELECT по-долу.
      Формата за редакция НЕ ползва списъка — bookForm(id) дърпа целия запис през
      books:get, който продължава да връща BOOK_SELECT. Ако нов екран потрябва от
      друго поле, тестът в test/fixes-ipc-payload.test.js пада и казва точно кое. */
@@ -181,6 +223,73 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     LEFT JOIN categories c ON c.id = b.category_id
     LEFT JOIN inventory i ON i.book_id = b.id
   `;
+  /* ЕТИКЕТИТЕ ВЕЧЕ НЕ ТЕГЛЯТ ЦЕЛИЯ ФОНД, ЗА ДА ОТПЕЧАТАТ 300 ЕТИКЕТА (v2.4.64).
+     =====================================================================
+     КАКВО СТАВАШЕ ДОТУК. „Баркод етикети“ → „От инвентарен № … До инвентарен №“
+     минаваше през activeBooks() в src/views/logo-org.js, а тя викаше
+     books:list('') БЕЗ прозорец. Тоест за 300 етикета базата връщаше ЦЕЛИЯ фонд
+     (измерено върху 15 000 документа: 87 ms в SQLite, 4,53 МБ JSON по IPC, после
+     още едно копие в паметта на изгледа), а самият диапазон се изрязваше в
+     JavaScript с .filter() върху всичките 15 000 реда. Същият път обслужваше и
+     „Всички“, и сигнатурните етикети — четири бутона, един и същ разход.
+     Измерено: node /tmp/r41/bench.js labels → labels.300 = 369 ms общо, от тях
+     82 ms SQL за books:list.
+
+     КАКВО ПРАВИ СЕГА. Диапазонът се търси В БАЗАТА, по уникалния индекс на
+     инвентарния номер (EXPLAIN QUERY PLAN: SEARCH b USING INDEX
+     sqlite_autoindex_books_1 (inv_number>? AND inv_number<?)) и с проекция от
+     точно шестте полета, които се печатат върху етикет: инвентарен номер и
+     баркод (lblCard), УДК, авторски знак и сигнатура (sigLblCard), плюс
+     статуса — по него се разпознава „действащият фонд“. Измерено на същата
+     база: 0,52 ms и 0,03 МБ за диапазона 1–300 вместо 87 ms и 4,53 МБ.
+     Заглавие и автор НЕ влизат: нито един от трите етикета не ги печата (виж
+     lblCard/sigLblCard в src/views/core.js). Ако някой ден етикетът започне да
+     печата заглавие, полето се добавя ТУК и тестът за проекцията в
+     test/etiketi-v2464.test.js казва точно кое липсва.
+
+     ЗАЩО ПОДРЕЖДАНЕТО Е С b.title, b.id НАКРАЯ. Дотук изгледът сортираше с
+     .sort((a, b) => a.inv_number - b.inv_number) върху списъка, подреден по
+     заглавие — а сортирането в JavaScript е УСТОЙЧИВО, тоест редовете БЕЗ
+     инвентарен номер (стара, внесена база: колоната допуска NULL) оставаха в
+     ред по заглавие най-отпред. Същият ред се получава само ако равните
+     стойности се доуреждат по заглавие и по id. Струва един временен B-tree за
+     последните два израза (0,52 → 1,38 ms за 300 етикета), но отпечатаният лист
+     остава ДУМА ПО ДУМА същият — а това е целта: етикетите се режат и лепят по
+     реда на листа. */
+  const LABEL_SELECT = `
+    SELECT b.inv_number, b.barcode, b.call_number, b.author_mark, b.udk, b.status
+    FROM books b
+  `;
+  /* Границата на диапазона от интерфейса. Празно/непосочено значи „без граница“
+     („Всички“); текст, който не е число, се ОТКАЗВА с обяснение, вместо да се
+     подмине — подминатата граница би разширила печата до целия фонд, тоест до
+     15 000 етикета вместо 300, и то без библиотекарят да е искал това. */
+  function labelBound(v, what) {
+    if (v === undefined || v === null || v === '') return null;
+    const n = typeof v === 'number' ? Math.trunc(v) : parseInt(String(v).trim(), 10);
+    if (!Number.isFinite(n)) {
+      throw new Error('„' + what + '“ не е инвентарен номер: „' + v + '“. '
+        + 'Въведете цяло число или оставете полето празно за целия фонд.');
+    }
+    return n;
+  }
+  function labelRows(db, page) {
+    const from = labelBound(page.from, 'От инвентарен №');
+    const to = labelBound(page.to, 'До инвентарен №');
+    if (from != null && to != null && to < from) {
+      throw new Error('Крайният инвентарен номер (' + to + ') е по-малък от началния (' + from + ').');
+    }
+    /* „Действащият фонд“ е ключът „НАЛИЧНО ДНЕС“ от db/fund-sql.js — същото
+       условие, с което броят фонда таблото и инвентарната книга. Отчисленият
+       документ не получава етикет (v2.4.58): залепен етикет на книга, която вече
+       не е на рафта, е грешка, която после никой не свързва с отчисляването. */
+    const conds = [fundByStatus];
+    const params = [];
+    if (from != null) { conds.push('b.inv_number >= ?'); params.push(from); }
+    if (to != null) { conds.push('b.inv_number <= ?'); params.push(to); }
+    return db.prepare(`${LABEL_SELECT} WHERE ${conds.join(' AND ')}
+      ORDER BY b.inv_number, b.title, b.id`).all(...params);
+  }
   const BOOK_FIELDS = ['inv_number', 'barcode', 'register_date', 'title', 'subtitle', 'author',
     'category_id', 'year', 'volume', 'isbn', 'pages', 'language', 'udk', 'call_number', 'author_mark',
     'city', 'publisher', 'series', 'series_no', // v1.70.0 — поредица
@@ -360,17 +469,27 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       params: [ftsQuery(query), q, q, q]
     };
   }
-  /* books:list(query, sort) — пълният резултат като масив (както досега: етикети,
-     износи, старите изгледи).
+  /* books:list(query, sort) — пълният резултат като масив (както досега:
+     износите и старите изгледи; етикетите вече НЕ минават оттук).
      books:list(query, sort, page) — ПРОЗОРЕЦ (v2.4.31, производителност): при
      15 000 документа пълният списък е 5,5 МБ и ~150 ms в SQLite при ВСЯКО отваряне
      на „Книги“ и всяко търсене, а на екрана стоят 300 реда. page = { offset, limit,
      dept, cat } връща { rows, total, depts } — само порцията, общия брой за брояча
      и отделите, срещани в резултата (за падащия филтър). page.idsOnly връща
-     { ids } — всички идентификатори на резултата за „Избери всички“. */
+     { ids } — всички идентификатори на резултата за „Избери всички“.
+     books:list(query, sort, { labels: true, from, to }) — ЕТИКЕТИ (v2.4.64):
+     МАСИВ с шестте полета от LABEL_SELECT за инвентарните номера между `from` и
+     `to` (празно = без граница, тоест целият действащ фонд), подреден по
+     инвентарен номер. `query` и `sort` се пренебрегват съзнателно: етикетът се
+     печата по инвентарен номер — по този ред се реже и лепи листът — и никой от
+     четирите бутона за етикети не търси. Защо режимът е ТУК, а не отделен канал:
+     етикетите открай време искат „същото, което е в списъка, но за диапазон“, а
+     един канал за фонда значи и едно място, на което се решава кое е „действащ
+     фонд“ (виж labelRows по-горе). */
   ipcMain.handle('books:list', (e, query, sort, page) =>
     run(() => {
       const db = getDb();
+      if (page && typeof page === 'object' && page.labels) return labelRows(db, page);
       const order = BOOK_ORDERS[sort] || BOOK_ORDERS.title;
       const { where, params } = booksSearchWhere(query);
       if (!page || typeof page !== 'object') {
