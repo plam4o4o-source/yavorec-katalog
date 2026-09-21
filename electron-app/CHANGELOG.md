@@ -11,6 +11,290 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.64
+
+**BG:** Кръг по **измерване**, не по четене на кода. Истинската програма беше пусната
+върху истински фонд — 15 000 документа, 3 000 читатели, 12 000 заемания, база
+19,47 МБ — и всяко число по-долу е от тази машина и тази база. Плюс едно ново
+действие, което дотук се правеше на ръка в папката на Windows: **„Изтриване на
+всички данни (започване на чисто)“**.
+
+**Прозорецът се появява пръв.** Дневното резервно копие се правеше четири реда
+**преди** създаването на прозореца, тоест библиотекарката го чакаше, преди да види
+каквото и да е. От самото копие пък над осем десети отиваха в **повторна дълбока
+проверка** на току-що записания файл — `PRAGMA integrity_check` върху копие, чийто
+източник същата програма беше проверила преди по-малко от секунда при стартирането.
+Сега прясното копие се проверява с `quick_check` (117 → 41 ms) — същата проверка
+срещу прекъснат или непълен запис, срещу която тя съществува, — а самото копие
+тръгва, след като прозорецът вече е нарисуван. Копието е 185 → 78 ms, стартирането
+откъм главния процес — 229 → 84 ms, и никоя от тези милисекунди вече не стои между
+щракването върху иконата и първия екран. Копие за деня пак се прави винаги: при
+зареден прозорец, по предпазен таймер и при затваряне на програмата. **Дълбоката
+проверка остава там, където ѝ е мястото** — при възстановяване, където файлът идва
+отвън и предстои да замени живата база.
+
+**`katalog.json` вече не се пренаписва след всяко сканиране на гишето.** Всяко
+заемане и връщане пренаписваше целия многомегабайтен файл — 184 ms, по 50 – 150
+пъти на ден, често в папка на мрежов диск, — а четирисекундното изчакване не сливаше
+нищо, защото сканиранията на гишето идват през 10 – 20 секунди. Три поправки, и трите
+измерени. Товарът на каталога се сглобява **веднъж за едно състояние на базата** (и
+ръчното „Каталог (JSON)…“ получава същия, вместо да си го прави наново). Проверката
+на сглобения текст вече струва еднакво при 2 и при 13 800 записа, вместо да се плаща
+по размера на файла: пунктуацията се сверява върху умалено копие, а стойностите — при
+самото сглобяване, и при най-малкото съмнение файлът се пише по стария начин.
+Записът е 193 → 37 ms по средата. И **циркулацията има собствена скорост**: промяна
+във фонда (нова книга, редакция, отчисляване, партида, периодика, витрина) влиза във
+файла веднага, както досега, а наличността от гишето — до около минута. Наличността
+в онлайн каталога и без това никога не е обещание за запазване, а отчислена книга,
+която продължава да се предлага, праща читател за нещо, което го няма. Резултатът:
+5 – 9 сканирания се сливат в един запис, 50 – 150 записа на ден стават ~15 – 25.
+Бутонът „Генерирай katalog.json“ и затварянето на програмата пишат всичко натрупано
+веднага, както досега.
+
+**Три места вършеха същата работа през много по-скъпа врата.** „Баркод етикети“ за
+300 нови книги теглеше **целия фонд** — 15 000 реда, 4,53 МБ през моста, 87 ms в
+SQLite — и после изрязваше диапазона в JavaScript; сега диапазонът се търси в базата
+по индекса на инвентарния номер (1 ms) и се връщат само шестте полета, които реално
+се печатат върху етикет. Целият лист: 386 → 238 ms. **Вносът** от файл компилираше
+заявките за вписване наново **на всеки ред** — точно формата, която тестовете
+забраняват другаде в програмата, а вносът е мястото с най-много редове изобщо:
+5 000 реда падат от 918 на 301 ms. **Трите износа** (UNIMARC, Dublin Core, CSV)
+минаваха през заявка за един документ на екрана — 38 колони плюс корелирана подзаявка
+на ред — приложена върху целия фонд; изброената проекция с агрегат свива паметта от
+10,60 на 7,05 МБ, а времената са 506 → 423 ms (UNIMARC), 269 → 237 ms (Dublin Core)
+и 230 → 225 ms (CSV). И в трите случая резултатът е **дословно същият**: отпечатаният
+лист с етикети — знак по знак, внесените редове и отказите — ред по ред, изнесените
+файлове — байт по байт.
+
+**Честно за числата на екраните.** Мерилката на този кръг рисува в jsdom, а jsdom е
+**17 – 41 пъти по-бавен** от двигателя на истинската програма при вписване в DOM
+(средно 24,8 пъти). Тоест екран, който в таблицата изглежда като 400 ms, е около
+30 ms истинска работа. Затова няколко екрана, които изглеждаха бавни — читатели,
+летопис, справки, персоналии, одитна следа, дневник, списъкът на периодиката — бяха
+**оставени както са**: измерването не ги обвинява, обвинява ги измервателният уред.
+Това, което jsdom изобщо не мери, се оказа истинското: **оформлението и паметта на
+прозореца**, премерени в истински Chromium.
+
+**Дългите списъци вече имат таван — 3 000 реда.** Дотук нямаше никакъв: „Покажи още“
+можеше да стигне до 15 000 реда, а това в истински прозорец е 270 375 възела,
+1 115 ms замръзнал екран, таблица, висока 751 835 px, и **+1 025 МБ** памет на
+рендера. При 3 000 реда същото е 283 ms — последната стъпка, при която прозорецът
+остава използваем, и повече, отколкото човек може да прегледа с очи. При тавана
+бутонът „Покажи още“ се маха и на негово място застава изречение: **„Показани са
+първите 3 000 реда от N. Останалите ги има…“** — с трите изхода (търсене, филтрите
+над таблицата, печат на диапазон). Мълчаливо отрязан списък е по-лошо от отрязан
+списък с надпис: библиотекарят решава, че книгите ги няма. Прозоречен рендер получиха
+и два екрана, които дотук бяха обосновано пропуснати: **списъкът на МЗС** (този
+регистър не се чисти — приключилите заявки остават в него завинаги, тоест той расте,
+а не се върти: 5 516 → 3 318 възела) и **кардексът с „всички години“**, който
+заобикаляше собствения си разрез по година (7 251 → 1 853).
+
+**„Печат на цялата инвентарна книга“ вече пита, с числата.** При 15 000 вписвания
+подготовката на листа замразява прозореца за около 2,7 секунди и заема около 792 МБ —
+програмата не отговаря на нищо, нито на затваряне, нито на Esc, и изглежда увиснала.
+Затова прозорецът за печат започва вече с **избор на година** (текущата — поводът за
+печат почти винаги е заверката на вписаното през нея), казва колко вписвания е цялата
+книга и колко листа А4 са това, а „Цялата книга…“ минава през изричен въпрос със
+същите числа. Самият печат **не е нарязан на порции** — и това е измерено, а не
+предположено: на порции по 500 реда същият лист струва 3 575 ms срещу 2 581 ms
+наведнъж, защото всяка порция кара браузъра да преоформи цялата вече построена
+таблица. Режеше се не печатът, а поводът.
+
+**Новото: „Изтриване на всички данни (започване на чисто)“** в „Настройки“ → до
+резервните копия. Дотук чиста база се получаваше само ръчно — затвори програмата,
+намери папката, преименувай `library.db` — по три напълно редовни повода: читалище,
+което е въвеждало пробни записи, докато свикне, и започва истинското описване на
+фонда; компютър, който минава към друга библиотека; обучение или демонстрация, след
+която демонстрационните данни трябва да изчезнат. И трите минаваха през ръчно пипане
+на файл в папка — действие, което се прави веднъж грешно и отнася годината работа.
+Сега редът е такъв: **първо пълно резервно копие** (`before-reset-…` в папката с
+копията, криптирано, ако защитата на личните данни е включена и отключена) и **ако
+копието не успее, не се изтрива нищо**; после думата **„ИЗТРИЙ“, написана на ръка** —
+проверява се в ядрото, не само на екрана, защото екранът е един от входовете, а не
+пазачът; после изпразване на данните в **една** транзакция, следващият инвентарен
+номер обратно на **1**, пресъздаване на индексите за търсене, нулиране на броячите на
+id (иначе първата книга на новата библиотека получава № 15 001) и **VACUUM**, за да
+не останат ЕГН-тата и адресите на изтритите читатели да лежат в освободените страници
+на файла; **първият ред на новата одитна следа** записва кой, кога, какво е изтрито и
+къде е копието; накрая програмата се стартира наново. Прозорецът показва **преди**
+потвърждението точните числа на онова, което изчезва, и поименния списък на онова,
+което остава.
+
+**Какво преживява изтриването и защо.** Остават настройките и самоличността на
+библиотеката, служителите, таблицата за авторски знак, видовете документи,
+номенклатурите (отдели, езици, местоположения), правилата за заемане по категория
+читател и календарът на затворените дни — те описват **инсталацията**, не фонда, а
+чиста база, в която библиотекарката трябва пак да напише ЕИК-а, ръководителя и
+работното време, е по-лоша от ръчното преименуване на файла: точно тези полета излизат
+върху всеки акт, протокол и регистър за подпис. Остава и **ключът за защита на личните
+данни** — изтриването му би направило невъзстановими вече направените криптирани
+копия, включително това, което се прави секунда по-рано. Папката с резервните копия не
+се пипа. И едно изтичане, което изтриването **не поправя** и затова се казва на глас —
+и на екрана, и в следата: вече публикуваният `katalog.json` остава в интернет със
+стария фонд, докато някой не го замени. Няма да се изчисти сам: програмата **нарочно**
+отказва да презапише непразен публикуван каталог с празен — предпазна мярка срещу
+прясна инсталация, която иначе би изтрила реално публикувани данни.
+
+Проверки: четири нови файла с тестове — `test/katalog-v2464.test.js`,
+`test/etiketi-v2464.test.js`, `test/proizvoditelnost-v2464.test.js` и
+`test/nachisto-v2464.test.js`. Всяка поправка е доказана **два пъти и поотделно**: че
+резултатът е същият (съдържанието на каталога и правилото за „налична“; отпечатаният
+лист с етикети знак по знак; внесените редове и отказите ред по ред; трите изнесени
+файла байт по байт; копието пак се отказва при повреда) и че устройството е такова,
+каквото твърди — по изпълнение на истинския код и по текста на заявките (двата срока,
+единственият запис, изброената проекция без подзаявка на ред, таванът в общата
+машинка, дълбоката проверка само при възстановяване). За изтриването: отказ без
+думата в самия обработчик, отказ при **наистина** провалено копие без изтрит нито
+един ред, поименна проверка на всяко решение „това остава“ и пазач, че таблица,
+добавена утре, не може да се промъкне между двата списъка без решение. Праговете по
+време са груб предпазител срещу нещо драстично и не бива да се четат като защита
+срещу връщане назад — същата честна бележка, както в `perf-v2448`. Два теста, които
+заковаваха старото поведение (кардексът без прозорец, двата екрана без прозоречен
+рендер), са обновени заедно с обяснението защо. Всяка теза е проверена и с **връщане
+на поправката**, а целият набор мина и през **харнеса за мутации** — тест, който
+минава и когато кодът под него е счупен нарочно, не пази нищо и не бива да стои в
+поредицата. Пълна поредица: **1966 успешни, 0 неуспешни**, в UTC и Europe/Sofia;
+сайтът: `test-page-katalog.js` 8/8 сценария и `test-page-katalog-view.js` при
+15 002 записа — и двата минават непроменени.
+
+**EN:** A round driven by **measurement**, not by reading code. The real program was
+run against a real collection — 15 000 documents, 3 000 readers, 12 000 loans, a
+19.47 MB database — and every number below comes from that machine and that database.
+Plus one new action that until now was done by hand in the Windows folder: **"Delete
+all data (start clean)"**.
+
+**The window now appears first.** The daily backup ran four lines *before* the window
+was created, so the librarian waited for it before seeing anything at all. More than
+eight tenths of that backup went into a **second deep check** of the file just
+written — `PRAGMA integrity_check` on a copy whose source the same program had checked
+less than a second earlier at startup. A fresh copy is now verified with `quick_check`
+(117 → 41 ms) — exactly the check against an interrupted or incomplete write that it
+exists for — and the copy itself starts after the window has been painted. The backup
+is 185 → 78 ms, startup on the main-process side 229 → 84 ms, and none of those
+milliseconds stand between the click and the first screen any more. The daily copy is
+still always made: on window load, on a safety timer, and on quit. **The deep check
+stays where it belongs** — on restore, where the file comes from outside and is about
+to replace the live database.
+
+**`katalog.json` is no longer rewritten after every desk scan.** Every checkout and
+return rewrote the whole multi-megabyte file — 184 ms, 50 – 150 times a day, often on
+a network share — and the four-second wait merged nothing, because desk scans are
+10 – 20 seconds apart. Three fixes, all measured. The catalog payload is built **once
+per database state** (and the manual "Catalog (JSON)…" export gets the same one
+instead of rebuilding it). Verifying the assembled text now costs the same for 2 and
+for 13 800 records instead of being paid by file size: punctuation is checked against
+a miniature copy, values as they are assembled, and at the slightest doubt the file is
+written the old way. The write is 193 → 37 ms median. And **circulation has its own
+speed**: a change to the collection (new book, edit, deaccession, acquisition,
+periodical, shelf) still reaches the file at once, while availability from the desk
+takes up to about a minute. Availability in an online catalog was never a promise to
+hold a book, while a deaccessioned book still on offer sends a reader after something
+that is not there. Result: 5 – 9 scans fold into one write, 50 – 150 writes a day
+become ~15 – 25. The "Generate katalog.json" button and quitting still write
+everything pending immediately.
+
+**Three places did the same work through a far more expensive door.** Barcode labels
+for 300 new books pulled the **whole collection** — 15 000 rows, 4.53 MB across the
+bridge, 87 ms in SQLite — and then sliced the range in JavaScript; the range is now a
+lookup on the inventory-number index (1 ms) returning only the six fields actually
+printed on a label. The whole sheet: 386 → 238 ms. **Import** from a file recompiled
+its insert statements **on every row** — precisely the shape the tests forbid elsewhere
+in the program, and import is the place with the most rows of all: 5 000 rows drop
+from 918 to 301 ms. **The three exports** (UNIMARC, Dublin Core, CSV) used a
+single-document screen query — 38 columns plus a correlated subquery per row — applied
+to the whole collection; an enumerated projection with an aggregate cuts memory from
+10.60 to 7.05 MB, and the times are 506 → 423 ms, 269 → 237 ms and 230 → 225 ms. In
+all three cases the result is **literally identical**: the label sheet character by
+character, the imported rows and rejections row by row, the exported files byte for
+byte.
+
+**An honest word about the screen numbers.** This round's benchmark renders in jsdom,
+and jsdom is **17 – 41 times slower** than the real program's engine at DOM insertion
+(24.8× median). A screen that looks like 400 ms in the table is about 30 ms of real
+work. Several screens that looked slow — readers, chronicle, reports, persons, audit
+trail, the daily journal, the periodicals list — were therefore **left alone**: the
+measurement does not accuse them, the measuring instrument does. What jsdom does not
+measure at all turned out to be the real cost: **layout and renderer memory**, measured
+in real Chromium.
+
+**Long lists now have a ceiling — 3 000 rows.** There was none: "Show more" could
+reach 15 000 rows, which in a real window is 270 375 nodes, 1 115 ms of frozen screen,
+a table 751 835 px tall and **+1 025 MB** of renderer memory. At 3 000 rows the same is
+283 ms — the last step at which the window stays usable, and more than a person can
+scan by eye. At the ceiling the "Show more" button is replaced by a sentence:
+**"The first 3 000 rows of N are shown. The rest are there…"** — with the three ways
+out (search, the filters above the table, printing a range). A silently truncated list
+is worse than a truncated list with a notice: the librarian concludes the books are
+gone. Two screens that had been deliberately left out also got windowed rendering: the
+**ILL register** (it is never purged — completed requests stay forever, so it grows
+rather than cycles: 5 516 → 3 318 nodes) and the **kardex "all years"** option, which
+bypassed its own per-year split (7 251 → 1 853).
+
+**"Print the whole inventory book" now asks, with the numbers.** At 15 000 entries,
+preparing the sheet freezes the window for about 2.7 seconds and costs about 792 MB —
+the program answers nothing, not closing, not Esc, and looks hung. The print dialog
+therefore now opens on a **choice of year** (the current one — the reason to print is
+almost always certifying what was entered during it), states how many entries the whole
+book holds and how many A4 sheets that is, and "The whole book…" goes through an
+explicit question carrying the same numbers. The printing itself is **not chunked**,
+and that is measured rather than assumed: in chunks of 500 the same sheet costs
+3 575 ms against 2 581 ms in one go, because every chunk makes the browser re-lay out
+the whole table built so far. What was cut was not the printing but the occasion.
+
+**New: "Delete all data (start clean)"** in Settings, next to the backups. Until now a
+clean database was only reachable by hand — close the program, find the folder, rename
+`library.db` — for three perfectly ordinary reasons: a community centre that entered
+trial records while learning the program and is starting the real cataloguing; a
+computer moving to another library; a training session whose demo data must disappear.
+All three went through renaming a file in a folder — something done wrong once costs a
+year of work. The order is now: **a full backup first** (`before-reset-…` in the
+backups folder, encrypted when personal-data protection is configured and unlocked) and
+**if the backup fails, nothing is deleted**; then the word **"ИЗТРИЙ" typed by hand** —
+checked in the handler, not only on screen, because the screen is one of the entrances,
+not the guard; then the data tables are emptied in **one** transaction, the next
+inventory number goes back to **1**, the search indexes are rebuilt, the id counters are
+cleared (otherwise the new library's first book gets No. 15 001) and **VACUUM** runs, so
+the deleted readers' national ID numbers and addresses do not stay lying in the file's
+freed pages; **the first row of the new audit trail** records who, when, what was
+deleted and where the backup is; finally the program restarts itself. The dialog shows
+the exact counts of what disappears and the itemised list of what stays **before** the
+confirmation.
+
+**What survives, and why.** The library's settings and identity, the employees, the
+author-mark table, the document types, the authorised values (departments, languages,
+locations), the circulation rules per reader category and the closed-days calendar —
+these describe the **installation**, not the collection, and a clean database in which
+the librarian has to retype the tax number, the director and the opening hours is worse
+than renaming the file by hand: those fields print on every act, protocol and register
+that gets signed. The **personal-data key** stays too — deleting it would make the
+encrypted backups already taken unrecoverable, including the one made a second earlier.
+The backups folder is untouched. And one leak the deletion does **not** fix, which is
+therefore said out loud both on screen and in the trail: the already published
+`katalog.json` stays online with the old collection until someone replaces it. It will
+not clear itself: the program **deliberately** refuses to overwrite a non-empty
+published catalog with an empty one — a safeguard against a fresh installation wiping
+genuinely published data.
+
+Checks: four new test files. Every fix is proven **twice and separately**: that the
+result is the same (catalog content and the "available" rule; the label sheet character
+by character; imported rows and rejections row by row; the three exported files byte for
+byte; a damaged copy still refused) and that the structure is what the comments claim —
+by running the real code and by the text of the queries (the two delays, the single
+write, the enumerated projection with no per-row subquery, the ceiling inside the shared
+routine, the deep check only on restore). For the deletion: refusal without the word in
+the handler itself, refusal on a **genuinely** failed backup with not one row deleted,
+an itemised check of every "this stays" decision, and a guard that a table added
+tomorrow cannot slip between the two lists undecided. The time thresholds are a coarse
+guard against something drastic and must not be read as protection against regression —
+the same honest note as in `perf-v2448`. Two tests that pinned the old behaviour are
+updated together with the reasoning. Each claim was also verified by **reverting the
+fix**, and the whole set went through the **mutation harness** — a test that still
+passes when the code beneath it is deliberately broken guards nothing and does not
+belong in the suite. Full suite: **1966 passing, 0 failing**, in UTC and
+Europe/Sofia; the site:
+`test-page-katalog.js` 8/8 scenarios and `test-page-katalog-view.js` at 15 002 records
+— both pass unchanged.
+
 ## v2.4.63
 
 **BG:** Таблицата за авторски знак вече **идва с програмата**. Дотук тя не идваше:
