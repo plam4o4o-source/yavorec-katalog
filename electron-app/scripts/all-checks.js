@@ -106,4 +106,4 @@ if (failed) {
   console.error('\u001b[31m' + failed + ' от ' + steps.length + ' проверки не минаха.\u001b[0m');
   process.exit(1);
 }
-console.log('\u001b[32mИ трите проверки минаха.\u001b[0m');
+console.log('\u001b[32mИ ' + steps.length + ' проверки минаха.\u001b[0m');
