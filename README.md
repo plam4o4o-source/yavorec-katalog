@@ -132,13 +132,27 @@ npm test           # node:test — всички тестове (1900+)
 | [`docs/naredba-3-karta.md`](docs/naredba-3-karta.md) | кой член от Наредба № 3 коя функция изпълнява |
 | [`docs/narachnik-za-bibliotekarya.pdf`](docs/narachnik-za-bibliotekarya.pdf) | наръчник за ежедневната работа |
 | [`electron-app/CHANGELOG.md`](electron-app/CHANGELOG.md) | всички издания, двуезично (BG/EN) |
+| [`CONTRIBUTING.bg.md`](CONTRIBUTING.bg.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) | как се предлагат промени — среда, тестове, преглед |
+| [`CODE_OF_CONDUCT.bg.md`](CODE_OF_CONDUCT.bg.md) · [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | правила за общуване |
 
 ## Принос (Contributing)
 
 Приемат се доклади за грешки, предложения и pull request-и — вижте
-[`CONTRIBUTING.md`](CONTRIBUTING.md) за стила на кода, изискванията към
-тестовете и процеса. Докладвайте грешки през
-[Issues](https://github.com/plam4o4o-source/yavorec-katalog/issues).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) (на английски) или
+[`CONTRIBUTING.bg.md`](CONTRIBUTING.bg.md) за стила на кода, изискванията към
+тестовете и процеса. Участието е и при
+[правилата за общуване](CODE_OF_CONDUCT.bg.md).
+
+- **Грешка** — [Issues](https://github.com/plam4o4o-source/yavorec-katalog/issues),
+  шаблонът „Доклад за грешка“.
+- **Предложение** — същото място, шаблонът „Предложение за подобрение“.
+- **Обратна връзка от библиотека или тестер** — шаблонът „Обратна връзка от
+  библиотека“.
+- **Въпрос или разговор** —
+  [Discussions](https://github.com/plam4o4o-source/yavorec-katalog/discussions).
+
+Не прилагайте лични данни на читатели (имена, ЕГН, адреси, телефони) в доклади
+и снимки на екрана.
 
 ## Сигурност
 

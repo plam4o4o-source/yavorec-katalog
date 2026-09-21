@@ -13,7 +13,11 @@
     "start": "electron .",
     "build": "electron-builder --win",
     "pack": "electron-builder --dir",
-    "test": "node --test"
+    "test": "node --test",
+    "test:all": "node scripts/all-checks.js"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
