@@ -1,0 +1,125 @@
+name: Доклад за грешка / Bug report
+description: Нещо в програмата не работи както трябва / Something in InvLib does not work as expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Благодарим, че отделяте време да опишете проблема.
+
+        **Попълнете каквото можете** — непълен доклад е по-добър от никакъв. Полетата
+        по-долу са подредени така, както обикновено се разказва един проблем.
+
+        ⚠️ **Не прилагайте лични данни.** Имена на читатели, ЕГН, адреси и телефони не
+        бива да се виждат в снимки или в текста. Изрежете или замажете тази част.
+
+        ---
+
+        Thank you for taking the time to report a problem. Fill in what you can — an
+        incomplete report is far better than none.
+
+        ⚠️ **Please do not include personal data.** Reader names, national identification
+        numbers, addresses and phone numbers must never appear in screenshots or text.
+
+  - type: checkboxes
+    id: duplicate-check
+    attributes:
+      label: Преди да докладвате / Before reporting
+      options:
+        - label: Потърсих в отворените и затворените доклади и този проблем още не е описан. / I searched the existing issues and this problem has not been reported yet.
+          required: true
+
+  - type: input
+    id: summary
+    attributes:
+      label: Накратко / Summary
+      description: Едно изречение за проблема. / One sentence describing the problem.
+      placeholder: "Инвентарната книга се печата с празна колона „Цена“"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Подробно описание / Detailed description
+      description: |
+        Какво се случва и в кой раздел на програмата. Ако има съобщение за грешка —
+        препишете го дословно.
+        What happens and where. Quote any error message word for word.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Стъпки за възпроизвеждане / Steps to reproduce
+      description: Точната последователност, която води до проблема. / The exact sequence that leads to the problem.
+      value: |
+        1. Отварям раздел „…“
+        2. Натискам „…“
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Очакван резултат / Expected result
+      description: Какво очаквахте да направи програмата. / What you expected the program to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Действителен резултат / Actual result
+      description: Какво направи тя вместо това. / What the program did instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия на InvLib / InvLib version
+      description: 'Вижда се в „Настройки“ или в името на инсталационния файл (напр. InvLib-Setup-2.4.63.exe). / Shown in Settings or in the installer file name.'
+      placeholder: "2.4.63"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Операционна система / Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows 8.1 или по-стара / or older
+        - Друга / Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: database-setup
+    attributes:
+      label: Как е разположена базата / Database setup
+      description: |
+        InvLib може да държи базата локално или в обща мрежова папка за няколко работни места.
+        InvLib can keep its database locally or in a shared network folder.
+      options:
+        - Локална база (едно работно място) / Local database (one workstation)
+        - Обща база в мрежова папка (две или повече работни места) / Shared database in a network folder
+        - Не съм сигурен/а / Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Снимки или допълнителна информация / Screenshots or additional information
+      description: |
+        Довлачете изображения тук, ако помагат. Първо махнете или замажете данните на читатели.
+        Ако проблемът е в печатен документ, снимка или PDF на прегледа преди печат е най-полезна.
+        Drag and drop images here. Remove or blur any reader data first.
+    validations:
+      required: false

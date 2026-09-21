@@ -1,0 +1,23 @@
+# Изборът на шаблон: дали празното issue остава възможно и какви връзки стоят
+# под формите.
+#
+# `blank_issues_enabled: true` е нарочно. Библиотекарка, чийто проблем не се
+# побира в нито една форма, трябва да може да го опише със свои думи, вместо да
+# се откаже — непохватно описан проблем е по-добре от неотворен.
+#
+# The issue chooser: whether a blank issue is still allowed, and which links
+# appear under the templates. Blank issues stay enabled on purpose.
+blank_issues_enabled: true
+contact_links:
+  - name: Въпрос или разговор / Question or discussion
+    url: https://github.com/plam4o4o-source/yavorec-katalog/discussions
+    about: Общи въпроси, идеи и разговор с други библиотеки. / Questions, ideas and conversation with other libraries.
+  - name: Помощ при инсталиране и работа / Help with installing and using InvLib
+    url: https://github.com/plam4o4o-source/yavorec-katalog/discussions/categories/help
+    about: Инсталиране, настройване и ежедневна работа — започнете оттук. / Installation, setup and day-to-day use — start here.
+  - name: Наръчник за библиотекаря / Handbook for librarians
+    url: https://invlib.com/
+    about: Документация, изтегляне и наръчникът за печат. / Documentation, downloads and the printed handbook.
+  - name: Пропуск в сигурността / Security issue
+    url: https://github.com/plam4o4o-source/yavorec-katalog/security/policy
+    about: Съобщавайте уязвимости лично, не като публично issue. / Please report vulnerabilities privately.

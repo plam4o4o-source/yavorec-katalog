@@ -1,0 +1,146 @@
+name: Обратна връзка от библиотека / Library testing feedback
+description: Как се държа InvLib във вашата библиотека — в реална или пробна работа / How InvLib performed in your library
+title: "[Feedback]: "
+labels: ["library-feedback", "testing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Благодарим, че изпробвахте InvLib и че отделяте време да опишете какво видяхте.
+
+        Обратната връзка от работеща библиотека струва повече от всякакво тестване от
+        страна на разработчика: вие ползвате програмата върху истински фонд и по
+        правилата, които наистина трябва да спазвате.
+
+        ⚠️ **Не прилагайте лични данни** — имена на читатели, ЕГН, адреси или телефони —
+        нито в текста, нито в прикачени файлове.
+
+        ---
+
+        Feedback from a working library is worth more than any amount of testing by the
+        developer. ⚠️ **Please do not include personal data.**
+
+  - type: input
+    id: library-name
+    attributes:
+      label: Библиотека / Library name
+      description: По желание. Оставете празно, ако предпочитате. / Optional — leave empty if you prefer not to say.
+      placeholder: "по желание / optional"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: library-type
+    attributes:
+      label: Вид библиотека / Type of library
+      options:
+        - Читалищна / Community centre library (chitalishte)
+        - Училищна / School library
+        - Обществена или общинска / Public or municipal
+        - Университетска / University or academic
+        - Специална или ведомствена / Special or institutional
+        - Друга / Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия на InvLib / InvLib version
+      description: 'Вижда се в „Настройки“ или в името на инсталационния файл (напр. InvLib-Setup-2.4.63.exe). / Shown in Settings or in the installer file name.'
+      placeholder: "2.4.63"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Операционна система / Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows 8.1 или по-стара / or older
+        - Друга / Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: modules
+    attributes:
+      label: Кои части ползвахте / Which parts did you use
+      description: Изберете всичко, по което сте работили (задръжте Ctrl). / Select every part you worked with.
+      multiple: true
+      options:
+        - Вписване и каталогизиране / Entering and cataloguing documents
+        - Инвентарна книга и КДБФ / Inventory book and КДБФ
+        - Партиди на придобиване / Acquisition batches
+        - Заемане, връщане и читатели / Lending, returns and readers
+        - Напомняния и читателски сметки / Overdue notices and reader accounts
+        - Отчисляване с актове / Deaccession acts
+        - Инвентаризация / Stocktaking
+        - Периодика / Periodicals
+        - Краезнание / Local studies
+        - Баркоди и етикети / Barcodes and labels
+        - Дневник и годишни справки / Daily register and annual reports
+        - Онлайн каталог / Online catalogue publishing
+        - Резервни копия и внасяне на данни / Backup, restore and data import
+        - Друго / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-tested
+    attributes:
+      label: Какво направихте / What you did
+      description: |
+        Накратко каква работа мина през програмата — напр. „вписах 120 книги от партидите
+        за 2025 г.“ или „направих пълна инвентаризация на детския отдел“.
+        A short account of the work you put through the program.
+    validations:
+      required: true
+
+  - type: textarea
+    id: works-well
+    attributes:
+      label: Какво работи добре / What worked well
+      description: |
+        Какво ви спести време или свърши работата вярно. Това е също толкова важно, колкото проблемите.
+        What saved you time or did the job correctly — this matters as much as the problems.
+    validations:
+      required: true
+
+  - type: textarea
+    id: improvements
+    attributes:
+      label: Какво може да се подобри / What could be improved
+      description: |
+        Неща, които работят, но неудобно — твърде много натискания, неясен надпис, липсваща колона.
+        Things that work, but awkwardly.
+    validations:
+      required: false
+
+  - type: textarea
+    id: difficulties
+    attributes:
+      label: Трудности / Difficulties
+      description: |
+        Къде заседнахте, трябваше да гадаете или потърсихте помощ. Ако нещо се държи като
+        дефект, отворете и отделен доклад за грешка, за да бъде проследен и поправен.
+        Where you got stuck. If something behaved as a defect, please also open a bug report.
+    validations:
+      required: false
+
+  - type: textarea
+    id: suggestions
+    attributes:
+      label: Предложения за развитие / Suggestions for development
+      description: Какво би направило програмата по-полезна за библиотека като вашата. / What would make it more useful for a library like yours.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Допълнителни бележки / Additional comments
+    validations:
+      required: false
