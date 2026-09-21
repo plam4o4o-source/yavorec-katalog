@@ -1,0 +1,88 @@
+name: Предложение за подобрение / Feature request
+description: Идея за нова възможност или подобрение / An idea for a new capability or an improvement
+title: "[Feature]: "
+labels: ["enhancement", "feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Благодарим за предложението.
+
+        Най-полезни са описанията на **работата в библиотеката**, а не на техническото
+        решение: какво се опитвате да свършите, как го правите днес и защо сегашният
+        начин е бавен, грешкоопасен или невъзможен.
+
+        ---
+
+        The most useful suggestions describe the **work in the library** rather than the
+        technical solution: what you are trying to accomplish, how you do it today, and
+        why the current way is slow, error-prone or impossible.
+
+  - type: checkboxes
+    id: duplicate-check
+    attributes:
+      label: Преди да предложите / Before suggesting
+      options:
+        - label: Потърсих в отворените и затворените предложения и това още не е предлагано. / I searched the existing issues and this idea has not been suggested yet.
+          required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Предложение / Proposal
+      description: Едно изречение за това какво искате да може програмата. / One sentence naming the capability you would like.
+      placeholder: "Справка за заеманията на един читател за избран период"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание / Description
+      description: Какво прави новата възможност, погледнато от гишето. / What it would do, from the librarian's point of view.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какъв проблем решава / Problem it solves
+      description: |
+        Кое е трудното днес. Напишете и как се справяте сега — на хартия, в таблица, на ръка —
+        и колко често се налага.
+        What is difficult today, how you handle it now, and how often the task comes up.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предложено решение / Proposed solution
+      description: |
+        Как си го представяте. Скица на екрана или на печатния документ е добре дошла.
+        How you imagine it working. A rough sketch is welcome.
+    validations:
+      required: false
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Пример от практиката / Example from library practice
+      description: |
+        Конкретен случай, в който ще се ползва — годишен отчет пред настоятелството,
+        инвентаризация, запитване от регионалната библиотека.
+        A concrete situation where this would be used.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Допълнителна информация / Additional information
+      description: |
+        Каквото още има значение: разпоредба от Наредба № 3, официален образец, на който
+        резултатът трябва да отговаря, или как друга система решава същата задача.
+        Anything else worth knowing — a relevant provision of Ordinance No. 3, an official
+        form the result has to match, or how another system solves the same task.
+    validations:
+      required: false
