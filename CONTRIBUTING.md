@@ -111,15 +111,23 @@ the second pass as well before opening a pull request:
 TZ=Europe/Sofia npm test
 ```
 
-There is a separate suite for the public online catalogue page, which lives
-outside `electron-app/` and is therefore not picked up by `npm test`:
+There are two separate suites for the public online catalogue page, which live
+outside `electron-app/` and are therefore not picked up by `npm test` — one for
+how the catalogue *reaches* the page (sources, timeouts, cache) and one for what
+the page *does* with it at a realistic scale of 15 000 copies:
 
 ```bash
 cd ../site
 NODE_PATH=../electron-app/node_modules node test-page-katalog.js page-katalog.html
+NODE_PATH=../electron-app/node_modules node test-page-katalog-view.js
 ```
 
-All three checks — both time zones and the catalogue page — run with one command:
+The first one takes about a minute and looks stuck: it is waiting out the page's
+real production timeouts (6 s for headers, 25 s for the body, per source). That
+wait *is* the check.
+
+All four checks — both time zones and both catalogue suites — run with one
+command:
 
 ```bash
 npm run test:all

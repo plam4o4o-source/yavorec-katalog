@@ -14,6 +14,22 @@ on:
 permissions:
   contents: read
 
+# ПОСЛЕДОВАТЕЛНИТЕ PUSH-ОВЕ НЕ СЕ ТРУПАТ.
+# Докато се оправя един PR, се push-ва по няколко пъти в рамките на минути.
+# Досега всяко от тези пускания вървеше до край — по ~6 минути на две машини,
+# за да съобщи резултат за код, който вече е презаписан. Тук по-новото пускане
+# отменя по-старото за СЪЩИЯ клон: остава само онова, което казва нещо за
+# текущото състояние.
+# ВАЖНО: cancel-in-progress е изключено за main. Там всяко пускане е за вече
+# слят код и трябва да остави запис дали е минало — иначе бърза поредица от
+# сливания би отменила проверката точно на публикувания клон.
+# github.ref e различен за push (refs/heads/…) и за pull_request
+# (refs/pull/N/merge), затова двете пускания на един и същ PR не се отменят
+# взаимно; отменя се само по-старото пускане от същия вид.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     # ДВЕТЕ ЧАСОВИ ЗОНИ ВЪРВЯТ УСПОРЕДНО, не една след друга.
@@ -59,24 +75,37 @@ jobs:
           cache: npm
           cache-dependency-path: electron-app/package-lock.json
 
-      - name: Инсталиране на зависимости
-        run: npm ci
+      # --ignore-scripts: package.json има postinstall
+      # (electron-rebuild -f -w better-sqlite3), който прекомпилира
+      # better-sqlite3 за ABI-то на Electron — и за целта СВАЛЯ самия Electron
+      # (~100 MB). Това е нужно на пакетирания .exe (виж release-electron.yml),
+      # но тук е чиста загуба: тестовете вървят с обикновен `node --test`, не
+      # през Electron, и веднага след това следващата стъпка компилира модула
+      # обратно за Node. Тоест досега CI сваляше Electron, компилираше за него
+      # и хвърляше резултата.
+      # Измерено в чиста папка само с package.json и package-lock.json:
+      # `npm ci` → 86 s; `npm ci --ignore-scripts` + `npm rebuild better-sqlite3`
+      # → 7 s. Спестява се в ДВЕТЕ задачи от матрицата.
+      # --no-audit --no-fund само махат изход, който никой не чете.
+      - name: Инсталиране на зависимости (без postinstall за Electron — виж защо горе)
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
-      # package.json има postinstall (electron-rebuild -f -w better-sqlite3), който
-      # прекомпилира better-sqlite3 за ABI-то на Electron (необходимо за пакетирания
-      # .exe — виж release-electron.yml). Тестовете тук обаче се пускат с обикновен
-      # `node --test`, не през Electron, затова компилираме better-sqlite3 обратно
-      # за текущия Node — иначе require() гърми с "NODE_MODULE_VERSION mismatch".
+      # better-sqlite3 остава без компилиран двоичен файл след --ignore-scripts,
+      # затова се компилира тук — за ТЕКУЩИЯ Node, какъвто искат тестовете.
+      # Без него require() гърми с "NODE_MODULE_VERSION mismatch".
       - name: Компилиране на better-sqlite3 за обикновен Node (не Electron) — за самите тестове
         run: npm rebuild better-sqlite3
 
+      # 265 файла, всеки в собствен процес на Node — почти цялото време отива в
+      # стартиране на процеси, а не в разбор. xargs -P ги пуска по едно на ядро:
+      # измерено локално 11,8 s → 4,3 s при същата проверка (`node --check`
+      # остава непроменен). xargs връща 123, щом поне едно извикване е паднало,
+      # а pipefail го изважда от конвейера — проверено с нарочно счупен файл.
       - name: Бърза синтактична проверка на всички .js файлове (извън node_modules)
         shell: bash
         run: |
-          set -e
-          for f in $(git ls-files '*.js' | grep -v 'node_modules/'); do
-            node --check "$f"
-          done
+          set -euo pipefail
+          git ls-files '*.js' | grep -v 'node_modules/' | xargs -P "$(nproc)" -n 1 node --check
 
       - name: Тестове (node:test, ${{ matrix.tz }})
         shell: bash
@@ -121,21 +150,6 @@ jobs:
             echo "защото официалният сайт го показва на посетителите."
             exit 1
           fi
-
-      # Одит v2.4.14: `npm test` е `node --test` и се пуска с working-directory:
-      # electron-app, тоест откриването на тестове никога не излиза от
-      # electron-app/test/. Отделната поредица за ПУБЛИЧНАТА каталожна страница
-      # (site/test-page-katalog.js — и двата източника паднали + кеш → видимо
-      # предупреждение за остарели данни; повреден кеш → връщане към статичния
-      # списък; висящо тяло на отговора → прекъсване по време) минаваше днес, ако
-      # човек я пусне на ръка, но нищо нямаше да съобщи, когато спре да минава.
-      # Също само веднъж: каталожната страница няма нищо общо с часовата зона.
-      - name: Тестове на публичната каталожна страница (site/)
-        if: matrix.primary
-        working-directory: site
-        env:
-          NODE_PATH: ../electron-app/node_modules
-        run: node test-page-katalog.js page-katalog.html
 
       # КОЙ ТЕСТ ПАДНА — НА ВИДНО МЯСТО.
       # Поредицата е 1901 теста и изходът ѝ е към 15 000 реда. При провал
@@ -195,3 +209,53 @@ jobs:
           path: /tmp/test-*.tap
           retention-days: 14
           if-no-files-found: ignore
+
+  # ПУБЛИЧНАТА КАТАЛОЖНА СТРАНИЦА — ОТДЕЛНА ЗАДАЧА, УСПОРЕДНО С ТЕСТОВЕТЕ.
+  # Одит v2.4.14: `npm test` е `node --test` с working-directory: electron-app,
+  # тоест откриването на тестове никога не излиза от electron-app/test/.
+  # Поредицата за страницата минаваше, ако човек я пусне на ръка, но нищо нямаше
+  # да съобщи, когато спре да минава — затова е в CI.
+  # ЗАЩО ОТДЕЛНА ЗАДАЧА. Досега вървеше накрая на задачата в UTC и добавяше 52 s
+  # право към времето, което човек чака. От тези 52 s само 3,5 s са сметки: почти
+  # всичко е ИСТИНСКО изчакване на производствените срокове от page-katalog.html
+  # (6 s за заглавките, 25 s за тялото, по веднъж за всеки от двата източника при
+  # сценария „тялото виси“). Това чакане е самата проверка и не бива да се
+  # съкращава — но няма причина да се чака ПОСЛЕ тестовете вместо ПО ВРЕМЕ на тях.
+  # Тук не се пуска `npm rebuild better-sqlite3`: страницата ползва само jsdom.
+  # Часовата зона е без значение за каталожната страница — пуска се веднъж.
+  site:
+    name: Публична каталожна страница (site/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: electron-app/package-lock.json
+
+      # jsdom е зависимост на electron-app и е чист JavaScript — нито постинсталация,
+      # нито компилиране. Затова само изтегляне.
+      - name: Инсталиране на jsdom (зависимост на electron-app)
+        working-directory: electron-app
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Как каталогът СТИГА до страницата: и двата източника паднали + кеш →
+      # видимо предупреждение за остарели данни; повреден кеш → връщане към
+      # статичния списък; висящо тяло на отговора → прекъсване по време.
+      - name: Източници, срокове, кеш и диагностика
+        working-directory: site
+        env:
+          NODE_PATH: ../electron-app/node_modules
+        run: node test-page-katalog.js page-katalog.html
+
+      # Какво прави страницата, СЛЕД като данните са дошли — при 15 000
+      # екземпляра, колкото е реален фонд. Този файл съществуваше от v2.4.x, но
+      # НИЩО не го пускаше автоматично: нито `npm test` (извън electron-app/),
+      # нито CI. Минаваше само когато някой се сети на ръка.
+      - name: Изгледът при реален мащаб (15 000 екземпляра)
+        working-directory: site
+        env:
+          NODE_PATH: ../electron-app/node_modules
+        run: node test-page-katalog-view.js
