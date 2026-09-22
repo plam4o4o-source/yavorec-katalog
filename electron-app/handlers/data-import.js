@@ -175,6 +175,28 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
 
       const cats = new Map(db.prepare('SELECT id, name FROM categories').all().map(c => [c.name.toLowerCase(), c.id]));
       const insertCat = db.prepare('INSERT INTO categories (name) VALUES (?)');
+      /* ЗАЯВКИТЕ ЗА ВПИСВАНЕ СЕ КОМПИЛИРАТ ВЕДНЪЖ, НЕ НА ВСЕКИ РЕД (v2.4.64).
+         =====================================================================
+         КАКВО СТАВАШЕ ДОТУК. Двете вписвания — редът в „Книги“ и бройката в
+         „Наличности“ — стояха като db.prepare(...).run(...) ВЪТРЕ в обхождането
+         на файла. db.prepare() компилира SQL: при 5 000 реда това са 10 000
+         компилации на два низа, които не се променят нито веднъж. Точно тази
+         форма е забранена другаде в програмата от test/perf-v2431.test.js и
+         test/perf-v2448.test.js („в нито едно обхождане не се сглобява заявка
+         наново на всеки ред“) — вносът беше останал извън правилото, а той е
+         мястото с най-много редове в цялата програма: първият работен ден с
+         програмата е внос на целия стар опис.
+         ИЗМЕРЕНО (node /tmp/r41/import-split.js, 5 000 реда върху база от 15 000
+         документа): 463 ms както беше, 215 ms с подготвени веднъж заявки — 54 %
+         от времето на вноса отиваше в повторно компилиране. При файл С колона
+         „Баркод“ разликата е още по-голяма, защото assertUniqueBarcode()
+         добавяше още две компилации на ред (586 ms; виж поправката там).
+         Какво се вписва, какво се отказва и какво пише в отчета НЕ се променя:
+         същият SQL, същите стойности, същият ред на изпълнение — сменя се само
+         КОГА се компилира текстът на заявката. */
+      const insertBook = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
+        VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`);
+      const insertInv = db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)');
       const existingInv = new Set(db.prepare('SELECT inv_number FROM books WHERE inv_number IS NOT NULL')
         .all().map(r => String(r.inv_number)));
       const existingIsbn = new Set(db.prepare("SELECT isbn FROM books WHERE isbn IS NOT NULL AND isbn <> ''")
@@ -412,9 +434,8 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
                заварените данни. Грешката е на реда — редът отпада с обяснение,
                а не целият внос. */
             assertUniqueBarcode(db, payload.barcode, payload.inv_number, null);
-            const info = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
-              VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`).run(payload);
-            db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
+            const info = insertBook.run(payload);
+            insertInv.run(info.lastInsertRowid);
             if (inv >= nextInv) nextInv = inv + 1;
             report.added++;
             // Броят се само РЕАЛНО въведените редове — ред, паднал в catch-а

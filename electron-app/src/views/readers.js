@@ -96,8 +96,11 @@ function readersFilterChanged() {
 window.readersFilterChanged = readersFilterChanged;
 function renderReadersBody(append) {
   const readers = READERS_WINDOWED ? (window._READERS_LIST || []) : (window._READERS_LIST || []).filter(readersFilterMatch);
+  /* total — за тавана на общия брой изчертани редове (RENDER_MAX_ROWS в core.js,
+     v2.4.64): в прозоречен режим `readers` са само изтеглените дотук порции. */
   READERS_PAINTED = paintRowWindow({
     body: '#rBody', bar: '#rMore', rows: readers, limit: READERS_WINDOWED ? readers.length : READERS_RENDER_LIMIT,
+    total: READERS_WINDOWED ? READERS_TOTAL : readers.length,
     painted: append ? READERS_PAINTED : 0,
     rowsHtml: readersRowsHtml,
     moreHtml: READERS_WINDOWED ? () => readersMoreHtml(READERS_TOTAL - readers.length, READERS_TOTAL) : readersMoreHtml
@@ -128,7 +131,9 @@ async function renderReaders() {
   window._READERS_LIST = readers;
   READERS_GEN++;
   const filtered = READERS_WINDOWED ? readers : readers.filter(readersFilterMatch);
-  const shown = READERS_WINDOWED ? readers : filtered.slice(0, READERS_RENDER_LIMIT);
+  /* Същият таван като в paintRowWindow (RENDER_MAX_ROWS, core.js, v2.4.64) —
+     тялото тук се сглобява направо в #view и не минава през общата машинка. */
+  const shown = (READERS_WINDOWED ? readers : filtered.slice(0, READERS_RENDER_LIMIT)).slice(0, RENDER_MAX_ROWS);
   const total = READERS_WINDOWED ? READERS_TOTAL : filtered.length;
   const more = total - shown.length;
   $('#view').innerHTML = `
@@ -162,7 +167,8 @@ async function renderReaders() {
       <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th class="actsCell"></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="rMore" style="justify-content:center">${readersMoreHtml(more, total)}</div>
+    <div class="toolbar" id="rMore" style="justify-content:center">${
+      more > 0 && shown.length >= RENDER_MAX_ROWS ? renderCapHtml(shown.length, total) : readersMoreHtml(more, total)}</div>
     ${searchListDatalist('dl_searchReaders', searchSuggest)}`;
   // Таблицата е изчертана направо в #view — броячът трябва да съответства, за да
   // може следващото „Покажи още“ само да ДОБАВИ порция (виж renderReadersBody).

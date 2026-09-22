@@ -28,6 +28,26 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
     freeCopies, activeHolds
   } = deps;
+  /* ГИШЕТО ИМА СВОЙ, ПО-БАВЕН ОТЛОЖЕН ЗАПИС НА КАТАЛОГА (v2.4.64).
+     =====================================================================
+     Всяко заемане и връщане сменя само наличността в публичния каталог, но
+     дотук караше main.js да пренапише целия katalog.json 4 секунди по-късно.
+     Измерено на истинска база (15 000 документа, файл 4,82 МБ): самото
+     сканиране е 1 – 2 ms, а записът на каталога след него — 178 ms. При 50 – 150 заемания и връщания на ден и
+     сканирания през 10 – 20 секунди 4-секундният срок не слива нищо: 9 – 28
+     секунди на ден отиват за пренаписване на един и същ файл, често в папка на
+     мрежов диск.
+     „circulation“ праща тези промени по бавния таймер (90 s вместо 4 s — вж.
+     CATALOG_WRITE_DEBOUNCE_CIRC_MS в main.js). Наличността на сайта може да
+     изостане с минута: читателят идва след това до библиотеката, а „налична“ в
+     онлайн каталога и без това никога не е обещание за запазване. Промените по
+     ФОНДА (нова книга, редакция, отчисляване, акт, периодика, витрина) остават
+     на бързия таймер — там библиотекарката очаква да види резултата на сайта
+     веднага.
+     Записът пак е ЕДИН: ако междувременно се появи промяна по фонда, бързият
+     таймер записва и натрупаното от гишето. При затваряне на програмата
+     насроченото се изпразва (window-all-closed в main.js). */
+  const CIRCULATION = 'circulation';
 
   const LOAN_SELECT = `
     SELECT l.*, b.title, b.author, b.inv_number, r.name AS reader_name, r.card_no
@@ -383,7 +403,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         return info.lastInsertRowid;
       });
       const id = tx.immediate();
-      scheduleCatalogWrite();
+      scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
       return id;
     })
   );
@@ -507,7 +527,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const { hold, suspendedUntil, daysLate, fine, fineNow } = tx.immediate();
       // Извън транзакцията: пише файл, не база — не бива да я държи отворена.
-      scheduleCatalogWrite();
+      scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
       return {
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
         suspendedUntil, daysLate, fine, fineNow
@@ -928,7 +948,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         };
       });
       const r = tx.immediate();
-      scheduleCatalogWrite(); // документът вече не е „наличен“ — пише файл, не база
+      scheduleCatalogWrite(CIRCULATION); // документът вече не е „наличен“ — пише файл, не база
       return r;
     })
   );
@@ -1054,7 +1074,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
       });
       const result = tx.immediate();
-      scheduleCatalogWrite();
+      scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
       return result;
     })
   );
@@ -1157,7 +1177,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         };
       });
       const r = tx.immediate();
-      scheduleCatalogWrite(); // пише файл, не база — извън транзакцията
+      scheduleCatalogWrite(CIRCULATION); // пише файл, не база — извън транзакцията
       return {
         title: r.title, inv_number: r.inv_number, reader_name: r.reader_name,
         daysLate: r.daysLate, fine: r.fine, fineNow: r.fineNow, suspendedUntil: r.suspendedUntil,

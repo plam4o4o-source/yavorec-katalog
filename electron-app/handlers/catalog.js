@@ -16,9 +16,12 @@
 // отложени callback-и, не веднага при зареждане, така че редът тук е
 // без значение (за разлика от scheduleCatalogWrite по-горе).
 module.exports = function registerCatalogHandlers(ipcMain, deps) {
+  /* BOOK_SELECT вече НЕ се взима тук (v2.4.64): и трите износа минават през
+     EXPORT_SELECT по-долу — лека изброена проекция с агрегат вместо `b.*` с
+     корелирана подзаявка на ред. Вж. дългия коментар при EXPORT_SELECT. */
   const {
     getDb, run, logAudit, dialog, getMainWindow, fs, path, execFile,
-    BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
+    csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
   } = deps;
 
   function gitRun(folder, args) {
@@ -552,8 +555,52 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      (внесена база отпреди enum тригера), е по-тежко от това да пътува със статус,
      който приемащата система вижда дословно в 995$r. */
   const EXPORT_WHERE = `WHERE COALESCE(b.status,'') != 'отчислен' AND COALESCE(b.department,'') != 'служебен'`;
-  function exportBooksFor() {
-    return getDb().prepare(`${BOOK_SELECT} ${EXPORT_WHERE} ORDER BY b.inv_number`).all();
+  /* ЛЕКА ПРОЕКЦИЯ ЗА ИЗНОСИТЕ, ВМЕСТО BOOK_SELECT (v2.4.64).
+     =====================================================================
+     И трите износа (UNIMARC, Dublin Core, CSV) минаваха през BOOK_SELECT, а
+     той е направен за ЕДИН документ на екрана, не за целия фонд наведнъж:
+       • `b.*` — 38 колони, включително описанието, авторския знак, адреса на
+         корицата, cn_sort, datelastseen, created_at и номерата на акта и на
+         партидата, които нито един от трите файла не съдържа;
+       • КОРЕЛИРАНА ПОДЗАЯВКА за отворените заемания, изпълнена по веднъж НА РЕД
+         (15 000 пъти).
+     Измерено върху истинска база (15 000 документа, 13 800 изнасяни):
+         самата заявка: BOOK_SELECT 124 ms · 10,60 МБ в паметта
+                        тази проекция 89 ms · 7,05 МБ в паметта
+         целият износ:  UNIMARC 527 → 455 ms, Dublin Core 301 → 287 ms,
+                        CSV 280 → 227 ms (двата варианта, редуващо се в един
+                        процес върху една и съща база)
+     Това е СЪЩОТО преобразувание, което v2.4.31 вече направи за
+     buildCatalogPayload (main.js): изброени колони + един агрегат по
+     idx_loans_open вместо подзаявка на ред.
+
+     СЪДЪРЖАНИЕТО НА ФАЙЛОВЕТЕ НЕ СЕ ПРОМЕНЯ. Изброени са всички полета, които
+     marcRecord/buildDublinCore и колоните на CSV-то четат, плюс quantity и
+     available в същия вид, в който ги дава BOOK_SELECT — заявката връща същите
+     редове, в същия ред, със същите стойности; разликата е само в колоните,
+     които никой не чете. quantity/available остават нарочно, макар днес нито
+     един от трите файла да не ги извежда: така редът е ЗАМЕСТИТЕЛ на
+     BOOK_SELECT и нова колона в някой износ утре няма да върне тихо
+     корелираната подзаявка на ред. Пази се от test/katalog-v2464.test.js: там
+     двата варианта на заявката се пускат върху една и съща база и трите файла
+     се сравняват байт по байт. */
+  const EXPORT_SELECT = `
+    SELECT b.id, b.inv_number, b.barcode, b.register_date, b.title, b.subtitle, b.author,
+           b.year, b.volume, b.isbn, b.pages, b.language, b.udk, b.call_number,
+           b.city, b.publisher, b.series, b.series_no, b.keywords, b.annotation,
+           b.department, b.status, b.price,
+           c.name AS category_name,
+           COALESCE(i.quantity, 0) AS quantity,
+           COALESCE(i.quantity, 0) - COALESCE(o.n, 0) AS available
+    FROM books b
+    LEFT JOIN categories c ON c.id = b.category_id
+    LEFT JOIN inventory i ON i.book_id = b.id
+    LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM loans WHERE date_in IS NULL GROUP BY book_id) o ON o.book_id = b.id
+  `;
+  /* Без `where` връща ЦЕЛИЯ фонд — това е случаят на CSV износа, който по
+     замисъл изнася и отчислените (вж. коментара при него). */
+  function exportBooksFor(where) {
+    return getDb().prepare(`${EXPORT_SELECT} ${where || ''} ORDER BY b.inv_number`).all();
   }
   function exportExcludedCount() {
     return getDb().prepare(`SELECT COUNT(*) AS n FROM books b
@@ -567,7 +614,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         filters: [{ name: 'MARCXML', extensions: ['xml'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-      const books = exportBooksFor();
+      const books = exportBooksFor(EXPORT_WHERE);
       const s = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
       fs.writeFileSync(filePath, buildMarcXml(books, s), 'utf8');
       logAudit('Извеждане UNIMARC', filePath + ' — ' + books.length + ' записа');
@@ -582,7 +629,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         filters: [{ name: 'XML', extensions: ['xml'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-      const books = exportBooksFor();
+      const books = exportBooksFor(EXPORT_WHERE);
       const s = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
       fs.writeFileSync(filePath, buildDublinCore(books, s), 'utf8');
       logAudit('Извеждане Dublin Core', filePath + ' — ' + books.length + ' записа');
@@ -617,14 +664,14 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         filters: [{ name: 'CSV', extensions: ['csv'] }]
       });
       if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
-      /* Отделна заявка за бройките: BOOK_SELECT връща `quantity` = наличност за
-         заемане (COALESCE(i.quantity, 0)), а тук е нужна ОТЧЕТНАТА бройка
-         (COALESCE(i.quantity, 1)) — същото правило като в КДБФ и инвентарната
-         книга. Без колона за бройка сборът на цените в Excel дава стойност на
-         фонда, занижена с всеки втори и следващ екземпляр. */
-      const rows = getDb().prepare(`
-        ${BOOK_SELECT} ORDER BY b.inv_number
-      `).all();
+      /* Отделна заявка за бройките: проекцията на износа връща `quantity` =
+         наличност за заемане (COALESCE(i.quantity, 0)), а тук е нужна ОТЧЕТНАТА
+         бройка (COALESCE(i.quantity, 1)) — същото правило като в КДБФ и
+         инвентарната книга. Без колона за бройка сборът на цените в Excel дава
+         стойност на фонда, занижена с всеки втори и следващ екземпляр.
+         exportBooksFor() БЕЗ условие: CSV-то по замисъл изнася целия фонд,
+         включително отчислените — за разлика от UNIMARC/Dublin Core. */
+      const rows = exportBooksFor();
       const fq = new Map(getDb().prepare(
         'SELECT b.id, COALESCE(i.quantity, 1) AS fund_qty FROM books b LEFT JOIN inventory i ON i.book_id = b.id'
       ).all().map(r => [r.id, r.fund_qty]));

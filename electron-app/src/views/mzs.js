@@ -1,9 +1,59 @@
 /* ---------------- МЗС ---------------- */
 function mzsBadgeClass(s) { return { 'заявено': '', 'изпратено': 'warn', 'получено': '', 'върнато': 'ok', 'отказано': 'warn' }[s] || ''; }
+/* ПРОЗОРЕЧЕН РЕНДЕР И ТУК (v2.4.64, измерване).
+   ===========================================================================
+   ДОТУК този списък се чертаеше ЦЕЛИЯТ, наведнъж, при всяко отваряне на
+   раздела — и това беше обосновано с довода, че „междубиблиотечното заемане е
+   рядка операция (единици годишно)“. Доводът не удържа: регистърът по чл. 26 НЕ
+   СЕ ЧИСТИ — приключилите заявки остават в него завинаги, за разлика от
+   резервациите (holds.js), които излизат от списъка, щом бъдат изпълнени. Тоест
+   той не се върти, а само расте: по петдесет заявки годишно това са хиляда реда
+   за двайсет години, а библиотека, която работи активно по МЗС, ги събира за
+   две-три.
+   ИЗМЕРЕНОТО: 500 заявки → 5 516 DOM възела в едно тяло, без нито един таван по
+   пътя. За сравнение: 5 400 възела („Книги“, 300 реда) са +73 МБ RSS на рендера
+   в истински Chromium (node /tmp/r41/mem-chromium.js) — тоест вече при 500
+   заявки този екран струва колкото цял прозорец „Книги“, а нищо не го спира да
+   продължи да расте.
+   Затова тук е ОБЩАТА машинка (paintRowWindow/RENDER_PAGE_SIZE в core.js) — със
+   същия бутон „Покажи още“ и същия таван (RENDER_MAX_ROWS), както в „Книги“ и
+   „Читатели“. Списъкът се тегли наведнъж, както досега (mzs:list няма порции в
+   обработчика), но на екрана застават 300 реда. */
+const MZS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
+let MZS_RENDER_LIMIT = MZS_PAGE_SIZE;
+let MZS_PAINTED = 0;
+function mzsRowsHtml(rows) {
+  return rows.length ? rows.map(m => `<tr><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
+      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td>
+      <td>${esc(m.requester || '')}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span></td>
+      <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`).join('')
+    : `<tr><td colspan="8" class="empty">Няма заявки.</td></tr>`;
+}
+function mzsMoreHtml(more, total) {
+  return more > 0 ? `<button class="btn" onclick="mzsMore()">Покажи още (${more} от общо ${total})</button>` : '';
+}
+/* „Покажи още“ само разширява прозореца върху вече изтегления списък — без нова
+   обиколка по IPC, точно както в „Книги“ и „Читатели“. */
+function mzsMore() {
+  MZS_RENDER_LIMIT += MZS_PAGE_SIZE;
+  renderMzsBody(true);
+}
+window.mzsMore = mzsMore;
+function renderMzsBody(append) {
+  MZS_PAINTED = paintRowWindow({
+    body: '#mzsBody', bar: '#mzsMore', rows: window._MZS_ROWS || [], limit: MZS_RENDER_LIMIT,
+    painted: append ? MZS_PAINTED : 0,
+    rowsHtml: mzsRowsHtml,
+    emptyHtml: `<tr><td colspan="8" class="empty">Няма заявки.</td></tr>`,
+    moreHtml: mzsMoreHtml
+  });
+}
+window.renderMzsBody = renderMzsBody;
 async function renderMzs() {
   const rows = await call(window.api.mzs.list());
   if (!rows) return;
   window._MZS_ROWS = rows;
+  MZS_RENDER_LIMIT = MZS_PAGE_SIZE; // ново отваряне на раздела — пак от първата порция
   $('#view').innerHTML = `
     <div class="note">Регистър на заявките за междубиблиотечно заемане — изходящи и входящи.</div>
     <div class="toolbar"><button class="btn pri" onclick="mzsForm()">+ Нова заявка</button></div>
@@ -11,13 +61,10 @@ async function renderMzs() {
          дубликат е по двойката (handlers/mzs.js). Голото „№ 1" в списъка сочи към
          толкова заявки, колкото години има регистърът. -->
     <div class="wrap"><table class="ledger"><thead><tr><th>№/год.</th><th>Дата</th><th>Посока</th><th>Партньор</th>
-      <th>Документ</th><th>Заявител</th><th>Статус</th><th></th></tr></thead><tbody>
-    ${rows.length ? rows.map(m => `<tr><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
-      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td>
-      <td>${esc(m.requester || '')}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span></td>
-      <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`).join('')
-      : `<tr><td colspan="8" class="empty">Няма заявки.</td></tr>`}
-    </tbody></table></div>`;
+      <th>Документ</th><th>Заявител</th><th>Статус</th><th></th></tr></thead><tbody id="mzsBody"></tbody>
+    </table></div>
+    <div class="toolbar" id="mzsMore" style="justify-content:center"></div>`;
+  renderMzsBody();
 }
 async function mzsForm(m) {
   const y = yr();

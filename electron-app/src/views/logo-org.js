@@ -15,9 +15,39 @@ async function clearLogo() {
   if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.clearLogo = clearLogo;
-async function activeBooks() {
-  const books = await call(window.api.books.list(''));
-  return (books || []).filter(b => b.status !== 'отчислен');
+/* ЕТИКЕТИТЕ ВЕЧЕ НЕ ТЕГЛЯТ ЦЕЛИЯ ФОНД, ЗА ДА ОТПЕЧАТАТ 300 ЕТИКЕТА (v2.4.64).
+   =====================================================================
+   КАКВО СТАВАШЕ ДОТУК. Тук стоеше activeBooks(): books.list('') БЕЗ прозорец,
+   тоест ЦЕЛИЯТ фонд — при 15 000 документа 87 ms в SQLite, 4,53 МБ JSON по
+   моста и още едно копие в паметта на изгледа — след което диапазонът „от 1 до
+   300“ се изрязваше с .filter() в JavaScript върху всичките 15 000 реда.
+   Библиотекарят, който печата етикети за новопостъпилите 300 книги, чакаше
+   толкова, колкото ако беше поискал етикети за цялата библиотека, и това важеше
+   за четири от петте бутона на „Баркод етикети“. Измерено:
+   node /tmp/r41/bench.js labels → labels.300 = 369 ms, от тях 82 ms в SQLite.
+
+   КАКВО ПРАВИ СЕГА. Диапазонът се търси В БАЗАТА по уникалния индекс на
+   инвентарния номер и се връщат само шестте полета, които се печатат върху
+   етикет (виж LABEL_SELECT в handlers/books.js) — измерено 0,52 ms и 0,03 МБ за
+   същите 300 етикета. Подреждането по инвентарен номер и филтърът „действащ
+   фонд“ (отчисленият документ не получава етикет, v2.4.58) също са в базата:
+   границата е там и правилото кое е фонд трябва да се решава на едно място.
+
+   ЛИСТЪТ ОСТАВА СЪЩИЯТ ДУМА ПО ДУМА. Това не е разкрасяване, а условието на
+   поправката: етикетите се режат и лепят по реда на листа, а сигнатурният
+   етикет се сверява с гърба на книгата. Същите редове, същият ред (по
+   инвентарен номер, а редовете без инвентарен номер — по заглавие, точно както
+   ги нареждаше устойчивият .sort() дотук), същото съдържание. Пази се от
+   test/etiketi-v2464.test.js, който сравнява целия отпечатан лист със стария
+   начин, знак по знак.
+
+   ПРАГЪТ ЗА МНОГО ЕТИКЕТИ НЕ СЕ ПРОМЕНЯ: printLabelSheet() пак получава
+   { rows, card } и пак пита при над 500 етикета ПРЕДИ да сглоби низа
+   (confirmManyLabels, v2.3.0/v2.3.1). Диапазон „от 1 до 99999“ е точно толкова
+   голям печат, колкото „Всички“, и минава през същия въпрос. */
+async function labelRows(from, to) {
+  const rows = await call(window.api.books.list('', 'inv', { labels: true, from, to }));
+  return rows || [];
 }
 /* Етикетите и картите се подават на printLabelSheet() като ДАННИ ({rows, card}),
    а не като готов HTML низ (v2.3.1). ЗАЩО: въпросът „наистина ли 14 750 етикета?“
@@ -30,13 +60,13 @@ async function activeBooks() {
 async function printLabelsRange() {
   const from = parseInt($('[name=lblFrom]').value, 10), to = parseInt($('[name=lblTo]').value, 10);
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
-  const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
+  const rows = await labelRows(from, to);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
   return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsRange = printLabelsRange;
 async function printLabelsAll() {
-  const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
+  const rows = await labelRows(null, null);
   if (!rows.length) return toast('Фондът е празен.', 'err');
   return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
@@ -44,17 +74,32 @@ window.printLabelsAll = printLabelsAll;
 async function printSignatureLabelsRange() {
   const from = parseInt($('[name=sigFrom]').value, 10), to = parseInt($('[name=sigTo]').value, 10);
   if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
-  const rows = (await activeBooks()).filter(b => b.inv_number >= from && b.inv_number <= to).sort((a, b) => a.inv_number - b.inv_number);
+  const rows = await labelRows(from, to);
   if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
   return printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
 async function printSignatureLabelsAll() {
-  const rows = (await activeBooks()).sort((a, b) => a.inv_number - b.inv_number);
+  const rows = await labelRows(null, null);
   if (!rows.length) return toast('Фондът е празен.', 'err');
   return printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsAll = printSignatureLabelsAll;
+/* ЧИТАТЕЛСКИТЕ КАРТИ ОСТАВАТ НА ПЪЛНИЯ СПИСЪК — ЗАСЕГА (v2.4.64).
+   Същият разход стои и тук: readers.list('') връща ЦЕЛИЯ ред на читателя (r.*,
+   включително адрес, имейл, ЕГН и № на лична карта, които минават и през
+   разшифроването/маскирането на защитените лични данни) — при 3 000 читатели
+   1,79 МБ, докато картата печата само име, номер на карта, категория и датата на
+   регистрация (readerCardHtml в src/views/core.js).
+   ЗАЩО НЕ Е ПОПРАВЕНО ТУК. Лек път за читателите няма: readers:list(query, limit)
+   реже на 500 реда (тоест би СКРИЛ карти, без да го каже), а прозоречният режим
+   { offset, limit } връща същата пълна проекция на порции. Лека проекция за
+   картите трябва да се направи в handlers/readers.js — в обработчика, където е
+   границата, точно както е направено за книгите — а този файл не е част от
+   настоящата поправка. Дотогава картите работят както досега: правилно, само
+   скъпо. Печатът на 3 000 карти и без това минава през въпроса за много етикети
+   (confirmManyLabels) и е рядка, планирана работа, за разлика от етикетите за
+   новопостъпилите книги, които се печатат всяка седмица. */
 async function printCardsAll() {
   const readers = await call(window.api.readers.list(''));
   const rows = (readers || []).filter(r => r.status !== 'прекратен');

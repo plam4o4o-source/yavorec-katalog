@@ -1499,7 +1499,6 @@ app.whenReady().then(() => {
   // "Кой служител работи в момента" е настройка на този компютър (не на споделената база
   // данни) — всяко работно място пази собствения си избор в локалния config.json.
   CURRENT_USER = readConfig().lastUserName || '';
-  autoBackupIfNeeded();
   /* И по таймер (на 3 часа, само при променена база), защото компютър в
      читалище често стои включен със седмици — а дотук копие се правеше САМО при
      стартиране, тоест цяла седмица работа висеше на един-единствен файл отпреди
@@ -1516,6 +1515,54 @@ app.whenReady().then(() => {
   startAutoPushTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
+  /* ДНЕВНОТО АВТОМАТИЧНО КОПИЕ — СЛЕД ПРОЗОРЕЦА (v2.4.64, измерване на старта).
+     ==========================================================================
+     ДОТУК autoBackupIfNeeded() стоеше четири реда ПРЕДИ createWindow() и цялата
+     му работа се плащаше от времето до появата на прозореца. Измерено при база
+     19,47 МБ (node /tmp/r41/backup-split.js): 140 ms преди поправката на самата
+     проверка, 64 ms след нея — и всичките те стояха между щракването върху
+     иконата и първото нещо, което библиотекарят вижда. Копието е работа, която
+     не интересува никого в този момент: то не подготвя нито един екран и нито
+     едно число на таблото.
+
+     СЕГА: прозорецът се създава пръв, а копието тръгва, когато съдържанието му е
+     заредено ('did-finish-load'), тоест след като екранът вече е нарисуван. Така
+     64-те ms падат извън пътя на показването, вместо да се прибавят към него.
+
+     НИЩО ПО-ДОЛУ НЕ ЗАВИСИ ОТ НЕГО. Проверено поименно: startAutoBackupTimer()
+     по-горе само пуска интервал (и сам вика autoBackupIfNeeded(), ако при
+     следващото си събуждане види, че копие за деня няма); expireStaleHolds(),
+     startAutoPushTimer(), createWindow(), initAutoUpdate() и initInstallReport()
+     не четат нито дневното копие, нито състоянието му. Картата „Настройки“ →
+     „Резервно копие“ пита backup:autoStatus чак когато библиотекарят я отвори, и
+     чете диска в този момент, а не запомнена стойност от старта.
+
+     ГАРАНЦИЯТА, ЧЕ КОПИЕ ЗА ДЕНЯ ВСЕ ПАК СЕ ПРАВИ, не отслабва — пази се от три
+     страни: (1) 'did-finish-load'; (2) предпазен таймер от 5 s, ако рендерът не
+     съобщи, че е готов (счупен или много бавен диск с профила на Electron);
+     (3) затварянето на програмата — backupBeforeQuit() в 'window-all-closed'
+     минава през autoBackupTick(), която първо гледа дали дневното копие изобщо
+     съществува и го прави, ако липсва. Тоест дори прозорец, затворен две секунди
+     след отварянето, оставя копието за деня. Пазачът startupBackupDone пази
+     функцията да не се изпълни два пъти (и без него autoBackupIfNeeded() излиза
+     веднага при вече съществуващ файл, но нека не се разчита на това). */
+  let startupBackupDone = false;
+  const startupAutoBackup = () => {
+    if (startupBackupDone) return;
+    startupBackupDone = true;
+    /* Не хвърля навън (вътре има try/catch за целия ход — виж handlers/backup.js),
+       но тук вече няма кой да го поеме: викаме се от събитие, не от старта. */
+    try { autoBackupIfNeeded(); }
+    catch (err) { console.error('Автоматично резервно копие при старт — грешка:', err.message); }
+  };
+  try {
+    mainWindow.webContents.once('did-finish-load', startupAutoBackup);
+  } catch (e) {
+    /* Без webContents (тестов заместител на BrowserWindow) остава само таймерът
+       по-долу — копието пак се прави, само че с 5 s закъснение. */
+    console.warn('Прозорецът не съобщава кога е зареден:', e.message);
+  }
+  setTimeout(startupAutoBackup, 5000).unref?.();
   /* Последно в реда нарочно: прозорецът вече е създаден, базата — отворена.
      Нищо по-долу не зависи от изхода, а самата функция не хвърля (виж
      initInstallReport по-горе). */
@@ -2092,6 +2139,25 @@ require('./handlers/security-exclusions')(ipcMain, {
 /* ---------------- Одитна следа ---------------- */
 require('./handlers/audit')(ipcMain, { getDb: () => db, run });
 
+/* ---------------- „Изтриване на всички данни“ (започване на чисто) ----------------
+   До v2.4.63 чиста база се получаваше само ръчно: затвори програмата, намери
+   папката, преименувай library.db. Целият ред на действията и — по-важното —
+   решението кое ОСТАВА след изтриването и защо, живеят в handlers/reset.js.
+   Стои точно тук, до одитната следа, защото първото, което прави след
+   изтриването, е да впише първия ред на новата следа.
+   checkDbFile е sqliteProblem() на handlers/backup.js: предпазното копие преди
+   изтриването се проверява със същата функция, с която се проверява всяко
+   друго резервно копие, вместо с нейно второ копие. */
+require('./handlers/reset')(ipcMain, {
+  app, fs, path, getDb: () => db, run, logAudit, resolveDbDir, resolveDbPath,
+  checkDbFile: backupHandlers.checkDbFile, getCurrentUser: () => CURRENT_USER,
+  /* Копието преди изтриването се прави от САМИЯ модул за резервни копия
+     (v2.4.64): „запиши настрани → провери → преименувай“ е един и същ ред и на
+     двете места и не бива да живее в два преписа. handlers/reset.js ползва
+     подадената функция и пада към собствената си реализация само ако някой ден
+     тя липсва — виж бележката при makeBackupDefault там. */
+  makeBackup: backupHandlers.doBackupTo });
+
 /* ---------------- Пълен износ на данните (CSV в ZIP) ----------------
    Изнася ВСЯКА таблица от базата, а не само четирите, за които имаше износ.
    Личните данни се пазят вътре в самия модул — виж дългия коментар там. */
@@ -2202,23 +2268,78 @@ function catalogPayloadItemCount(payload) {
    един ред, а хранилището расте с толкова.
 
    ЗАЩО Е БЕЗОПАСНО: текстът се сглобява на ръка, затова СЕ ПРОВЕРЯВА, преди да
-   бъде записан — разчита се обратно и се сравнява с оригинала. При най-малкото
-   разминаване се пише по стария начин. Счупен katalog.json значи потъмнял
-   каталог на сайта, а това не бива да зависи от една моя запетая. */
+   бъде записан. Счупен katalog.json значи потъмнял каталог на сайта, а това не
+   бива да зависи от една моя запетая.
+
+   КАКВО ТОЧНО СЕ ПРОВЕРЯВА И ЗАЩО ВЕЧЕ НЕ Е ЦЕЛИЯТ ФАЙЛ (v2.4.64).
+   =====================================================================
+   Дотук проверката беше `JSON.stringify(JSON.parse(text)) === JSON.stringify(payload)`
+   върху ЦЕЛИЯ товар. Измерено на истински фонд (15 000 документа, 13 800
+   публикувани): сглобяването на текста е 24 ms, а проверката отгоре — един
+   JSON.parse (17 ms) и два JSON.stringify на няколко мегабайта. Пуснати едно
+   след друго върху същия товар: цялата функция 89 ms със старата проверка
+   срещу 25 ms с новата, при ДОСЛОВНО същия текст. Тези ~60 ms се плащаха при
+   ВСЯКО заемане и връщане на гишето, 50 – 150 пъти на ден, само за да се
+   потвърди нещо, което не зависи от броя на записите.
+
+   Защото текстът НЕ е ръчно екраниране: всяка стойност — и ключът, и записът —
+   минава през JSON.stringify. Ръчни са само пунктуацията и подредбата ({ } [ ]
+   , : и новите редове), а те са едни и същи за 2 и за 13 800 записа. Оттук и
+   двете реални опасности, и по една проверка срещу всяка:
+     1) Стойност, която JSON.stringify НЕ може да представи (undefined, функция)
+        — тя връща `undefined` и на нейно място в текста би се озовала голата
+        дума „undefined“, тоест невалиден файл. Това ЗАВИСИ от данните, затова
+        се проверява стойност по стойност, при самото сглобяване (сравнение с
+        undefined на вече сметнатия низ — без нова работа). BigInt и цикличните
+        връзки хвърлят и се хващат от try/catch по-долу.
+     2) Грешка в самата пунктуация (моята запетая). Тя НЕ зависи от данните —
+        затова се проверява върху УМАЛЕНО копие на товара: същите ключове, а от
+        всеки масив само първият и последният ИСТИНСКИ запис. Умаленото копие
+        минава пълната стара проверка (сглобяване → JSON.parse → сравнение), но
+        върху два записа вместо 13 800: под 0,1 ms вместо ~60 ms. Сглобява се със
+        същата функция, с която и целият файл — различава се само броят записи,
+        слепени с ',\n' между двете скоби.
+   При най-малкото разминаване се пише по стария начин (JSON.stringify с
+   разредка) — по-голям файл, но сигурно валиден.
+
+   Функцията нарочно е САМОДОСТАТЪЧНА (всички помощни функции са вътре в нея):
+   три теста я вадят от main.js по текст и я изпълняват отделно — вж.
+   test/perf-v2448.test.js, test/handlers-catalog.test.js,
+   test/catalog-export-roundtrip.test.js. */
 function catalogJsonText(payload) {
-  const enc = (v) => JSON.stringify(v);
-  const parts = [];
-  for (const [k, v] of Object.entries(payload)) {
-    if (Array.isArray(v)) {
-      parts.push('  ' + enc(k) + ': [' + (v.length ? '\n' + v.map(x => '    ' + enc(x)).join(',\n') + '\n  ' : '') + ']');
-    } else {
-      parts.push('  ' + enc(k) + ': ' + enc(v));
+  const build = (obj) => {
+    const enc = (v) => JSON.stringify(v);
+    const parts = [];
+    for (const [k, v] of Object.entries(obj)) {
+      const key = enc(k);
+      if (key === undefined) return null;
+      if (Array.isArray(v)) {
+        const rows = [];
+        for (const x of v) {
+          const t = enc(x);
+          if (t === undefined) return null;   // undefined/функция → голата дума „undefined“ в текста
+          rows.push('    ' + t);
+        }
+        parts.push('  ' + key + ': [' + (rows.length ? '\n' + rows.join(',\n') + '\n  ' : '') + ']');
+      } else {
+        const t = enc(v);
+        if (t === undefined) return null;
+        parts.push('  ' + key + ': ' + t);
+      }
     }
+    return '{\n' + parts.join(',\n') + '\n}\n';
+  };
+  // Умаленото копие: същите ключове, от всеки масив — първият и последният запис.
+  const probe = {};
+  for (const [k, v] of Object.entries(payload)) {
+    probe[k] = Array.isArray(v) ? (v.length > 2 ? [v[0], v[v.length - 1]] : v.slice()) : v;
   }
-  const text = '{\n' + parts.join(',\n') + '\n}\n';
-  // Проверка: същият обект ли се получава обратно?
   try {
-    if (JSON.stringify(JSON.parse(text)) === JSON.stringify(payload)) return text;
+    const text = build(payload);
+    const probeText = text === null ? null : build(probe);
+    if (text !== null && probeText !== null && JSON.stringify(JSON.parse(probeText)) === JSON.stringify(probe)) {
+      return text;
+    }
     console.error('katalog.json: сглобеният текст не се разчита като същия обект — пише се по стария начин.');
   } catch (err) {
     console.error('katalog.json: сглобеният текст не е валиден JSON (' + err.message + ') — пише се по стария начин.');
@@ -2236,13 +2357,63 @@ function catalogJsonText(payload) {
 // флаг и записваме веднъж, известно време след последната промяна. Ръчните
 // действия (writeNow, gitPublishNow) вместо това "изпразват" веднага текущия
 // таймер и пишат синхронно, за да дадат точна обратна връзка на потребителя.
-const CATALOG_WRITE_DEBOUNCE_MS = 4000;
+/* ЕДНО СГЛОБЯВАНЕ НА ТОВАРА ЗА ЕДНА ПРОМЯНА В БАЗАТА (v2.4.64).
+   =====================================================================
+   buildCatalogPayload() е 95 – 105 ms при 13 800 публикувани документа
+   (заявката + publicBookFields за всеки ред; целият catalog:write е 180 ms,
+   тоест товарът е по-голямата част). Дотук ВСЕКИ консуматор си го сглобяваше
+   сам: отложеният
+   запис на katalog.json (writeCatalogIfConfigured) и ръчното „Каталог (JSON)…“
+   (catalog:export в handlers/catalog.js) — две пълни сглобявания по 95 ms за
+   едни и същи данни, когато библиотекарката натисне „Генерирай katalog.json“ и
+   веднага след това изведе същия каталог във файл.
+
+   Затова товарът се пази, докато базата не се е променила. „Не се е променила“
+   се мери с ДВА брояча на самата SQLite, защото всеки от тях вижда само своята
+   половина от света:
+     • total_changes() — променените редове през ТАЗИ връзка. Вдига се при всяко
+       вмъкване/промяна/изтриване, включително по настройките и по публичните
+       надписи (authorised_values), а не само по книгите и заеманията;
+     • PRAGMA data_version — сменя се, когато промяна е записана от ДРУГА връзка
+       към същия файл (второ работно място на мрежовата папка, възстановено
+       копие, отворена отстрани база). total_changes() за такива промени мълчи.
+   В ключа влизат още датата (полето `generated` в товара е днешната дата) и
+   самият обект на връзката (при смяна/възстановяване на базата db се пресъздава
+   и total_changes() тръгва от нула). Всичко, което е измислено да пази
+   СЪДЪРЖАНИЕТО — да се променя по-рядко — тук нарочно работи в обратната
+   посока: съмнение = ново сглобяване.
+
+   Товарът е няколко десетки мегабайта в паметта при пълен фонд, затова
+   scheduleCatalogWrite() го пуска веднага щом се появи промяна: от този момент
+   той е излишен и само държи памет до следващото сглобяване. */
+const CATALOG_PAYLOAD_CACHE = { db: null, stamp: null, payload: null };
+function catalogDataStamp() {
+  const n = db.prepare('SELECT total_changes() AS n').get().n;
+  const v = db.pragma('data_version', { simple: true });
+  return n + '|' + v + '|' + new Date().toISOString().slice(0, 10);
+}
+function dropCatalogPayloadCache() {
+  CATALOG_PAYLOAD_CACHE.db = null;
+  CATALOG_PAYLOAD_CACHE.stamp = null;
+  CATALOG_PAYLOAD_CACHE.payload = null;
+}
+function catalogPayloadNow() {
+  const stamp = catalogDataStamp();
+  if (CATALOG_PAYLOAD_CACHE.payload && CATALOG_PAYLOAD_CACHE.db === db && CATALOG_PAYLOAD_CACHE.stamp === stamp) {
+    return CATALOG_PAYLOAD_CACHE.payload;
+  }
+  const payload = buildCatalogPayload();
+  CATALOG_PAYLOAD_CACHE.db = db;
+  CATALOG_PAYLOAD_CACHE.stamp = stamp;
+  CATALOG_PAYLOAD_CACHE.payload = payload;
+  return payload;
+}
 function writeCatalogIfConfigured() {
   try {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { written: false };
     const file = path.join(s.catalog_folder, 'katalog.json');
-    const payload = buildCatalogPayload();
+    const payload = catalogPayloadNow();
     // Предпазна мярка: не презаписвай непразен публикуван каталог с празен. Това пази от
     // случаен запис от прясна/тестова инсталация (празен фонд) върху вече публикувани
     // реални данни — например, ако папката е свързана, преди фондът да е зареден в тази база.
@@ -2277,13 +2448,88 @@ function writeCatalogIfConfigured() {
     return { written: false, error: err.message };
   }
 }
+/* ДВЕ СКОРОСТИ НА ОТЛОЖЕНИЯ ЗАПИС (v2.4.64).
+   =====================================================================
+   КАКВО БЕШЕ: един-единствен таймер от 4 секунди за всичко. Измерено на
+   истинска база (15 000 документа, 13 800 публикувани, katalog.json 4,82 МБ):
+   catalog:write 180 ms, а „заемане на гишето + записът, който таймерът прави
+   след него“ — 178 ms, от които
+   самото сканиране е 1 – 2 ms. Тоест почти цялото време е записът на каталога.
+   Сканиранията на гишето идват през 10 – 20 секунди, а таймерът е 4 — той на
+   практика не слива нищо: 50 – 150 заемания и връщания на ден правят 50 – 150
+   пълни презаписа на многомегабайтния файл, 9 – 28 секунди на ден, и то често
+   в папка на мрежов диск.
+
+   ЗАЩО ДВЕ СКОРОСТИ, А НЕ ПРОСТО ПО-ДЪЛГО ЧАКАНЕ ЗА ВСИЧКО: двата вида промени
+   не струват еднакво на библиотеката.
+     • Наличността на документ (заемане, връщане, подновяване, изгубен) може да
+       изостане с минута на сайта: читателят и без това идва след това до
+       библиотеката, а докато е на път, книгата може да бъде заета от друг —
+       „налична“ в онлайн каталога никога не е обещание за запазване.
+     • Промяна във ФОНДА (нова книга, редакция, отчисляване, акт, периодика,
+       витрина) е точно обратното: библиотекарката тъкмо е вписала партидата или
+       е отчислила книги и очаква да ги види на сайта; отчислена книга, която
+       продължава да се предлага, праща читател за нещо, което го няма.
+   Затова фондът пази досегашните 4 секунди, а циркулацията чака 90 (в
+   допустимото 60 – 120 s от измерването). При сканирания през 10 – 20 s това
+   слива 5 – 9 гишета в един запис: 50 – 150 записа на ден стават ~15 – 25, или
+   9 – 28 s/ден → 2 – 4 s/ден, и то в моменти, когато никой не чака екрана.
+
+   КАК СЕ ДЪРЖАТ ЗАЕДНО: таймерите са два, но записът е ЕДИН. Първата промяна
+   вдига CATALOG_WRITE_STATE.pending; който таймер удари пръв, записва всичко
+   натрупано и сваля флага, а другият, когато дойде неговият ред, вижда, че няма
+   какво да пише, и не прави нищо (затова се записва през
+   runPendingCatalogWrite, а не направо през writeCatalogIfConfigured). Така
+   редакция на книга по време на гишето изтегля и заеманията напред, вместо да
+   добави втори запис. Забавянето НЕ се подновява при всяко следващо сканиране
+   (createDebouncer пази първия насрочен момент): 90 секунди са таван от първата
+   незаписана промяна, а не пълзящ срок, който натоварено гише може да отлага
+   безкрайно.
+
+   ПРИ ЗАТВАРЯНЕ: вж. app.on('window-all-closed') по-горе —
+   там `if (catalogWriteDebouncer.pending()) flushCatalogWrite();` стои ПРЕДИ
+   проверката за непубликувани промени, и pending() вече означава „има промяна,
+   която нито един от двата таймера още не е записал“. Това е по-важно отпреди:
+   връщане в 16:59 ч. и затваряне в 17:00 ч. щеше да изгуби записа, ако изходът
+   гледаше само таймера на фонда. */
+const CATALOG_WRITE_CIRCULATION = 'circulation';
+const CATALOG_WRITE_DEBOUNCE_FUND_MS = 4000;
+const CATALOG_WRITE_DEBOUNCE_CIRC_MS = 90000;
+const CATALOG_WRITE_STATE = { pending: false };
+// Изпълнява се от двата таймера: пише САМО ако има ненаписана промяна.
+function runPendingCatalogWrite() {
+  if (!CATALOG_WRITE_STATE.pending) return { written: false };
+  CATALOG_WRITE_STATE.pending = false;
+  return writeCatalogIfConfigured();
+}
 // generic debounce/coalesce помощник (debounce.js) — schedule() слива много
 // бързи последователни мутации в един-единствен запис; flush() го изпълнява
 // веднага (използва се от ръчните действия writeNow/gitPublishNow/chooseFolder
 // и при затваряне на приложението, за да не се загуби последната промяна).
-const catalogWriteDebouncer = createDebouncer(writeCatalogIfConfigured, CATALOG_WRITE_DEBOUNCE_MS);
-function scheduleCatalogWrite() { catalogWriteDebouncer.schedule(); }
-function flushCatalogWrite() { return catalogWriteDebouncer.flush(); }
+const catalogFundWriter = createDebouncer(runPendingCatalogWrite, CATALOG_WRITE_DEBOUNCE_FUND_MS);
+const catalogCircWriter = createDebouncer(runPendingCatalogWrite, CATALOG_WRITE_DEBOUNCE_CIRC_MS);
+/* kind === 'circulation' идва от гишето (handlers/loans.js — заемане, връщане,
+   изгубен документ). Всичко друго — и повикванията без аргумент от по-старите
+   модули — минава по бързата пътека: неизвестен вид промяна се публикува
+   веднага, а не се бави. */
+function scheduleCatalogWrite(kind) {
+  CATALOG_WRITE_STATE.pending = true;
+  dropCatalogPayloadCache();   // старият товар вече не отговаря на базата — освобождава и паметта
+  if (kind === CATALOG_WRITE_CIRCULATION) catalogCircWriter.schedule();
+  else catalogFundWriter.schedule();
+}
+/* Ръчните действия и изходът: пише СИНХРОННО и връща резултата (writeNow и
+   gitPublishNow го показват на библиотекаря — вж. assertCatalogWriteOk в
+   handlers/catalog.js). Двата таймера се гасят предварително: flush() на
+   createDebouncer изпълнява функцията си, но тя вижда свален флаг и не пише —
+   така изгасването не струва втори запис на 4,82 МБ. */
+function flushCatalogWrite() {
+  CATALOG_WRITE_STATE.pending = false;
+  catalogFundWriter.flush();
+  catalogCircWriter.flush();
+  return writeCatalogIfConfigured();
+}
+const catalogWriteDebouncer = { pending: () => CATALOG_WRITE_STATE.pending, schedule: scheduleCatalogWrite, flush: flushCatalogWrite };
 
 /* ---------------- Онлайн каталог (публикуване през GitHub) + Витрини +
    Експорт в библиотечни формати ----------------
@@ -2299,7 +2545,14 @@ function flushCatalogWrite() { return catalogWriteDebouncer.flush(); }
 require('./handlers/shelves')(ipcMain, {
   getDb: () => db, run, logAudit, scheduleCatalogWrite, normalizeScanCode
 });
+/* buildCatalogPayload: catalogPayloadNow — ръчното извеждане („Каталог (JSON)…“)
+   получава СЪЩИЯ товар, който е сглобен за автоматичния запис, ако базата не се
+   е променила междувременно (вж. CATALOG_PAYLOAD_CACHE по-горе). Дотук двете
+   пътеки сглобяваха един и същ товар поотделно — по 95 ms при 13 800 документа.
+   Името на зависимостта остава buildCatalogPayload: за handlers/catalog.js това
+   е „дай ми товара на каталога“, а откъде идва — кеширан или пресметнат — е
+   работа на main.js. */
 const { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit } = require('./handlers/catalog')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, execFile,
-  BOOK_SELECT, csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
+  csvCell, flushCatalogWrite, buildCatalogPayload: catalogPayloadNow, catalogJsonText
 });

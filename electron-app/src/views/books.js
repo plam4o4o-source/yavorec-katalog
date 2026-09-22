@@ -147,9 +147,10 @@ function booksMoreHtml(more, total) {
 
    v2.3.0: append=true (само от бутона „Покажи още“) добавя САМО новата порция.
    Дотогава всяко натискане презаписваше целия <tbody> с rows.slice(0, LIMIT) и
-   изчертаваше наново и вече показаните редове — квадратична работа: измерено
-   при 15 000 книги, 49 натискания от 300 до 15 000 реда = 112 462 ms, като
-   първите натискания бяха ~250 ms, а последните 5 691 ms всяко.
+   изчертаваше наново и вече показаните редове — квадратична работа. (Числото,
+   което стоеше тук — „49 натискания = 112 462 ms“ — беше от jsdom и не описваше
+   истинския прозорец; измереното в Chromium и произлизащият от него ТАВАН на
+   общия брой редове са при paintRowWindow/RENDER_MAX_ROWS в core.js.)
    Всички останали извиквания (търсене, филтър, „Избери всички“, презареждане)
    остават пълен рендер — там наборът от редове е ДРУГ и добавяне би долепило
    нови редове към стар резултат. BOOKS_PAINTED пази колко реда стоят в тялото;
@@ -177,8 +178,13 @@ window.booksFilterChanged = booksFilterChanged;
 function renderBooksBody(append) {
   // Прозоречен режим: заредените порции са вече филтрирани от базата, общият брой е отделен.
   const books = BOOKS_WINDOWED ? (window._BOOKS_LIST || []) : (window._BOOKS_LIST || []).filter(booksFilterMatch);
+  /* total — за тавана на общия брой изчертани редове (RENDER_MAX_ROWS в core.js,
+     v2.4.64): в прозоречен режим `books` са само вече изтеглените порции, а
+     надписът при тавана трябва да каже колко са ВСИЧКИ намерени, не колко са
+     стигнали дотук. */
   BOOKS_PAINTED = paintRowWindow({
     body: '#bBody', bar: '#bMore', rows: books, limit: BOOKS_WINDOWED ? books.length : BOOKS_RENDER_LIMIT,
+    total: BOOKS_WINDOWED ? BOOKS_TOTAL : books.length,
     painted: append ? BOOKS_PAINTED : 0,
     rowsHtml: booksRowsHtml,
     moreHtml: BOOKS_WINDOWED ? () => booksMoreHtml(BOOKS_TOTAL - books.length, BOOKS_TOTAL) : booksMoreHtml
@@ -244,7 +250,11 @@ async function renderBooks() {
   }
   const n = BOOKS_SELECTED.size;
   const filtered = BOOKS_WINDOWED ? books : books.filter(booksFilterMatch);
-  const shown = BOOKS_WINDOWED ? books : filtered.slice(0, BOOKS_RENDER_LIMIT);
+  /* Същият таван като в paintRowWindow (RENDER_MAX_ROWS, core.js, v2.4.64):
+     тялото тук се сглобява направо в #view, тоест не минава през общата машинка
+     и трябва да спази тавана само. Достига се при връщане в раздела с вече
+     разгърнат прозорец (BOOKS_RENDER_LIMIT се пази между отварянията). */
+  const shown = (BOOKS_WINDOWED ? books : filtered.slice(0, BOOKS_RENDER_LIMIT)).slice(0, RENDER_MAX_ROWS);
   const total = BOOKS_WINDOWED ? BOOKS_TOTAL : filtered.length;
   const more = total - shown.length;
   // Отделите за филтъра идват от резултата (реално ползвани стойности), обединени
@@ -289,7 +299,8 @@ async function renderBooks() {
         <th class="actsCell" style="width:90px"></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
-    <div class="toolbar" id="bMore" style="justify-content:center">${booksMoreHtml(more, total)}</div>
+    <div class="toolbar" id="bMore" style="justify-content:center">${
+      more > 0 && shown.length >= RENDER_MAX_ROWS ? renderCapHtml(shown.length, total) : booksMoreHtml(more, total)}</div>
     ${searchListDatalist('dl_searchBooks', searchSuggest)}
   `;
   // Таблицата е изчертана направо в #view — броячът трябва да знае колко реда
