@@ -49,9 +49,15 @@ const { isEncryptedBackup, decryptBackupBuffer } = require(path.join(APP_DIR, 'b
    не доказва нищо. Затова пълната фикстура с намален брой книги: така
    заеманията, периодиката, краезнанието, дневникът, следата и проверките си
    остават със стотици и хиляди редове. */
-const FIXTURE = '/tmp/r41/fixture.js';
-const haveFixture = fs.existsSync(FIXTURE);
-const seedFixture = haveFixture ? require(FIXTURE).seed : null;
+/* ФИКСТУРАТА Е В ХРАНИЛИЩЕТО, не в /tmp. Първата версия на този файл я четеше
+   от „/tmp/r41/fixture.js“ — работен файл на машината, на която беше писан — и
+   при липса я прескачаше мълчаливо (`fs.existsSync ? require : null`). На всяка
+   друга машина, включително в CI, засяването не се случваше и СЕДЕМ от
+   тринайсетте теста тук падаха. Тоест единственото необратимо действие в
+   програмата се оказваше без действаща проверка навсякъде освен там.
+   Сега пътят е задължителен: липсващ файл гърми при зареждане, вместо да
+   превърне поредицата в тиха измама. */
+const seedFixture = require('./helpers/nachisto-fixture').seed;
 
 /* Базата се прави като истинската: schema.sql + FTS5 индексите + тригерите за
    изброимите колони + колоните, които миграциите добавят (pdp_salt/
@@ -109,7 +115,7 @@ function setup(opts) {
      нея — иначе тестът за „настройките остават“ би сравнявал с чужди стойности.
      Броячът нарочно остава вдигнат от фикстурата: изтриването трябва да го
      върне на 1 и това се проверява. */
-  if (o.seed !== false && seedFixture) seedFixture(db, { books: o.books || 600, today: '2026-09-21' });
+  if (o.seed !== false) seedFixture(db, { books: o.books || 600, today: '2026-09-21' });
   seedLibraryIdentity(db);
   const audit = [];
   const relaunch = [];
