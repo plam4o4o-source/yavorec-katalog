@@ -246,7 +246,13 @@ contextBridge.exposeInMainWorld('api', {
   },
   gdpr: {
     candidates: invoke('gdpr:candidates'),
-    anonymize: invoke('gdpr:anonymize')
+    anonymize: invoke('gdpr:anonymize'),
+    /* Заличаване по искане на ЕДИН човек (чл. 17 ОРЗД), v2.4.65. Анонимизирането
+       дотук работеше само по срок назад („всичко отпреди N години“), тоест за
+       читател, поискал заличаване тази година, нямаше нито един път — данните му
+       оставаха и в `readers`, и в одитната следа. Затова отделен канал, който
+       прилага същите правила, но по конкретния читател, независимо от срока. */
+    forgetReader: invoke('gdpr:forgetReader')
   },
   av: {
     categories: invoke('av:categories'),
@@ -277,6 +283,12 @@ contextBridge.exposeInMainWorld('api', {
     markLost: invoke('loans:markLost'),
     lostQuote: invoke('loans:lostQuote'),
     lost: invoke('loans:lost'),
+    /* „Документът се намери“ (v2.4.65). Дотук пътят беше еднопосочен: приключеното
+       като изгубено заемане оставаше с белег `lost = 1` завинаги, дори след като
+       книгата се върнеше на рафта, тоест тя продължаваше да стои в списъка за акт
+       по чл. 30, т. 5, а обезщетението за нея — да тежи на сметката на читателя.
+       Обратният път вече е отделно действие, а не редакция на състоянието „на ръка“. */
+    found: invoke('loans:found'),
     lostPolicy: invoke('loans:lostPolicy'),
     lostPolicySave: invoke('loans:lostPolicySave'),
     reminders: invoke('loans:reminders'),

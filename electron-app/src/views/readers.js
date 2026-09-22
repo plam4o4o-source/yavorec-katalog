@@ -9,9 +9,25 @@ let READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
    при BOOKS_FILTER_* в books.js. */
 let READERS_FILTER_CAT = '';
 let READERS_FILTER_STATUS = '';
+/* Филтър „без отбелязано съгласие“ (v2.4.65) — виж дългата бележка при
+   readers:list в handlers/readers.js. Правилото живее в обработчика (списъкът е
+   прозоречен и екранът вижда само изтеглената порция, тоест не може да филтрира
+   достоверно); тук стои само огледалото му за случая, в който обработчикът върне
+   МАСИВ — стар обработчик или тестов заместител. Двете проверки питат едно и
+   също: липсващо съгласие по чл. 47, ал. 2 ИЛИ дете до 14 г. без съгласие на
+   родител/настойник. */
+let READERS_FILTER_CONSENT = '';
+const READER_CHILD_CAT = 'дете до 14 г.';
+function readerNoConsent(r) {
+  if (!r.gdpr_consent) return 'чл. 47, ал. 2';
+  if ((r.category || '') === READER_CHILD_CAT && !r.parent_consent) return 'родител/настойник';
+  return '';
+}
 function readersFilterMatch(r) {
   if (READERS_FILTER_CAT && (r.category || '') !== READERS_FILTER_CAT) return false;
   if (READERS_FILTER_STATUS && (r.status || '') !== READERS_FILTER_STATUS) return false;
+  if (READERS_FILTER_CONSENT === 'no' && !readerNoConsent(r)) return false;
+  if (READERS_FILTER_CONSENT === 'yes' && readerNoConsent(r)) return false;
   return true;
 }
 function readersRowsHtml(shown) {
@@ -21,7 +37,13 @@ function readersRowsHtml(shown) {
          изписваше буквално и подсказката гласеше „${esc(r.alert_note)}“ —
          библиотекарката виждаше кода вместо самата бележка, а значката казва
          само „бележка“, тоест текстът ѝ не се виждаше никъде в списъка. */
-      ? ` <span class="badge w" title="${esc(r.alert_note)}">бележка</span>` : ''}</td>
+      ? ` <span class="badge w" title="${esc(r.alert_note)}">бележка</span>` : ''}${readerNoConsent(r)
+      /* ЕТИКЕТ „БЕЗ СЪГЛАСИЕ“ (v2.4.65). Дотук липсващото съгласие се виждаше
+         само на гишето, при опит за заемане, с читателя пред библиотекарката — и
+         то по един читател. Етикетът казва и КОЕ съгласие липсва: по чл. 47,
+         ал. 2 (самият ползвател) или на родител/настойник (дете до 14 г.) —
+         двете се отбелязват от различни хора и с различни дати. */
+      ? ` <span class="badge warn" title="Заемане не се допуска, докато съгласието не бъде отбелязано в картона">без съгласие: ${esc(readerNoConsent(r))}</span>` : ''}</td>
       <td class="num">${esc(r.phone || '')}</td><td class="num">${esc(r.card_no || '')}</td>
       <td>${esc(r.category || '')}</td><td><span class="badge ${r.status === 'активен' ? 'ok' : 'warn'}">${esc(r.status || '')}</span></td>
       <td class="num">${r.open_loans == null ? '' : `<span class="loansCnt ${r.overdue_loans ? 'warn' : ''}" title="${r.overdue_loans
@@ -61,12 +83,21 @@ let READERS_WINDOWED = false;
 let READERS_TOTAL = 0;
 let READERS_REQ = 0; // пореден номер на пълното зареждане (търсене)
 let READERS_GEN = 0; // поколение на списъка — „Покажи още“ долепя само към същия списък
+/* Броят на всички читатели без отбелязано съгласие — идва с всяка страница от
+   readers:list (v2.4.65) и е числото в предупреждението над списъка. */
+let READERS_NO_CONSENT = 0;
 async function readersFetch(offset, limit) {
   const res = await call(window.api.readers.list(READERS_QUERY, null,
-    { offset, limit: Math.min(limit || READERS_PAGE_SIZE, 2000), cat: READERS_FILTER_CAT || '', status: READERS_FILTER_STATUS || '' }));
+    { offset, limit: Math.min(limit || READERS_PAGE_SIZE, 2000), cat: READERS_FILTER_CAT || '',
+      status: READERS_FILTER_STATUS || '', consent: READERS_FILTER_CONSENT || '' }));
   if (!res) return null;
-  if (Array.isArray(res)) { READERS_WINDOWED = false; return { all: res }; }
+  if (Array.isArray(res)) {
+    READERS_WINDOWED = false;
+    READERS_NO_CONSENT = res.filter(readerNoConsent).length;
+    return { all: res };
+  }
   READERS_WINDOWED = true; READERS_TOTAL = res.total || 0;
+  READERS_NO_CONSENT = Number(res.noConsent) || 0;
   return res;
 }
 let READERS_MORE_PENDING = false;
@@ -94,6 +125,17 @@ function readersFilterChanged() {
   renderReadersBody();
 }
 window.readersFilterChanged = readersFilterChanged;
+/* Смяната на филтъра по СЪГЛАСИЕ пречертава целия раздел, а не само тялото на
+   таблицата (v2.4.65): предупреждението над списъка („N читатели нямат
+   отбелязано съгласие…“ / „Показани са само…“) зависи точно от него, а
+   readersFilterChanged() пипа само <tbody> и лентата под него — тоест кутията
+   щеше да продължи да казва „Покажи ги“, след като те вече са показани. */
+function readersConsentFilter(v) {
+  READERS_FILTER_CONSENT = v || '';
+  READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
+  return renderReaders();
+}
+window.readersConsentFilter = readersConsentFilter;
 function renderReadersBody(append) {
   const readers = READERS_WINDOWED ? (window._READERS_LIST || []) : (window._READERS_LIST || []).filter(readersFilterMatch);
   /* total — за тавана на общия брой изчертани редове (RENDER_MAX_ROWS в core.js,
@@ -153,8 +195,35 @@ async function renderReaders() {
         <option value="активен" ${READERS_FILTER_STATUS === 'активен' ? 'selected' : ''}>активен</option>
         <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
       </select>
+      ${/* v2.4.65 — виж дългата бележка при readers:list в handlers/readers.js:
+            без този филтър заварените читатели без отбелязано съгласие можеха да
+            се намерят само по един, на гишето, при отказано заемане. */''}
+      <select id="rConsentFilter" onchange="readersConsentFilter(this.value)" title="Филтър по съгласие по чл. 47, ал. 2 / на родител">
+        <option value="">— съгласие: всички —</option>
+        <option value="no" ${READERS_FILTER_CONSENT === 'no' ? 'selected' : ''}>без отбелязано съгласие</option>
+        <option value="yes" ${READERS_FILTER_CONSENT === 'yes' ? 'selected' : ''}>с отбелязано съгласие</option>
+      </select>
       <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
+    ${/* ЗАВАРЕНИТЕ БЕЗ СЪГЛАСИЕ СЕ КАЗВАТ НАВЕДНЪЖ (v2.4.65). В проба със
+          заварена база това са 120 от 125 читатели: всеки от тях спира гишето, а
+          дотук библиотекарката научаваше за тях по един, с читателя пред себе
+          си. Предупреждението назовава ИЗХОДА — филтъра, картона и датата на
+          подписа — а не само проблема. Програмата нарочно НЕ вдига съгласието
+          сама: съгласието е подпис на човек, не настройка. */''}
+    ${READERS_NO_CONSENT > 0 && READERS_FILTER_CONSENT !== 'no' ? `<div class="note w">
+      ⚠️ <b>${READERS_NO_CONSENT}</b> ${READERS_NO_CONSENT === 1 ? 'читател няма' : 'читатели нямат'}
+      отбелязано съгласие по <b>чл. 47, ал. 2</b> (а за деца до 14 г. — на родител/настойник) и
+      ${READERS_NO_CONSENT === 1 ? 'не може' : 'не могат'} да заемат документи.
+      Обикновено това са картоните отпреди обновяването и внесените от стара програма.
+      Отворете картона на всеки, отбележете съгласието и <b>впишете датата, на която ползвателят се е
+      подписал</b> на читателския си картон — не днешната.
+      <button class="btn sm" style="margin-left:8px" onclick="readersConsentFilter('no')">Покажи ги</button>
+    </div>` : ''}
+    ${READERS_FILTER_CONSENT === 'no' ? `<div class="note w">
+      Показани са само читателите без отбелязано съгласие (${READERS_NO_CONSENT} общо).
+      <button class="btn sm" style="margin-left:8px" onclick="readersConsentFilter('')">Покажи всички</button>
+    </div>` : ''}
     <div class="wrap"><table class="ledger readersTable">
       ${/* Заглавната клетка на колоната с действията носи същия клас `actsCell`
             като клетките под нея (одит v2.4.56). Без него тя е обикновена <th>:
@@ -233,12 +302,23 @@ async function readerForm(id) {
       </div>
       ${fld('Бележка при заемане', 'alert_note', { val: v.alert_note || '', type: 'textarea', rows: 2,
         hint: 'изскача открояващо се, щом читателят бъде избран в „Заемане и връщане" — напр. „носи още старата книга на брат си"' })}
-      ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.'
-        + (v.gdpr_consent_date ? ' <span class="fh">(дадено на ' + bg(v.gdpr_consent_date) + ')</span>' : ''),
+      ${fld('Ползвателят е запознат с правилата за обслужване (чл. 47, ал. 2) и е дал съгласие за обработване на лични данни.',
         'gdpr_consent', { type: 'checkbox', val: v.gdpr_consent })}
-      ${fld('За читатели под 14 г. — налице е съгласие на родител/настойник.'
-        + (v.parent_consent_date ? ' <span class="fh">(дадено на ' + bg(v.parent_consent_date) + ')</span>' : ''),
+      ${/* ПОЛЕ ЗА ДАТАТА НА ПОДПИСА (v2.4.65).
+            Дотук датата се записваше автоматично — днешната — и това е вярно за
+            нов читател, който се подписва пред библиотекарката. За ЗАВАРЕНИТЕ е
+            грешно, а те са мнозинството: картон, подписан през 2019 г., получаваше
+            2026 г. Отметката без вярна дата не е доказателство при проверка по
+            ЗЗЛД/ОРЗД — там се сверява точно тя, с подписания картон. Празно поле
+            при нов читател значи „днес“; обработчикът отказва бъдеща дата. */''}
+      ${fld('Дата на подписа (съгласие по чл. 47, ал. 2)', 'gdpr_consent_date',
+        { val: v.gdpr_consent_date || '', type: 'date',
+          hint: 'денят, на който ползвателят се е подписал на читателския си картон — за заварен читател впишете старата дата; празно = днес' })}
+      ${fld('За читатели под 14 г. — налице е съгласие на родител/настойник.',
         'parent_consent', { type: 'checkbox', val: v.parent_consent })}
+      ${fld('Дата на подписа на родител/настойник', 'parent_consent_date',
+        { val: v.parent_consent_date || '', type: 'date',
+          hint: 'денят, на който родителят/настойникът се е подписал; празно = днес' })}
       ${v.suspended_until && v.suspended_until > today() ? `
         <div class="note w" style="margin-top:10px">⛔ Заемането е преустановено до <b>${bg(v.suspended_until)}</b>
         (наказание за просрочени връщания).
@@ -257,6 +337,21 @@ async function readerForm(id) {
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      ${id ? `<button class="btn" onclick="readerFormToAccount(${id})">Сметка</button>` : ''}
+     ${/* „ПРАВО ДА БЪДА ЗАБРАВЕН“ — ОТ КАРТОНА НА ЧОВЕКА (v2.4.65).
+           Изтриването на читател се отказва, докато има история (и съветва
+           „прекратен“ + „Анонимизиране“), а анонимизирането работи по ГОДИНИ
+           назад — тоест за конкретен човек, поискал заличаване на данните си,
+           път нямаше изобщо. gdpr:forgetReader заличава личните му данни от
+           картона И от одитната следа, като пази статистиката.
+           ЗАЩО ТУК, А НЕ В МЕНЮТО „⋯“ НА РЕДА. Действието е необратимо и пипа
+           одитната следа; мястото му е зад отварянето на картона, при който
+           библиотекарката вече вижда чий е, а не на едно натискане от списъка.
+           v2.4.50 свали от реда шестте копчета точно по тази причина — редът не
+           е място за опасни действия.
+           Каналът се прави в handlers/gdpr.js (чужд файл за този кръг); ако още
+           не е регистриран, бутонът казва точно това, вместо да мълчи. */''}
+     ${id ? `<button class="btn dgr" onclick="forgetReader(${id})"
+       title="Заличава личните данни на читателя по негово искане (ОРЗД), като запазва статистиката">Забрави (ОРЗД)</button>` : ''}
      <button class="btn pri" onclick="saveReader(${id || 'null'})">Запиши</button>`);
   if (id) {
     const f = $('#readerF');
@@ -295,6 +390,14 @@ async function saveReader(id) {
   if (GUARANTOR_CATS.includes(d.category) && !(d.guarantor_name || '').trim()) {
     return toast('За читател под 14 г. посочете родител/настойник (гарант).', 'err');
   }
+  /* v2.4.65: отметката „съгласие на родител/настойник“ дотук не пречеше на нищо —
+     нито тук, нито в обработчика (виж assertConsent в handlers/readers.js и
+     checkReaderMayBorrow в handlers/loans.js, където е истинската граница).
+     Екранът само предупреждава по-рано, за да не се стига до отказ след запис. */
+  if (GUARANTOR_CATS.includes(d.category) && !d.parent_consent) {
+    return toast('За читател под 14 г. отбележете и съгласието на родител/настойник — '
+      + 'съгласието за обработване на лични данни на дете под 14 години се дава от него.', 'err');
+  }
   d.id = id;
   /* Отпечатъкът от отварянето (v2.4.56) — виж assertUnchanged в
      security-utils.js. Без него записът заличаваше мълчаливо промяна, направена
@@ -328,3 +431,43 @@ async function deleteReader(id) {
     () => window.api.readers.delete(id), 'Читателят е изтрит.', () => renderReaders());
 }
 window.deleteReader = deleteReader;
+
+/* „ЗАБРАВИ ЧИТАТЕЛЯ“ — ЗАЛИЧАВАНЕ ПО НЕГОВО ИСКАНЕ (v2.4.65).
+   =====================================================================
+   КАКВО СТАВАШЕ ДОТУК. Когато читател поиска да бъде заличен, програмата нямаше
+   какво да му предложи: `readers:delete` се отказва, докато има история (и
+   съветва „прекратен“ + „Анонимизиране“), а анонимизирането работи по ГОДИНИ
+   назад и не хваща скорошен читател. След изтриване пък в одитната следа
+   оставаха името, старият и новият телефон и адресът.
+   ЗАЩО БУТОНЪТ Е В КАРТОНА. Действието е необратимо и пипа одитната следа —
+   мястото му е зад отварянето на картона, а не на едно натискане от списъка.
+   Потвърждението казва какво ОСТАВА (заеманията и статистиката за минали години)
+   и какво изчезва (името, ЕГН, телефонът, адресът).
+   Самият канал (gdpr:forgetReader) е в handlers/gdpr.js — чужд файл за този
+   кръг. Ако още не е регистриран, отказът се превежда на български вместо да
+   излезе техническото съобщение на Electron, и се сочи заместващият път. */
+async function forgetReader(id) {
+  const r = (window._READERS_LIST || []).find(x => x.id === id);
+  const who = r ? r.name : 'този читател';
+  if (!await askConfirm('Заличаване на личните данни на ' + who + ' по негово искане (ОРЗД): '
+    + 'името, ЕГН, телефонът, адресът и данните от личната карта се премахват от картона И от одитната следа. '
+    + 'Заеманията и статистиката за минали години остават, но вече без име. Действието е необратимо.',
+    { kind: 'danger', title: 'Право да бъдеш забравен', okLabel: 'Заличи данните' })) return;
+  let res;
+  try {
+    res = await window.api.gdpr.forgetReader(id);
+  } catch (err) {
+    return toast('Заличаването по искане на читателя не е налично в тази версия (' + (err && err.message ? err.message : err)
+      + '). Дотогава ползвайте „Анонимизиране“ от „Настройки“ → „Лични данни“.', 'err');
+  }
+  if (!res || !res.ok) {
+    return toast((res && res.error) || 'Заличаването не бе извършено.', 'err');
+  }
+  const d = res.data || {};
+  closeModal();
+  toast('Личните данни на ' + (d.name || who) + ' са заличени'
+    + (d.auditCleared ? ' — обезличени ' + d.auditCleared + ' реда в одитната следа' : '') + '.', 'ok');
+  markSaved();
+  if (VIEW === 'readers') await renderReaders(); else if (RENDERERS[VIEW]) await RENDERERS[VIEW]();
+}
+window.forgetReader = forgetReader;

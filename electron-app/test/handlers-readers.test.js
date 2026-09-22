@@ -214,7 +214,13 @@ test('readers:list with a query uses ftsQuery for the FTS5 match and LIKE for ph
 test('readers:exportCsv writes a semicolon-separated CSV with a BOM, one row per reader, ordered by name', async () => {
   const { ipcMain, auditLog } = setup();
   await ipcMain.invoke('readers:create', { name: 'Борислав Петров', card_no: 'C2', phone: '0888', category: 'възрастен', gdpr_consent: 1 });
-  await ipcMain.invoke('readers:create', { name: 'Ана Иванова', card_no: 'C1', phone: '0899', category: 'дете до 14 г.', gdpr_consent: 1 });
+  /* v2.4.65: `parent_consent` вече е задължителен при СЪЗДАВАНЕ на читател от
+     категория „дете до 14 г.“ — съгласието за обработване на лични данни на дете
+     под 14 години се дава от родителя/настойника, не от детето (виж assertConsent
+     в handlers/readers.js). Дотук отметката не пречеше на нищо и този тест
+     записваше дете без нея; тук тя се добавя, защото проверяваното е износът в
+     CSV, а не правилото за съгласието. */
+  await ipcMain.invoke('readers:create', { name: 'Ана Иванова', card_no: 'C1', phone: '0899', category: 'дете до 14 г.', gdpr_consent: 1, parent_consent: 1 });
 
   const result = await ipcMain.invoke('readers:exportCsv');
   assert.equal(result.ok, true);

@@ -31,10 +31,33 @@ module.exports = function registerVisitsHandlers(ipcMain, deps) {
         db.prepare('INSERT INTO visits (date, count) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET count = count + excluded.count').run(date, n);
       }
       const total = db.prepare('SELECT count FROM visits WHERE date = ?').get(date).count;
+      /* ДВАТА ДНЕВНИКА ЗА ПОСЕЩЕНИЯ СЕ ВИЖДАТ ЕДИН ДРУГ (одит v2.4.65, находка Б18).
+         =====================================================================
+         Посещенията се водят на ДВЕ несвързани места и двете влизат в
+         отчетността: тази таблица („Статистика → Впиши посещения“, показателят
+         по БДС ISO 2789) и Раздел А на Дневника (`dnevnik_days.a_visit_*` —
+         официалният формуляр, от който се смята годишният отчет). Вписаното в
+         едното не стига до другото. Измерено за една година: 40 тук срещу 52 в
+         Дневника, и нищо не ги сравняваше.
+         ДВЕТЕ НЕ СЕ СЛИВАТ — автоматичното попълване на Дневника от посещенията
+         и заеманията е отложено решение. Тук само се ВРЪЩА какво пише в Дневника
+         за СЪЩИЯ ден, за да го види библиотекарката още на гишето, вместо да
+         открие разминаването в края на годината. Сравняването за цялата година
+         стои на екрана „Статистика“ (handlers/stats.js → visitsCheck), по образец
+         на съгласуването на фонда в handlers/fund-check.js.
+         „Деца до 14 г.“ е ПОДМНОЖЕСТВО на „в заемна за дома“ по формуляра и
+         затова не се събира отделно — иначе едно дете би се броило два пъти. */
+      const dn = db.prepare(`SELECT COALESCE(a_visit_home,0) AS home, COALESCE(a_visit_child,0) AS child,
+        COALESCE(a_visit_reading,0) AS reading, COALESCE(a_visit_internet,0) AS internet
+        FROM dnevnik_days WHERE date = ?`).get(date);
+      const dnevnik = dn
+        ? { home: dn.home, child: dn.child, reading: dn.reading, internet: dn.internet,
+            total: dn.home + dn.reading + dn.internet, recorded: true }
+        : { home: 0, child: 0, reading: 0, internet: 0, total: 0, recorded: false };
       const pos = (n === 1 ? '1 посещение' : n + ' посещения');
       logAudit('Посещения', date + ': ' + (replace ? (n === 1 ? 'вписано ' : 'вписани ') : (n === 1 ? 'добавено ' : 'добавени ')) + pos
         + (before ? ' (преди: ' + before.count + ')' : '') + ' — общо за деня ' + total);
-      return { added: replace ? null : n, total, before: before ? before.count : 0 };
+      return { added: replace ? null : n, total, before: before ? before.count : 0, dnevnik };
     })
   );
   ipcMain.handle('visits:get', (e, date) =>

@@ -102,6 +102,47 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           AND name != ?
       `).get(y, y, ANON_READER_NAME).n;
       const visitsYear = db.prepare(`SELECT COALESCE(SUM(count),0) AS n FROM visits WHERE substr(date,1,4) = ?`).get(y).n;
+      /* СЪГЛАСУВАНЕ НА ДВЕТЕ МЕСТА ЗА ПОСЕЩЕНИЯ (одит v2.4.65, находка Б18).
+         =====================================================================
+         Посещенията се водят на ДВЕ несвързани места и двете влизат в
+         отчетността: таблицата `visits` („Статистика → Впиши посещения“) и
+         Раздел А на Дневника (`dnevnik_days.a_visit_*`, официалният формуляр).
+         Вписаното в едното не стига до другото и нищо не ги сравнява. Измерено:
+         показателят „Посещения“ на „Статистика“ показваше 40, а годишният отчет
+         А/Б — 52 „в заемна за дома“ за същата година; надписът „не са вписвани
+         посещения“ излизаше и когато Дневникът е воден изрядно цяла година,
+         защото гледаше само таблицата `visits`.
+         ДВЕТЕ НЕ СЕ СЛИВАТ — автоматичното попълване на Дневника от посещенията
+         и заеманията е отложено решение и остава отложено. Тук се прави онова,
+         което handlers/fund-check.js прави за фонда: двете числа се СРАВНЯВАТ и
+         се ОБЯСНЯВАТ, а екранът казва честно кое число откъде идва. Числата в
+         официален формуляр не се пипат автоматично — това е работа на човека,
+         който подписва.
+         По формуляра „деца до 14 г.“ е ПОДМНОЖЕСТВО на „в заемна за дома“ и
+         затова НЕ се събира отделно — иначе сборът би броил детето два пъти. */
+      const dnv = db.prepare(`
+        SELECT COALESCE(SUM(a_visit_home),0) AS home, COALESCE(SUM(a_visit_child),0) AS child,
+               COALESCE(SUM(a_visit_reading),0) AS reading, COALESCE(SUM(a_visit_internet),0) AS internet
+        FROM dnevnik_days WHERE date BETWEEN ? AND ?
+      `).get(y + '-01-01', end);
+      const dnevnikVisits = {
+        home: dnv.home, child: dnv.child, reading: dnv.reading, internet: dnv.internet,
+        total: dnv.home + dnv.reading + dnv.internet
+      };
+      const visitsCheck = {
+        a: { label: 'Статистика → „Впиши посещения“ (дневник на посещенията по БДС ISO 2789)', n: visitsYear },
+        b: { label: 'Дневник на библиотеката, Раздел А (в заемна за дома + в читалня + интернет)', n: dnevnikVisits.total },
+        diff: visitsYear - dnevnikVisits.total,
+        why: 'Двете се водят на различни места и нито едното не попълва другото: „Впиши посещения“ пише в '
+          + 'дневника на посещенията, а Раздел А на Дневника се попълва от формуляра за деня. '
+          + 'Годишният отчет към регионалната библиотека взима числата от Дневника.',
+        todo: dnevnikVisits.total > visitsYear
+          ? 'Дневникът е воден, а дневникът на посещенията изостава — впишете посещенията и в него или се позовавайте на Дневника.'
+          : (visitsYear > dnevnikVisits.total
+            ? 'Посещенията са вписани в „Впиши посещения“, но не са пренесени в Раздел А на Дневника — '
+              + 'формулярът, който подписвате, брои Дневника.'
+            : '')
+      };
       /* Разбивките („Фонд по езици“, „по отдели“) също броят екземпляри, за да
          се събират до fundCount — иначе лентите щяха да сочат едно, а показателят
          над тях — друго. Редовете, които нямат `qty` (напр. читатели), се броят по
@@ -218,7 +259,12 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
            стойност, а `visitsRecorded` казва дали изобщо са вписвани, за да може
            изгледът да покаже „не са вписвани“ вместо подведено число. */
         visits: visitsYear,
+        /* „Вписвани ли са изобщо“ вече брои И ДВЕТЕ места (находка Б18): дотук
+           библиотека, водила Дневника изрядно цяла година, четеше „не са
+           вписвани посещения“ под число 0. */
         visitsRecorded: visitsYear > 0,
+        dnevnikVisits, visitsCheck,
+        visitsAnyRecorded: visitsYear > 0 || dnevnikVisits.total > 0,
         /* „Спазване на сроковете" се брои по годината на ВРЪЩАНЕ, не на заемане —
            същата поправка като при глобите (finesCharged) в v2.2.0. Книга, заета
            през декември и върната със забава през февруари, е събитие от новата
@@ -262,7 +308,39 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       const y = String(year || yearOf());
       if (id === 'annual_ab') {
         const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ?').all(`${y}-01-01`, `${y}-12-31`);
-        return { id, year: y, totals: dnevnikSumRow(rows), daysRecorded: rows.length };
+        /* „ВПИСАН РАБОТЕН ДЕН“ ЗНАЧИ ДЕН С НЕЩО В НЕГО (одит v2.4.65, В1 и В3).
+           =====================================================================
+           ДОТУК `daysRecorded: rows.length` броеше РЕДОВЕТЕ в dnevnik_days. Ред
+           обаче се създава и от едно натискане на „Запиши деня“ върху празния
+           формуляр: всичките 66 колони нули, а отчетът към регионалната
+           библиотека твърдеше „Справката обхваща 1 вписан работен ден“ и
+           числата под надписа бяха нули. Покритието на официална справка не бива
+           да се мери по това дали някой е натискал бутон.
+           Сега се броят дните с поне една ненулева колона или с бележка — същото
+           правило като на таблото („Дневникът за днес е попълнен“), за да не
+           твърдят двата екрана различни неща за един и същ ден.
+           Отделно се връща и колко от вписаните дни падат в ден, който
+           КАЛЕНДАРЪТ обявява за затворен: дотук такъв ден се броеше за работен
+           без дума, а разликата между „264 работни дни“ и „264 работни дни, от
+           които 3 в затворени дни“ е точно това, което проверяващият сверява с
+           заповедта за работното време. Правилото е дословно същото като
+           isWorkDay() в handlers/calendar.js — ден от седмицата извън
+           settings.work_days или дата в calendar_closed; в доклада е записано, че
+           правилното място е main.js да подаде isWorkDay и на този модул. */
+        const filled = rows.filter(r => {
+          if (String(r.note || '').trim()) return true;
+          return Object.keys(r).some(k => k !== 'id' && k !== 'date' && k !== 'note' && (Number(r[k]) || 0) !== 0);
+        });
+        const sett = db.prepare('SELECT work_days FROM settings WHERE id = 1').get() || {};
+        const rawWd = sett.work_days == null ? '0,1,2,3,4,5,6' : sett.work_days;
+        const wdSet = new Set(String(rawWd).split(',').map(x => parseInt(x, 10)).filter(n => !isNaN(n)));
+        const wd = wdSet.size ? wdSet : new Set([0, 1, 2, 3, 4, 5, 6]);
+        const closedSet = new Set(db.prepare('SELECT date FROM calendar_closed WHERE date BETWEEN ? AND ?')
+          .all(`${y}-01-01`, `${y}-12-31`).map(r => r.date));
+        const daysOnClosed = filled.filter(r =>
+          closedSet.has(r.date) || !wd.has(new Date(r.date + 'T00:00:00Z').getUTCDay())).length;
+        return { id, year: y, totals: dnevnikSumRow(rows), daysRecorded: filled.length,
+          daysWithRow: rows.length, daysOnClosed };
       }
       if (id === 'fund_breakdown') {
         const end = y + '-12-31';

@@ -23,8 +23,16 @@ let OVER_PAINTED = 0;
 function overRowsHtml(rows) {
   return rows.length ? rows.map(l => {
     const days = Number(l.daysLate) || 0;
+    /* КОЛОНАТА „ОБЕЗЩЕТЕНИЕ“ ПОКАЗВА ОСТАВАЩОТО, А ПОД НЕГО — ПЛАТЕНОТО (v2.4.65).
+       `l.fine` идва от loans:overdue и от този кръг значи „остава да се плати“,
+       а не „начислено“ (виж unpaidOverdueFines в handlers/loans.js). Когато
+       читателят е платил част от начисленото, това се КАЗВА тук: иначе
+       библиотекарката вижда число, по-малко от вчерашното, без обяснение. */
+    const paid = Number(l.finePaid) || 0;
     return `<tr><td>${esc(l.reader_name)}</td><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
-        <td class="num nowrap">${bg(l.date_due)}</td><td class="num warn">${days}</td><td class="num">${mnyCell(Number(l.fine) || 0)}</td>
+        <td class="num nowrap">${bg(l.date_due)}</td><td class="num warn">${days}</td>
+        <td class="num">${mnyCell(Number(l.fine) || 0)}${paid > 0
+          ? `<div class="hint">начислено ${esc(mny(Number(l.fineAccrued) || 0))}, платено ${esc(mny(paid))}</div>` : ''}</td>
         <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
             <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button>
             ${/* v2.4.56: точно на този екран стоят заеманията, които никога няма да
@@ -69,6 +77,9 @@ async function renderOver(keepWindow) {
   if (!rows) return;
   window._OVERDUE_LIST = rows;
   const total = rows.reduce((sum, l) => sum + (Number(l.fine) || 0), 0);
+  // v2.4.65 — вж. бележката при overRowsHtml: сборът е на ОСТАВАЩОТО, а платеното
+  // се назовава отделно, за да не изглежда разликата като изгубени пари.
+  const totalPaid = rows.reduce((sum, l) => sum + (Number(l.finePaid) || 0), 0);
   /* Празното място за изгубените се добавя И В ДВЕТЕ разклонения (v2.4.56).
      Библиотека без нито едно просрочено заемане пак може да има невърнати
      документи, чакащи акт по чл. 30, т. 5 — те са приключени заемания и по
@@ -86,7 +97,8 @@ async function renderOver(keepWindow) {
   if (OVER_RENDER_LIMIT > rows.length) OVER_RENDER_LIMIT = Math.max(OVER_PAGE_SIZE, rows.length);
   $('#view').innerHTML = `
     <div class="note w"><b>Чл. 43, ал. 2 и чл. 49, ал. 1, т. 3</b> — библиотекарят следи сроковете при забава.
-    Общо дължимо обезщетение: <b>${mny(total)}</b></div>
+    Общо дължимо обезщетение: <b>${mny(total)}</b>${totalPaid > 0
+      ? ` <span class="hint">(начислено ${esc(mny(total + totalPaid))}, от които вече платени ${esc(mny(totalPaid))} по читателските сметки)</span>` : ''}</div>
     <div class="toolbar">
       <button class="btn pri" onclick="openReminders()">Напомняния (имейл и SMS)</button>
       <button class="btn" onclick="printOverdueNotices()">Печат на напомняния / PDF</button>
@@ -123,6 +135,11 @@ async function paintLostPanel() {
   const box = $('#ovLost'); if (!box) return;
   const rows = await call(window.api.loans.lost()) || [];
   if (!$('#ovLost')) return; // междувременно е сменен разделът
+  /* Списъкът се пази, за да може прозорецът „Документът се намери“ (v2.4.65,
+     views/loans.js) да покаже кой документ, кой читател и колко виси по сметката
+     БЕЗ втора обиколка по IPC — редът е току-що прочетен и нищо не се е случило
+     междувременно. Решението пак се взима в обработчика. */
+  window._LOST_LIST = rows;
   if (!rows.length) { box.innerHTML = ''; return; }
   const charged = rows.reduce((s, r) => s + (r.charge ? Number(r.charge.charged) || 0 : 0), 0);
   const due = rows.reduce((s, r) => s + (r.charge ? Number(r.charge.outstanding) || 0 : 0), 0);
@@ -134,7 +151,7 @@ async function paintLostPanel() {
         <b>${due ? 'несъбрани ' + mny(due) : 'събрани всички'}</b>.` : ''}</div>
     <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
       <th>Инв. №</th><th>Заглавие</th><th>Читател</th><th>Отбелязан</th><th>Уреждане</th>
-      <th>Обезщетение</th><th>Събрано</th></tr></thead><tbody>
+      <th>Обезщетение</th><th>Събрано</th><th style="width:190px"></th></tr></thead><tbody>
       ${rows.map(r => `<tr>
         <td class="num">${r.inv_number ?? ''}</td>
         <td>${esc(r.title)}</td>
@@ -155,7 +172,17 @@ async function paintLostPanel() {
             ? (r.charge.outstanding > 0
               ? '<span class="badge warn">остават ' + esc(mny(r.charge.outstanding)) + '</span>'
               : '<span class="badge ok">събрано</span>')
-            : '<span class="hint">замяна с документ</span>'}</td></tr>`).join('')}
+            : '<span class="hint">замяна с документ</span>'}</td>
+        ${/* ОБРАТНИЯТ ПЪТ НА НАМЕРЕНИЯ ДОКУМЕНТ (v2.4.65). Дотук този панел беше
+              еднопосочен: редът влизаше и не излизаше никога, а самата програма
+              съветваше библиотекарката да върне състоянието на „наличен“ от
+              „Книги“ — което не сваляше нищо и оставяше документа в списъка за
+              акт по чл. 30, т. 5 заедно с обезщетението по сметката на читателя.
+              Бутонът стои ТУК, до реда, защото точно тук библиотекарката вижда
+              какво още виси по този документ. Самото правило е в обработчика
+              (loans:found) — включително отказът за вече отчислен документ. */''}
+        <td><button class="btn sm" onclick="foundLoanDialog(${r.id})"
+          title="Документът се върна в библиотеката — сваля го от списъка за акт по чл. 30, т. 5">Документът се намери</button></td></tr>`).join('')}
     </tbody></table></div></div>`;
 }
 window.paintLostPanel = paintLostPanel;

@@ -1065,7 +1065,14 @@ function runMigrations() {
 require('./handlers/db-location')(ipcMain, {
   app, dialog, fs, path,
   getDb: () => db, setDb: (v) => { db = v; }, getMainWindow: () => mainWindow,
-  run, readConfig, writeConfig, updateConfig, resolveDbDir, resolveDbPath
+  run, readConfig, writeConfig, updateConfig, resolveDbDir, resolveDbPath,
+  /* logAudit/getCurrentUser — от v2.4.65. Преместването на базата и „ползвай
+     съществуващата база от тази папка“ на практика сменят коя библиотека
+     работи програмата, а дотук не оставяха нито ред в следата: проверяващият
+     виждаше необясним скок в номерацията и нямаше откъде да разбере, че на
+     тази дата базата е сменена. Редът се пише в ДВЕТЕ бази — в изоставяната
+     и в целевата, — защото само така остава четим от която и да е от тях. */
+  logAudit, getCurrentUser: () => CURRENT_USER
 });
 
 /* ---------------- Резервни копия ----------------
@@ -1082,7 +1089,13 @@ const backupHandlers = require('./handlers/backup')(ipcMain, {
      живее в config.json, а не в таблицата settings. currentSchemaVersion —
      за отказа да се възстанови копие от по-нова версия на програмата (иначе
      assertSchemaNotNewer спира програмата ВЕЧЕ след подмяната на базата). */
-  readConfig, updateConfig, currentSchemaVersion: CURRENT_SCHEMA_VERSION
+  readConfig, updateConfig, currentSchemaVersion: CURRENT_SCHEMA_VERSION,
+  /* getCurrentUser — от v2.4.65, заради реда „базата беше заменена с копие от…“,
+     който успешното възстановяване вече вписва в НОВАТА база (дотук се вписваше
+     само при провал, тоест възстановената база мълчеше за собствената си
+     подмяна). Без това име редът наследяваше последния служител от старата
+     следа — тоест назоваваше човек, който може и да не е бил на компютъра. */
+  getCurrentUser: () => CURRENT_USER
 });
 const { autoBackupIfNeeded, startAutoBackupTimer, stopAutoBackupTimer, backupBeforeQuit } = backupHandlers;
 
@@ -2136,8 +2149,18 @@ require('./handlers/security-exclusions')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, app, resolveDbDir
 });
 
-/* ---------------- Одитна следа ---------------- */
-require('./handlers/audit')(ipcMain, { getDb: () => db, run });
+/* ---------------- Одитна следа ----------------
+   `logAudit` и `getCurrentUser` се подават от v2.4.65. Дотук модулът получаваше
+   само базата, затова `audit:export` — ЕДИНСТВЕНОТО извеждане на данни навън,
+   което не оставяше следа, при положение че коментарът в handlers/catalog.js
+   обявява точно обратното правило — нямаше с какво да се впише, а когато си
+   написа вписване на място, то трябваше да гадае кой работи в момента, като
+   чете последния ред на самата следа. Тоест колоната „кой“ на реда за износа
+   назоваваше служителя от ПРЕДИШНОТО действие. Сега се подават и двете и
+   местните заместители в модула отпадат от само себе си. */
+require('./handlers/audit')(ipcMain, {
+  getDb: () => db, run, logAudit, getCurrentUser: () => CURRENT_USER
+});
 
 /* ---------------- „Изтриване на всички данни“ (започване на чисто) ----------------
    До v2.4.63 чиста база се получаваше само ръчно: затвори програмата, намери

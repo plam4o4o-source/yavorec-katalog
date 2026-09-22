@@ -320,10 +320,37 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
+  /* СМЯНАТА НА ХРАНИЛИЩЕТО ОСТАВЯ РЕД В СЛЕДАТА (v2.4.65, кръг 42, Б21)
+     ==========================================================================
+     (а) Дотук този канал минаваше мълчаливо. А точно тези три полета решават
+     КОЙ АДРЕС чете публичният сайт на читалището: от тях се сглобява raw
+     адресът на `katalog.json` (ghRawUrl) и по тях се проверява дали работната
+     папка не сочи към ЧУЖДО хранилище (catalogRemoteCheck). Смяната им
+     пренасочва каталога на библиотеката към друг профил в GitHub.
+     (б) ЗАЩО Е ГРЕШНО. Онлайн каталогът е публичният регистър на фонда и
+     единственото, което читателят вижда, без да влиза в библиотеката. Промяна,
+     след която сайтът чете от друго място, е промяна в публикувания регистър —
+     а до v2.4.64 съседното `catalog:chooseFolder` вече оставяше ред, тоест
+     половината от същото действие се документираше, а другата не.
+     (в) ЗАЩО ТОЧНО ТАКА. Вписва се СТАРОТО и НОВОТО, защото въпросът, който
+     после се задава, е „откога сайтът чете от този адрес и какъв беше преди“.
+     Ако нищо не се е променило (екранът записва формата и без промяна), ред не
+     се прави — следа от незасегнати записи заглушава истинските. */
   ipcMain.handle('catalog:updateGh', (e, { gh_user, gh_repo, gh_branch }) =>
     run(() => {
-      getDb().prepare('UPDATE settings SET gh_user=?, gh_repo=?, gh_branch=? WHERE id=1')
-        .run((gh_user || '').trim(), (gh_repo || '').trim(), (gh_branch || 'main').trim() || 'main');
+      const db = getDb();
+      const before = db.prepare('SELECT gh_user, gh_repo, gh_branch FROM settings WHERE id=1').get() || {};
+      const user = (gh_user || '').trim();
+      const repo = (gh_repo || '').trim();
+      const branch = (gh_branch || 'main').trim() || 'main';
+      db.prepare('UPDATE settings SET gh_user=?, gh_repo=?, gh_branch=? WHERE id=1').run(user, repo, branch);
+      const slug = (u, r, b) => (u || r ? (u || '—') + '/' + (r || '—') + ' (клон ' + (b || 'main') + ')' : '(не е зададено)');
+      const old = slug(before.gh_user, before.gh_repo, before.gh_branch);
+      const now = slug(user, repo, branch);
+      if (old !== now) {
+        logAudit('Онлайн каталог', 'хранилището в GitHub беше променено: ' + old + ' → ' + now
+          + '. Оттук нататък публичният каталог на сайта се чете от този адрес.');
+      }
     })
   );
   ipcMain.handle('catalog:chooseFolder', async () => {
@@ -354,8 +381,25 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
+  /* СПИРАНЕТО НА ОНЛАЙН КАТАЛОГА СЪЩО ОСТАВЯ РЕД (v2.4.65, кръг 42, Б21).
+     Свързването (`catalog:chooseFolder`) се вписва от v2.4.49, а РАЗвързването —
+     не. А то е по-тежкото от двете: от този миг публикуваният `katalog.json`
+     замръзва в състоянието си отпреди секунда и сайтът на читалището показва
+     фонд, който вече не отговаря на инвентарната книга — без нито едно
+     предупреждение и без начин после да се разбере откога. Тук е и мястото да
+     се каже, че файлът НЕ се маха: изключва се само записът от програмата
+     нататък, а публикуваното си остава публикувано. */
   ipcMain.handle('catalog:disconnectFolder', () =>
-    run(() => { getDb().prepare('UPDATE settings SET catalog_folder = NULL WHERE id = 1').run(); })
+    run(() => {
+      const db = getDb();
+      const before = (db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get() || {}).catalog_folder || '';
+      db.prepare('UPDATE settings SET catalog_folder = NULL WHERE id = 1').run();
+      if (before) {
+        logAudit('Онлайн каталог', 'автоматичният запис беше СПРЯН — папката „' + before
+          + '“ вече не е свързана. Публикуваният файл katalog.json НЕ е изтрит: онлайн каталогът остава '
+          + 'достъпен, но замръзва в състоянието си отпреди спирането и вече няма да следва инвентарната книга.');
+      }
+    })
   );
   // Одит v2.3.1 №8: и двата канала по-долу проверяваха САМО `w.blocked`, а не
   // `w.written` — реален провал на самия запис (напр. изключен мрежов диск:
