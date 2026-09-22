@@ -676,7 +676,16 @@ test('11. сметка: начисление, плащане, квитанция
   await h.waitFor(() => /КВИТАНЦИЯ/.test(h.printed()), 'квитанцията');
   const pay = q("SELECT * FROM account_lines WHERE kind = 'плащане'");
   assert.equal(pay.amount, -owed);
-  assert.equal(Math.round(q('SELECT SUM(amount) AS s FROM account_lines WHERE reader_id = ?', ids.reader1).s * 100), 0);
+  /* САЛДОТО Е НУЛА — но „нула“ се проверява по СТОЙНОСТ, не по знак.
+     SUM() върху числа с плаваща запетая оставя остатък от порядъка на 1e-15, а
+     знакът му зависи от самите суми — тоест от начисленото за забава, тоест от
+     това КОЛКО ДНИ преди днес е бил падежът. Когато остатъкът излезе
+     отрицателен, Math.round(-1.8e-13) дава -0, а assert.equal от node:assert/strict
+     сравнява през Object.is, за което -0 НЕ е 0. Така един и същ непроменен код
+     минаваше 1901/1901 в CI на 21.09.2026 и падаше на 22.09.2026.
+     Затова се твърди онова, което всъщност значи: разликата е под стотинка. */
+  const balance = q('SELECT SUM(amount) AS s FROM account_lines WHERE reader_id = ?', ids.reader1).s;
+  assert.ok(Math.abs(balance) < 0.005, 'сметката трябва да е изравнена, а салдото е ' + balance);
   const p = h.printed();
   assert.match(p, new RegExp('КВИТАНЦИЯ № ' + pay.id + ' / ' + E.bgDate(T).replace(/\./g, '\\.')));
   assert.match(p, /Читател: Иван Читателов \(карта 1001\)/);
