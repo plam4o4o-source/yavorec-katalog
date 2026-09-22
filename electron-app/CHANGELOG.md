@@ -153,9 +153,37 @@ id (иначе първата книга на новата библиотека 
 рендер), са обновени заедно с обяснението защо. Всяка теза е проверена и с **връщане
 на поправката**, а целият набор мина и през **харнеса за мутации** — тест, който
 минава и когато кодът под него е счупен нарочно, не пази нищо и не бива да стои в
-поредицата. Пълна поредица: **1966 успешни, 0 неуспешни**, в UTC и Europe/Sofia;
+поредицата. Пълна поредица: **1973 успешни, 0 неуспешни**, в UTC и Europe/Sofia;
 сайтът: `test-page-katalog.js` 8/8 сценария и `test-page-katalog-view.js` при
 15 002 записа — и двата минават непроменени.
+
+**Поправено при прегледа на самия кръг.** Четири неща, всяко възпроизведено, преди да
+бъде пипнато, и всяко покрито с тест, който пада, ако поправката се върне:
+
+- **Копието отпреди изтриването се прекриптира при смяна на паролата.**
+  `reencryptOldBackups()` обхващаше `auto-…` и `before-restore-…`, но не и новото
+  `before-reset-…`. След „Започване на чисто“ базата е празна, тоест това копие е
+  **единственото**, което още съдържа старата библиотека — а смяната на паролата
+  (най-честият повод: напуснал служител) би го заключила завинаги. Същият пропуск
+  вече беше поправян веднъж, за `before-restore-…` (одит v2.4.24).
+- **Търсенето в кардекса вижда всички броеве.** Откакто броевете се рисуват на
+  порции, филтърът четеше само изчертаните редове: за ежедневник (365 броя в година)
+  или при „всички години“ търсенето на съществуващ брой отговаряше „Показани 0 от
+  1200“. Сега при непразно търсене списъкът се дорисува, преди да се скрият
+  несъвпадащите.
+- **Празната разпечатка на инвентарната книга казва защо е празна.** Диалогът вече
+  започва с текущата година и сам попълва двете дати; печат на инв. № 1–300 за
+  партида, вписана лани, връщаше нула реда със съобщение „проверете границите на
+  диапазона“ — тоест пращаше библиотекарката да проверява точно числата, които са
+  верни. Сега съобщението изброява **всички** действащи ограничения и сочи и датите.
+- **Надписът за некриптираните предпазни копия назовава и двата префикса**, защото
+  числото над него брои и двата.
+
+Освен това: `package-lock.json` носи същата версия като `package.json` (кръгът беше
+вдигнал само едната), а тестът за изтриването вече се изпълнява навсякъде — четеше
+фикстурата си от работна папка извън хранилището и при липса я прескачаше мълчаливо,
+тоест седем от тринайсетте му теста падаха на всяка друга машина. Фикстурата е в
+хранилището (`test/helpers/nachisto-fixture.js`).
 
 **EN:** A round driven by **measurement**, not by reading code. The real program was
 run against a real collection — 15 000 documents, 3 000 readers, 12 000 loans, a
@@ -290,10 +318,37 @@ the same honest note as in `perf-v2448`. Two tests that pinned the old behaviour
 updated together with the reasoning. Each claim was also verified by **reverting the
 fix**, and the whole set went through the **mutation harness** — a test that still
 passes when the code beneath it is deliberately broken guards nothing and does not
-belong in the suite. Full suite: **1966 passing, 0 failing**, in UTC and
+belong in the suite. Full suite: **1973 passing, 0 failing**, in UTC and
 Europe/Sofia; the site:
 `test-page-katalog.js` 8/8 scenarios and `test-page-katalog-view.js` at 15 002 records
 — both pass unchanged.
+
+**Fixed while reviewing the round itself.** Four things, each reproduced before being
+touched, and each covered by a test that fails if the fix is reverted:
+
+- **The backup taken before a wipe is re-encrypted when the password changes.**
+  `reencryptOldBackups()` covered `auto-…` and `before-restore-…` but not the new
+  `before-reset-…`. After "start clean" the database is empty, so that copy is the
+  **only** thing still holding the old library — and changing the password (most
+  commonly after a member of staff leaves) would have locked it away for good. The
+  same omission had already been fixed once, for `before-restore-…` (audit v2.4.24).
+- **Searching the kardex sees every issue.** Since issues are painted in pages, the
+  filter read only the rows already drawn: for a daily paper (365 issues a year), or
+  with "all years" selected, searching for an issue that exists answered "showing 0 of
+  1200". The list is now painted in full before non-matching rows are hidden.
+- **An empty inventory-book printout says why it is empty.** The dialog now starts on
+  the current year and pre-fills both dates; printing inv. nos. 1–300 for a batch
+  registered last year returned no rows with the message "check the range bounds" —
+  sending the librarian to check the very numbers that were correct. The message now
+  lists **every** restriction in force and points at the dates as well.
+- **The note about unencrypted safety copies names both prefixes**, because the number
+  above it counts both.
+
+Also: `package-lock.json` now carries the same version as `package.json` (the round had
+bumped only one of them), and the test for the wipe now runs everywhere — it read its
+fixture from a working directory outside the repository and silently skipped it when
+absent, so seven of its thirteen tests failed on any other machine. The fixture now
+lives in the repository (`test/helpers/nachisto-fixture.js`).
 
 ## v2.4.63
 

@@ -223,6 +223,23 @@ function filterIssueRows() {
   const label = $('#perIssueCount');
   if (!body) return;
   const q = String(box ? box.value : '').trim().toLowerCase();
+  /* ТЪРСЕНЕТО ТРЯБВА ДА ВИЖДА ВСИЧКИ БРОЕВЕ, НЕ САМО НАРИСУВАНИТЕ (v2.4.64).
+     Откакто кардексът се рисува на порции (PER_ISSUES_PAGE_SIZE), в тялото на
+     таблицата стоят само първите редове. Филтърът обаче чете точно тях, тоест
+     за ежедневник (365 броя в година) или при „всички години“ (1200+) търсене
+     на съществуващ брой отговаряше „Показани 0 от 1200“ — броят си е вписан,
+     просто още не е изчертан. Затова при непразно търсене първо се дорисува
+     целият списък и чак тогава се скриват несъвпадащите.
+     Списъкът е на ЕДНО издание, не целият фонд — няколко хиляди реда в най-
+     лошия случай, и то само когато библиотекарката сама е поискала търсене. */
+  if (q) {
+    const p = window._PER_KARDEX;
+    const all = (p && p.issues) ? p.issues.length : 0;
+    if (all > PER_ISSUES_LIMIT) {
+      PER_ISSUES_LIMIT = all;
+      paintPerIssues(true);
+    }
+  }
   const rows = Array.from(body.querySelectorAll('tr'));
   let visible = 0;
   for (const tr of rows) {
