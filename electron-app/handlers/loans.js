@@ -60,12 +60,16 @@ const OVERDUE_CHARGE_TYPE = 'обезщетение';
    свое място (панелът „Изгубени и невърнати документи“).
    Обхожда се веднъж на читател (а не chargeCoverage за всеки ред поотделно,
    което е квадратично при читател с дълга сметка). */
-function unpaidOverdueFines(db, readerId) {
+function unpaidOverdueFines(db, readerId, legacy) {
   const lines = db.prepare(`
     SELECT kind, type, amount FROM account_lines WHERE reader_id = ?
     ORDER BY date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
   `).all(readerId);
-  const queue = [];
+  /* Заварената забава (виж unpaidForRows) влиза като НАЙ-СТАРОТО задължение:
+     тя е натрупана преди всяко начисление в сметката, тоест по правилото
+     „най-старото се покрива първо“ плащане без съответно начисление (аванс,
+     записан, докато забавата живееше само в loans.fine) отива първо за нея. */
+  const queue = legacy > 0.0001 ? [{ type: OVERDUE_CHARGE_TYPE, left: legacy }] : [];
   for (const l of lines) {
     if (l.kind === 'начисление') { queue.push({ type: l.type, left: Math.abs(Number(l.amount) || 0) }); continue; }
     let money = Math.abs(Number(l.amount) || 0);
@@ -80,6 +84,36 @@ function unpaidOverdueFines(db, readerId) {
   }
   const rest = queue.reduce((s, q) => s + (q.type === OVERDUE_CHARGE_TYPE ? q.left : 0), 0);
   return Math.round(rest * 100) / 100;
+}
+
+/* ЗАВАРЕНАТА ЗАБАВА, КОЯТО НИКОГА НЕ Е ВЛИЗАЛА В СМЕТКАТА (v2.4.65).
+   =====================================================================
+   КАКВО СТАВАШЕ. unpaidOverdueFines() чете само сметката. Но преди v2.4.61
+   loans:extend добавяше забавата САМО в loans.fine на отвореното заемане
+   (`UPDATE loans SET fine = COALESCE(fine, 0) + ?`), без ред в сметката — и
+   миграция, която да ги прехвърли, няма. В обновена база такова заемане има
+   fine = 2,70, а сметката — нищо. Тогава неплатеното излизаше 0, целите 2,70
+   се водеха платени, а писмото по чл. 43 пишеше „от тях платени 2,70 €“ за
+   пари, които никой не е искал, нито е давал. Библиотеката спираше да иска
+   дължимо обезщетение.
+
+   ПРАВИЛОТО — КОНСЕРВАТИВНО, ЗА ДА НЕ ИЗМИСЛЯ ДЪЛГ. Начисленията в сметката
+   не носят номер на заемане (бележката им е „Забава N дни по инв. № …“), тоест
+   точно отнасяне към заемане не е възможно. Затова заварената част се смята
+   като ДОЛНА граница: всичко начислено за забава в сметката на читателя се
+   приема, че е за показаните заемания, и само остатъкът над него е заварен.
+       заварено = max(0, Σ fineCharged на показаните − Σ начисления за забава)
+   Така числото никога не е по-голямо от истинското: където не може да се
+   докаже, че е дължимо, не се иска. А читател със само заварена забава (без
+   нито едно начисление в сметката) — точно случаят, който се губеше — си я
+   получава обратно изцяло. Трите места, които пресмятат (Просрочени,
+   напомнителното писмо, SMS), минават през тази една функция. */
+function unpaidForRows(db, readerId, rows) {
+  const onRows = rows.reduce((s, r) => s + (Number(r.fineCharged) || 0), 0);
+  const inAccount = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM account_lines
+      WHERE reader_id = ? AND kind = 'начисление' AND type = ?`).get(readerId, OVERDUE_CHARGE_TYPE).s;
+  const legacy = Math.max(0, Math.round((onRows - Math.abs(Number(inAccount) || 0)) * 100) / 100);
+  return unpaidOverdueFines(db, readerId, legacy);
 }
 
 /* РАЗНАСЯ НЕПЛАТЕНАТА ЗАБАВА ПО ПРОСРОЧЕНИТЕ ЗАЕМАНИЯ НА ЕДИН ЧИТАТЕЛ.
@@ -371,7 +405,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         if (!byReader.has(r.reader_id)) byReader.set(r.reader_id, []);
         byReader.get(r.reader_id).push(r);
       });
-      for (const [readerId, list] of byReader) spreadUnpaidFine(list, unpaidOverdueFines(db, readerId));
+      for (const [readerId, list] of byReader) spreadUnpaidFine(list, unpaidForRows(db, readerId, list));
       return rows;
     })
   );
@@ -425,7 +459,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         /* И тук платеното се приспада (v2.4.65) — виж unpaidOverdueFines в
            началото на файла. Това е каналът на ПЕЧАТНОТО писмо по чл. 43: точно
            тук се раждаше искането към читател, платил всичко на гишето. */
-        spreadUnpaidFine(r.loans, unpaidOverdueFines(db, r.reader_id));
+        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
         // toCents и на сбора (v2.4.61): това е числото в реда „Общо дължимо
         // обезщетение“ на напомнителното писмо.
         r.fine = toCents(r.loans.reduce((sum, d) => sum + d.fine, 0));
@@ -1211,18 +1245,35 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            защото след като `lost_account_line_id` се занули, редът вече не може
            да бъде намерен. */
         let charge = null, chargeAction = 'няма начисление';
+        /* Дали връзката към начислението да се свали. Сваля се само когато
+           начислението НАИСТИНА е уредено (сторнирано или прочетено); ако
+           покритието не може да се прочете, редът остава в сметката и връзката
+           му със заемането НЕ се къса — иначе остава начисление за изгубен
+           документ, което никой вече не може да свърже с книгата, а книгата се
+           е намерила. */
+        let keepChargeLink = false;
         if (l.lost_account_line_id) {
-          let cov = null;
+          let cov = null, covErr = null;
           try { cov = chargeCoverage(db, l.lost_account_line_id); }
           catch (err) {
             /* Празен catch няма: без покритието не може да се реши дали редът да
                падне, затова се ЗАПАЗВА (по-безопасното) и причината влиза в
                следата — иначе изчезва ред от касовия дневник по неизвестна
                причина. */
+            covErr = err;
             logAudit('Документът се намери', 'ВНИМАНИЕ: покритието на начислението по заемане № ' + l.id
               + ' не можа да се прочете (' + err.message + ') — начислението остава в сметката.');
           }
-          if (!cov) { chargeAction = 'начислението е изтрито от картона по-рано'; }
+          /* ПРОВАЛЕНО ЧЕТЕНЕ НЕ Е „ИЗТРИТО ПО-РАНО“ (v2.4.65). Дотук и двата
+             случая стигаха до `!cov` и следата, и съобщението на екрана
+             казваха „начислението е изтрито от картона по-рано“ — невярно, то
+             си стои в сметката. После lost_account_line_id се зануляваше и
+             начислението оставаше без връзка със заемането. */
+          if (covErr) {
+            keepChargeLink = true;
+            chargeAction = 'начислението ОСТАВА — покритието му не можа да се прочете (' + covErr.message
+              + '); уредете го от картона на читателя';
+          } else if (!cov) { chargeAction = 'начислението е изтрито от картона по-рано'; }
           else if (reverseCharge === false) { charge = cov; chargeAction = 'начислението ОСТАВА по решение на библиотекаря'; }
           else if (!cov.covered) {
             db.prepare('DELETE FROM account_lines WHERE id = ?').run(l.lost_account_line_id);
@@ -1234,11 +1285,14 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
               + cov.charged.toFixed(2) + ' €) — уредете го от картона на читателя';
           }
         }
+        /* При непрочетено покритие връзката към начислението ОСТАВА (виж
+           keepChargeLink горе) — CASE, а не второ UPDATE, за да е едно изявление. */
         db.prepare(`UPDATE loans SET lost = NULL, lost_date = NULL, lost_resolution = NULL,
-            lost_amount = NULL, lost_account_line_id = NULL,
+            lost_amount = NULL,
+            lost_account_line_id = CASE WHEN ? THEN lost_account_line_id ELSE NULL END,
             lost_replacement_book_id = NULL, lost_replacement_note = NULL,
             lost_note = ? WHERE id = ?`)
-          .run(String(note || '').trim() || l.lost_note || null, l.id);
+          .run(keepChargeLink ? 1 : 0, String(note || '').trim() || l.lost_note || null, l.id);
         /* Състоянието на документа. Ако библиотекарката вече го е върнала на
            „наличен“ по съвета на програмата, не се пипа; ако стои „изгубен“ —
            връща се. Друго състояние („за реставрация“, „бракуван“) също не се
@@ -1483,3 +1537,4 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
 module.exports.OVERDUE_CHARGE_TYPE = OVERDUE_CHARGE_TYPE;
 module.exports.unpaidOverdueFines = unpaidOverdueFines;
 module.exports.spreadUnpaidFine = spreadUnpaidFine;
+module.exports.unpaidForRows = unpaidForRows;

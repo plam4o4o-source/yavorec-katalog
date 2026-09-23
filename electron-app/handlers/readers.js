@@ -20,8 +20,17 @@ const CHILD_CATEGORY = 'дете до 14 г.';
    родител/настойник. Филтърът в „Читатели“, броячът над списъка и етикетът на
    реда питат ЕДНО И СЪЩО, иначе библиотекарката ще прочете „120 без съгласие“,
    ще отвори филтъра и ще види 118. */
-const NO_CONSENT_SQL = `(COALESCE(r.gdpr_consent, 0) = 0
-  OR (COALESCE(r.category, '') = '${CHILD_CATEGORY}' AND COALESCE(r.parent_consent, 0) = 0))`;
+/* СЛУЖЕБНИЯТ ЗАПИС НЕ Е ЧИТАТЕЛ БЕЗ СЪГЛАСИЕ (v2.4.65). „— анонимизирани
+   заемания —“ се създава с gdpr_consent = 0 (handlers/gdpr.js) и никога не може
+   да получи съгласие — зад него няма човек. Без това изключение, веднага щом
+   анонимизирането е минало веднъж, библиотека, в която ВСЕКИ истински читател
+   има съгласие, вижда „1 читател без отбелязано съгласие“, а филтърът ѝ
+   предлага служебния запис като нещо за оправяне. Името се вгражда като
+   CHILD_CATEGORY по-долу — константа от кода, не вход от потребител; кавичките
+   се удвояват за всеки случай. */
+const ANON_NAME_SQL = String(ANON_READER_NAME).replace(/'/g, "''");
+const NO_CONSENT_SQL = `(r.name IS NOT '${ANON_NAME_SQL}' AND (COALESCE(r.gdpr_consent, 0) = 0
+  OR (COALESCE(r.category, '') = '${CHILD_CATEGORY}' AND COALESCE(r.parent_consent, 0) = 0)))`;
 
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {

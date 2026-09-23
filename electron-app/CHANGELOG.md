@@ -200,9 +200,53 @@ for full detail.
 копия описваше междинните като „отпреди включването на защитата“. И непозната стойност
 за начина на постъпване излизаше като суровото съобщение на тригера.
 
-**Проверено:** пълната поредица е **2057+ теста, 0 неуспешни**; мутационна проверка —
-198 мутации, всички уловени, с минаваща контролна; проверките на публичния каталог —
-8 сценария и мащаб 15 002 записа.
+**Поправено при прегледа на самия кръг.** Прегледът върна десет находки. Девет бяха
+потвърдени, всяка **възпроизведена преди да бъде пипната** — трите за личните данни на
+истинска база — и всяка покрита с тест, който пада, ако поправката се върне:
+
+- **Заличаването по чл. 17 пипаше чужди редове.** Редовете в следата се търсеха като
+  подниз, тоест заличаването на „Иван Петров“ обезличаваше необратимо и редовете на
+  „Иван Петрова“ и на „Иван Петров-Стоянов“. Сега името трябва да стои като цяло, а ако
+  до него има номер на карта — да е картата на същия човек. Пълен съименник с друга
+  карта също остава непокътнат. Същото важи за историята на търсенията.
+- **Заличаването прехвърляше и активните резервации** на служебния запис „—
+  анонимизирани заемания —“, който тогава заемаше място в опашката пред истинските
+  читатели. Сега чакащите и заделените се отказват, заделеният документ се освобождава,
+  и броят им влиза в следата.
+- **Два нови вида ред в следата оставаха с името на читателя** след анонимизиране и
+  заличаване: „Документът се намери“ и „Изтрит читател“ (без история). Първият вече
+  губи само читателя и пази инв. № и заглавието, както другите редове от гишето.
+- **Заварената забава се водеше за платена.** Преди v2.4.61 продължението на просрочено
+  заемане записваше забавата само в самото заемане, без ред в сметката. Новото смятане на
+  „Общо дължимо“ гледаше само сметката, тоест такава забава изчезваше от „Просрочени“, от
+  писмото по чл. 43 и от SMS-а, а писмото пишеше „от тях платени“ за пари, които никой
+  не е давал. Сега се смята отделно — **консервативно**, като долна граница: програмата
+  не иска сума, която не може да докаже.
+- **„Документът се намери“ при непрочетено начисление** казваше „изтрито от картона
+  по-рано“ (невярно) и откъсваше връзката на начислението със заемането. Сега казва, че
+  начислението остава, и връзката се пази.
+- **Заварени „Труд“ и „ТРУД“ ставаха нередактируеми.** Новата проверка за дубликат (с
+  кирилица без значение на регистъра) се правеше при всеки запис, тоест отказваше дори
+  смяна само на периодичността. Сега се прави само при смяна на заглавието.
+- **Неуспешно преместване на базата оставяше в следата ред „преместена“.** Редът
+  нарочно се пише преди копирането (за да го наследи новата база); при провал вече се
+  допълва с ред, че опитът не е успял и базата е останала на мястото си.
+- **Служебният запис се броеше за „читател без съгласие“**, тоест библиотека, в която
+  всеки истински читател има съгласие, виждаше „1 без съгласие“.
+- **Формата „Подробно за деня“ записваше „2,7“ като 0.** Клетките в таблицата бяха
+  поправени в този кръг, но формата за деня води до същото място и беше останала с
+  числово поле. Сега е текстова и отказва поименно всичко, което не е цяло число.
+
+**Не е пипано, за решение:** вносът вече отказва цени с валута („12,50 лв.“) и ги вписва
+като 0,00 € с предупреждение на всеки ред. Старото поведение ги вземаше за евро — също
+грешно, при това мълчаливо. Правилният ход изисква решение: цена в левове от стар файл
+да се превръща по официалния курс 1,95583 или не.
+
+**Проверено:** пълната поредица е **2070 теста, 0 неуспешни**, в UTC и
+Europe/Sofia; поправките от прегледа — 12 мутации, всяка уловена от точно своя тест.
+Мутационната проверка на самия кръг (198 мутации, всички уловени) е по данните на
+кръга — харнесът му е извън хранилището и тук не е пускан; проверките на публичния
+каталог — 8 сценария и мащаб 15 002 записа.
 
 **EN:** A **verification** round: six areas were exercised through the real program —
 real `main.js`, real handlers, real database, real screen — and every finding was
@@ -340,9 +384,53 @@ share. The intent (never lose an acquisition silently) is preserved; measured
 **5 132 → 37–44 ms** for the same batch. The full data export spent **544 of 1 490 ms**
 in one compression level; level 6 costs 167 ms for a 4 % larger archive.
 
-**Verified:** full suite **2057+ tests, 0 failures**; mutation testing — 198 mutations,
-all caught, control mutation passing; catalogue page checks — 8 scenarios and a
-15 002-record scale run.
+**Fixed while reviewing the round itself.** The review returned ten findings. Nine were
+confirmed, each **reproduced before being touched** — the three about personal data on a
+real database — and each covered by a test that fails if the fix is reverted:
+
+- **Erasure under art. 17 touched other people's rows.** Audit rows were matched as a
+  substring, so erasing "Иван Петров" irreversibly anonymised the rows of "Иван Петрова"
+  and "Иван Петров-Стоянов" as well. The name must now stand as a whole word, and if a
+  card number follows it, it must be the same person's card. A full namesake with a
+  different card is left intact too. The same rule applies to the search history.
+- **Erasure also moved active holds** onto the "— anonymised loans —" service record,
+  which then held a place in the queue ahead of real readers. Waiting and set-aside holds
+  are now cancelled, the set-aside item is released, and the count goes into the trail.
+- **Two new kinds of audit row kept the reader's name** after anonymisation and
+  erasure: "Документът се намери" (item found) and "Изтрит читател" (reader deleted, no
+  history). The first now loses only the reader and keeps the inventory number and
+  title, like the other circulation rows.
+- **A legacy overdue fine was treated as paid.** Before v2.4.61, renewing an overdue
+  loan recorded the fine only on the loan itself, with no account line. The new "total
+  owed" looked only at the account, so such a fine disappeared from Overdue, from the
+  art. 43 letter and from the SMS — and the letter said "of which paid" for money no one
+  had handed over. It is now computed separately, **conservatively**, as a lower bound:
+  the program never asks for an amount it cannot prove.
+- **"Item found" with an unreadable charge** said "deleted from the card earlier"
+  (untrue) and cut the link between the charge and the loan. It now says the charge
+  stays, and the link is kept.
+- **Pre-existing "Труд" and "ТРУД" became uneditable.** The new case-insensitive
+  Cyrillic duplicate check ran on every save, so it refused even a change of frequency.
+  It now runs only when the title changes.
+- **A failed database move left a "moved" row in the trail.** That row is deliberately
+  written before copying (so the new database inherits it); on failure it is now followed
+  by a row stating the attempt failed and the database stayed where it was.
+- **The service record was counted as a "reader without consent"**, so a library in
+  which every real reader has consent saw "1 without consent".
+- **The "Day details" form saved "2,7" as 0.** The table cells were fixed in this round,
+  but the day form leads to the same place and still used a numeric field. It is now a
+  text field and refuses, by name, anything that is not a whole number.
+
+**Left as is, for a decision:** import now refuses prices with a currency ("12,50 лв.")
+and records them as 0.00 € with a warning per row. The old behaviour took them as euro —
+also wrong, and silently so. The right move needs a decision: whether a price in leva
+from an old file should be converted at the official rate of 1.95583.
+
+**Verified:** full suite **2070 tests, 0 failures**, in UTC and Europe/Sofia;
+the review fixes — 12 mutations, each caught by exactly its own test. The round's own
+mutation testing (198 mutations, all caught) is as reported by the round — its harness
+lives outside the repository and was not run here; catalogue page checks — 8 scenarios and
+a 15 002-record scale run.
 
 ## v2.4.64
 

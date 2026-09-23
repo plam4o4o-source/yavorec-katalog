@@ -31,7 +31,12 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
   // „Изтрит ред от сметката“ (v2.4.24) носи същия формат „име — остатък“ и влиза
   // тук (одит v2.4.25) — иначе името оставаше в следата след срока.
   const MONEY_ACTIONS = "('Начисление', 'Плащане', 'Изтрит ред от сметката')";
+  /* „Изтрит читател“ (без история) — от v2.4.65 readers.js вписва и него, с име
+     и карта (виж readers.js при readers:delete). Дотук тук стоеше само вариантът
+     „с история“, тоест изтрит читател без заемания оставаше поименно в следата
+     завинаги, а анонимизирането и заличаването по чл. 17 обявяваха успех. */
   const NAME_ACTIONS = `('Нов читател', 'Редакция на читател', 'Изтрит читател с история',
+                     'Изтрит читател',
                      'Снето наказание',
                      -- резервации: handlers/holds.js вписва името на читателя
                      'Заделена книга', 'Резервация', 'Отказана резервация', 'Изтекла резервация',
@@ -69,7 +74,17 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
      функция (stripReaderSegment) и за трите действия, защото и трите пишат
      сегмента в един и същ вид (handlers/loans.js:400, :634, :934).
      Резултатът е „инв. № 101 — Под игото; срок 03.04.2019“. */
-  const LOAN_ACTIONS = "('Заемане', 'Продължение на заемане', 'Изгубен документ')";
+  /* ЕДИН СПИСЪК, ОТ КОЙТО СЕ ПРАВЯТ И SQL-ЪТ, И МНОЖЕСТВОТО ЗА JS (v2.4.65).
+     „Документът се намери“ (loans:found) пише читателя в същия вид „; читател
+     … (карта …); “ като останалите три, затова минава през същото рязане на
+     сегмента. Дотук списъкът стоеше два пъти — като SQL низ тук и като
+     твърдо написан Set вътре в gdpr:forgetReader — и новото действие щеше да
+     влезе само в единия: SQL-ът щеше да го намери, а JS да го пусне през
+     клона за пълна замяна, тоест да изтрие и инв. № и заглавието, които
+     следата е длъжна да пази (чл. 17, ал. 2 от Наредба № 3). */
+  const LOAN_ACTION_LIST = ['Заемане', 'Продължение на заемане', 'Изгубен документ', 'Документът се намери'];
+  const LOAN_ACTION_SET = new Set(LOAN_ACTION_LIST);
+  const LOAN_ACTIONS = '(' + LOAN_ACTION_LIST.map(a => "'" + a + "'").join(', ') + ')';
   const READER_SEG = '; читател ';
   /* Сегментът винаги започва с „; читател “ и свършва на следващото „; “
      (или в края на реда, ако читателят е последното нещо в текста). Списъкът
@@ -286,6 +301,44 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
      екрана (за изречението „Данните на … са заличени“) и никъде не се записва.
   ========================================================================== */
   const FORGET_ACTIONS_SQL = `action IN ${MONEY_ACTIONS} OR action IN ${NAME_ACTIONS} OR action IN ${LOAN_ACTIONS}`;
+
+  /* ТОЗИ ЛИ ЧИТАТЕЛ Е В РЕДА — А НЕ СЪИМЕНЕНИК С ПО-ДЪЛГО ИМЕ (v2.4.65).
+     =====================================================================
+     Дотук редовете се намираха с instr(detail, name) > 0, тоест като ПОДНИЗ.
+     Заличаването на „Иван Петров“ хващаше и „Иван Петрова“, и „Иван
+     Петров-Стоянов“ — и техните редове ставаха „[анонимизирано по GDPR]“ с
+     изтрит diff. Необратимо, върху следата на ДРУГ човек, който нищо не е
+     искал. При кратко име („Ана“) това е голяма част от следата.
+     Измерено: заличаване на „Иван Петров“ при наличен читател „Иван Петрова“
+     обезличи и двата реда на Иван Петрова („Нов читател“ и „Редакция“).
+
+     ПРАВИЛОТО. Името трябва да стои като ЦЯЛО: знакът преди него и знакът
+     след него не бива да са буква, цифра или тире (тирето е част от двойно
+     фамилно име). А ако веднага след името следва „ (карта N)“ — какъвто е
+     видът, в който loans.js, readers.js и holds.js пишат читателя — N трябва
+     да е картата на ТОЗИ читател: иначе е пълен съименник с друга карта.
+     SQL-ът продължава да стеснява с instr (евтино, по индекс няма), а
+     решението е тук, в JS, върху вече малкото кандидати. */
+  const NAME_CHAR = /[\p{L}\p{N}-]/u;
+  function mentionsReader(detail, name, cardNo) {
+    const s = String(detail || '');
+    if (!name) return false;
+    let from = 0;
+    for (;;) {
+      const at = s.indexOf(name, from);
+      if (at < 0) return false;
+      from = at + 1;
+      const before = at > 0 ? s[at - 1] : '';
+      const after = s[at + name.length] || '';
+      if (before && NAME_CHAR.test(before)) continue;
+      if (after && NAME_CHAR.test(after)) continue;
+      /* Картата: ако я има в реда веднага след името, решава тя. */
+      const tail = s.slice(at + name.length);
+      const card = /^ \(карта ([^)]+)\)/.exec(tail);
+      if (card && cardNo != null && String(cardNo) !== '' && card[1] !== String(cardNo)) continue;
+      return true;
+    }
+  }
   ipcMain.handle('gdpr:forgetReader', (e, arg) =>
     run(() => {
       const db = getDb();
@@ -344,6 +397,20 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         const accountMoved = db.prepare('UPDATE account_lines SET reader_id = ? WHERE reader_id = ?')
           .run(anonId, id).changes;
         const eventsCleared = db.prepare('UPDATE events SET reader_id = NULL WHERE reader_id = ?').run(id).changes;
+        /* АКТИВНИТЕ РЕЗЕРВАЦИИ СЕ ОТМЕНЯТ, ПРЕДИ ДА БЪДАТ ПРЕМЕСТЕНИ (v2.4.65).
+           Дотук ВСИЧКИ резервации отиваха на служебния запис, включително
+           „чака“ и „заделена“. Тогава служебният запис заемаше място в опашката:
+           при връщане holds.js заделяше книгата за „— анонимизирани заемания —“,
+           а истинските читатели зад него чакаха, докато фантомната резервация
+           изтече. gdpr:anonymize нарочно мести само приключените
+           („изпълнена“/„отказана“) — тук правилото е същото, но човекът е
+           поискал заличаване, тоест неговото желание да вземе книгата вече не
+           съществува: резервацията се отказва, а заделеният документ се
+           освобождава за следващия. */
+        const holdsCancelled = db.prepare(`UPDATE holds
+             SET status = 'отказана', resolved_at = date('now'),
+                 note = 'отказана при заличаване по искане на читателя (чл. 17 ОРЗД)'
+           WHERE reader_id = ? AND status IN ('чака', 'заделена')`).run(id).changes;
         const holdsMoved = db.prepare('UPDATE holds SET reader_id = ? WHERE reader_id = ?').run(anonId, id).changes;
         const visitsMoved = db.prepare('UPDATE housebound_visits SET reader_id = ? WHERE reader_id = ?')
           .run(anonId, id).changes;
@@ -367,14 +434,16 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
               ред само върху редовете, в които стои името на този човек. */
         let auditCleared = 0;
         if (name) {
+          /* instr само стеснява кандидатите; дали редът наистина е за ТОЗИ
+             читател, решава mentionsReader() — цяло име и същата карта. */
           const rows = db.prepare(`SELECT id, action, detail FROM audit_log
-             WHERE detail IS NOT NULL AND instr(detail, ?) > 0 AND (${FORGET_ACTIONS_SQL})`).all(name);
+             WHERE detail IS NOT NULL AND instr(detail, ?) > 0 AND (${FORGET_ACTIONS_SQL})`).all(name)
+            .filter(row => mentionsReader(row.detail, name, r.card_no));
           const setDetail = db.prepare('UPDATE audit_log SET detail = ?, diff = NULL WHERE id = ?');
           const MONEY = new Set(['Начисление', 'Плащане', 'Изтрит ред от сметката']);
-          const LOAN = new Set(['Заемане', 'Продължение на заемане', 'Изгубен документ']);
           for (const row of rows) {
             let next;
-            if (LOAN.has(row.action)) {
+            if (LOAN_ACTION_SET.has(row.action)) {
               next = stripReaderSegment(row.detail);
             } else if (MONEY.has(row.action)) {
               const at = row.detail.indexOf(' — ');
@@ -389,13 +458,21 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         }
         /* 5) ИСТОРИЯТА НА ТЪРСЕНИЯТА — библиотекарката често търси читателя по
               име, тоест името стои и тук. Не е документ и отпада. */
-        const searchCleared = name
-          ? db.prepare('DELETE FROM search_history WHERE instr(COALESCE(query, \'\'), ?) > 0').run(name).changes
-          : 0;
+        /* Същото правило за цяло име: търсене „Иван Петрова“ е търсене на
+           друг човек и не бива да отпада заради заличаването на „Иван Петров“.
+           Търсенията не носят карта, затова решава само границата на името. */
+        let searchCleared = 0;
+        if (name) {
+          const delSearch = db.prepare('DELETE FROM search_history WHERE id = ?');
+          for (const s of db.prepare("SELECT id, query FROM search_history WHERE instr(COALESCE(query, ''), ?) > 0")
+            .all(name)) {
+            if (mentionsReader(s.query, name, null)) searchCleared += delSearch.run(s.id).changes;
+          }
+        }
 
         const readerCleared = readerGone + loansMoved + accountMoved + eventsCleared + holdsMoved
           + visitsMoved + noticesGone + suggCleared + suggByName + mzsCleared;
-        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved };
+        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled };
       });
       const res = tx.immediate();
 
@@ -411,6 +488,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         + 'изтрити стари търсения: ' + res.searchCleared + '; '
         + 'останали обезличени записа (резервации, предложения, МЗС, напомняния, посещения по домовете): '
         + (res.readerCleared - res.loansMoved - res.accountMoved - 1) + '. '
+        + (res.holdsCancelled
+          ? 'Отказани активни резервации: ' + res.holdsCancelled + ' — заделените документи са освободени за '
+            + 'следващия читател в опашката. '
+          : '')
         + 'Самоличността на читателя нарочно НЕ се вписва тук. '
         + 'ВНИМАНИЕ: резервните копия НЕ са пипани — данните на този читател остават в тях, '
         + 'докато копията не изтекат по правилото за пазене или не бъдат изтрити ръчно.');
@@ -420,6 +501,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         auditCleared: res.auditCleared,
         name,
         searchCleared: res.searchCleared,
+        holdsCancelled: res.holdsCancelled,
         namesakes,
         /* Изречението пътува до екрана готово: това, което библиотекарката ще
            препише в отговора си до читателя, не бива да се съчинява на две

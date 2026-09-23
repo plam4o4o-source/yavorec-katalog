@@ -352,10 +352,19 @@ async function dnevnikRefreshTotals() {
   fill(rows[0], r.monthTotal);
   fill(rows[1], r.ytdTotal);
 }
+/* ФОРМАТА ЗА ДЕНЯ — ТЕКСТОВИ ПОЛЕТА, КАКТО КЛЕТКИТЕ В ТАБЛИЦАТА (v2.4.65).
+   Находка Б17 смени клетките в месечната таблица от <input type="number"> на
+   текстови, защото Chromium връща ПРАЗЕН НИЗ за „2,7“ (десетичната запетая на
+   българската клавиатура), а празното се записва като 0 — тиха нула. Формата
+   „Подробно за деня“ води до СЪЩИЯ обработчик и беше останала с type="number":
+   „2,7“ там пак ставаше 0, без нито едно известие. Сега полетата са текстови
+   (inputmode="numeric" пази цифровата клавиатура), а saveDnevnikDay() отказва
+   поименно всичко, което не е цяло неотрицателно число — точно както клетката. */
 function dnevnikGroup(title, fields, row) {
   return `<fieldset><legend>${esc(title)}</legend><div class="grid g4">
     ${fields.map(([k, l]) => `<div class="field"><label>${esc(l)}</label>
-      <input type="number" min="0" name="${k}" value="${row[k] || 0}" oninput="dnevnikPreview()"></div>`).join('')}
+      <input type="text" inputmode="numeric" name="${k}" data-label="${esc(l)}" value="${row[k] || 0}"
+        oninput="dnevnikPreview()"></div>`).join('')}
     </div></fieldset>`;
 }
 async function dnevnikDayForm(date) {
@@ -503,6 +512,19 @@ function dnevnikPreview() {
 }
 window.dnevnikPreview = dnevnikPreview;
 async function saveDnevnikDay(date) {
+  /* Броевете са хора и документи — цели неотрицателни числа. Всичко друго се
+     отказва ПОИМЕННО, преди заявката да тръгне: „2,7“ не е 2 и не е 0.
+     Празно поле остава 0, както досега (непопълнено = нула). Часовете са
+     отделно (a_hours_hhmm/b_hours_hhmm) и минават през parseHhmm. */
+  const bad = [];
+  for (const el of document.querySelectorAll('#dnvF input[type="text"][data-label]')) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    if (raw !== '' && !/^\d+$/.test(raw)) bad.push('„' + el.dataset.label + '“ = „' + raw + '“');
+  }
+  if (bad.length) {
+    return toast('Денят НЕ е записан. Тези полета трябва да са цели числа (брой хора или документи): '
+      + bad.join(', ') + '.', 'err');
+  }
   const d = formData('#dnvF');
   d.date = date;
   d.a_hours = parseHhmm(d.a_hours_hhmm); delete d.a_hours_hhmm;

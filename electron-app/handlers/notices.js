@@ -10,7 +10,7 @@
    трябва да искат едно и също число; всеки път, когато това пресмятане е било на
    две места, е давало две различни суми за едно задължение (виж бележките при
    loans:reminders по-долу — тъкмо това поправиха v2.4.24 и v2.4.25). */
-const { unpaidOverdueFines, spreadUnpaidFine } = require('./loans');
+const { unpaidForRows, spreadUnpaidFine } = require('./loans');
 
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
   const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
@@ -203,7 +203,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
         /* И третият път приспада платеното (v2.4.65). Дотук писмото по пощата и
            SMS-ът искаха начисленото, без да поглеждат сметката: читател, платил
            2,70 € на гишето, получаваше SMS за 3,10 €. */
-        spreadUnpaidFine(r.loans, unpaidOverdueFines(db, r.reader_id));
+        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
         r.fine = Math.round(r.loans.reduce((sum, d) => sum + d.fine, 0) * 100) / 100;
         r.fineAccrued = Math.round(r.loans.reduce((sum, d) => sum + d.fineAccrued, 0) * 100) / 100;
         r.finePaid = Math.round(r.loans.reduce((sum, d) => sum + d.finePaid, 0) * 100) / 100;
