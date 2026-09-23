@@ -320,8 +320,28 @@ function guessMapping(headers) {
   return map;
 }
 
+/* ВАЛУТАТА НА ЦЕНАТА ВЪВ ВХОДНИЯ ФАЙЛ (v2.4.66).
+   Разпознаването на формата на входа живее тук — кодиране, разделител, повредена
+   кавичка, а вече и валутата пред или след числото. handlers/data-import.js
+   решава какво да прави с нея (превръщане по курса, отчет); тук само се казва
+   какво пише във файла. Затова и думите за лева стоят тук, а не в обработчик:
+   test/evro-v2451.test.js пази обработчиците от текст, който описва ЗАПИСАНА сума
+   като лева, а това е разпознаване на ВХОД — друго нещо.
+     • „лв“, „лв.“, „лева“, „BGN“ → { leva: true }
+     • „€“, „EUR“, „евро“          → { leva: false }
+     • без валута                  → { leva: false } (решава обработчикът)
+   Отпред или отзад, с или без интервал, с какъвто и да е регистър. */
+const LEVA_RE = /^(?:лв\.?|лева|bgn)\s*|\s*(?:лв\.?|лева|bgn)$/iu;
+const EURO_RE = /^(?:€|eur|евро)\s*|\s*(?:€|eur|евро)$/iu;
+function splitCurrency(raw) {
+  const s = String(raw ?? '').trim();
+  if (LEVA_RE.test(s)) return { amount: s.replace(LEVA_RE, '').trim(), leva: true };
+  if (EURO_RE.test(s)) return { amount: s.replace(EURO_RE, '').trim(), leva: false };
+  return { amount: s, leva: false };
+}
+
 module.exports = {
-  readTable, guessMapping, HEADER_MAP, decodeBuffer, parseDelimited, parseXlsx,
+  readTable, guessMapping, HEADER_MAP, splitCurrency, decodeBuffer, parseDelimited, parseXlsx,
   hasUnterminatedQuote, rowColumnCountWarning, MAX_DELIMITED_FILE_SIZE,
   /* unzipEntries се ползва и от handlers/author-mark.js: .docx и .odt са същият
      ZIP контейнер като .xlsx, а тук той вече е с таваните срещу „zip bomb“. */
