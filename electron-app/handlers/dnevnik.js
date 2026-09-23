@@ -94,6 +94,51 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   };
 
   function daysInMonth(year, month) { return new Date(year, month, 0).getDate(); }
+  /* ВПИСАН ЛИ Е НАИСТИНА ДЕНЯТ (одит v2.4.65, находка В1).
+     =====================================================================
+     ДОТУК „вписан ден“ значеше „има ред в dnevnik_days“. Ред обаче се създава и
+     от едно натискане на „Запиши деня“ върху празния формуляр — всичките 66
+     колони излизат нули и денят пак се брои: таблото обявява „Дневникът за днес
+     е попълнен“ (handlers/dashboard.js) и годишният отчет го брои за „вписан
+     работен ден“ (handlers/stats.js → annual_ab). Библиотекарката губи
+     единствената си подсещалка точно за деня, който НЕ е вписан, а отчетът към
+     регионалната библиотека твърди покритие, каквото няма.
+     „Вписан“ значи: поне една ненулева колона ИЛИ бележка за деня. Бележката се
+     брои, защото „затворено — ремонт“ е валидно вписване на ден без работа. */
+  function dnevnikDayFilled(row) {
+    if (!row) return false;
+    if (String(row.note || '').trim()) return true;
+    return DNEVNIK_FIELDS.some(f => (Number(row[f]) || 0) !== 0);
+  }
+  /* КАЛЕНДАРЪТ НА БИБЛИОТЕКАТА, ПРОЧЕТЕН ОТТУК (одит v2.4.65, находка В3).
+     =====================================================================
+     Дневникът не питаше календара изобщо: ден, в който библиотеката е затворена
+     (неработен ден от седмицата или изрично затворена дата — ремонт, празник),
+     изглеждаше в таблицата точно като всеки друг, а вписаната в него работа
+     минаваше без дума и влизаше в „вписани работни дни“ на годишния отчет.
+     Таблото отдавна си има `isTodayOpen` (handlers/dashboard.js) — Дневникът,
+     който е самият формуляр за проверка, нямаше нищо.
+     Правилото е ДОСЛОВНО същото като isWorkDay() в handlers/calendar.js: ден от
+     седмицата извън `settings.work_days` ИЛИ дата в `calendar_closed`. Тук то се
+     чете направо от двете таблици, защото main.js (забранен за пипане този кръг)
+     не подава isWorkDay в зависимостите на този модул — в доклада е записано, че
+     правилното място е да се подаде оттам, както се подава на Таблото. Денят от
+     седмицата се смята в UTC от голия низ „ГГГГ-ММ-ДД“, както в calendar.js:
+     местната полунощ при UTC+2/+3 дава ден по-рано и проверява грешния ден. */
+  function dnevnikClosedDays(db, from, to) {
+    const s = db.prepare('SELECT work_days FROM settings WHERE id = 1').get() || {};
+    const raw = s.work_days == null ? '0,1,2,3,4,5,6' : s.work_days;
+    const set = new Set(String(raw).split(',').map(x => parseInt(x, 10)).filter(n => !isNaN(n)));
+    const wd = set.size ? set : new Set([0, 1, 2, 3, 4, 5, 6]); // празна/повредена настройка — не блокирай всичко
+    const closed = new Map();
+    db.prepare('SELECT date, reason FROM calendar_closed WHERE date BETWEEN ? AND ?').all(from, to)
+      .forEach(r => closed.set(r.date, r.reason || null));
+    return (date) => {
+      if (closed.has(date)) return { closed: true, reason: closed.get(date) };
+      const dow = new Date(date + 'T00:00:00Z').getUTCDay();
+      return wd.has(dow) ? { closed: false, reason: null } : { closed: true, reason: 'неработен ден от седмицата' };
+    };
+  }
   function dnevnikTotals(row) {
     const g = (k) => (row ? (row[k] || 0) : 0);
     const a_total_age = g('a_age_u14') + g('a_age_15_18') + g('a_age_19_28') + g('a_age_o28');
@@ -124,16 +169,28 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const from = `${y}-${pad(m)}-01`, to = `${y}-${pad(m)}-${pad(dim)}`;
       const rows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ? ORDER BY date').all(from, to);
       const byDate = {}; rows.forEach(r => { byDate[r.date] = r; });
+      /* Календарът и истинското покритие на месеца се връщат ЗАЕДНО с дните
+         (одит v2.4.65, находки В1–В3): екранът рисува затворените дни различно,
+         а печатът казва колко дни изобщо са вписани, вместо да излиза готов за
+         подпис формуляр от нули без нито дума. */
+      const closedOf = dnevnikClosedDays(db, from, to);
       const days = [];
+      let daysFilled = 0, daysFilledClosed = 0;
       for (let d = 1; d <= dim; d++) {
         const date = `${y}-${pad(m)}-${pad(d)}`;
         const row = byDate[date] || { date };
-        days.push(Object.assign({ day: d, date }, row, dnevnikTotals(row)));
+        const c = closedOf(date);
+        const filled = dnevnikDayFilled(byDate[date]);
+        if (filled) { daysFilled++; if (c.closed) daysFilledClosed++; }
+        days.push(Object.assign({ day: d, date }, row, dnevnikTotals(row),
+          { closed: c.closed, closedReason: c.reason, filled }));
       }
       const monthTotal = dnevnikSumRow(rows);
       const ytdRows = db.prepare('SELECT * FROM dnevnik_days WHERE date BETWEEN ? AND ?').all(`${y}-01-01`, to);
       const ytdTotal = dnevnikSumRow(ytdRows);
-      return { year: y, month: m, daysInMonth: dim, days, monthTotal, ytdTotal };
+      return { year: y, month: m, daysInMonth: dim, days, monthTotal, ytdTotal,
+        daysFilled, daysFilledClosed,
+        ytdDaysFilled: ytdRows.filter(dnevnikDayFilled).length };
     })
   );
   /* Записват се САМО колоните, които наистина са дошли в заявката — не всичките
@@ -163,10 +220,34 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const payload = { date: d.date };
       /* Одит v2.4.29: „-5“ влизаше в клетката и оттам в месечните и годишните сборове
          без възражение. Формулярът брои хора и документи — само цели числа, 0 или повече. */
+      /* ДРОБНОТО ЧИСЛО СЕ ОТКАЗВА, А НЕ СЕ ОТРЯЗВА (одит v2.4.65, находка Б17).
+         =====================================================================
+         ДОТУК проверката беше `parseInt(d[f], 10) || 0` и ловеше само
+         отрицателното. „2,7“ в клетка се записваше като 2, „4,8“ като 4, „3abc“
+         като 3 — а клетката на екрана продължаваше да показва въведеното: до
+         съседната колона „Всичко“ с 4 стоеше клетка с 4,8, а месечният сбор
+         броеше 12 при видими 12,5. Нито едно известие; измерено в жив прозорец.
+         Същият случай е отказан в „Посещения“ още от v2.4.29
+         (handlers/visits.js) — Дневникът, който е самият официален формуляр,
+         беше останал непокрит.
+         ОТКАЗ, а не закръгляне: числото, което човекът вижда в клетката, и
+         числото в подписания формуляр трябва да са едно и също. Записването на
+         3 вместо 2,7 измисля данни, а мълчаливото отрязване прави сбор, който
+         никой няма как да провери. Празната клетка си остава 0 — празно поле в
+         хартиения дневник значи „нищо за този ден“, а не грешка. */
       cols.forEach(f => {
-        const n = parseInt(d[f], 10) || 0;
-        if (n < 0) throw new Error('„' + (DNEVNIK_LABELS[f] || f) + '“ не може да бъде отрицателно число (' + d[f] + ').');
-        payload[f] = n;
+        const raw = d[f];
+        const str = String(raw == null ? '' : raw).trim();
+        const label = DNEVNIK_LABELS[f] || f;
+        if (str === '') { payload[f] = 0; return; }
+        if (/^-\d+$/.test(str) || (typeof raw === 'number' && raw < 0)) {
+          throw new Error('„' + label + '“ не може да бъде отрицателно число (' + d[f] + ').');
+        }
+        if (!/^\d+$/.test(str)) {
+          throw new Error('„' + label + '“ приема цяло число, 0 или повече — въведено е „' + str + '“. '
+            + 'Формулярът брои хора и документи, не части от тях: поправете клетката и запишете отново.');
+        }
+        payload[f] = parseInt(str, 10);
       });
       if (hasNote) payload.note = d.note || null;
       const names = cols.concat(hasNote ? ['note'] : []);
@@ -176,6 +257,52 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         ON CONFLICT(date) DO UPDATE SET ${names.map(f => f + '=excluded.' + f).join(',')}
       `).run(payload);
       logAudit('Дневник', 'вписан ден ' + d.date);
+      /* ПРЕДУПРЕЖДЕНИЯ СЛЕД ЗАПИСА — не отказ (одит v2.4.65, находки В3 и А).
+         =====================================================================
+         Двете неща по-долу не са грешки: библиотеката наистина може да е
+         работила в затворен ден (дежурство, мероприятие), а половин попълнен
+         Раздел А е нормално състояние, докато денят още се води. Затова записът
+         минава, но програмата ГО КАЗВА — дотук и двете минаваха без дума.
+         (а) Затворен ден: работа, вписана в ден, който календарът обявява за
+             затворен, се появява в годишния отчет като работен ден. Или денят е
+             работен и календарът трябва да се поправи, или числото е попаднало
+             на грешен ред.
+         (б) Четирите „Всичко“ на Раздел А: официалният формуляр иска ЕДИН И СЪЩ
+             брой читатели по възраст, по пол, по образование и по занятие.
+             Програмата може да предложи само възрастта (картонът на читателя не
+             пази пол, образование и занятие — виж dnevnik:suggest), затова при
+             попълване само с „⚡ Предложи от регистрите“ редът излиза 2 / 0 / 1 / 0.
+             Изписва се само при запис на ЦЕЛИЯ формуляр („Запиши деня“), не при
+             всяка редактирана клетка в таблицата — иначе би се обаждало при
+             всяко число, вписано по реда си.
+         (в) „Деца до 14 г.“ е ПОДМНОЖЕСТВО на „В заемна за дома“ по формуляра;
+             подмножество, по-голямо от множеството си, е аритметично невъзможно. */
+      const warnings = [];
+      const c = dnevnikClosedDays(db, d.date, d.date)(d.date);
+      const stored = db.prepare('SELECT * FROM dnevnik_days WHERE date = ?').get(d.date);
+      if (c.closed && dnevnikDayFilled(stored)) {
+        warnings.push('По календара ' + d.date + ' е затворен ден'
+          + (c.reason ? ' (' + c.reason + ')' : '') + ', а за него е вписана работа. '
+          + 'Ако библиотеката наистина е работила, отворете деня от „Настройки → Календар“; '
+          + 'иначе проверете дали числата не са попаднали на грешен ред — годишният отчет ще го брои за работен ден.');
+      }
+      const fullForm = DNEVNIK_A_FIELDS.every(f => d[f] !== undefined);
+      if (fullForm && stored) {
+        const t = dnevnikTotals(stored);
+        const four = [t.a_total_age, t.a_total_sex, t.a_total_edu, t.a_total_prof];
+        if (Math.max(...four) > 0 && new Set(four).size > 1) {
+          warnings.push('Раздел А — по възраст ' + t.a_total_age + ', по пол ' + t.a_total_sex
+            + ', по образование ' + t.a_total_edu + ', по занятие ' + t.a_total_prof
+            + ': четирите „Всичко“ на официалния формуляр броят едни и същи читатели и трябва да съвпадат. '
+            + 'Програмата може да изведе само възрастта — пол, образование и занятие не се пазят в картона на читателя. Допълнете ги.');
+        }
+        if ((stored.a_visit_child || 0) > (stored.a_visit_home || 0)) {
+          warnings.push('Посещения — „деца до 14 г.“ (' + (stored.a_visit_child || 0) + ') надхвърля '
+            + '„в заемна за дома“ (' + (stored.a_visit_home || 0) + '), а по формуляра децата са ЧАСТ от нея. '
+            + 'Допълнете „В заемна за дома“.');
+        }
+      }
+      return { date: d.date, closed: c.closed, warnings };
     })
   );
   // Предложени стойности за един ден на дневника, изведени от потока събития (events).
@@ -183,10 +310,43 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   // библиотекаря; тук програмата само предлага числата, които може да изведе сама:
   // Раздел Б по вид/език/съдържание от заеманията, посещенията в читалня и по домовете,
   // и разпределението на читателите по възрастови категории.
+  /* КОЛОНИТЕ „DVD“ И „ГОВОРЕЩИ КНИГИ“ НЕ ПОЛУЧАВАХА НИЩО НИКОГА (одит v2.4.65, Б15).
+     =====================================================================
+     ДОТУК картата по име знаеше осемте начални вида, а всичко останало падаше в
+     резервната стойност `b_type_books`. Измерено: пет заемания на пет различни
+     вида — DVD, говореща книга, патент/стандарт, „друго“ и книга — дадоха
+     `{"b_type_books": 5}`. Двете последни колони на официалния формуляр („DVD“ и
+     „Говорещи книги“) не можеха да получат число дори когато библиотекарката
+     създаде вид с ТОЧНОТО име от формуляра. Надомното обслужване на незрящи
+     (handlers/housebound.js) работи именно с говорещи книги — тоест колоната,
+     която единствена отчита тази дейност, стоеше празна, а числото ѝ се броеше
+     в „Книги“.
+     Затова: (1) имената се сравняват НОРМАЛИЗИРАНО (малки букви, събрани
+     интервали), за да съвпадат „DVD“, „dvd“ и „DVD-диск“; (2) добавени са
+     собствените имена от формуляра и най-честите преименувания, които екранът
+     „Категории“ допуска; (3) видовете БЕЗ собствен ред във формуляра
+     (патент/стандарт, „друго“ и всеки вид, който библиотекарката е измислила)
+     продължават да се предлагат в „Книги“ — иначе редът „Всичко по вид“ би
+     станал по-малък от броя заемания, — но вече се ВРЪЩАТ ПОИМЕННО в
+     `typeFallback`, за да ги изпише екранът: „2 заемания са на видове без
+     собствен ред във формуляра (патент/стандарт, друго) и са предложени в
+     «Книги»“. Тихото падане в „Книги“ е причината числото да изглежда вярно и
+     никой да не го провери — същата логика като при `unclassified` по-долу. */
+  const normType = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
   const DNEVNIK_TYPE_MAP = {
-    'книга': 'b_type_books', 'продължаващо издание': 'b_type_period', 'графично издание': 'b_type_graphic',
-    'картографско издание': 'b_type_carto', 'нотно издание': 'b_type_music', 'аудиодокумент': 'b_type_audio',
-    'видеодокумент': 'b_type_video', 'електронен документ': 'b_type_electronic'
+    'книга': 'b_type_books', 'книги': 'b_type_books',
+    'продължаващо издание': 'b_type_period', 'периодично издание': 'b_type_period',
+    'периодични издания': 'b_type_period', 'периодика': 'b_type_period',
+    'графично издание': 'b_type_graphic', 'графични издания': 'b_type_graphic',
+    'картографско издание': 'b_type_carto', 'картографски издания': 'b_type_carto',
+    'нотно издание': 'b_type_music', 'нотни издания': 'b_type_music',
+    'аудиодокумент': 'b_type_audio', 'аудио-касета': 'b_type_audio', 'аудиокасета': 'b_type_audio',
+    'видеодокумент': 'b_type_video', 'видео-касета': 'b_type_video', 'видеокасета': 'b_type_video',
+    'електронен документ': 'b_type_electronic', 'електронно издание': 'b_type_electronic',
+    'електронни издания': 'b_type_electronic',
+    // Двете колони на формуляра, които дотук не можеха да получат нищо:
+    'dvd': 'b_type_dvd', 'двд': 'b_type_dvd', 'dvd-диск': 'b_type_dvd', 'dvd диск': 'b_type_dvd',
+    'говореща книга': 'b_type_talking', 'говорещи книги': 'b_type_talking'
   };
   /* ВИДЪТ СЕ ПОЗНАВА ПО КОД, А ИМЕТО Е САМО РЕЗЕРВА (одит v2.4.61, находка 19).
      =====================================================================
@@ -206,11 +366,39 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   const DNEVNIK_TYPE_BY_CODE = {
     book: 'b_type_books', periodical: 'b_type_period', graphic: 'b_type_graphic',
     cartographic: 'b_type_carto', music: 'b_type_music', audio: 'b_type_audio',
-    video: 'b_type_video', electronic: 'b_type_electronic'
+    video: 'b_type_video', electronic: 'b_type_electronic',
+    /* Двата начални вида без ред в официалния формуляр (db/schema.sql — „патент/
+       стандарт“ и „друго“). Решението е ИЗРИЧНО: броят се в „Книги“, защото
+       редът „Всичко по вид“ трябва да е равен на броя заемания за деня, но
+       минават през `DNEVNIK_TYPE_NO_ROW` по-долу и излизат поименно на екрана,
+       вместо да изчезнат мълчаливо. Самата схема не се пипа — там кодовете са
+       верни, липсва редът във формуляра. */
+    patent: 'b_type_books', other: 'b_type_books'
   };
+  // Видове, които се броят в „Книги“ САМО защото формулярът няма техен ред —
+  // и точно затова се казват на библиотекарката поименно (виж typeFallback).
+  const DNEVNIK_TYPE_NO_ROW = new Set(['patent', 'other']);
+  /* КОЛОНАТА „СЛАВЯНСКИ“ НЕ СЕ ПРЕДЛАГАШЕ НИКОГА (одит v2.4.65, находка Б16).
+     =====================================================================
+     ДОТУК картата знаеше пет езика; сръбски, полски, чешки и украински падаха в
+     `b_lang_other` заедно с испанския. Раздел Б на формуляра обаче има отделна
+     колона „Славянски“ точно за тях (българският и руският са с отделни редове,
+     останалите славянски — заедно), тоест една от седемте колони по език не
+     можеше да получи число при никакви данни, а „Други“ показваше число, което
+     трябва да стои другаде. Имената се сравняват нормализирано и без опашката
+     „език“ („руски език“ = „руски“). */
+  const normLang = (s) => String(s == null ? '' : s).trim().toLowerCase()
+    .replace(/\s+/g, ' ').replace(/\s*език$/, '');
   const DNEVNIK_LANG_MAP = {
     'български': 'b_lang_bg', 'руски': 'b_lang_ru', 'английски': 'b_lang_en',
-    'немски': 'b_lang_de', 'френски': 'b_lang_fr'
+    'немски': 'b_lang_de', 'френски': 'b_lang_fr',
+    // Славянските езици без собствен ред във формуляра — колоната „Славянски“.
+    'сръбски': 'b_lang_slavic', 'сърбохърватски': 'b_lang_slavic', 'хърватски': 'b_lang_slavic',
+    'босненски': 'b_lang_slavic', 'черногорски': 'b_lang_slavic', 'македонски': 'b_lang_slavic',
+    'словенски': 'b_lang_slavic', 'полски': 'b_lang_slavic', 'чешки': 'b_lang_slavic',
+    'словашки': 'b_lang_slavic', 'украински': 'b_lang_slavic', 'беларуски': 'b_lang_slavic',
+    'белоруски': 'b_lang_slavic', 'църковнославянски': 'b_lang_slavic',
+    'старобългарски': 'b_lang_slavic'
   };
   // Проверява се от най-дългия префикс към най-късия — иначе „793" би хванало „7".
   /* Таблицата ТРЯБВА да покрива всяка цифра 0-9 на последно място, иначе заемането
@@ -279,14 +467,31 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       const seenReaders = new Set();
       let unclassified = 0;          // заемания на КНИГИ без разпознат УДК — виж по-долу
       let periodicalsByType = 0;     // заети периодични издания — броят се по ВИД, не по съдържание
+      const fallbackByName = new Map(); // вид без ред във формуляра → бройка (виж Б15 по-горе)
+      let noTypeAtAll = 0;              // документ, записан изобщо без вид
       for (const ev of events) {
         if (ev.kind === 'читалня') { add('a_visit_reading'); continue; }
         if (ev.kind === 'дома') { add('a_visit_home'); continue; }
         if (ev.kind !== 'заемане') continue;
         // Раздел Б — по вид, език и съдържание, само за реално заетите този ден.
-        const typeKey = DNEVNIK_TYPE_BY_CODE[ev.book_category_code] || DNEVNIK_TYPE_MAP[ev.book_category] || 'b_type_books';
+        const code = ev.book_category_code;
+        const nm = normType(ev.book_category);
+        const byCode = code ? DNEVNIK_TYPE_BY_CODE[code] : null;
+        const typeKey = byCode || DNEVNIK_TYPE_MAP[nm] || 'b_type_books';
+        /* Видът няма СОБСТВЕН ред във формуляра в два случая: познат код без ред
+           (патент/стандарт, „друго“) и изцяло непознат вид, измислен от
+           библиотекарката. И в двата се брои в „Книги“, но се назовава. */
+        if ((code && DNEVNIK_TYPE_NO_ROW.has(code)) || (!byCode && !DNEVNIK_TYPE_MAP[nm])) {
+          const label = String(ev.book_category || '').trim();
+          /* Документ БЕЗ посочен вид изобщо (картонът е записан без да се избере
+             вид) се брои отделно от видовете, които просто нямат ред във
+             формуляра: изходът е различен — там се попълва картонът, тук се
+             мести колона. */
+          if (label) fallbackByName.set(label, (fallbackByName.get(label) || 0) + 1);
+          else noTypeAtAll++;
+        }
         add(typeKey);
-        add(DNEVNIK_LANG_MAP[ev.book_language] || 'b_lang_other');
+        add(DNEVNIK_LANG_MAP[normLang(ev.book_language)] || 'b_lang_other');
         /* Книга без попълнен УДК не може да бъде подредена по съдържание. Да бъде
            набутана в „Общ отдел“ би било по-лошо от това да не бъде броена — числото
            щеше да изглежда вярно и никой не би проверил. Затова тук се брои отделно
@@ -325,7 +530,27 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
           if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
         }
       }
-      return { date, suggestions: out, eventsCount: events.length, unclassified, periodicalsByType };
+      /* ЧЕТИРИТЕ „ВСИЧКО“ НА РАЗДЕЛ А — ВРЪЩАТ СЕ, ЗА ДА СЕ ВИДЯТ (одит v2.4.65,
+         находка А от доклада).
+         =====================================================================
+         Предложението попълва само `a_age_*` и `a_visit_child`, защото това е
+         всичко, което програмата ЗНАЕ: картонът на читателя (`readers`) няма пол,
+         образование и занятие, а официалният формуляр ги иска. Затова четирите
+         реда „Всичко“ на Раздел А излизат например 2 / 0 / 1 / 0 — три от тях си
+         противоречат с формуляра, а подмножеството „деца до 14 г.“ (1) може да
+         надхвърли множеството „в заемна за дома“ (0). Раздел Б има закована
+         инвариантност за същото (test/fixes-audit-numbers.test.js). АВТОМАТИЧНО
+         попълване не се предлага — числа, които програмата не знае, не се
+         измислят; вместо това разминаването се ВРЪЩА и екранът го изписва, за да
+         знае библиотекарката какво остава за нея. */
+      const aTotals = dnevnikTotals(out);
+      return { date, suggestions: out, eventsCount: events.length, unclassified, periodicalsByType,
+        typeFallback: [...fallbackByName.entries()].sort((a, b) => b[1] - a[1]), typeMissing: noTypeAtAll,
+        sectionA: {
+          age: aTotals.a_total_age, sex: aTotals.a_total_sex,
+          edu: aTotals.a_total_edu, prof: aTotals.a_total_prof,
+          visitHome: out.a_visit_home || 0, visitChild: out.a_visit_child || 0
+        } };
     })
   );
   ipcMain.handle('dnevnik:exportCsv', async (e, { year, month }) => {

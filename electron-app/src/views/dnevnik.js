@@ -78,9 +78,59 @@ function dnevnikGroupNotes(groups) {
   return (groups || []).filter(([l]) => l.indexOf(' (') > 0)
     .map(([l]) => dnevnikShortLabel(l) + ' — ' + l.slice(l.indexOf(' (') + 2).replace(/\)$/, ''));
 }
-function dnevnikNotesHtml(groups) {
-  const n = dnevnikGroupNotes(groups);
+function dnevnikNotesHtml(groups, extra) {
+  const n = dnevnikGroupNotes(groups).concat((extra || []).filter(Boolean));
   return n.length ? `<div class="pnote">${n.map(t => '* ' + esc(t)).join('<br>')}</div>` : '';
+}
+/* ОБЯСНЕНИЕТО ЗА ТРИТЕ РАЗЛИЧНИ „ВСИЧКО“ СЛИЗА НА ХАРТИЯТА (одит v2.4.65, В4).
+   =====================================================================
+   Отпечатаният Раздел Б показва три реда „Всичко“ — по вид, по език и по
+   съдържание — и те законно се разминават: периодичното издание се брои по ВИД,
+   но не по съдържание (съдържанието му е различно във всеки брой), а документ
+   без попълнен УДК не влиза в разбивката по съдържание. ДОТУК обяснението
+   съществуваше само в подсказката на прозореца „Подробно за деня“ (#dnvSugHint)
+   и изчезваше заедно с прозореца: проверяващият виждаше три различни числа под
+   един надпис „Всичко“ на ПОДПИСАН лист, без нито дума защо. Бележката се
+   изписва само когато разминаването наистина е на листа, за да не се пълни
+   формулярът с текст, който не се отнася за него. Същото вече се прави за
+   колоната „В читални“ (dnevnikNotesHtml) — това е образецът. */
+function dnevnikTotalsNoteB(row) {
+  if (!row) return '';
+  const g = (k) => Number(row[k]) || 0;
+  const byType = g('b_total_type'), byLang = g('b_total_lang'), byContent = g('b_total_content');
+  if (byType === byContent && byType === byLang) return '';
+  const parts = [];
+  if (byContent < byType) {
+    parts.push('периодичните издания се броят по вид, не по съдържание (така е и във формуляра), '
+      + 'а документ без попълнен УДК не влиза в разбивката по съдържание');
+  }
+  if (byLang !== byType) parts.push('разбивката по език брои всеки документ веднъж, независимо от вида му');
+  return 'Трите реда „Всичко“ на Раздел Б — по вид ' + byType + ', по език ' + byLang
+    + ', по съдържание ' + byContent + ' — се разминават по формуляр: ' + parts.join('; ') + '.';
+}
+/* Честният надпис за покритието на месеца (одит v2.4.65, находка В2) — един и
+   същ текст на екрана и на хартията, по образеца на reportCoverageNote() в
+   src/views/reports.js, добавен там, защото „разпечатката излизаше с нули, с
+   бланка и с два реда за подпис, без нито дума защо“. Дневникът за месец без
+   нито един вписан ден излизаше по същия начин. */
+function dnevnikCoverageNote(r) {
+  if (!r) return '';
+  const d = r.daysFilled == null ? null : r.daysFilled;
+  if (d === null) return '';
+  const mesec = (MESETSI[r.month - 1] || '') + ' ' + r.year + ' г.';
+  if (!d) {
+    return 'Внимание: за ' + mesec + ' няма нито един вписан ден в Дневника. Всички числа по-долу са нули, '
+      + 'защото няма от какво да бъдат сметнати — листът не отразява действителната работа на библиотеката.';
+  }
+  return 'Вписани са ' + d + (d === 1 ? ' ден' : ' дни') + ' от ' + r.daysInMonth + ' за ' + mesec
+    + '; дните без вписване остават нули и не участват в сборовете.'
+    + (r.daysFilledClosed ? ' От тях ' + r.daysFilledClosed
+      + (r.daysFilledClosed === 1 ? ' е в ден' : ' са в дни') + ', отбелязан(и) като затворен(и) в календара.' : '')
+    /* Редът „Всичко от нач. на годината“ също е толкова пълен, колкото е воден
+       дневникът — казва се със същото изречение, вместо сборът да изглежда
+       като число за цялата изминала година. */
+    + (r.ytdDaysFilled != null ? ' Редът „Всичко от нач. на годината“ събира '
+      + r.ytdDaysFilled + (r.ytdDaysFilled === 1 ? ' вписан ден' : ' вписани дни') + '.' : '');
 }
 /* РАЗДЕЛЯНЕ НА ШИРОКАТА ТАБЛИЦА ПО ЛИСТОВЕ (v2.4.54).
    =====================================================================
@@ -118,9 +168,14 @@ function dnevnikPrintPages(cols, groups, max) {
   if (cur.cols.length) pages.push(cur);
   return pages;
 }
-/* Всички реални (въвеждани) полета от ДВАТА раздела. Записът в базата презаписва целия ред,
-   затова при запис на клетка от Раздел А трябва да се изпратят и стойностите на Раздел Б —
-   иначе те биха се нулирали. */
+/* Всички реални (въвеждани) полета от ДВАТА раздела.
+   Коментарът тук дотук твърдеше, че „записът в базата презаписва целия ред,
+   затова при запис на клетка от Раздел А трябва да се изпратят и стойностите на
+   Раздел Б“ — вярно е било до v2.4.14/v2.4.25 и точно затова беше поправено:
+   изпраща се САМО променената колона (виж dnevnikSaveCell по-долу и
+   handlers/dnevnik.js), иначе едната машина връщаше на нула вписаното от
+   другата. Същата отдавна премахната обяснение стоеше и в наръчника
+   (README-bibliotekar.md, находка В12) — поправено в същия кръг. */
 const DNEVNIK_ALL_FIELDS = [...DNEVNIK_A_COLS, ...DNEVNIK_B_COLS]
   .map(([k]) => k).filter(k => !k.startsWith('$'));
 function dnevnikCell(row, key) {
@@ -150,11 +205,31 @@ async function renderDnevnik() {
       return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"
         data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
     }
-    return `<td><input class="dnvCell" type="number" min="0" value="${row[k] || 0}"
+    /* КЛЕТКАТА Е ТЕКСТОВА, А НЕ <input type="number"> (одит v2.4.65, находка Б17).
+       =====================================================================
+       Причината е измерена в жив прозорец: при type="number" Chromium връща
+       ПРАЗЕН НИЗ за всичко, което не е число по неговите правила — включително
+       „2,7“ с десетична запетая, която е точно каквото дава българската
+       клавиатура. Тоест най-вероятната грешка на библиотекарката се превръщаше в
+       тиха НУЛА, без нито едно известие и без начин програмата да разбере какво е
+       било написано. С текстово поле написаното остава, проверката по-долу го
+       отказва поименно и клетката се връща на предишната си стойност — а
+       обработчикът отказва втори път, вече като граница (handlers/dnevnik.js).
+       inputmode="numeric" пази цифровата клавиатура там, където има такава;
+       колоната „Часове“ е текстова по същата причина още отпреди. */
+    return `<td><input class="dnvCell" type="text" inputmode="numeric" value="${row[k] || 0}"
       data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
   };
-  const dayRowHtml = (row) => `<tr class="${row.date === todayStr ? 'dnvToday' : ''}">
-    <td class="num dnvDay">${row.day}</td>${cols.map(([k]) => cellHtml(row, k)).join('')}</tr>`;
+  /* ЗАТВОРЕНИЯТ ДЕН СЕ ВИЖДА В ТАБЛИЦАТА (одит v2.4.65, находка В3).
+     Дотук редът на ден, в който библиотеката е затворена по календара (неработен
+     ден от седмицата или изрично затворена дата — празник, ремонт), изглеждаше
+     точно като всеки друг: библиотекарката нямаше как да разбере, че вписва
+     работа в затворен ден, а годишният отчет го броеше за работен. Денят се
+     надписва и в заглавието на клетката (title), за да се види причината. */
+  const dayRowHtml = (row) => `<tr class="${row.date === todayStr ? 'dnvToday' : ''}${row.closed ? ' dnvClosed' : ''}">
+    <td class="num dnvDay"${row.closed ? ` title="${esc('Затворен ден' + (row.closedReason ? ' — ' + row.closedReason : ''))}"` : ''}>${row.day}${
+      row.closed ? ' <span class="hint" aria-label="затворен ден">·затв.</span>' : ''}</td>${
+    cols.map(([k]) => cellHtml(row, k)).join('')}</tr>`;
   const totalRowHtml = (label, row, cls) => `<tr class="dnvTotal ${cls || ''}"><td>${esc(label)}</td>
     ${cols.map(([k]) => `<td class="num">${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
   $('#view').innerHTML = `
@@ -162,6 +237,8 @@ async function renderDnevnik() {
     Раздел А (читатели и посещения) и Раздел Б (заети материали). <b>Попълва се направо в таблицата</b> —
     всяка стойност се записва веднага при излизане от полето. Колоните „Всичко“ и двата обобщителни
     реда се изчисляват автоматично и не се въвеждат ръчно.</div>
+    <div class="note ${r.daysFilled ? '' : 'd'}" style="margin-top:0">${esc(dnevnikCoverageNote(r))}${
+      r.days.some(d => d.closed) ? ' Дните, отбелязани „·затв.“, са затворени по календара на библиотеката.' : ''}</div>
     <div class="toolbar">
       <select onchange="DNEVNIK_YEAR=parseInt(this.value,10);renderDnevnik()">${years.map(x => `<option value="${x}" ${x === y ? 'selected' : ''}>${x}</option>`).join('')}</select>
       <select onchange="DNEVNIK_MONTH=parseInt(this.value,10);renderDnevnik()">${MESETSI.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
@@ -189,7 +266,28 @@ async function dnevnikSaveCell(el) {
   const date = el.dataset.date, field = el.dataset.field;
   const r = window._DNEVNIK;
   const row = r && r.days.find(d => d.date === date);
-  const val = (field === 'a_hours' || field === 'b_hours') ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
+  const hours = (field === 'a_hours' || field === 'b_hours');
+  /* ДРОБНОТО ЧИСЛО НЕ СЕ ОТРЯЗВА МЪЛЧАЛИВО (одит v2.4.65, находка Б17).
+     =====================================================================
+     ДОТУК тук стоеше `parseInt(el.value, 10) || 0`: „2,7“ отиваше в базата като
+     2, а клетката продължаваше да показва 2,7 — съседната колона „Всичко“
+     показваше 4 при 4,8 в клетката, а месечният сбор броеше 12 при видими 12,5.
+     Нито едно известие. Обработчикът вече отказва (handlers/dnevnik.js), както
+     „Посещения“ от v2.4.29; тук се отказва ПО-РАНО, за да не пътува заявка и
+     клетката да се върне веднага на старото си число.
+     `validity.badInput` е за истинския прозорец: Chromium връща празен низ от
+     <input type="number">, когато написаното не е число (напр. „2,7“ с десетична
+     запетая), тоест без тази проверка би се записала тиха нула. */
+  if (!hours) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    const bad = (el.validity && el.validity.badInput) || (raw !== '' && !/^\d+$/.test(raw));
+    if (bad) {
+      el.value = row ? (row[field] || 0) : 0;
+      return toast('Дневникът брои хора и документи — въведете цяло число, 0 или повече'
+        + (raw ? ' (въведено е „' + raw + '“).' : '.'), 'err');
+    }
+  }
+  const val = hours ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
   /* v2.4.29: отрицателно число не се записва — клетката се връща на старата стойност. */
   if (val < 0) {
     el.value = row ? (row[field] || 0) : 0;
@@ -219,7 +317,13 @@ async function dnevnikSaveCell(el) {
   markSaved();
   el.classList.add('saved');
   setTimeout(() => el.classList.remove('saved'), 700);
-  if (field === 'a_hours' || field === 'b_hours') el.value = hhmm(val);
+  if (hours) el.value = hhmm(val);
+  /* Предупрежденията идват от обработчика — той е границата и той знае какво е
+     влязло в базата (одит v2.4.65, находка В3): вписана работа в ден, който
+     календарът обявява за затворен, дотук минаваше без дума и влизаше в
+     годишния отчет като работен ден. Записът не се отказва — библиотеката
+     наистина може да е работила, — но вече се казва. */
+  (res.data && res.data.warnings || []).forEach(w => toast(w, 'err'));
   await dnevnikRefreshTotals();
 }
 window.dnevnikSaveCell = dnevnikSaveCell;
@@ -248,10 +352,19 @@ async function dnevnikRefreshTotals() {
   fill(rows[0], r.monthTotal);
   fill(rows[1], r.ytdTotal);
 }
+/* ФОРМАТА ЗА ДЕНЯ — ТЕКСТОВИ ПОЛЕТА, КАКТО КЛЕТКИТЕ В ТАБЛИЦАТА (v2.4.65).
+   Находка Б17 смени клетките в месечната таблица от <input type="number"> на
+   текстови, защото Chromium връща ПРАЗЕН НИЗ за „2,7“ (десетичната запетая на
+   българската клавиатура), а празното се записва като 0 — тиха нула. Формата
+   „Подробно за деня“ води до СЪЩИЯ обработчик и беше останала с type="number":
+   „2,7“ там пак ставаше 0, без нито едно известие. Сега полетата са текстови
+   (inputmode="numeric" пази цифровата клавиатура), а saveDnevnikDay() отказва
+   поименно всичко, което не е цяло неотрицателно число — точно както клетката. */
 function dnevnikGroup(title, fields, row) {
   return `<fieldset><legend>${esc(title)}</legend><div class="grid g4">
     ${fields.map(([k, l]) => `<div class="field"><label>${esc(l)}</label>
-      <input type="number" min="0" name="${k}" value="${row[k] || 0}" oninput="dnevnikPreview()"></div>`).join('')}
+      <input type="text" inputmode="numeric" name="${k}" data-label="${esc(l)}" value="${row[k] || 0}"
+        oninput="dnevnikPreview()"></div>`).join('')}
     </div></fieldset>`;
 }
 async function dnevnikDayForm(date) {
@@ -347,10 +460,38 @@ async function dnevnikSuggest(date) {
      обработчикът ги брои отделно (periodicalsByType) и тук им се казва истината —
      че липсата им в „по съдържание“ е по формуляр, а не пропуск за поправяне. */
   const периодика = res.periodicalsByType || 0;
+  /* ВИДОВЕ БЕЗ СОБСТВЕН РЕД ВЪВ ФОРМУЛЯРА (одит v2.4.65, находка Б15) — казват
+     се поименно. DVD и говорещите книги вече си имат колони и отиват в тях;
+     патент/стандарт, „друго“ и всеки вид, измислен от библиотекарката, се
+     предлагат в „Книги“, защото „Всичко по вид“ трябва да е равно на броя
+     заемания — но тихото падане в „Книги“ беше точно причината числото да
+     изглежда вярно и никой да не го провери. */
+  const fb = res.typeFallback || [];
+  const fbN = fb.reduce((s, [, n]) => s + n, 0);
+  const missing = res.typeMissing || 0;
+  /* ЧЕТИРИТЕ „ВСИЧКО“ НА РАЗДЕЛ А (одит v2.4.65, находка А от доклада).
+     Предложението попълва само възрастта и посещенията на децата — програмата
+     няма откъде да вземе пол, образование и занятие (картонът на читателя не ги
+     пази). Дотук формулярът просто излизаше 2 / 0 / 1 / 0 и си противоречеше,
+     без нищо на екрана да каже, че липсващото е работа за човека. */
+  const A = res.sectionA || null;
+  const aNote = (A && Math.max(A.age, A.sex, A.edu, A.prof) > 0
+    && new Set([A.age, A.sex, A.edu, A.prof]).size > 1)
+    ? ` · Раздел А — по възраст ${A.age}, по пол ${A.sex}, по образование ${A.edu}, по занятие ${A.prof}:`
+      + ' четирите „Всичко“ трябва да съвпадат, а пол, образование и занятие не се пазят в картона на читателя — допълнете ги'
+    : '';
   $('#dnvSugHint').textContent = `${filled === 1 ? 'Предложена 1 стойност' : 'Предложени ' + filled + ' стойности'} от ${pl(res.eventsCount, 'събитие', 'събития')}` +
     (kept ? ` (${kept === 1 ? '1 ръчно въведена е запазена' : kept + ' ръчно въведени са запазени'})` : '') +
     (res.unclassified ? ` · ${res.unclassified === 1 ? '1 заемане е на книга' : res.unclassified + ' заемания са на книги'} без УДК и не ${res.unclassified === 1 ? 'влиза' : 'влизат'} в „по съдържание“ — допълнете ${res.unclassified === 1 ? 'го' : 'ги'} ръчно` : '') +
     (периодика ? ` · ${периодика === 1 ? '1 заемане е на периодично издание и се брои' : периодика + ' заемания са на периодични издания и се броят'} по вид, не по съдържание (така е и във формуляра)` : '') +
+    (fbN ? ` · ${fbN === 1 ? '1 заемане е на вид' : fbN + ' заемания са на видове'} без собствен ред във формуляра (`
+      + fb.map(([n, c]) => n + (c > 1 ? ' × ' + c : '')).join(', ')
+      + `) и ${fbN === 1 ? 'е предложено' : 'са предложени'} в „Книги“ — преместете ${fbN === 1 ? 'го' : 'ги'}, ако водите друга колона` : '') +
+    /* Документ, записан изобщо без вид, е ДРУГ случай и изходът му е друг:
+       попълва се картонът на документа, а не се мести колона (находка Б15). */
+    (missing ? ` · ${missing === 1 ? '1 заемане е на документ' : missing + ' заемания са на документи'} без посочен вид`
+      + ` и ${missing === 1 ? 'е предложено' : 'са предложени'} в „Книги“ — посочете вида в картона на документа („Книги → Вид документ“)` : '') +
+    aNote +
     ' — прегледайте и поправете преди запис.';
   toast('⚡ Попълнени ' + filled + ' полета — прегледайте преди „Запиши деня“.', 'ok');
 }
@@ -371,11 +512,29 @@ function dnevnikPreview() {
 }
 window.dnevnikPreview = dnevnikPreview;
 async function saveDnevnikDay(date) {
+  /* Броевете са хора и документи — цели неотрицателни числа. Всичко друго се
+     отказва ПОИМЕННО, преди заявката да тръгне: „2,7“ не е 2 и не е 0.
+     Празно поле остава 0, както досега (непопълнено = нула). Часовете са
+     отделно (a_hours_hhmm/b_hours_hhmm) и минават през parseHhmm. */
+  const bad = [];
+  for (const el of document.querySelectorAll('#dnvF input[type="text"][data-label]')) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    if (raw !== '' && !/^\d+$/.test(raw)) bad.push('„' + el.dataset.label + '“ = „' + raw + '“');
+  }
+  if (bad.length) {
+    return toast('Денят НЕ е записан. Тези полета трябва да са цели числа (брой хора или документи): '
+      + bad.join(', ') + '.', 'err');
+  }
   const d = formData('#dnvF');
   d.date = date;
   d.a_hours = parseHhmm(d.a_hours_hhmm); delete d.a_hours_hhmm;
   d.b_hours = parseHhmm(d.b_hours_hhmm); delete d.b_hours_hhmm;
   const ok = await call(window.api.dnevnik.saveDay(d), 'Денят е записан.');
+  /* Предупрежденията на обработчика се изписват СЛЕД потвърждението за записа
+     (одит v2.4.65, находки В3 и А): затворен ден по календара и четирите „Всичко“
+     на Раздел А, които не съвпадат. Денят е записан — това не са откази, а
+     неща, които библиотекарката трябва да види, преди да подпише формуляра. */
+  if (ok && ok.warnings) ok.warnings.forEach(w => toast(w, 'err'));
   // Пречертава се ТЕКУЩИЯТ екран (преглед на кръга v2.4.27): формата се отваря
   // и от таблото — иначе месечната таблица заместваше таблото под заглавие „Табло“.
   if (ok !== null) { closeModal(); if (VIEW === 'dnevnik') renderDnevnik(); else if (RENDERERS[VIEW]) RENDERERS[VIEW](); }
@@ -403,10 +562,25 @@ function printDnevnikDoc() {
     ${r.days.map(row => rowHtml(page.cols, row.day, row)).join('')}
     ${rowHtml(page.cols, 'Всичко за месеца', r.monthTotal)}
     ${rowHtml(page.cols, 'Всичко от нач. на годината', r.ytdTotal)}
-    </tbody></table>${dnevnikNotesHtml(page.groups)}`;
+    </tbody></table>${dnevnikNotesHtml(page.groups, [
+      /* Обяснението за трите „Всичко“ слиза на листа, на който те стоят (В4). */
+      DNEVNIK_TAB === 'b' && page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0)
+        ? dnevnikTotalsNoteB(r.monthTotal) : '',
+      /* Затворените дни по календара — изписват се на листа, а не само на екрана (В3). */
+      !i && r.days.some(d => d.closed)
+        ? 'Дни, отбелязани като затворени в календара на библиотеката: '
+          + r.days.filter(d => d.closed).map(d => d.day).join(', ') + '.'
+        : ''
+    ])}`;
   setPrintPage({ name: `Дневник ${String(DNEVNIK_MONTH).padStart(2, '0')}.${DNEVNIK_YEAR}`, landscape: true, margin: '8mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2 style="font-size:14pt">ДНЕВНИК НА БИБЛИОТЕКАТА</h2>
+    ${/* ПРАЗНИЯТ МЕСЕЦ СИ ГО КАЗВА (одит v2.4.65, находка В2). Дотук печатът на
+         месец без нито един вписан ден излизаше като готов за подпис официален
+         формуляр от нули, с бланка и два реда за подпис, без нито дума защо —
+         точно каквото годишният отчет вече не прави (reportCoverageNote в
+         src/views/reports.js). Един и същ текст стои и на екрана. */''}
+    <div class="pmeta">${esc(dnevnikCoverageNote(r))}</div>
     ${pages.map(tableHtml).join('')}
     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }

@@ -62,8 +62,19 @@ function reportCoverageNote(r) {
   const d = r.daysRecorded || 0;
   if (!d) return `<b>Внимание:</b> за ${r.year} г. в „Дневник на библиотеката“ няма нито един вписан ден.
     Всички числа по-долу са нули, защото няма от какво да бъдат сметнати — справката не отразява действителната работа.`;
+  /* „ВПИСАН“ ЗНАЧИ ДЕН С НЕЩО В НЕГО (одит v2.4.65, находки В1 и В3).
+     `daysRecorded` вече брои дните с поне една ненулева колона или с бележка, а
+     не редовете в таблицата — ред се създаваше и от едно натискане на „Запиши
+     деня“ върху празния формуляр (виж handlers/stats.js). Ако редовете в базата
+     са повече от вписаните дни, разликата се КАЗВА: иначе библиотекарката вижда
+     „обхваща 12 дни“ там, където вчера пишеше 15, и няма откъде да разбере защо.
+     Дните, вписани в затворен по календара ден, също се назовават — точно това
+     сверява проверяващият със заповедта за работното време. */
+  const prazni = (r.daysWithRow || 0) - d;
   return `Справката обхваща <b>${d}</b> ${d === 1 ? 'вписан работен ден' : 'вписани работни дни'} от „Дневник на библиотеката“ за ${r.year} г.
-    Числата са сбор от тях; дни, които не са вписани, не участват.`;
+    Числата са сбор от тях; дни, които не са вписани, не участват.`
+    + (prazni > 0 ? ` Още ${prazni} ${prazni === 1 ? 'ден е отварян' : 'дни са отваряни'} в Дневника, но ${prazni === 1 ? 'е останал' : 'са останали'} без нито едно число — ${prazni === 1 ? 'той не се брои' : 'те не се броят'} за вписан работен ден.` : '')
+    + (r.daysOnClosed ? ` От вписаните ${r.daysOnClosed} ${r.daysOnClosed === 1 ? 'е в ден' : 'са в дни'}, отбелязан(и) като затворен(и) в календара на библиотеката — проверете календара или числата.` : '');
 }
 function reportBodyHtml(r) {
   if (r.id === 'annual_ab') {
@@ -81,6 +92,8 @@ function reportBodyHtml(r) {
         ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
         <tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table></div>
+        ${/* Същото обяснение и на екрана, не само на хартията (находка В4). */
+          dnevnikTotalsNoteB(r.totals) ? `<div class="hint" style="margin-top:8px">${esc(dnevnikTotalsNoteB(r.totals))}</div>` : ''}
       </div>`;
   }
   if (r.id === 'fund_breakdown') {
@@ -149,6 +162,11 @@ function reportPrintHtml(r) {
     const rowHtml = (cols) => `<tr><td>За ${r.year} г.</td>${cols.map(([k]) => `<td>${dnevnikCell(r.totals, k)}</td>`).join('')}</tr>`;
     const section = (title, cols, firstSection) => {
       const pages = dnevnikPrintPages(cols);
+      /* Обяснението защо трите „Всичко“ на Раздел Б се разминават слиза на
+         ПОДПИСВАНИЯ лист (одит v2.4.65, находка В4) — дотук стоеше само в
+         подсказката на прозореца „Подробно за деня“ и изчезваше с него, а тук
+         проверяващият вижда три различни числа под един надпис „Всичко“. */
+      const noteB = cols === DNEVNIK_B_COLS ? dnevnikTotalsNoteB(r.totals) : '';
       return pages.map((page, i) => `
         ${(firstSection && !i) ? '' : '<div class="pbreak"></div>'}
         <div class="pmeta"><b>${esc(title)}</b>${pages.length > 1
@@ -157,7 +175,8 @@ function reportPrintHtml(r) {
           page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
         ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
         <tr><th></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
-        <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups)}`).join('');
+        <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups,
+          [page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0) ? noteB : ''])}`).join('');
     };
     return `
       <div class="pmeta">${reportCoverageNote(r)}</div>

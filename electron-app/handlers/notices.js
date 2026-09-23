@@ -4,6 +4,14 @@
 // решава. Зависи от LOAN_SELECT (връщано от handlers/loans.js), EUR_RATE
 // (по стойност), isValidEmail (стабилен модулен export от
 // security-utils.js), shell (Electron, стабилен) и today.
+/* Приспадането на вече платеното се взима ГОТОВО от handlers/loans.js, а не се
+   преписва тук (v2.4.65) — виж дългата бележка при unpaidOverdueFines там.
+   Екранът „Просрочени“, печатното писмо по чл. 43 и напомнянето по пощата/SMS
+   трябва да искат едно и също число; всеки път, когато това пресмятане е било на
+   две места, е давало две различни суми за едно задължение (виж бележките при
+   loans:reminders по-долу — тъкмо това поправиха v2.4.24 и v2.4.25). */
+const { unpaidForRows, spreadUnpaidFine } = require('./loans');
+
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
   const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
 
@@ -28,9 +36,16 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
     ['count_phrase', 'напр. „3 просрочени документа“'],
     ['it_them', '„го“ или „ги“, според броя'],
     ['list', 'списък на просрочените документи'],
-    ['fine', 'сума на обезщетението, напр. „0.63 € (1.23 лв.)“'],
-    ['fine_line', 'ред с обезщетението (или празно, ако е 0)'],
-    ['fine_sms', ', обезщетение ... € (или празно, ако е 0)'],
+    ['fine', 'ОСТАВАЩОТО за плащане обезщетение, напр. „0.63 € (1.23 лв.)“'],
+    ['fine_line', 'ред с обезщетението (или празно, ако не се дължи нищо)'],
+    ['fine_sms', ', обезщетение ... € (или празно, ако не се дължи нищо)'],
+    /* v2.4.65 — вече платеното по сметката се приспада от {fine}; двата нови
+       заместителя позволяват на библиотека, пренаписала си шаблона, да покаже и
+       начисленото. По подразбиране {fine_line} казва и трите числа само когато
+       наистина има платено — иначе писмото би обяснявало нещо, което не се е
+       случило. */
+    ['fine_accrued', 'общо НАЧИСЛЕНО обезщетение, преди да се приспадне платеното'],
+    ['fine_paid', 'вече платеното по начислените обезщетения (или празно, ако няма)'],
     ['librarian', 'име на библиотекаря'], ['librarian_line', 'библиотекар + нов ред (или празно)'],
     ['place', 'населено място'], ['place_line', 'нов ред + място (или празно)'],
     ['date', 'днешна дата'],
@@ -88,6 +103,17 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       `• ${[l.author, l.title].filter(Boolean).join('. ')} (инв. № ${l.inv_number ?? '—'}), срок ${bgDate(l.date_due)}`
     ).join('\n');
     const fine = Number(r.fine || 0);
+    /* НАЧИСЛЕНО, ПЛАТЕНО, ОСТАВА (v2.4.65). {fine} вече е ОСТАТЪКЪТ — виж
+       unpaidOverdueFines в handlers/loans.js. Ако читателят е платил част от
+       начисленото, писмото го КАЗВА: иначе библиотекарката подава документ с
+       по-малко число от предишното напомняне и няма как да обясни разликата, а
+       читателят вижда сума, която не отговаря нито на квитанцията му, нито на
+       предишното писмо. Когато платено няма (обичайният случай), редът остава
+       дословно какъвто е бил — шаблоните, пренаписани от библиотеките, не се
+       променят без нужда. */
+    const accrued = Number(r.fineAccrued == null ? r.fine : r.fineAccrued) || 0;
+    const paid = Number(r.finePaid || 0);
+    const eur = (n) => `${n.toFixed(2)} € (${(n * EUR_RATE).toFixed(2)} лв.)`;
     const one = r.n === 1;
     const shortLib = lib.length > 40 ? lib.slice(0, 37).trim() + '…' : lib;
     /* „Уважаема Петя Детска (родител/настойник на Ани Детска)“ — цялото
@@ -109,8 +135,15 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
       /* Обезщетението е ЗАПИСАНО в евро от v2.4.51 — не се дели повторно по
          курса. Дотук писмото, имейлът и SMS-ът показваха три различни числа за
          едно и също задължение (открито при прегледа на кръга). */
-      fine: fine > 0 ? `${fine.toFixed(2)} € (${(fine * EUR_RATE).toFixed(2)} лв.)` : '',
-      fine_line: fine > 0 ? `\nНачислено обезщетение към днешна дата: ${fine.toFixed(2)} € (${(fine * EUR_RATE).toFixed(2)} лв.).` : '',
+      fine: fine > 0 ? eur(fine) : '',
+      fine_accrued: accrued > 0 ? eur(accrued) : '',
+      fine_paid: paid > 0 ? eur(paid) : '',
+      fine_line: fine > 0
+        ? (paid > 0
+          ? `\nНачислено обезщетение към днешна дата: ${eur(accrued)}, от тях платени ${eur(paid)} — `
+            + `остава да се плати ${eur(fine)}.`
+          : `\nНачислено обезщетение към днешна дата: ${eur(fine)}.`)
+        : (paid > 0 ? '\nНачисленото обезщетение по тези документи е платено изцяло.' : ''),
       fine_sms: fine > 0 ? `, обезщетение ${fine.toFixed(2)} €` : '',
       librarian: s.librarian || '', librarian_line: s.librarian ? s.librarian + '\n' : '',
       place: s.place || '', place_line: s.place ? '\n' + s.place : '',
@@ -163,8 +196,17 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
            имат ТРИ пътя, и този — екранът „Напомняния“, имейлът, SMS-ът, „Копирай
            текста“ — още смяташе само днешните дни: писмото искаше 2,05 лв., имейлът
            0,25 лв., гишето 2,05 лв. Точно трите различни суми, обявени за затворени. */
-        r.loans.forEach(d => { d.fine = (Number(d.fine) || 0) + effectiveDaysLate(d.date_due, today()) * perDay; });
-        r.fine = r.loans.reduce((sum, d) => sum + d.fine, 0);
+        r.loans.forEach(d => {
+          d.fineCharged = Math.round(((Number(d.fine) || 0)) * 100) / 100;
+          d.fineNew = Math.round((effectiveDaysLate(d.date_due, today()) * perDay) * 100) / 100;
+        });
+        /* И третият път приспада платеното (v2.4.65). Дотук писмото по пощата и
+           SMS-ът искаха начисленото, без да поглеждат сметката: читател, платил
+           2,70 € на гишето, получаваше SMS за 3,10 €. */
+        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
+        r.fine = Math.round(r.loans.reduce((sum, d) => sum + d.fine, 0) * 100) / 100;
+        r.fineAccrued = Math.round(r.loans.reduce((sum, d) => sum + d.fineAccrued, 0) * 100) / 100;
+        r.finePaid = Math.round(r.loans.reduce((sum, d) => sum + d.finePaid, 0) * 100) / 100;
         /* До кого е писмото и на кой телефон (v2.4.61) — решава се тук, за да е
            еднакво за екрана „Напомняния“, за имейла, за SMS-а и за печатното
            писмо. `phone` нарочно се ПОДМЕНЯ с телефона на гаранта: точно този

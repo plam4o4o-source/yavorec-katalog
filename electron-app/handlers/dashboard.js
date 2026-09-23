@@ -226,7 +226,22 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const isTodayOpen = isWorkDay(today());
       /* Попълнен ли е дневникът за днес (v2.4.27, A9): формулярът, който
          регионалната библиотека проверява, беше на четири стъпки от таблото. */
-      const dnevnikFilled = !!db.prepare('SELECT 1 FROM dnevnik_days WHERE date = ?').get(today());
+      /* „ПОПЪЛНЕН“ ЗНАЧИ ДЕН С НЕЩО В НЕГО (одит v2.4.65, находка В1).
+         =====================================================================
+         ДОТУК проверката беше `SELECT 1 FROM dnevnik_days WHERE date = ?` — има
+         ли ред. Ред обаче се създава и от едно натискане на „Запиши деня“ върху
+         празния формуляр (виж handlers/dnevnik.js): всичките 66 колони нули, а
+         таблото веднага обявяваше деня за попълнен и подсещането изчезваше.
+         Библиотекарката губеше единствената си подсещалка точно за деня, който
+         НЕ е вписан. Сега денят се брои за попълнен, когато има поне една
+         ненулева колона или бележка — същото правило, с което годишният отчет
+         брои „вписани работни дни“ (handlers/stats.js → annual_ab), за да не
+         твърдят двата екрана различни неща за един и същи ден.
+         Един ред, четен веднъж на отваряне на таблото — по-евтино е от SQL израз
+         върху шейсет и шест колони и не се разминава с имената им. */
+      const dnvRow = db.prepare('SELECT * FROM dnevnik_days WHERE date = ?').get(today());
+      const dnevnikFilled = !!dnvRow && (String(dnvRow.note || '').trim() !== ''
+        || Object.keys(dnvRow).some(k => k !== 'id' && k !== 'date' && k !== 'note' && (Number(dnvRow[k]) || 0) !== 0));
       return {
         fundCount: fund.n, fundValue: fund.v, activeReaders, loansOpen, overdueCount, overdueRows,
         overdueBuckets, loansWeeks,

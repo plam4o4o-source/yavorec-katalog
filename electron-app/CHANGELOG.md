@@ -11,6 +11,427 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.65
+
+**BG:** Кръг по **проверка**: шест области бяха минати през истинската програма —
+истински `main.js`, истински обработчици, истинска база, истински екран — и всяка
+находка беше **възпроизведена**, преди да бъде пипната. Намериха се 46. Всичките са
+поправени и всяка е закована с тест, който пада, ако поправката се върне назад.
+Повечето не са грешки в сметките, а **числа и документи, които не си съответстват**:
+екран, който казва едно, и подписан лист, който казва друго.
+
+**Изгубената книга вече минава по един и същи път от начало до край.** Дотук тази
+верига се късаше на четири места. Документ, приключен с „Документът е изгубен“ —
+тоест с име на читател, с начислено обезщетение и с основание по **чл. 30, т. 5**
+(невърнат от ползвател) — при пълна инвентаризация се презаписваше като **„липсващ“**.
+Оттам нататък той влизаше в протокола по чл. 40 като установена при проверката липса,
+броеше се срещу норматива за естествен отпад по **чл. 41** (а превишението задейства
+реда по чл. 51 – 53) и „Проект за акт от липсите“ му предлагаше **чл. 30, т. 6**.
+Три последици от едно презаписване: сгрешено основание в подписан акт, завишени липси
+и скъсана връзка с обезщетението, което читателят дължи. Сега изгубените се извиняват
+отделно, имат **собствен ред в протокола** („изгубени от ползватели, установени преди
+проверката — отчисляват се с акт по чл. 30, т. 5“) и състоянието им не се пипа.
+
+**А когато книгата се намери, вече има път назад.** Досега програмата сама съветваше
+„ако документът се е намерил, върнете състоянието му на «наличен» от «Книги»“ —
+и библиотекарката го правеше, но нищо не се променяше: редът оставаше в списъка
+„подлежат на отчисляване с акт по чл. 30, т. 5“ **завинаги**, а обезщетението за
+книга, която стои на рафта, продължаваше да тежи на читателската сметка. Добавено е
+действие **„Документът се намери“** до реда в „Просрочени“: сваля белега, връща
+състоянието и предлага да сторнира начислението за самия документ — **забавата
+остава дължима**, защото тя е за времето, а не за книгата. За документ, който вече
+е отчислен с акт, пътят е друг (анулиране на акта) и програмата го казва.
+
+**Анулирането на акт вече казва какво ОСТАВА.** Акт по чл. 30, т. 5 начислява
+обезщетение и забава по сметката на читателя. Ако по тях е плащано, анулирането не
+може да ги отмени — и не ги отменяше, — но екранът съобщаваше само „Актът е анулиран.
+Номерът остава зает“. Читателят идваше на гишето и питаше откъде е сумата, а
+библиотекарката нямаше откъде да знае. Сега се изписват името, инвентарният номер,
+видът на начислението, начисленото, събраното, остатъкът и общият сбор — и къде се
+урежда. Същото анулиране вече и **изчиства събитието „изгубен“**, което оставаше в
+регистъра за книга, която е на рафта.
+
+**Разделянето на липсващ запис вече не връща екземплярите във фонда.** Стар ред с
+три екземпляра под един номер, липсващ изцяло: протоколът казваше „Липсващи: 3“,
+„Проект за акт от липсите“ го разделяше правилно (по v2.4.62), но двата нови реда
+излизаха със състояние **„наличен“** — и програмата почваше да брои **един** липсващ
+вместо три. Ако комисията не утвърдеше проекта, двата документа оставаха „налични“
+завинаги: броят се във фонда, могат да се заемат, влизат в онлайн каталога. Сега
+новите редове наследяват състоянието на оригинала. Единичното „Раздели“ (скъсаната
+книга в ръката на комисията) остава каквото беше.
+
+**Напомнителното писмо вече не иска платени пари.** Екранът „Просрочени“, печатното
+писмо по **чл. 43** и SMS-ът събираха начисленото плюс новите дни, без да поглеждат
+читателската сметка. Читател, който е платил забавата си на гишето, получаваше
+подписан документ с искане за същата сума. Сега „Общо дължимо“ значи точно това —
+**остава да се плати**, — а начисленото и платеното се изписват отделно, когато има
+платено.
+
+**Вносът вече не пуска в инвентарната книга неща, които после не могат да се поправят.**
+Ред с цена `-99` влизаше безпрепятствено: КДБФ показваше наличност **−89 €**,
+инвентарната книга „Неотчислени −89.00 €“, „Проверка на данните“ не намираше нищо, а
+самият запис не можеше да се поправи от картона, защото формата отказваше цена,
+която библиотекарката не беше въвеждала. Цената във вноса вече минава през същата
+проверка като вписването от екрана (`parseBookPrice`), а редът отпада с обяснение.
+Нечислова цена („безплатно“) вече дава предупреждение вместо тиха нула.
+
+**Повреден ред по средата на файла вече не се премълчава.** Файл с незатворена
+кавичка изяждаше остатъка си: три документа изчезваха безследно, един влизаше със
+слепено 80-знаково заглавие, а отчетът гласеше „2 въведени · 0 пропуснати · няма
+грешки“. Програмата **вече беше изчислила** предупреждението — просто не го показваше
+никъде. Сега то стои в прозореца за съответствие, над бутона „Въведи N реда“,
+повтаря се в отчета и влиза в дневника. А ред, чийто инвентарен номер е зает от
+съвсем друга книга, вече се назовава поименно („ред 2 (№ 700) — «…»: номерът вече е
+зает от «…»“) вместо да се брои мълчаливо като „пропуснат“.
+
+**Личните данни — три дупки наведнъж.** Анонимизирането обезличаваше реда „Нов
+читател“, но оставяше името и номера на картата дословно във всеки ред **„Заемане“**
+— а те са най-многобройните в цялата следа (по 50 – 150 на ден), и вървят с всяко
+резервно копие. Отгоре броячът обявяваше „1 запис ще бъде обезличен“, когато редовете
+с име са четири. Сега се маха само частта „; читател … (карта …)“ — инвентарният
+номер и заглавието остават, за да продължи следата да документира кой документ е бил
+зает. Второ: **„Пълен износ на данните“** скриваше адреса, телефона и имейла в
+`chitateli.csv`, а ги изнасяше в чист текст в `odit-sleda.csv` — в същия архив, който
+се носи на флашка. Сега `audit_log.diff` се маскира винаги, `audit_log.detail` — при
+заключена защита, и ПРОЧЕТИ-МЕ.txt взема списъка от същото място, откъдето се прави
+маскирането, тоест обещанието и действието вече не могат да се разминат. Трето:
+за читател, поискал заличаване по **чл. 17 от ОРЗД**, нямаше път — анонимизирането
+работи само „всичко отпреди N години“. Добавено е **„Заличи данните на този читател“**:
+прилага същите правила по конкретния човек, независимо от срока, прехвърля заеманията
+и сметката към служебен запис (отчетността по чл. 30 не мърда) и казва изрично, че
+резервните копия не се пипат.
+
+**Съгласията.** След обновяването заварените читатели се оказваха с неотбелязано
+съгласие по **чл. 47, ал. 2** и гишето отказваше на всичките наведнъж — а нямаше нито
+етикет, нито филтър, по който да бъдат намерени: червена кутия с бутон „Отвори
+картона“, по един читател. Сега „Читатели“ има филтър и брояч **„без съгласие“**, а
+отбелязването приема **датата на подписа** (дотук картон, подписан през 2019 г.,
+получаваше днешна дата). Миграция, която мълчаливо вдига съгласието, не е правена —
+съгласието е подпис, не настройка. Отделно: за **дете до 14 г.** съгласието на
+родител/настойник беше поле без проверка — отметка-украса. Сега се иска както при
+пълнолетния, а отказът на гишето назовава изхода. И: изтриването на читател **без
+история** — най-лесното, с едно натискане — не оставяше нито ред в следата; сега
+оставя (без ЕГН, телефон и адрес, защото следата се изнася в CSV).
+
+**Резервните копия и самоличността след „започване на чисто“.** Прекриптирането при
+смяна на паролата хващаше само `auto-ГГГГ-ММ-ДД.invbak` и пропускаше **междинните**
+копия (`…-ЧЧММ.invbak`, на всеки три часа и при всяко затваряне — до ~120 файла) и
+ръчните. Тоест най-прясното копие, това от последното затваряне с целия последен
+работен ден, оставаше отваряемо със **старата** парола, докато екранът показваше
+зелено „прекриптирано“. Ако паролата се сменя, защото старата е компрометирана, това
+е дупка — затворена е. А след **„Изтриване на всички данни“** новата библиотека
+наследяваше папката и профила на старата: първата вписана книга презаписваше
+`katalog.json` в чуждото работно копие, таймерът го качваше в чуждия GitHub профил, а
+публикуваният файл продължаваше да се представя с името и селото на предишната
+библиотека. Сега връзката с онлайн каталога се **нулира безусловно** (тя е адрес към
+чужда папка, не предпочитание), а самоличността — по изрична отметка **„това е нова
+библиотека“**, защото най-честият повод е същата библиотека да изчисти пробни записи.
+
+**Одитната следа вече покрива и действията, за които съществува.** Без нито ред
+минаваха: смяната на GitHub хранилището (тя решава кой адрес чете сайтът), спирането
+на онлайн каталога (сайтът замръзва, без да го каже), **успешното** възстановяване на
+резервно копие (вписваше се само провалът, тоест възстановената база мълчеше за
+собствената си подмяна — сега редът се пише в нея, преди да заеме мястото си),
+износът на самата одитна следа (единственото извеждане на данни навън без следа) и
+преместването на базата. Груповата редакция пък вписваше „4 документ(а) — състояние →
+липсващ“ без нито един номер, докато **чл. 17, ал. 2** иска отговор за всеки вписан
+ред — сега изрежда реално променените. И редакцията на вписан документ вече минава
+през потвърждението по чл. 17, ал. 2 **и от Таблото, и от „Проверка на данните“**,
+а не само от „Инвентарна книга“, както обещаваше надписът.
+
+**Периодиката.** Проверката „едно издание — един картон“ не работеше на кирилица:
+`COLLATE NOCASE` на SQLite сгъва регистъра само за латиница, затова „Труд“, „ТРУД“ и
+„труд“ получаваха **три отделни картона**, а „TRUD“ се отказваше правилно. Броевете
+се разпръсваха, сборът на цените за годината ставаше грешен — а той е предложената
+цена на годишния комплект в инвентарната книга (чл. 16). Търсенето в кардекса пък
+отговаряше **„0 намерени“** за брой, който е вписан, щом броевете надхвърлят 3 000
+(ежедневник от около 2015 г. насам): търсачката работеше върху нарисуваните редове, а
+те спират на тавана. Сега филтрира самите броеве и рисува съвпаденията. Печатният
+абонаментен списък броеше **отчислен** годишен комплект за „инвентиран“, докато
+съседният екран показваше 0 за същото издание — а този лист отива при счетоводството.
+Заместващ комплект след отчисляване не можеше да се впише от екрана, въпреки че
+обработчикът отдавна го допуска. Кардексът показваше две различни бройки на два
+съседни реда („300 от 405“ до „още 65 от общо 365“). И отказът при дублиран брой
+съветваше да се отбележи в забележка, каквато във формата нямаше — вече има.
+
+**Краезнанието.** Указателят на статиите не намираше по онова, което сам показва в
+колона „Източник“: „Колектив“ и „бр. 21“ даваха нула, а „21“ — един. Персоналиите пък
+излизаха в двоична подредба — „Ѝлчев“ преди „Ангелов“, а име с малка буква **след**
+„Янков“ — и в разпечатката също; сега подредбата е българска, а при вписване на вече
+съществуващо име програмата пита.
+
+**Дневникът и годишният отчет.** DVD, говорещите книги, патентите и „друго“ се брояха
+за **книги**, тоест колоните „DVD“ и „Говорещи книги“ на формуляра не получаваха нищо
+никога — включително ако библиотекарката създаде вид с точното име от формуляра.
+Колоната „Славянски“ не се предлагаше никога (картата знаеше пет езика). „2,7“ в
+клетка се записваше като **2**, а клетката продължаваше да показва 2,7 — сега се
+отказва с обяснение, защото числото на екрана и числото в подписания формуляр трябва
+да са едно и също. „Запиши деня“ върху празен формуляр правеше ден от нули, таблото
+го обявяваше „попълнен“ и годишният отчет го броеше за вписан работен ден — сега се
+брои ден с поне едно вписано число или бележка. Печатът на месец без нито един вписан
+ден излизаше като готов за подпис формуляр от нули; затворените дни от календара не
+личаха в Дневника; трите различни „Всичко“ на Раздел Б стояха на подписан лист без
+обяснението, което програмата държеше само в прозореца. И **„⚡ Предложи от
+регистрите“** попълваше само възрастта, затова четирите „Всичко“ на Раздел А излизаха
+2 / 0 / 1 / 0 — сега разминаването се изписва (автоматично попълване не се въвежда:
+картотеката няма пол, образование и занятие). Посещенията се водят на две несвързани
+места и двете влизат в отчета — не са слети (това е отделно решение), но вече се
+съгласуват и се назовават, както „Проверка на данните“ прави за фонда.
+
+**По-бързо, измерено.** Вписването на нова книга при свързан онлайн каталог струваше
+**106 ms вместо 2 ms**, защото всяка книга пренаписваше целия 4,82 МБ `katalog.json`
+синхронно — описването на партида от 40 книги замразяваше програмата за **4,2 секунди**
+локално, и толкова пъти пренасяше 4,82 МБ по мрежата, ако папката е на споделен диск.
+Намерението (да не се губи постъпление мълчаливо) е запазено: записът се проверява
+евтино, а същинското публикуване минава по нормалния отложен път за промени по фонда.
+Измерено: **5 132 → 37 – 44 ms** за същата партида. Пълният износ на данните пък
+харчеше **544 от 1 490 ms** в едно ниво на свиване — level 6 дава 167 ms срещу 4 %
+по-голям архив.
+
+**И дребните, но видими.** Печатът на инвентарната книга за една година обявяваше
+фонда на библиотеката с числото на **отпечатания диапазон** (а от v2.4.64 „една
+година“ е подразбирането, и точно този лист се заверява по чл. 26, ал. 2) — сега
+казва и двете числа. Партида с бъдеща дата (`2062` вместо `2026`) се приемаше,
+изчезваше от КДБФ и после не можеше нито да се поправи, нито да се изтрие — вече се
+отказва. Етикетите по диапазон мълчаха за липсващите номера и отказваха отворен
+диапазон, какъвто обработчикът поддържа. Списъкът „Книги“ се свиваше от 3 000 на
+2 000 реда при първото пречертаване и губеше честния надпис. Съобщението при повредено
+резервно копие вграждаше цял абзац суров английски текст; броячът на некриптираните
+копия описваше междинните като „отпреди включването на защитата“. И непозната стойност
+за начина на постъпване излизаше като суровото съобщение на тригера.
+
+**Поправено при прегледа на самия кръг.** Прегледът върна десет находки. Девет бяха
+потвърдени, всяка **възпроизведена преди да бъде пипната** — трите за личните данни на
+истинска база — и всяка покрита с тест, който пада, ако поправката се върне:
+
+- **Заличаването по чл. 17 пипаше чужди редове.** Редовете в следата се търсеха като
+  подниз, тоест заличаването на „Иван Петров“ обезличаваше необратимо и редовете на
+  „Иван Петрова“ и на „Иван Петров-Стоянов“. Сега името трябва да стои като цяло, а ако
+  до него има номер на карта — да е картата на същия човек. Пълен съименник с друга
+  карта също остава непокътнат. Същото важи за историята на търсенията.
+- **Заличаването прехвърляше и активните резервации** на служебния запис „—
+  анонимизирани заемания —“, който тогава заемаше място в опашката пред истинските
+  читатели. Сега чакащите и заделените се отказват, заделеният документ се освобождава,
+  и броят им влиза в следата.
+- **Два нови вида ред в следата оставаха с името на читателя** след анонимизиране и
+  заличаване: „Документът се намери“ и „Изтрит читател“ (без история). Първият вече
+  губи само читателя и пази инв. № и заглавието, както другите редове от гишето.
+- **Заварената забава се водеше за платена.** Преди v2.4.61 продължението на просрочено
+  заемане записваше забавата само в самото заемане, без ред в сметката. Новото смятане на
+  „Общо дължимо“ гледаше само сметката, тоест такава забава изчезваше от „Просрочени“, от
+  писмото по чл. 43 и от SMS-а, а писмото пишеше „от тях платени“ за пари, които никой
+  не е давал. Сега се смята отделно — **консервативно**, като долна граница: програмата
+  не иска сума, която не може да докаже.
+- **„Документът се намери“ при непрочетено начисление** казваше „изтрито от картона
+  по-рано“ (невярно) и откъсваше връзката на начислението със заемането. Сега казва, че
+  начислението остава, и връзката се пази.
+- **Заварени „Труд“ и „ТРУД“ ставаха нередактируеми.** Новата проверка за дубликат (с
+  кирилица без значение на регистъра) се правеше при всеки запис, тоест отказваше дори
+  смяна само на периодичността. Сега се прави само при смяна на заглавието.
+- **Неуспешно преместване на базата оставяше в следата ред „преместена“.** Редът
+  нарочно се пише преди копирането (за да го наследи новата база); при провал вече се
+  допълва с ред, че опитът не е успял и базата е останала на мястото си.
+- **Служебният запис се броеше за „читател без съгласие“**, тоест библиотека, в която
+  всеки истински читател има съгласие, виждаше „1 без съгласие“.
+- **Формата „Подробно за деня“ записваше „2,7“ като 0.** Клетките в таблицата бяха
+  поправени в този кръг, но формата за деня води до същото място и беше останала с
+  числово поле. Сега е текстова и отказва поименно всичко, което не е цяло число.
+
+**Не е пипано, за решение:** вносът вече отказва цени с валута („12,50 лв.“) и ги вписва
+като 0,00 € с предупреждение на всеки ред. Старото поведение ги вземаше за евро — също
+грешно, при това мълчаливо. Правилният ход изисква решение: цена в левове от стар файл
+да се превръща по официалния курс 1,95583 или не.
+
+**Проверено:** пълната поредица е **2070 теста, 0 неуспешни**, в UTC и
+Europe/Sofia; поправките от прегледа — 12 мутации, всяка уловена от точно своя тест.
+Мутационната проверка на самия кръг (198 мутации, всички уловени) е по данните на
+кръга — харнесът му е извън хранилището и тук не е пускан; проверките на публичния
+каталог — 8 сценария и мащаб 15 002 записа.
+
+**EN:** A **verification** round: six areas were exercised through the real program —
+real `main.js`, real handlers, real database, real screen — and every finding was
+**reproduced** before anything was touched. 46 were found. All are fixed, and each is
+pinned by a test that fails if the fix is reverted. Most are not arithmetic errors but
+**numbers and documents that disagree with each other**: one thing on screen, another
+on the signed sheet.
+
+**The lost book now follows one path from end to end.** That chain broke in four
+places. A document closed as "lost" — with a reader's name, an assessed compensation
+and grounds under **art. 30 (5)** (not returned by a user) — was overwritten as
+**"missing"** by a full inventory check. From there it entered the art. 40 protocol as
+a loss established *during the check*, counted against the natural-loss allowance of
+**art. 41** (exceeding which triggers the art. 51–53 procedure), and the draft act
+offered it **art. 30 (6)**. Three consequences from one overwrite: wrong grounds on a
+signed act, inflated losses, and a severed link to the compensation the reader owes.
+Lost documents are now excused separately, get **their own line in the protocol**, and
+their status is left alone.
+
+**And when the book turns up, there is now a way back.** The program itself advised
+"if the document has been found, set its status back to «available» from «Books»" —
+the librarian would do exactly that, and nothing changed: the row stayed on the
+"to be deaccessioned under art. 30 (5)" list **forever**, and the compensation for a
+book sitting on the shelf kept weighing on the reader's account. A **"The document was
+found"** action has been added next to the row in "Overdue": it clears the flag,
+restores the status and offers to reverse the charge for the document itself — **the
+late fee stays payable**, because it is for the time, not for the book. For a document
+already removed by an act the path is different (revoke the act), and the program says so.
+
+**Revoking an act now says what REMAINS.** An act under art. 30 (5) charges
+compensation and a fee to the reader's account. Where something has been paid against
+them, revoking cannot undo them — and did not — but the screen said only "The act has
+been revoked." Now the name, inventory number, kind of charge, amount charged,
+amount collected, remainder and total are all spelled out, together with where to
+settle it. The same revoke now also **clears the "lost" event** left behind for a book
+that is back on the shelf.
+
+**Splitting a missing record no longer returns the copies to the collection.** An old
+row of three copies under one number, missing in full: the protocol said "Missing: 3",
+the draft act split it correctly (per v2.4.62), but the two new rows came out
+**"available"** — and the program began counting **one** missing instead of three. If
+the committee did not approve the draft, those two stayed available forever: counted in
+the collection, loanable, published in the online catalogue. New rows now inherit the
+original's status.
+
+**The reminder letter no longer asks for money already paid.** The "Overdue" screen,
+the printed **art. 43** letter and the SMS added the charge plus the new days without
+looking at the reader's account, so a reader who had paid at the desk received a signed
+document demanding the same sum again. "Total due" now means exactly that — **what is
+left to pay** — with charged and paid shown separately where anything has been paid.
+
+**Import no longer lets in things that cannot be corrected afterwards.** A row priced
+`-99` passed straight through: the register showed **−89 €** on hand, the inventory book
+"−89.00 €", the data check found nothing, and the record could not be repaired from the
+card because the form rejected a price the librarian had never entered. Import prices now
+go through the same check as manual entry, and the row is rejected with an explanation. A
+file with an unclosed quote used to swallow the rest of itself — three documents vanished
+without trace while the report said "0 skipped, 0 errors" — even though the program had
+**already computed** the warning and simply never showed it. It is now shown above the
+"Import N rows" button, repeated in the report and written to the log. And a row whose
+inventory number is taken by an entirely different book is now named, instead of being
+silently counted as "skipped".
+
+**Personal data — three holes at once.** Anonymisation cleared the "New reader" line but
+left the name and card number verbatim in every **"Loan"** line — the most numerous in
+the whole trail (50–150 a day), travelling with every backup — while the counter
+announced "1 record will be anonymised" when four carried names. Only the "; reader …
+(card …)" segment is now removed; the inventory number and title stay, so the trail goes
+on documenting which document was lent. Second: **"Full data export"** masked address,
+phone and e-mail in `chitateli.csv` while exporting them in clear text in
+`odit-sleda.csv` — in the same archive that gets carried on a USB stick. Both are now
+masked, and the README takes its list from the same place the masking does, so promise
+and behaviour can no longer diverge. Third: for a reader requesting erasure under
+**art. 17 GDPR** there was no path at all — anonymisation only works "everything older
+than N years". **"Erase this reader's data"** has been added.
+
+**Consents.** After the upgrade, pre-existing readers turned out to have no recorded
+consent under **art. 47 (2)** and the desk refused all of them at once — with no label
+and no filter to find them by. "Readers" now has a **"no consent"** filter and counter,
+and recording it accepts **the date of the signature** (until now a card signed in 2019
+got today's date). No migration silently raises consent — a consent is a signature, not
+a setting. Separately, for a **child under 14** the parent's consent was a checkbox
+nobody checked; it is now required, and deleting a reader **without history** now leaves
+an audit line, which it did not.
+
+**Backups and identity after "start clean".** Re-encryption on a password change caught
+only `auto-YYYY-MM-DD.invbak` and missed the **intraday** copies (every three hours and
+on every close — up to ~120 files) and the manual ones, so the freshest copy of all
+stayed openable with the **old** password while the screen showed a green
+"re-encrypted". And after **"Delete all data"** the new library inherited the old one's
+folder and GitHub profile: the first book written overwrote `katalog.json` in someone
+else's working copy, the timer pushed it to someone else's profile, and the published
+file still carried the previous library's name. The catalogue link is now cleared
+unconditionally; the identity only on an explicit "this is a new library" checkbox.
+
+**The audit trail now covers the actions it exists for.** Changing the GitHub
+repository, disconnecting the online catalogue, a **successful** restore from backup
+(only failures were recorded, so a restored database said nothing about its own
+replacement), exporting the audit trail itself and moving the database all passed
+without a line. Bulk edit recorded "4 document(s) — status → missing" without a single
+number, while **art. 17 (2)** requires an answer for every entry — it now lists the ones
+actually changed. And editing a registered document now goes through the art. 17 (2)
+confirmation from the Dashboard and from the data check too, not only from the
+inventory book as the on-screen text promised.
+
+**Periodicals.** The "one title, one card" check did not work in Cyrillic — SQLite's
+`COLLATE NOCASE` folds case for Latin only — so "Труд", "ТРУД" and "труд" got **three
+separate cards**, scattering the issues and corrupting the yearly price total that is
+proposed as the bound volume's value (art. 16). Kardex search answered **"0 found"** for
+an issue that exists once a title passes 3 000 issues. The printed subscription list
+counted a **deaccessioned** annual volume as inventoried while the adjacent screen showed
+0 for the same title; a replacement volume could not be entered from the screen at all;
+and the kardex showed two different totals on two adjacent lines.
+
+**Local studies.** The article index did not find what it displays in its own "Source"
+column, and the persons index came out in binary order — "Ѝлчев" before "Ангелов" — on
+screen and in print. Both fixed; duplicate names are now flagged on entry.
+
+**The daily register and the annual report.** DVDs, talking books, patents and "other"
+were all counted as **books**, so the form's "DVD" and "Talking books" columns never
+received anything; the "Slavic" column was never offered; "2.7" in a cell was stored as
+**2** while the cell went on showing 2.7; "Save the day" on an empty form produced a day
+of zeros that the dashboard called "filled" and the annual report counted as a working
+day; printing a month with nothing recorded produced a signature-ready form of zeros;
+closed days were invisible; and "⚡ Suggest from the registers" filled only age, leaving
+the four section-A totals contradicting one another. All are now either fixed or made
+visible. Visits are still kept in two places — they are not merged (that is a separate
+decision) — but the two are now reconciled and named.
+
+**Faster, measured.** Registering a new book with the online catalogue connected cost
+**106 ms instead of 2 ms**, because every single book rewrote the whole 4.82 MB
+`katalog.json` synchronously — a batch of 40 books froze the program for **4.2 seconds**
+locally, and pushed 4.82 MB over the network that many times if the folder is on a
+share. The intent (never lose an acquisition silently) is preserved; measured
+**5 132 → 37–44 ms** for the same batch. The full data export spent **544 of 1 490 ms**
+in one compression level; level 6 costs 167 ms for a 4 % larger archive.
+
+**Fixed while reviewing the round itself.** The review returned ten findings. Nine were
+confirmed, each **reproduced before being touched** — the three about personal data on a
+real database — and each covered by a test that fails if the fix is reverted:
+
+- **Erasure under art. 17 touched other people's rows.** Audit rows were matched as a
+  substring, so erasing "Иван Петров" irreversibly anonymised the rows of "Иван Петрова"
+  and "Иван Петров-Стоянов" as well. The name must now stand as a whole word, and if a
+  card number follows it, it must be the same person's card. A full namesake with a
+  different card is left intact too. The same rule applies to the search history.
+- **Erasure also moved active holds** onto the "— anonymised loans —" service record,
+  which then held a place in the queue ahead of real readers. Waiting and set-aside holds
+  are now cancelled, the set-aside item is released, and the count goes into the trail.
+- **Two new kinds of audit row kept the reader's name** after anonymisation and
+  erasure: "Документът се намери" (item found) and "Изтрит читател" (reader deleted, no
+  history). The first now loses only the reader and keeps the inventory number and
+  title, like the other circulation rows.
+- **A legacy overdue fine was treated as paid.** Before v2.4.61, renewing an overdue
+  loan recorded the fine only on the loan itself, with no account line. The new "total
+  owed" looked only at the account, so such a fine disappeared from Overdue, from the
+  art. 43 letter and from the SMS — and the letter said "of which paid" for money no one
+  had handed over. It is now computed separately, **conservatively**, as a lower bound:
+  the program never asks for an amount it cannot prove.
+- **"Item found" with an unreadable charge** said "deleted from the card earlier"
+  (untrue) and cut the link between the charge and the loan. It now says the charge
+  stays, and the link is kept.
+- **Pre-existing "Труд" and "ТРУД" became uneditable.** The new case-insensitive
+  Cyrillic duplicate check ran on every save, so it refused even a change of frequency.
+  It now runs only when the title changes.
+- **A failed database move left a "moved" row in the trail.** That row is deliberately
+  written before copying (so the new database inherits it); on failure it is now followed
+  by a row stating the attempt failed and the database stayed where it was.
+- **The service record was counted as a "reader without consent"**, so a library in
+  which every real reader has consent saw "1 without consent".
+- **The "Day details" form saved "2,7" as 0.** The table cells were fixed in this round,
+  but the day form leads to the same place and still used a numeric field. It is now a
+  text field and refuses, by name, anything that is not a whole number.
+
+**Left as is, for a decision:** import now refuses prices with a currency ("12,50 лв.")
+and records them as 0.00 € with a warning per row. The old behaviour took them as euro —
+also wrong, and silently so. The right move needs a decision: whether a price in leva
+from an old file should be converted at the official rate of 1.95583.
+
+**Verified:** full suite **2070 tests, 0 failures**, in UTC and Europe/Sofia;
+the review fixes — 12 mutations, each caught by exactly its own test. The round's own
+mutation testing (198 mutations, all caught) is as reported by the round — its harness
+lives outside the repository and was not run here; catalogue page checks — 8 scenarios and
+a 15 002-record scale run.
+
 ## v2.4.64
 
 **BG:** Кръг по **измерване**, не по четене на кода. Истинската програма беше пусната

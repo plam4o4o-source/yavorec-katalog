@@ -21,6 +21,127 @@ const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
 const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
 
+/* Видът на начислението за ЗАБАВА в читателската сметка — дословно този, с който
+   пише chargeOverdueFine в handlers/account.js. Стои като именувана константа,
+   защото по него се решава кои начисления вече са платени (виж
+   unpaidOverdueFines по-долу), а разминаване в един низ би дало мълчаливо
+   „нищо не е платено“, тоест точно сумата, която този кръг поправя. */
+const OVERDUE_CHARGE_TYPE = 'обезщетение';
+
+/* КОЛКО ОТ ВЕЧЕ НАЧИСЛЕНАТА ЗАБАВА ЧИТАТЕЛЯТ ОЩЕ НЕ Е ПЛАТИЛ (v2.4.65).
+   =====================================================================
+   КАКВО СТАВАШЕ ДОТУК. От v2.4.24 екранът „Просрочени“, печатното напомнително
+   писмо по чл. 43 и напомнянията по пощата/SMS събират `loans.fine` (вече
+   начисленото по заемането) с обезщетението за дните след последния падеж. Това
+   поправи едно разминаване и създаде друго: от v2.4.61 начислената забава влиза
+   и в ЧИТАТЕЛСКАТА СМЕТКА (chargeOverdueFine), тоест читателят може да я е
+   ПЛАТИЛ на гишето — а `loans.fine` не знае нищо за плащания и остава непокътнат
+   завинаги.
+   ИЗМЕРЕНОТО (проба № 3 от кръг 42): продължение на просрочено заемане начислява
+   2,70 €, читателят плаща 2,70 € на същото гише, салдото по сметката му става
+   0,00 € — и след нови 4 дни забава по 0,10 € екранът „Просрочени“, печатното
+   писмо и SMS-ът искат 3,10 € вместо дължимите 0,40 €. Тоест библиотекарката
+   подава на читателя ПОДПИСАН документ по чл. 43 с искане за сума, която той е
+   платил, при това точно на нея.
+   КАКВО ПРАВИ ПОПРАВКАТА И ЗАЩО ТОЧНО ТАКА. Избрано е „раздели начисленото от
+   оставащото“: `fine` остава ЕДНО число, но вече значи онова, което надписът над
+   него и без това обещава — „Общо ДЪЛЖИМО обезщетение“, тоест остатъкът; а
+   начисленото и платеното пътуват до екрана отделно (`fineAccrued`, `finePaid`),
+   за да може писмото да каже и трите числа. Другият път — писмото да иска
+   начисленото и само да добави „от тях платени“ — беше отхвърлен: сумата в реда
+   „Общо дължимо“ се преписва в квитанцията и се сверява с касата, а число, което
+   трябва да се дочете, за да се разбере, че не се дължи, е същата грешка с
+   по-дребен шрифт.
+   КАК СЕ СМЯТА. По същото правило, по което се води всяка сметка и по което
+   handlers/account.js (chargeCoverage) и handlers/stats.js вече разнасят
+   плащанията: НАЙ-СТАРОТО ЗАДЪЛЖЕНИЕ СЕ ПОКРИВА ПЪРВО, независимо от вида му.
+   Оттам се взима само остатъкът по начисленията от вид „обезщетение“ (забава) —
+   обезщетението за самия изгубен документ е ДРУГО задължение и се показва на
+   свое място (панелът „Изгубени и невърнати документи“).
+   Обхожда се веднъж на читател (а не chargeCoverage за всеки ред поотделно,
+   което е квадратично при читател с дълга сметка). */
+function unpaidOverdueFines(db, readerId, legacy) {
+  const lines = db.prepare(`
+    SELECT kind, type, amount FROM account_lines WHERE reader_id = ?
+    ORDER BY date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
+  `).all(readerId);
+  /* Заварената забава (виж unpaidForRows) влиза като НАЙ-СТАРОТО задължение:
+     тя е натрупана преди всяко начисление в сметката, тоест по правилото
+     „най-старото се покрива първо“ плащане без съответно начисление (аванс,
+     записан, докато забавата живееше само в loans.fine) отива първо за нея. */
+  const queue = legacy > 0.0001 ? [{ type: OVERDUE_CHARGE_TYPE, left: legacy }] : [];
+  for (const l of lines) {
+    if (l.kind === 'начисление') { queue.push({ type: l.type, left: Math.abs(Number(l.amount) || 0) }); continue; }
+    let money = Math.abs(Number(l.amount) || 0);
+    while (money > 0.0001 && queue.length) {
+      const head = queue[0];
+      const used = Math.min(money, head.left);
+      head.left -= used;
+      money -= used;
+      if (head.left <= 0.0001) queue.shift();
+    }
+    // Надплатеното (аванс) не се приписва на нищо — както в chargeCoverage и stats.js.
+  }
+  const rest = queue.reduce((s, q) => s + (q.type === OVERDUE_CHARGE_TYPE ? q.left : 0), 0);
+  return Math.round(rest * 100) / 100;
+}
+
+/* ЗАВАРЕНАТА ЗАБАВА, КОЯТО НИКОГА НЕ Е ВЛИЗАЛА В СМЕТКАТА (v2.4.65).
+   =====================================================================
+   КАКВО СТАВАШЕ. unpaidOverdueFines() чете само сметката. Но преди v2.4.61
+   loans:extend добавяше забавата САМО в loans.fine на отвореното заемане
+   (`UPDATE loans SET fine = COALESCE(fine, 0) + ?`), без ред в сметката — и
+   миграция, която да ги прехвърли, няма. В обновена база такова заемане има
+   fine = 2,70, а сметката — нищо. Тогава неплатеното излизаше 0, целите 2,70
+   се водеха платени, а писмото по чл. 43 пишеше „от тях платени 2,70 €“ за
+   пари, които никой не е искал, нито е давал. Библиотеката спираше да иска
+   дължимо обезщетение.
+
+   ПРАВИЛОТО — КОНСЕРВАТИВНО, ЗА ДА НЕ ИЗМИСЛЯ ДЪЛГ. Начисленията в сметката
+   не носят номер на заемане (бележката им е „Забава N дни по инв. № …“), тоест
+   точно отнасяне към заемане не е възможно. Затова заварената част се смята
+   като ДОЛНА граница: всичко начислено за забава в сметката на читателя се
+   приема, че е за показаните заемания, и само остатъкът над него е заварен.
+       заварено = max(0, Σ fineCharged на показаните − Σ начисления за забава)
+   Така числото никога не е по-голямо от истинското: където не може да се
+   докаже, че е дължимо, не се иска. А читател със само заварена забава (без
+   нито едно начисление в сметката) — точно случаят, който се губеше — си я
+   получава обратно изцяло. Трите места, които пресмятат (Просрочени,
+   напомнителното писмо, SMS), минават през тази една функция. */
+function unpaidForRows(db, readerId, rows) {
+  const onRows = rows.reduce((s, r) => s + (Number(r.fineCharged) || 0), 0);
+  const inAccount = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM account_lines
+      WHERE reader_id = ? AND kind = 'начисление' AND type = ?`).get(readerId, OVERDUE_CHARGE_TYPE).s;
+  const legacy = Math.max(0, Math.round((onRows - Math.abs(Number(inAccount) || 0)) * 100) / 100);
+  return unpaidOverdueFines(db, readerId, legacy);
+}
+
+/* РАЗНАСЯ НЕПЛАТЕНАТА ЗАБАВА ПО ПРОСРОЧЕНИТЕ ЗАЕМАНИЯ НА ЕДИН ЧИТАТЕЛ.
+   `rows` са редовете на ЕДИН читател; всеки носи `fineCharged` (вече
+   начисленото по заемането, дословно от loans.fine) и `fineNew` (обезщетението
+   за дните след последния падеж, още неначислено никъде).
+   Остатъкът се разпределя от НАЙ-НОВОТО начисление назад: плащанията покриват
+   най-старото задължение първо, значи неплатеното е по най-скорошните редове.
+   Сборът по читател е верен независимо от подредбата — тя определя само как
+   изглежда разбивката по редове, а редът на екрана трябва да е повтаряем.
+   Таванът `Math.min(charged, …)` пази от обратното разминаване: неплатена забава
+   по ВЕЧЕ ВЪРНАТО заемане е също дължима, но не по този ред и не в това писмо —
+   тя си стои в сметката на читателя. */
+function spreadUnpaidFine(rows, unpaid) {
+  let pool = unpaid;
+  const order = rows.slice().sort((a, b) =>
+    String(b.date_due || '').localeCompare(String(a.date_due || '')) || ((b.id || 0) - (a.id || 0)));
+  for (const r of order) {
+    const charged = Math.round((Number(r.fineCharged) || 0) * 100) / 100;
+    const still = Math.min(charged, Math.max(0, pool));
+    pool = Math.round((pool - still) * 100) / 100;
+    r.finePaid = Math.round((charged - still) * 100) / 100;
+    r.fineAccrued = Math.round((charged + (Number(r.fineNew) || 0)) * 100) / 100;
+    r.fine = Math.round((still + (Number(r.fineNew) || 0)) * 100) / 100;
+  }
+  return rows;
+}
+
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
@@ -153,7 +274,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      писмо по чл. 43 (виж loans:overdueByReader). */
   const CHILD_CATEGORY = 'дете до 14 г.';
   function checkReaderMayBorrow(db, readerId) {
-    const r = db.prepare('SELECT id, name, card_no, status, gdpr_consent FROM readers WHERE id = ?').get(readerId);
+    const r = db.prepare('SELECT id, name, card_no, status, category, gdpr_consent, parent_consent FROM readers WHERE id = ?').get(readerId);
     if (!r) throw new Error('Читателят не е намерен — вероятно е изтрит от друго работно място.');
     if (String(r.status || '').trim() === READER_BLOCK_STATUS) {
       throw new Error('Регистрацията на ' + r.name + ' е прекратена и заемане не се допуска. '
@@ -164,6 +285,26 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       throw new Error('За ' + r.name + ' няма отбелязано съгласие по чл. 47, ал. 2 и за обработване на личните данни. '
         + 'Заемането се вписва на негово име, затова първо отбележете съгласието в картона на читателя '
         + '(„Читатели“ → редакция) — читателят се подписва на читателския си картон.');
+    }
+    /* ЧЕТВЪРТАТА ПРЕЧКА: ДЕТЕ ДО 14 Г. БЕЗ СЪГЛАСИЕ НА РОДИТЕЛ/НАСТОЙНИК (v2.4.65).
+       =================================================================
+       Полето `parent_consent` съществува в схемата, формата има отметка за него
+       и показва датата му — а дотук никой не го четеше: нито assertConsent в
+       handlers/readers.js, нито тази врата. Дете на 7 години се записваше и
+       заемаше с `parent_consent = 0`, тоест отметката беше украса. Това е
+       буквално същият дефект, който v2.4.61 затвори за `gdpr_consent` — виж
+       дългата бележка при assertConsent в handlers/readers.js за защо съгласието
+       на дете под 14 г. се дава от родителя/настойника.
+       СЪОБЩЕНИЕТО НАЗОВАВА ИЗХОДА, а не само пречката: заварените деца са в
+       същото положение като заварените читатели без съгласие по чл. 47 и се
+       намират наведнъж от „Читатели“ → филтър „без съгласие“ — иначе
+       библиотекарката ги научава по едно, с детето пред себе си. */
+    if (String(r.category || '').trim() === CHILD_CATEGORY && !r.parent_consent) {
+      throw new Error('За ' + r.name + ' (дете до 14 г.) няма отбелязано съгласие на родител/настойник — '
+        + 'съгласието за обработване на лични данни на дете под 14 години се дава от родителя/настойника, '
+        + 'не от детето. Отбележете го в картона на читателя („Читатели“ → редакция), с датата, на която '
+        + 'родителят се е подписал на читателския картон. Всички такива картони се намират наведнъж от '
+        + '„Читатели“ → филтър „без съгласие“.');
     }
     return r;
   }
@@ -251,8 +392,20 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            трите различни суми, срещу които е бележката по-горе. */
         // toCents и тук (v2.4.61): числото се ПЕЧАТА в напомнителното писмо и се
         // сравнява с касата — виж бележката при toCents.
-        r.fine = toCents((Number(r.fine) || 0) + r.daysLate * perDay);
+        r.fineCharged = toCents(Number(r.fine) || 0);
+        r.fineNew = toCents(r.daysLate * perDay);
+        // fine/fineAccrued/finePaid се попълват от spreadUnpaidFine по-долу.
       });
+      /* ПЛАТЕНОТО СЕ ПРИСПАДА (v2.4.65) — виж дългата бележка при
+         unpaidOverdueFines в началото на файла. Едно четене на сметката на
+         читател, не на заемане: библиотека с 300 просрочени заемания при 80
+         читатели прави 80 заявки вместо 300. */
+      const byReader = new Map();
+      rows.forEach(r => {
+        if (!byReader.has(r.reader_id)) byReader.set(r.reader_id, []);
+        byReader.get(r.reader_id).push(r);
+      });
+      for (const [readerId, list] of byReader) spreadUnpaidFine(list, unpaidForRows(db, readerId, list));
       return rows;
     })
   );
@@ -299,10 +452,19 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       rows.forEach(r => {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);
         // Виж бележката при loans:overdue: натрупаното по заемането се добавя.
-        r.loans.forEach(d => { d.fine = toCents((Number(d.fine) || 0) + effectiveDaysLate(d.date_due, now) * perDay); });
+        r.loans.forEach(d => {
+          d.fineCharged = toCents(Number(d.fine) || 0);
+          d.fineNew = toCents(effectiveDaysLate(d.date_due, now) * perDay);
+        });
+        /* И тук платеното се приспада (v2.4.65) — виж unpaidOverdueFines в
+           началото на файла. Това е каналът на ПЕЧАТНОТО писмо по чл. 43: точно
+           тук се раждаше искането към читател, платил всичко на гишето. */
+        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
         // toCents и на сбора (v2.4.61): това е числото в реда „Общо дължимо
         // обезщетение“ на напомнителното писмо.
         r.fine = toCents(r.loans.reduce((sum, d) => sum + d.fine, 0));
+        r.fineAccrued = toCents(r.loans.reduce((sum, d) => sum + d.fineAccrued, 0));
+        r.finePaid = toCents(r.loans.reduce((sum, d) => sum + d.finePaid, 0));
         /* До кого върви писмото (v2.4.61). За читател под 14 години — до
            родителя/настойника, „чрез“ когото се води и самият читател. Решението
            се взима ТУК, а не на екрана, защото и печатът (src/views/logo-org.js),
@@ -383,8 +545,16 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            повреда. Същата проверка и в двете врати за заемане (виж бележката
            „ДВЕ ВРАТИ, ЕДНИ ПРАВИЛА“ по-долу). */
         if (b0.status === BOOK_STATUS_LOST) {
-          throw new Error('Инв. № ' + b0.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
-            + 'върнете състоянието му на „наличен“ от „Книги“; ако не — отчислете го с акт по чл. 30, т. 5.');
+          throw new Error(/* СЪВЕТЪТ СОЧИ КЪМ ДЕЙСТВИЕ, КОЕТО РАБОТИ (v2.4.65). Дотук тук пишеше
+             „върнете състоянието му на «наличен» от «Книги»“ — библиотекарката го
+             правеше и нищо друго не се променяше: заемането оставаше с белег
+             `lost = 1`, редът висеше в списъка за акт по чл. 30, т. 5 завинаги, а
+             обезщетението — по сметката на читателя. Сега обратният път е едно
+             действие („Документът се намери“, loans:found) и съветът сочи него. */
+            'Инв. № ' + b0.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
+            + 'натиснете „Документът се намери“ до реда му в „Просрочени“ → „Изгубени и невърнати документи“ — '
+            + 'това връща документа във фонда и урежда начислението. Ако не се е намерил — отчислете го с акт '
+            + 'по чл. 30, т. 5.');
         }
         const s = circRule(readerCategory(reader_id));
         const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
@@ -1001,6 +1171,165 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     })
   );
 
+  /* „ДОКУМЕНТЪТ СЕ НАМЕРИ“ — ОБРАТНИЯТ ПЪТ НА ИЗГУБЕНОТО ЗАЕМАНЕ (v2.4.65).
+     =====================================================================
+     КАКВО СТАВАШЕ ДОТУК. Пътят беше еднопосочен. Самата програма съветва на две
+     места (loans:checkout и loans:checkoutByCode по-долу): „Ако документът се е
+     намерил, върнете състоянието му на «наличен» от «Книги».“ Библиотекарката го
+     прави — и нищо друго не се променя: `loans.lost` си остава 1, а loans:lost
+     филтрира ЕДИНСТВЕНО по него, тоест редът виси в панела „подлежат на
+     отчисляване с акт по чл. 30, т. 5“ завинаги. Заедно с него виси и
+     обезщетението: проверено в проба № 3 от кръг 42 — 30,00 € по сметката на
+     читател, който е върнал книгата, и покана да бъде отчислен документ, който е
+     на рафта. Единственото място, което дотук сваляше белега, беше анулирането
+     на акт за отчисляване (handlers/deaccession-acts.js) — тоест изходът минаваше
+     през съставяне на акт, който не трябва да съществува.
+     ЗАЩО Е ГРЕШНО ЗА БИБЛИОТЕКАТА. Актът по чл. 30, т. 5 отчислява документ,
+     който го няма. Документ, който се е намерил, не подлежи на отчисляване и
+     включването му в акт е невярно съдържание в документ, подписан от комисия.
+     Отделно — обезщетението по чл. 43 се дължи за НЕвърнат документ; върнатият
+     документ не се обезщетява, дължи се само забавата, която е факт.
+     КАКВО ПРАВИ ПОПРАВКАТА. Едно действие, което прави наведнъж всичко, което
+     дотук библиотекарката нямаше как да направи:
+       • сваля `lost` и придружаващите го полета — редът излиза от списъка за акт;
+       • връща състоянието на документа на „наличен“, ако още стои „изгубен“
+         (ако библиотекарката вече го е върнала на ръка, не го пипа);
+       • СТОРНИРА начислението за САМИЯ документ по същото правило, по което го
+         прави и анулирането на акт (виж там): маха се само ако по него още не е
+         платено нищо; платеното не се пипа никога, защото парите са в касата и
+         връщането им е касова операция, не редакция на ред;
+       • ЗАБАВАТА ОСТАВА дължима — тя не е обезщетение за липсващ документ, а за
+         дните, през които той не е бил в библиотеката, и те са били такива;
+       • маха събитието от вид „изгубен“ за това заемане (същото, което прави и
+         анулирането на акт от този кръг): документът не е изгубен, а `events` е
+         обявеният източник на годишния отчет и на Дневника;
+       • вписва ред в одитната следа с документа, читателя и съдбата на парите.
+     ОТЧИСЛЕНИЯТ ДОКУМЕНТ НЕ МИНАВА ОТТУК. Ако актът вече е съставен, номерът е
+     освободен и документът е излязъл от фонда по чл. 39 — обратният път е
+     АНУЛИРАНЕ НА АКТА, което връща и заемането, и начисленията, и резервациите.
+     Затова тук се отказва с изречение, което казва точно кой акт и откъде се
+     анулира, вместо да се получат два несъгласувани пътя към едно състояние. */
+  ipcMain.handle('loans:found', (e, { id, reverseCharge, date, note } = {}) =>
+    run(() => {
+      if (date != null && date !== '' && !isValidIsoDate(date)) {
+        throw new Error('Датата (' + date + ') е невалидна.');
+      }
+      const db = getDb();
+      ensureLostSchema(db);
+      const when = date || today();
+      const tx = db.transaction(() => {
+        const l = db.prepare(`
+          SELECT l.id, l.book_id, l.reader_id, l.lost, l.lost_date, l.lost_amount, l.lost_account_line_id,
+                 l.lost_resolution, l.lost_note, l.fine,
+                 b.inv_number, b.title, b.status, b.deaccession_act_id, b.deaccession_date,
+                 r.name AS reader_name, r.card_no
+          FROM loans l
+          JOIN books b ON b.id = l.book_id
+          JOIN readers r ON r.id = l.reader_id
+          WHERE l.id = ?`).get(id);
+        if (!l) throw new Error('Заемането не е намерено — вероятно е изтрито от друго работно място.');
+        if (!l.lost) {
+          throw new Error('Това заемане не е приключено като изгубен документ и няма какво да се връща.');
+        }
+        if (l.deaccession_act_id != null || l.deaccession_date != null || l.status === 'отчислен') {
+          const act = l.deaccession_act_id != null
+            ? db.prepare('SELECT no, date FROM deaccession_acts WHERE id = ?').get(l.deaccession_act_id)
+            : null;
+          throw new Error('Инв. № ' + (l.inv_number ?? '—') + ' вече е ОТЧИСЛЕН от фонда'
+            + (act ? ' с акт № ' + act.no + ' от ' + bgDate(act.date) : '')
+            + ' и не може да бъде върнат с този бутон. Намерен документ, който вече е отчислен, се връща във фонда '
+            + 'само чрез АНУЛИРАНЕ НА АКТА — от „Отчисляване“ → актът → „Анулирай“. Анулирането връща документа, '
+            + 'отваря заемането и урежда начисленията по него.');
+        }
+        /* Съдбата на начислението за САМИЯ документ. Решава се преди UPDATE-а,
+           защото след като `lost_account_line_id` се занули, редът вече не може
+           да бъде намерен. */
+        let charge = null, chargeAction = 'няма начисление';
+        /* Дали връзката към начислението да се свали. Сваля се само когато
+           начислението НАИСТИНА е уредено (сторнирано или прочетено); ако
+           покритието не може да се прочете, редът остава в сметката и връзката
+           му със заемането НЕ се къса — иначе остава начисление за изгубен
+           документ, което никой вече не може да свърже с книгата, а книгата се
+           е намерила. */
+        let keepChargeLink = false;
+        if (l.lost_account_line_id) {
+          let cov = null, covErr = null;
+          try { cov = chargeCoverage(db, l.lost_account_line_id); }
+          catch (err) {
+            /* Празен catch няма: без покритието не може да се реши дали редът да
+               падне, затова се ЗАПАЗВА (по-безопасното) и причината влиза в
+               следата — иначе изчезва ред от касовия дневник по неизвестна
+               причина. */
+            covErr = err;
+            logAudit('Документът се намери', 'ВНИМАНИЕ: покритието на начислението по заемане № ' + l.id
+              + ' не можа да се прочете (' + err.message + ') — начислението остава в сметката.');
+          }
+          /* ПРОВАЛЕНО ЧЕТЕНЕ НЕ Е „ИЗТРИТО ПО-РАНО“ (v2.4.65). Дотук и двата
+             случая стигаха до `!cov` и следата, и съобщението на екрана
+             казваха „начислението е изтрито от картона по-рано“ — невярно, то
+             си стои в сметката. После lost_account_line_id се зануляваше и
+             начислението оставаше без връзка със заемането. */
+          if (covErr) {
+            keepChargeLink = true;
+            chargeAction = 'начислението ОСТАВА — покритието му не можа да се прочете (' + covErr.message
+              + '); уредете го от картона на читателя';
+          } else if (!cov) { chargeAction = 'начислението е изтрито от картона по-рано'; }
+          else if (reverseCharge === false) { charge = cov; chargeAction = 'начислението ОСТАВА по решение на библиотекаря'; }
+          else if (!cov.covered) {
+            db.prepare('DELETE FROM account_lines WHERE id = ?').run(l.lost_account_line_id);
+            charge = cov;
+            chargeAction = 'сторнирано ' + cov.charged.toFixed(2) + ' €';
+          } else {
+            charge = cov;
+            chargeAction = 'начислението ОСТАВА (платено ' + cov.covered.toFixed(2) + ' € от '
+              + cov.charged.toFixed(2) + ' €) — уредете го от картона на читателя';
+          }
+        }
+        /* При непрочетено покритие връзката към начислението ОСТАВА (виж
+           keepChargeLink горе) — CASE, а не второ UPDATE, за да е едно изявление. */
+        db.prepare(`UPDATE loans SET lost = NULL, lost_date = NULL, lost_resolution = NULL,
+            lost_amount = NULL,
+            lost_account_line_id = CASE WHEN ? THEN lost_account_line_id ELSE NULL END,
+            lost_replacement_book_id = NULL, lost_replacement_note = NULL,
+            lost_note = ? WHERE id = ?`)
+          .run(keepChargeLink ? 1 : 0, String(note || '').trim() || l.lost_note || null, l.id);
+        /* Състоянието на документа. Ако библиотекарката вече го е върнала на
+           „наличен“ по съвета на програмата, не се пипа; ако стои „изгубен“ —
+           връща се. Друго състояние („за реставрация“, „бракуван“) също не се
+           пипа: то е нечие друго решение и не е работа на този бутон. */
+        let statusBack = null;
+        if (l.status === BOOK_STATUS_LOST) {
+          db.prepare('UPDATE books SET status = ?, status_date = ? WHERE id = ?').run('наличен', when, l.book_id);
+          statusBack = 'наличен';
+        }
+        // Виж дългата бележка по-горе: събитието „изгубен“ описва факт, който не се е случил.
+        const droppedEvents = db.prepare('DELETE FROM events WHERE kind = ? AND book_id = ? AND reader_id = ? AND date = ?')
+          .run(EVENT_KIND_LOST, l.book_id, l.reader_id, l.lost_date).changes;
+        const fineLeft = toCents(Number(l.fine) || 0);
+        logAudit('Документът се намери',
+          'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
+          + '; ' + readerTrace({ name: l.reader_name, card_no: l.card_no })
+          + '; заемане № ' + l.id + ', отбелязано като изгубено на ' + bgDate(l.lost_date)
+          + '; обезщетение за документа: ' + chargeAction
+          + (fineLeft ? '; начислената забава ' + fineLeft.toFixed(2) + ' € ОСТАВА дължима' : '')
+          + (statusBack ? '; състоянието на документа е върнато на „наличен“' : '')
+          + (droppedEvents ? '; премахнато събитие „изгубен“' : '')
+          + (String(note || '').trim() ? '; бележка: ' + String(note).trim() : ''));
+        return {
+          inv_number: l.inv_number, title: l.title, reader_name: l.reader_name,
+          statusBack, chargeAction, droppedEvents,
+          reversed: charge && chargeAction.startsWith('сторнирано') ? charge.charged : 0,
+          keptCharge: charge && chargeAction.startsWith('начислението ОСТАВА')
+            ? { charged: charge.charged, covered: charge.covered, outstanding: charge.outstanding } : null,
+          fineLeft
+        };
+      });
+      const r = tx.immediate();
+      scheduleCatalogWrite(CIRCULATION); // документът пак е наличен — пише файл, не база
+      return r;
+    })
+  );
+
   /* Заемане и връщане чрез баркод четец — четецът въвежда текст и Enter, точно
      както при физическа клавиатура, затова тук се приема inv. номер или баркод. */
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
@@ -1034,8 +1363,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         if (b.status === 'отчислен') throw new Error('Инв. № ' + b.inv_number + ' е отчислен от фонда.');
         // Виж бележката при loans:checkout — изгубеният документ не се заема по нито една от двете врати.
         if (b.status === BOOK_STATUS_LOST) {
-          throw new Error('Инв. № ' + b.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
-            + 'върнете състоянието му на „наличен“ от „Книги“; ако не — отчислете го с акт по чл. 30, т. 5.');
+          throw new Error(// Виж бележката при loans:checkout — двете врати дават един и същи съвет.
+            'Инв. № ' + b.inv_number + ' е отбелязан като изгубен/невърнат. Ако документът се е намерил, '
+            + 'натиснете „Документът се намери“ до реда му в „Просрочени“ → „Изгубени и невърнати документи“ — '
+            + 'това връща документа във фонда и урежда начислението. Ако не се е намерил — отчислете го с акт '
+            + 'по чл. 30, т. 5.');
         }
         /* Свободна бройка, а не „има ли изобщо отворен заем". Моделът на данните
            изрично поддържа няколко екземпляра на едно заглавие (inventory.quantity),
@@ -1192,3 +1524,17 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   // ТОЧНО сумата, която после ще се начисли на гишето (виж loans:overdueByReader).
   return { LOAN_SELECT, effectiveDaysLate };
 };
+
+/* Закачени за самата експортирана функция, а не подадени през deps — точно както
+   handlers/account.js закача chargeLost/chargeCoverage (виж бележката в края на
+   онзи файл). main.js регистрира този модул, без да пази върнатото, тоест няма
+   къде да ги прекара до handlers/notices.js; а напомнянията по пощата и SMS
+   трябва да искат СЪЩАТА сума като екрана „Просрочени“ и печатното писмо —
+   второ, „почти същото“ пресмятане на това място вече три пъти е давало три
+   различни суми за едно задължение (виж бележките при loans:overdue).
+   `require('./loans')` от notices.js не регистрира нищо повторно: модулът вече е
+   в кеша на Node и се взима готов. */
+module.exports.OVERDUE_CHARGE_TYPE = OVERDUE_CHARGE_TYPE;
+module.exports.unpaidOverdueFines = unpaidOverdueFines;
+module.exports.spreadUnpaidFine = spreadUnpaidFine;
+module.exports.unpaidForRows = unpaidForRows;

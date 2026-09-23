@@ -565,6 +565,17 @@ test('изгледът предлага проект и отказва „Изт
    4. ПОПРАВКА НА ВПИСАНА ПАРТИДА
    ================================================================== */
 
+/* v2.4.65 (кръг 42, находка В8) — ТУК НАРОЧНО Е СМЕНЕНА ЕДНА СТОЙНОСТ.
+   Двата теста по-долу завеждаха партида с начин на постъпване „покупка“. Такава
+   стойност НЕ съществува в програмата: позволените са закупуване / депозит /
+   обмен / дарение (db/enum-triggers.js), и в истинската база SQL тригерът
+   отхвърля реда — библиотекарката получаваше суровото „Непозната стойност за
+   acquisitions.how.“ Тестовете минаваха само защото харнесът freshDb не създава
+   enum тригерите, тоест заковаваха поведение, каквото програмата никога не е
+   имала. От v2.4.65 обработчикът отказва такава стойност сам, с обяснение на
+   български (виж assertAcqHow в handlers/acquisitions.js), затова тук е
+   изписано истинското „закупуване“. Всичко останало в двата теста —
+   поправката, следата поименно и проверките при update — е непроменено. */
 test('acquisitions:update поправя партидата и вписва всяка промяна поименно в одитната следа', () => {
   /* Дотук имаше само create и delete, а delete отказва, щом поне един документ е
      инвентиран в партидата. Тоест сгрешен номер на фактура или сгрешена дата на
@@ -572,14 +583,14 @@ test('acquisitions:update поправя партидата и вписва вс
      Поправката е позволена, но не е мълчалива: редът е в официален регистър. */
   const { db, ipcMain, audit } = setup();
   const acqId = ok(ipcMain.invoke('acquisitions:create', {
-    no: 5, year: '2026', date: '2026-03-01', how: 'покупка', from_source: 'Книжарница',
+    no: 5, year: '2026', date: '2026-03-01', how: 'закупуване', from_source: 'Книжарница',
     doc_type: 'фактура', doc_no: '111', doc_date: '2026-02-28', total_count: 10, sum: 100
   }), 'създаване');
 
   audit.length = 0;
   const changed = ok(ipcMain.invoke('acquisitions:update', {
     id: acqId,
-    acq: { date: '2026-03-01', how: 'покупка', from_source: 'Книжарница',
+    acq: { date: '2026-03-01', how: 'закупуване', from_source: 'Книжарница',
       doc_type: 'фактура', doc_no: '222', doc_date: '2026-02-28', total_count: 12, sum: 100 }
   }), 'поправка');
   assert.equal(changed, 2, 'две променени полета — номер на документа и общ брой');
@@ -600,7 +611,7 @@ test('acquisitions:update поправя партидата и вписва вс
   audit.length = 0;
   ok(ipcMain.invoke('acquisitions:update', {
     id: acqId,
-    acq: { date: '2026-03-01', how: 'покупка', from_source: 'Книжарница',
+    acq: { date: '2026-03-01', how: 'закупуване', from_source: 'Книжарница',
       doc_type: 'фактура', doc_no: '222', doc_date: '2026-02-28', total_count: 12, sum: 100 }
   }), 'запис без промяна');
   assert.equal(audit.length, 1);
@@ -613,7 +624,7 @@ test('поправката на партида не е дупка в прове�
      въвеждам като покупка, после сменям начина на „дарение“. */
   const { db, ipcMain } = setup();
   const acqId = ok(ipcMain.invoke('acquisitions:create', {
-    no: 1, year: '2026', date: '2026-03-01', how: 'покупка', doc_type: 'фактура', total_count: 3
+    no: 1, year: '2026', date: '2026-03-01', how: 'закупуване', doc_type: 'фактура', total_count: 3
   }), 'създаване');
 
   const noAddr = ipcMain.invoke('acquisitions:update', {
@@ -623,14 +634,14 @@ test('поправката на партида не е дупка в прове�
   assert.match(noAddr.error, /адресът на дарителя/);
 
   const badDate = ipcMain.invoke('acquisitions:update', {
-    id: acqId, acq: { date: 'НЕВАЛИДНА-99-99', how: 'покупка', total_count: 3 }
+    id: acqId, acq: { date: 'НЕВАЛИДНА-99-99', how: 'закупуване', total_count: 3 }
   });
   assert.equal(badDate.ok, false);
   assert.match(badDate.error, /[Дд]атата/);
 
   // Нищо от отказаните не е влязло в базата.
   const row = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(acqId);
-  assert.equal(row.how, 'покупка');
+  assert.equal(row.how, 'закупуване');
   assert.equal(row.date, '2026-03-01');
 
   // А с адрес дарението минава.

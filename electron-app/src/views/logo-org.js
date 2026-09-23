@@ -57,11 +57,72 @@ async function labelRows(from, to) {
    е казал „да“, и напълно напразно, ако каже „не“. Сега низът се сглобява чак
    след потвърждението. „Диапазон“ минава по същия път — таванът важи и там,
    защото диапазон „от 1 до 99999“ е точно същият печат с друго име. */
+/* ДИАПАЗОНЪТ ВЕЧЕ МЪЛЧИ ПО-МАЛКО (v2.4.65).
+   =====================================================================
+   КАКВО СТАВАШЕ ДОТУК — две неща наведнъж.
+   ПЪРВО, ТИХАТА ЛИПСА. Диапазон 1–6, в който № 3 е отчислен, а № 4 изобщо не
+   съществува, даваше 4 етикета — без дума. Библиотекарката реже листа, лепи
+   етикетите и открива разминаването чак пред рафта, ако изобщо го открие. А
+   двете причини са различни и се оправят различно: отчисленият документ НЕ
+   получава етикет нарочно (залепен етикет на книга, която не е на рафта, е
+   грешка, която после никой не свързва с отчисляването — виж labelRows в
+   handlers/books.js), докато липсващият номер значи дупка в инвентарната книга
+   и подлежи на проверка. Затова се казват и броят, и самите номера.
+   ВТОРО, ГРАНИЦИТЕ. `!from || !to` отказваше и НУЛАТА като начало, и празното
+   поле — а обработчикът поддържа отворен диапазон („от 500 нататък“, „до 100“,
+   празно и двете = целият фонд) точно за случая „отпечатай етикетите на всичко,
+   заведено след последния път“. Тук границата се четеше по-строго, отколкото я
+   пази обработчикът, без никаква причина.
+   КАКВО НЕ МОЖЕ ДА СЕ КАЖЕ ОТТУК. Кой от липсващите номера е отчислен и кой не
+   съществува — каналът връща само действащия фонд и не знае за останалите.
+   Разделянето иска промяна в handlers/books.js (чужд файл за този кръг) и е
+   докладвано; дотогава изречението назовава и двете възможности, вместо да гадае. */
+function labelBound(sel) {
+  const el = $('[name=' + sel + ']');
+  const raw = el ? String(el.value || '').trim() : '';
+  if (!raw) return { ok: true, value: null };           // празно = без граница (виж labelRows)
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0 || !/^\d+$/.test(raw)) return { ok: false, raw };
+  return { ok: true, value: n };
+}
+/* Питане за липсващите номера. Връща false, ако библиотекарката се откаже.
+   ПРАГЪТ GAP_MAX е нарочен. Въпросът има смисъл, когато липсващите са СПИСЪК,
+   който човек може да вземе и да провери в инвентарната книга — тогава празнината
+   е изключение и си заслужава да бъде назована. „От 1 до 99999“ не е такъв случай:
+   това е бланкетен печат на целия фонд с друго име, липсващите са десетки хиляди и
+   изреждането им не помага на никого, а въпросът само застава пред другия, който
+   наистина трябва да бъде зададен — „наистина ли 14 750 етикета?“
+   (confirmManyLabels в printLabelSheet, v2.3.0). */
+const LABEL_GAP_MAX = 50;
+async function labelGapCheck(from, to, rows) {
+  if (from == null || to == null) return true;          // отворен диапазон — няма „колко искани“
+  const asked = to - from + 1;
+  const gap = asked - rows.length;
+  if (asked <= 0 || gap <= 0 || gap > LABEL_GAP_MAX) return true;
+  const have = new Set(rows.map(r => Number(r.inv_number)));
+  const missing = [];
+  for (let n = from; n <= to && missing.length <= 40; n++) if (!have.has(n)) missing.push(n);
+  const list = missing.length > 40 ? missing.slice(0, 40).join(', ') + ' и други' : missing.join(', ');
+  return await askConfirm('От ' + asked + ' поискани инвентарни номера (' + from + '–' + to + ') ще излязат '
+    + rows.length + ' етикета. Липсват ' + gap + ' номера: ' + list + '. '
+    + 'Такъв номер или е отчислен от фонда (на отчислен документ не се лепи етикет), или изобщо не е заведен '
+    + 'в инвентарната книга. Проверете ги от „Инвентарна книга“, ако очаквате да са налични.',
+    { kind: 'warn', title: 'Част от номерата няма да получат етикет', okLabel: 'Печатай ' + rows.length });
+}
 async function printLabelsRange() {
-  const from = parseInt($('[name=lblFrom]').value, 10), to = parseInt($('[name=lblTo]').value, 10);
-  if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
-  const rows = await labelRows(from, to);
-  if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
+  const f = labelBound('lblFrom'), t = labelBound('lblTo');
+  if (!f.ok || !t.ok) return toast('„' + ((!f.ok ? f.raw : t.raw)) + '“ не е инвентарен номер. '
+    + 'Въведете цяло число или оставете полето празно (празно „от“ = от началото, празно „до“ = до края).', 'err');
+  if (f.value != null && t.value != null && t.value < f.value) {
+    return toast('Крайният инвентарен номер (' + t.value + ') е по-малък от началния (' + f.value + ').', 'err');
+  }
+  const rows = await labelRows(f.value, t.value);
+  /* Празният резултат казва и ЗАЩО е празен (v2.4.65): „няма документи“ звучи
+     като „нищо не съществува“, а най-честата причина е точно обратната — номерата
+     ги има, но са отчислени, тоест етикет не им се полага. */
+  if (!rows.length) return toast('Няма документи в този диапазон от действащия фонд — '
+    + 'номерата или са отчислени, или не са заведени в инвентарната книга.', 'err');
+  if (!await labelGapCheck(f.value, t.value, rows)) return;
   return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsRange = printLabelsRange;
@@ -71,11 +132,21 @@ async function printLabelsAll() {
   return printLabelSheet({ rows, card: lblCard }, 'fund');
 }
 window.printLabelsAll = printLabelsAll;
+// Сигнатурните етикети минават по същия път — виж бележката при printLabelsRange.
 async function printSignatureLabelsRange() {
-  const from = parseInt($('[name=sigFrom]').value, 10), to = parseInt($('[name=sigTo]').value, 10);
-  if (!from || !to || to < from) return toast('Въведете валиден диапазон от инвентарни номера.', 'err');
-  const rows = await labelRows(from, to);
-  if (!rows.length) return toast('Няма документи в този диапазон.', 'err');
+  const f = labelBound('sigFrom'), t = labelBound('sigTo');
+  if (!f.ok || !t.ok) return toast('„' + ((!f.ok ? f.raw : t.raw)) + '“ не е инвентарен номер. '
+    + 'Въведете цяло число или оставете полето празно (празно „от“ = от началото, празно „до“ = до края).', 'err');
+  if (f.value != null && t.value != null && t.value < f.value) {
+    return toast('Крайният инвентарен номер (' + t.value + ') е по-малък от началния (' + f.value + ').', 'err');
+  }
+  const rows = await labelRows(f.value, t.value);
+  /* Празният резултат казва и ЗАЩО е празен (v2.4.65): „няма документи“ звучи
+     като „нищо не съществува“, а най-честата причина е точно обратната — номерата
+     ги има, но са отчислени, тоест етикет не им се полага. */
+  if (!rows.length) return toast('Няма документи в този диапазон от действащия фонд — '
+    + 'номерата или са отчислени, или не са заведени в инвентарната книга.', 'err');
+  if (!await labelGapCheck(f.value, t.value, rows)) return;
   return printLabelSheet({ rows, card: sigLblCard }, 'sig');
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
@@ -364,7 +435,17 @@ async function printOverdueNotices() {
     ${r.loans.map(l => `<tr><td>${l.inv_number ?? ''}</td><td>${esc(l.title)}</td><td>${bg(l.date_out)}</td><td>${bg(l.date_due)}</td></tr>`).join('')}
     </tbody></table>
     ${levelLine(levels[r.reader_id] || 1)}
-    <div class="pmeta">Общо дължимо обезщетение: <b>${mny(r.fine)}</b>${perDay
+    ${/* ПЛАТЕНОТО СЕ ПРИСПАДА И СЕ КАЗВА (v2.4.65).
+          `r.fine` идва от loans:overdueByReader и от този кръг значи ОСТАВАЩОТО
+          за плащане, а не начисленото (виж unpaidOverdueFines в
+          handlers/loans.js). Дотук писмото искаше начисленото: читател, платил
+          2,70 € на гишето, получаваше ПОДПИСАН документ по чл. 43 с искане за
+          3,10 € — от същата библиотекарка, която му е издала квитанцията.
+          Когато има платено, и трите числа се изписват: иначе сумата в това
+          писмо е по-малка от тази в предишното, без нищо по листа да го обяснява. */''}
+    <div class="pmeta">${Number(r.finePaid) > 0
+      ? `Начислено обезщетение към днешна дата: <b>${mny(r.fineAccrued)}</b>; платено по читателската сметка:
+        <b>${mny(r.finePaid)}</b>.<br>` : ''}Общо дължимо обезщетение: <b>${mny(r.fine)}</b>${perDay
       ? ` (${esc(perDay)} €/ден забава съгласно Правилата за обслужване на читателите на библиотеката,
         приети на основание чл. 43, ал. 2 от Наредба № 3 от 18.11.2014 г.)` : ''}.</div>
     ${ssig(['Библиотекар: ' + esc(s.librarian || '…………………')])}</div>`).join(''), null, logNotices);

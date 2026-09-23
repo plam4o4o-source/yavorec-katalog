@@ -7,7 +7,10 @@
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
-  const { assertUniqueBarcode } = require('./books');
+  /* `parseBookPrice` е изнесена от handlers/books.js точно за да може вносът да
+     мине през СЪЩАТА проверка, която пази формата за книга — виж importPrice
+     по-долу защо това не е козметика. */
+  const { assertUniqueBarcode, parseBookPrice } = require('./books');
   const { ENUM_COLUMNS } = require('../db/enum-triggers');
   /* Позволените стойности се четат от същия списък, който създава тригерите — така
      двата не могат да се разминат при бъдеща промяна. */
@@ -31,12 +34,17 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     if (!t.rows.length) throw new Error('Файлът е празен или не се разчита като таблица.');
     const headers = t.rows[0].map(h => String(h || '').trim());
     const body = t.rows.slice(1);
-    IMPORT_CACHE = { path: filePath, headers, body };
+    /* Предупреждението за повреден файл се ПАЗИ в кеша, не само се връща на
+       прегледа: отчетът след вноса се прави от import:run, който дотогава нямаше
+       никакъв достъп до него (виж report.fileWarning по-долу). */
+    IMPORT_CACHE = { path: filePath, headers, body, warning: t.warning || null };
     return {
       path: filePath, encoding: t.encoding, delimiter: t.delimiter,
       // BUG FIX (одит #11): предупреждение за незатворена кавичка или подозрителен
-      // брой колони спрямо заглавния ред (виж importers.js) — подадено чак дотук,
-      // за да може бъдещ екран на прегледа да го покаже; засега не спира внасянето.
+      // брой колони спрямо заглавния ред (виж importers.js) — подадено чак дотук.
+      // v2.4.65: вече се ПОКАЗВА — в диалога за съответствие над бутона „Въведи N
+      // реда“ и повторно в отчета след вноса (src/views/data-import.js). Не спира
+      // внасянето: файлът може и да е наред, решението е на библиотекарката.
       warning: t.warning || null,
       headers, mapping: importers.guessMapping(headers),
       preview: body.slice(0, 8), total: body.length, fields: IMPORT_FIELDS
@@ -86,11 +94,57 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  // Числата в стари износи идват с интервали за хилядни и със запетая за десетичен знак.
-  function parseNum(v) {
-    const s = String(v ?? '').replace(/\s/g, '').replace(',', '.');
-    const n = parseFloat(s);
-    return Number.isFinite(n) ? n : 0;
+  /* ЦЕНАТА ВЪВ ВНОСА МИНАВА ПРЕЗ СЪЩАТА ПРОВЕРКА, КОЯТО ПАЗИ КАРТОНА (v2.4.65).
+     =====================================================================
+     КАКВО СТАВАШЕ ДОТУК. Тук стоеше собствено четене на число:
+       parseFloat(String(v).replace(/\s/g,'').replace(',','.')) || 0
+     — тоест приемаше СЕ ВСЯКО число, включително отрицателно, а всичко
+     неразпознато ставаше мълчаливо 0. Формата за книга (bookPayload в
+     handlers/books.js) минава през parseBookPrice и отказва и двете;
+     вносът — най-масовият път за вписване в цялата програма, първият
+     работен ден е внос на целия стар опис — беше останал извън правилото.
+     ЗАЩО Е ГРЕШНО ЗА БИБЛИОТЕКАТА И ЗА НАРЕДБА № 3. Измерено с файл от два
+     реда (10,00 € и −99,00 €; същият файл стои в test/vnos-v2465.test.js):
+       КДБФ 2020, постъпили     : 2 документа, −89 €
+       КДБФ 2020, наличност 31.12: 2 документа, −89 €
+       Инвентарна книга (KPI)   : „2 Неотчислени −89.00 € / −174.07 лв.“
+       „Съгласуване на фонда“   : 0 находки — НЕ ГО НАМИРА
+     Стойността на фонда по чл. 13 и чл. 16 е сбор от оценките на документите;
+     отрицателна оценка не съществува по Наредба № 3 — комисията по чл. 3, ал. 2
+     оценява, или документът се вписва с 0. Един такъв ред занижава СБОРА НА
+     ЦЕЛИЯ ФОНД, числото отива в годишния отчет и в НСИ, а нито един екран не
+     го посочва. По-лошото: записът е и НЕРЕМОНТИРУЕМ през картона — всяко
+     записване от „Инвентарна книга → Редакция“ пада с „Цената «−99» е
+     отрицателна…“, дори библиотекарката да поправя съвсем друго поле, защото
+     формата проверява цената, която тя никога не е въвеждала.
+     ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Границата е обработчикът, а правилото вече
+     съществува на едно място — parseBookPrice. Двата случая обаче не са
+     еднакви и не бива да свършват еднакво:
+       • ОТРИЦАТЕЛНА цена — грешката се вдига и редът отпада в report.errors с
+         номера на реда, точно както прави assertUniqueBarcode два реда по-долу.
+         Ред, който би развалил сбора на фонда, не влиза „както и да е“: по-добре
+         е да липсва един документ и да се види кой, отколкото да влезе с оценка,
+         която после никой не може да намери и никой не може да поправи.
+       • НЕЧИСЛОВА цена („безплатно“, „дарение“, „—“) — документът е годен, това
+         е обичайно съдържание на стар опис. Стойността пада на 0,00 €, но вече
+         НЕ мълчаливо: редът получава предупреждение с номера си, за да може
+         библиотекарката да реши дали да го оцени по чл. 3, ал. 2.
+     Предупреждението се събира в списъка НА РЕДА и влиза в отчета едва след
+     като редът наистина е вписан: ред, паднал по-нататък (напр. на дублиран
+     баркод), вече е описан в report.errors и не бива да се появява втори път с
+     твърдение, че е вписан със стойност 0,00 €. */
+  function importPrice(raw, lineNo, rowWarnings) {
+    try {
+      return parseBookPrice(raw);
+    } catch (err) {
+      const norm = String(raw ?? '').trim().replace(/\s/g, '').replace(',', '.');
+      // Отрицателна — редът отпада (хвърлената грешка се улавя от catch-а на реда).
+      if (/^[-−]/.test(norm)) throw err;
+      rowWarnings.push(`ред ${lineNo}: цената „${String(raw).trim()}“ не е число и документът е вписан `
+        + 'със стойност 0,00 €. Ако документът е оценен от комисията (чл. 3, ал. 2), впишете оценката '
+        + 'от „Инвентарна книга“ → „Редакция“; ако не е оценяван, 0,00 € е вярното.');
+      return 0;
+    }
   }
   // BUG FIX (одит #4): по-рано тук се махаха ВСИЧКИ недигитни знаци с
   // .replace(/[^\d]/g,''), което тихо поврежда стойността, вместо да я отхвърли:
@@ -197,8 +251,14 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const insertBook = db.prepare(`INSERT INTO books (${BOOK_FIELDS.join(',')})
         VALUES (${BOOK_FIELDS.map(f => '@' + f).join(',')})`);
       const insertInv = db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)');
-      const existingInv = new Set(db.prepare('SELECT inv_number FROM books WHERE inv_number IS NOT NULL')
-        .all().map(r => String(r.inv_number)));
+      /* Заетите инвентарни номера се държат с ЗАГЛАВИЕТО на документа, който ги
+         заема (v2.4.65). Set-ът остава Set — ключовете на Map-а са същите — но
+         когато ред бъде пропуснат заради зает номер, отчетът вече може да каже
+         КОЙ го заема („№ 200 е зает от «Заварена 200»“), а не само че нещо е
+         пропуснато. Виж report.skippedRows по-долу. */
+      const invOwner = new Map(db.prepare('SELECT inv_number, title FROM books WHERE inv_number IS NOT NULL')
+        .all().map(r => [String(r.inv_number), r.title]));
+      const existingInv = new Set(invOwner.keys());
       const existingIsbn = new Set(db.prepare("SELECT isbn FROM books WHERE isbn IS NOT NULL AND isbn <> ''")
         .all().map(r => String(r.isbn).replace(/[^0-9Xx]/g, '')));
       // Трета проверка за дубликат: ред без инвентарен номер и без ISBN не може да се
@@ -208,7 +268,38 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const existingTitles = new Set(db.prepare('SELECT title, author FROM books').all()
         .map(r => titleKey(r.title, r.author)));
 
-      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [] };
+      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [] };
+      /* КОЙ ТОЧНО Е ПРОПУСНАТ — А НЕ САМО КОЛКО (v2.4.65).
+         =====================================================================
+         КАКВО СТАВАШЕ ДОТУК. Всеки от четирите изхода „пропусни реда“ правеше
+         само `report.skipped++` и се връщаше. Екранът след вноса показваше
+         „2 Пропуснати · дубликати или редове с грешка“ и нищо повече — при
+         нула грешки и нула предупреждения. Измерено (виж
+         test/vnos-v2465.test.js): файл с три реда върху фонд, в който № 700 е
+         зает от „Заварена 700“, дава added=1, skipped=2, errors=[], usedInv=[] —
+         тоест два документа не са влезли и НЯМА откъде да се разбере кои.
+         ЗАЩО Е ГРЕШНО ЗА БИБЛИОТЕКАТА. Най-честият случай не е дубликат, а
+         СБЛЪСЪК: ред, чийто инвентарен номер е зает от съвсем друга книга
+         (различно заглавие, различен автор) — слята библиотека, втора поредица,
+         два клона с отделни номерации. Такъв документ не е вписан никъде и по
+         нищо не личи, че липсва: инвентарната книга просто няма ред за него,
+         а по чл. 16, ал. 1 всеки постъпил документ подлежи на вписване. При
+         сливане това са стотици документа.
+         ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Машинката за назоваване на редове вече
+         съществува и работи в другия клон — `report.usedInv` изрежда „ред 2 →
+         № 203“, когато номерът се преномерира. Тук се прави същото: всеки
+         пропуснат ред влиза с номера си, инвентарния си номер, заглавието си и
+         ПРИЧИНАТА, която назовава изхода (кой заема номера и какво да се
+         направи), а екранът ги изрежда както изрежда усвоените номера.
+         Списъкът е с таван 100 реда (както report.errors) — при внос на 5 000
+         реда отчетът не бива да стане самият той нечетим; общият брой остава в
+         report.skipped, а колко от тях са описани се вижда от дължината. */
+      const noteSkipped = (lineNo, inv, title, reason) => {
+        report.skipped++;
+        if (report.skippedRows.length < 100) {
+          report.skippedRows.push({ line: lineNo, inv: inv || null, title: title || '', reason });
+        }
+      };
       const cell = (row, field) => cols[field] == null ? '' : String(row[cols[field]] ?? '').trim();
 
       /* ---- Дата на вписване по подразбиране (одит v2.4.56) -------------------
@@ -251,6 +342,28 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       // програмата (по подразбиране или днешна). Връща се в отчета и се показва.
       report.registerDateDefaulted = 0;
       report.registerDateDefault = defaultRegDate;
+      /* ПОВРЕДЕНИЯТ ФАЙЛ СТИГА И ДО ОТЧЕТА (v2.4.65).
+         =====================================================================
+         КАКВО СТАВАШЕ ДОТУК. importers.readTable() отдавна разпознава незатворена
+         кавичка и подозрителен брой колони и връща готово предупреждение на
+         български; import:load го подаваше нататък, но НИКОЙ не го четеше — нито
+         диалогът за съответствие, нито този обработчик. Измерено (виж
+         test/vnos-v2465.test.js): файл от 5 реда с незатворена кавичка на
+         ред 3 → в базата влизат 2 документа, единият със заглавие от 80 знака
+         слепен боклук („Незатворена кавичка,Ав,2\n103,След повредата,…“), три
+         документа изчезват безследно, а отчетът гласи „2 Въведени · 0 Пропуснати“
+         без нито една грешка и нито едно предупреждение.
+         ЗАЩО Е ГРЕШНО. Това е най-опасният вид загуба: не „нещо не стана“, а
+         „всичко стана“ — библиотекарката няма основание да провери и няма число,
+         по което да забележи липсата. Три непостъпили документа в инвентарната
+         книга не се виждат никъде (чл. 16, ал. 1 — всеки документ се вписва).
+         ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Предупреждението вече е изчислено — трябва
+         само да бъде занесено дотам, където се гледа. Отчетът се прави тук, затова
+         тук се и слага (report.fileWarning); екранът го показва и по-рано — в
+         диалога за съответствие, над бутона „Въведи N реда“ — за да може вносът
+         да бъде спрян, преди да е станал. Вносът не се отказва: евристиката може
+         и да сгреши (кавичка в заглавие), а решението е на библиотекарката. */
+      report.fileWarning = IMPORT_CACHE.warning || null;
 
       /* Одит v2.4.29: лимитът от „Настройки“ → „Ограничения“ (checkRecordLimit в
          handlers/books.js) важеше за „+ Нова книга“, но не и за вноса — 4 000 реда
@@ -265,9 +378,15 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         let nextInv = (db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {}).next_inv_number || 1;
         IMPORT_CACHE.body.forEach((row, i) => {
           const lineNo = i + 2; // +1 за заглавния ред, +1 за човешко броене
+          const rowWarnings = []; // събират се на реда, влизат в отчета само ако редът мине
           try {
             const title = cell(row, 'title');
-            if (!title) { report.skipped++; return; }
+            if (!title) {
+              noteSkipped(lineNo, cell(row, 'inv_number'), '',
+                'редът няма заглавие — без заглавие в инвентарната книга няма какво да се впише '
+                + '(чл. 16, ал. 2). Допишете заглавието във файла и повторете вноса.');
+              return;
+            }
 
             const invRaw = cell(row, 'inv_number');
             let inv = parseIntOrNull(invRaw);
@@ -294,11 +413,40 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
 
             const author = cell(row, 'author');
             if (opt.skipDuplicates) {
-              if (inv != null && existingInv.has(String(inv))) { report.skipped++; return; }
-              if (!inv && isbnKey && existingIsbn.has(isbnKey)) { report.skipped++; return; }
-              if (!inv && !isbnKey && existingTitles.has(titleKey(title, author))) { report.skipped++; return; }
+              if (inv != null && existingInv.has(String(inv))) {
+                /* Тук е сблъсъкът, за който няма как да се разбере отвън: зает
+                   номер НЕ значи, че документът е същият. Затова в отчета влиза
+                   и заглавието на документа, който държи номера — по него се
+                   вижда веднага дали това е дубликат (същата книга) или две
+                   различни книги под един номер (слята библиотека). */
+                const owner = invOwner.get(String(inv));
+                noteSkipped(lineNo, inv, title,
+                  `инвентарен № ${inv} вече е зает` + (owner ? ` от „${owner}“` : '') + '. Ако това е друг документ, '
+                  + 'повторете вноса без отметката „Пропускай вече съществуващите“ — тогава редът влиза със '
+                  + 'следващия свободен номер; ако е същият документ, няма какво да се прави.');
+                return;
+              }
+              if (!inv && isbnKey && existingIsbn.has(isbnKey)) {
+                noteSkipped(lineNo, '', title,
+                  `във фонда вече има документ с ISBN ${isbnRaw}. Ако това е втори екземпляр, повторете вноса `
+                  + 'без отметката „Пропускай вече съществуващите“ — той получава свой инвентарен номер.');
+                return;
+              }
+              if (!inv && !isbnKey && existingTitles.has(titleKey(title, author))) {
+                noteSkipped(lineNo, '', title,
+                  'във фонда вече има документ със същото заглавие и автор, а редът няма нито инвентарен номер, '
+                  + 'нито ISBN, по който да се различи. Ако това е втори екземпляр, повторете вноса без отметката '
+                  + '„Пропускай вече съществуващите“.');
+                return;
+              }
             }
-            if (free <= 0) { overLimit++; report.skipped++; return; } // след дубликатите: те не заемат място
+            // след дубликатите: те не заемат място
+            if (free <= 0) {
+              overLimit++;
+              noteSkipped(lineNo, inv == null ? invRaw : inv, title,
+                `достигнат е лимитът от ${limitBooks} документи във фонда („Настройки“ → „Ограничения“).`);
+              return;
+            }
             existingTitles.add(titleKey(title, author));
             // Зает или липсващ инвентарен номер: дава се следващият свободен, за да
             // не се губи записът и да не се чупи уникалността в инвентарната книга.
@@ -324,6 +472,9 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               report.usedInv.push({ line: lineNo, inv });
             }
             existingInv.add(String(inv));
+            // Същият номер, зает от ТОЗИ ред: по-нататъшен ред от същия файл, който
+            // се блъсне в него, вижда в отчета кой документ го е заел (виж invOwner).
+            invOwner.set(String(inv), title);
             if (isbnKey) existingIsbn.add(isbnKey);
 
             let categoryId = null;
@@ -423,7 +574,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               permanent_location: null,
               status: knownStatus ? rawStatus : 'наличен',
               status_date: today(),
-              price: parseNum(cell(row, 'price')),
+              price: importPrice(cell(row, 'price'), lineNo, rowWarnings),
               description: noteParts.length ? noteParts.join(' · ') : null,
               acquisition_id: null,
               cn_sort: callNumber ? cnSortKey(callNumber) : null
@@ -438,6 +589,9 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             insertInv.run(info.lastInsertRowid);
             if (inv >= nextInv) nextInv = inv + 1;
             report.added++;
+            // Предупрежденията, събрани на този ред (засега само за цената), влизат
+            // в отчета едва сега — след като редът наистина е в базата.
+            for (const w of rowWarnings) report.warnings.push(w);
             // Броят се само РЕАЛНО въведените редове — ред, паднал в catch-а
             // по-долу, не е в базата и не бива да утежнява числото в отчета.
             if (!regDate) report.registerDateDefaulted++;
@@ -482,7 +636,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         (report.registerDateDefaulted
           ? `; на ${report.registerDateDefaulted} от тях датата на вписване е сложена от програмата (`
             + (defaultRegDate ? 'посочена за стар фонд: ' + defaultRegDate : 'днешна дата: ' + today()) + ')'
-          : ''));
+          : '') +
+        /* Повреденият файл влиза и в дневника: ако след месец се окаже, че в
+           инвентарната книга липсват документи от точно този внос, това е
+           единственият ред, от който може да се разбере защо. */
+        (report.fileWarning ? '; файлът беше разпознат като възможно повреден (незатворена кавичка '
+          + 'или несъответстващ брой колони) — възможно е част от редовете да не са прочетени' : ''));
       return { ok: true, data: report };
     } catch (err) { return { ok: false, error: err.message }; }
   });
