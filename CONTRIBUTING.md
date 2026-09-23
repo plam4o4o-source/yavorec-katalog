@@ -100,7 +100,7 @@ external test framework.
 npm test
 ```
 
-At the time of writing this runs **1900+ tests** and takes a few minutes. Run it
+At the time of writing this runs **2000+ tests** and takes a few minutes. Run it
 once before you change anything, so you know the starting state is green.
 
 CI runs the suite **twice**, in two time zones, because several tests about

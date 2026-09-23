@@ -115,7 +115,7 @@ git clone https://github.com/plam4o4o-source/yavorec-katalog.git
 cd yavorec-katalog/electron-app
 npm install        # включва electron-rebuild за better-sqlite3
 npm start          # стартира програмата в режим за разработка
-npm test           # node:test — всички тестове (1900+)
+npm test           # node:test — всички тестове (2000+)
 ```
 
 Изисквания за разработка: Node.js 22+, npm. За build на Windows
