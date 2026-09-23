@@ -11,6 +11,84 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.66
+
+**BG:** **Цена в левове от стар файл се превръща в евро при внос.** Решение на
+библиотеката след прегледа на v2.4.65.
+
+**Какво ставаше.** Старите описи обикновено са водени в левове — „12,50 лв.“. До
+v2.4.64 вносът вземаше такава цена **за евро**: фондът излизаше почти двойно
+надценен, в КДБФ, в инвентарната книга и в годишния отчет, без нито дума. Във
+v2.4.65 вносът започна да минава през строгата проверка на цената (същата като при
+вписване от екрана) и същата цена влизаше като **0,00 €** с предупреждение на всеки
+ред — пет хиляди реда в левове ставаха пет хиляди предупреждения и фонд на стойност
+нула.
+
+**Какво прави сега.** Валутата се разпознава изрично — отпред или отзад, с или без
+точка, с какъвто и да е регистър:
+
+- „лв“, „лв.“, „лева“, „BGN“ → превръща се по фиксирания курс **1 € = 1,95583
+  лв.** (Регламент (ЕС) 2025/1409) и се закръгля до евроцент — със същата формула,
+  с която бяха превърнати заварените цени при преминаването към евро.
+  `12,50 лв. → 6,39 €`, `19,56 лв. → 10,00 €`;
+- „€“, „EUR“, „евро“ → остава, както е;
+- **число без валута се приема за евро**, както досега: програмата вече води евро и
+  не може да познае, че неозначено число е в левове.
+
+Самото число след валутата минава през **същата** проверка като при ръчно вписване:
+отрицателна цена в левове пак отпада с обяснение, а запис с разделител за хилядите
+(„1.234,50 лв.“) пак влиза с 0 и предупреждение, вместо тихо да стане 0,63 € или
+1 234,50 €. Отчетът след вноса казва **колко** цени са превърнати — веднъж, с
+числото и с курса, а не на всеки ред.
+
+Курсът не е записан наново: вносът го получава от същото място в програмата, от
+което го взимат всички други сметки в евро.
+
+**Проверено:** нов `test/leva-v2466.test.js` минава през **истинския екран за внос и
+истинския `main.js`** — така проверява и че курсът наистина стига до вноса. Шест
+мутации (без превръщане; курсът не е подаден; без бележка в отчета; без разпознаване
+отпред; без „BGN“; без отказ на отрицателна цена) — всяка уловена. Пълна поредица:
+**2073 успешни, 0 неуспешни**, в UTC и Europe/Sofia; сайтът — 8 сценария и мащаб
+15 002 записа.
+
+**EN:** **A price in leva from an old file is converted to euro on import.** The
+library's decision after reviewing v2.4.65.
+
+**What used to happen.** Old inventories are usually kept in leva — "12,50 лв.". Up to
+v2.4.64, import took such a price **as euro**: the collection came out almost twice its
+value in the accession ledger, the inventory book and the annual report, without a
+word. In v2.4.65 import began to go through the strict price check (the same one used
+when registering on screen) and the same price came in as **0.00 €** with a warning on
+every row — five thousand rows in leva became five thousand warnings and a collection
+valued at zero.
+
+**What it does now.** The currency is recognised explicitly — before or after the
+number, with or without a full stop, in any case:
+
+- "лв", "лв.", "лева", "BGN" → converted at the fixed rate of **1 € = 1.95583
+  leva** (Regulation (EU) 2025/1409) and rounded to the euro cent — with the same formula
+  used to convert existing prices when the program moved to the euro.
+  `12,50 лв. → 6.39 €`, `19,56 лв. → 10.00 €`;
+- "€", "EUR", "евро" → left as they are;
+- **a number with no currency is taken as euro**, as before: the program now keeps
+  euro and cannot guess that an unmarked number is in leva.
+
+The number after the currency goes through the **same** check as manual entry: a
+negative price in leva is still rejected with an explanation, and an entry with a
+thousands separator ("1.234,50 лв.") still comes in as 0 with a warning, instead of
+silently becoming 0.63 € or 1,234.50 €. The report after import says **how many**
+prices were converted — once, with the number and the rate, not on every row.
+
+The rate is not written down a second time: import receives it from the same place in
+the program that every other euro calculation uses.
+
+**Verified:** the new `test/leva-v2466.test.js` goes through **the real import screen
+and the real `main.js`** — so it also checks that the rate actually reaches the import.
+Six mutations (no conversion; rate not passed; no note in the report; no recognition
+before the number; no "BGN"; no rejection of a negative price) — each caught. Full
+suite: **2073 passing, 0 failing**, in UTC and Europe/Sofia; the site — 8 scenarios and
+a 15 002-record scale run.
+
 ## v2.4.65
 
 **BG:** Кръг по **проверка**: шест области бяха минати през истинската програма —
