@@ -133,11 +133,52 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
      като редът наистина е вписан: ред, паднал по-нататък (напр. на дублиран
      баркод), вече е описан в report.errors и не бива да се появява втори път с
      твърдение, че е вписан със стойност 0,00 €. */
-  function importPrice(raw, lineNo, rowWarnings) {
+  /* ЦЕНА В ЛЕВОВЕ ОТ СТАР ФАЙЛ СЕ ПРЕВРЪЩА В ЕВРО (v2.4.66).
+     =====================================================================
+     КАКВО СТАВАШЕ. До v2.4.64 вносът ползваше хлабав parseFloat и „12,50 лв.“
+     влизаше като 12,50 — в ЕВРО, тоест двойно надценено, без нито дума. От
+     v2.4.65 вносът минава през строгата parseBookPrice, която отказва всичко с
+     буква, и същата цена влизаше като 0,00 € с предупреждение на всеки ред.
+     Нито едното не е вярно: стар инвентарен файл в левове е най-обичайният
+     вход за програма, която се въвежда в библиотека с години водена отчетност.
+
+     КАКВО ПРАВИ СЕГА. Валутата се разпознава изрично — отпред или отзад, с или
+     без точка, с какъвто и да е регистър:
+       • „лв“, „лв.“, „лева“, „BGN“  → превръща се по фиксирания курс;
+       • „€“, „EUR“, „евро“          → остава, както е.
+     Самото число после минава през СЪЩАТА parseBookPrice като при ръчно
+     въвеждане — отрицателната цена се отказва, а „1.234,50 лв.“ (с разделител за
+     хилядите) продължава да се отказва с предупреждение, вместо да стане 1,23.
+     Число без валута остава в евро, както досега: програмата вече води евро и
+     не може да познае, че неозначено число е в левове.
+
+     КУРСЪТ е фиксираният и необратим 1,95583 (Регламент (ЕС) 2025/1409) и идва
+     от main.js (EUR_RATE) — тук не се пише негово копие. Закръгляването е до
+     евроцент, със СЪЩАТА формула като превръщането на заварените цени при
+     миграцията към евро: Math.round(лева / курс × 100) / 100.
+
+     ОТЧЕТЪТ казва колко цени са превърнати — веднъж, не на всеки ред: 5 000
+     реда в левове не са 5 000 предупреждения, а едно изречение с числото. */
+  /* Какво пише във файла, решава importers.js (splitCurrency) — там е цялото
+     разпознаване на формата на входа; тук се решава какво да се направи с него. */
+  const { splitCurrency } = importers;
+  function importPrice(raw, lineNo, rowWarnings, rowCtx) {
+    const cur = splitCurrency(raw);
     try {
-      return parseBookPrice(raw);
+      const value = parseBookPrice(cur.amount);
+      if (!cur.leva) return value;
+      /* Курсът е задължителен точно тук, а не при регистрацията: без него
+         левовете не бива тихо да станат евро. main.js винаги го подава. */
+      if (!Number.isFinite(deps.EUR_RATE) || deps.EUR_RATE <= 0) {
+        const e = new Error('курсът лев/евро не е подаден на вноса — цената в левове не може да бъде превърната');
+        e.noRate = true;
+        throw e;
+      }
+      if (rowCtx) rowCtx.leva = true;
+      return Math.round(value / deps.EUR_RATE * 100) / 100;
     } catch (err) {
-      const norm = String(raw ?? '').trim().replace(/\s/g, '').replace(',', '.');
+      if (err && err.noRate) throw err;
+      const norm = String(cur.amount ?? '').trim().replace(/\s/g, '').replace(',', '.');
       // Отрицателна — редът отпада (хвърлената грешка се улавя от catch-а на реда).
       if (/^[-−]/.test(norm)) throw err;
       rowWarnings.push(`ред ${lineNo}: цената „${String(raw).trim()}“ не е число и документът е вписан `
@@ -268,7 +309,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const existingTitles = new Set(db.prepare('SELECT title, author FROM books').all()
         .map(r => titleKey(r.title, r.author)));
 
-      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [] };
+      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [], convertedLeva: 0 };
       /* КОЙ ТОЧНО Е ПРОПУСНАТ — А НЕ САМО КОЛКО (v2.4.65).
          =====================================================================
          КАКВО СТАВАШЕ ДОТУК. Всеки от четирите изхода „пропусни реда“ правеше
@@ -379,6 +420,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         IMPORT_CACHE.body.forEach((row, i) => {
           const lineNo = i + 2; // +1 за заглавния ред, +1 за човешко броене
           const rowWarnings = []; // събират се на реда, влизат в отчета само ако редът мине
+          const rowCtx = { leva: false }; // цена в левове, превърната — брои се само ако редът мине
           try {
             const title = cell(row, 'title');
             if (!title) {
@@ -574,7 +616,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               permanent_location: null,
               status: knownStatus ? rawStatus : 'наличен',
               status_date: today(),
-              price: importPrice(cell(row, 'price'), lineNo, rowWarnings),
+              price: importPrice(cell(row, 'price'), lineNo, rowWarnings, rowCtx),
               description: noteParts.length ? noteParts.join(' · ') : null,
               acquisition_id: null,
               cn_sort: callNumber ? cnSortKey(callNumber) : null
@@ -592,6 +634,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             // Предупрежденията, събрани на този ред (засега само за цената), влизат
             // в отчета едва сега — след като редът наистина е в базата.
             for (const w of rowWarnings) report.warnings.push(w);
+            if (rowCtx.leva) report.convertedLeva++;
             // Броят се само РЕАЛНО въведените редове — ред, паднал в catch-а
             // по-долу, не е в базата и не бива да утежнява числото в отчета.
             if (!regDate) report.registerDateDefaulted++;
@@ -612,6 +655,16 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
          казва с числото и с годината, а не като обща приказка. Ако библиотекарят е
          посочил дата за ретро-фонд, се казва просто на колко реда е сложена — и това
          е информация, не предупреждение (виж отчета в src/views/data-import.js). */
+      /* ПРЕВЪРНАТИТЕ ЦЕНИ — веднъж, с числото (виж splitCurrency по-горе). Влиза
+         при предупрежденията, защото стойностите в базата вече НЕ са буквално
+         тези от файла, а библиотекарката трябва да го знае, преди да подпише
+         КДБФ или инвентарната книга. */
+      if (report.convertedLeva) {
+        const n = report.convertedLeva;
+        report.warnings.push(`${n} ${n === 1 ? 'цена беше' : 'цени бяха'} в левове и ${n === 1 ? 'е превърната' : 'са превърнати'} `
+          + `в евро по фиксирания курс 1 € = ${String(deps.EUR_RATE).replace('.', ',')} лв., закръглено до евроцент `
+          + '(например 6,39 € за 12,50 лв.). Числата без валута във файла са приети за евро.');
+      }
       if (report.registerDateDefaulted && !defaultRegDate) {
         const n = report.registerDateDefaulted;
         const year = String(today()).slice(0, 4);
