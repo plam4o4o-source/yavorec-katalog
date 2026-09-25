@@ -1,5 +1,15 @@
 // Одитна следа — извадени от main.js в отделен модул (Фаза 4, стъпка 28).
 // Единствен read-only справочен handler. Зависи само от getDb, run.
+/* bglower() — малки букви и за кирилица (SQLite LOWER() и LIKE сгъват само
+   латиница). Регистрира се веднъж на връзка, както в handlers/chronicle.js. */
+const BGLOWER_READY = new WeakSet();
+function ensureBglower(db) {
+  if (BGLOWER_READY.has(db)) return db;
+  db.function('bglower', (s) => (s == null ? null : String(s).toLowerCase()));
+  BGLOWER_READY.add(db);
+  return db;
+}
+
 module.exports = function registerAuditHandlers(ipcMain, deps) {
   const { getDb, run } = deps;
 
@@ -37,9 +47,20 @@ module.exports = function registerAuditHandlers(ipcMain, deps) {
     const db = getDb();
     const limit = all ? '' : 'LIMIT 500';
     if (query && String(query).trim()) {
-      const q = `%${String(query).trim()}%`;
+      /* ТЪРСЕНЕТО НЕ ЗАВИСИ ОТ ГЛАВНИ И МАЛКИ БУКВИ НА КИРИЛИЦА (v2.4.67).
+         Дотук стоеше `detail LIKE ?`, а LIKE на SQLite сгъва регистъра САМО за
+         латиница. Измерено: при запис „…Под игото; читател Иван Петров…“
+         търсенето „под игото“, „иван петров“ и „заемане“ даваше 0 намерени —
+         тоест проверяващ, който търси следата за книга или читател с малки букви,
+         заключаваше, че такива действия няма. Същото правило вече ползват
+         летописът, краезнанието и аналитичните описания: bglower() плюс
+         екраниране на „%“ и „_“, които иначе се четат като заместващи знаци. */
+      ensureBglower(db);
+      const q = '%' + String(query).trim().toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
       return db.prepare(`
-        SELECT * FROM audit_log WHERE user LIKE ? OR action LIKE ? OR detail LIKE ?
+        SELECT * FROM audit_log
+         WHERE bglower(user) LIKE ? ESCAPE '\\' OR bglower(action) LIKE ? ESCAPE '\\'
+            OR bglower(detail) LIKE ? ESCAPE '\\'
         ORDER BY id DESC ${limit}
       `).all(q, q, q);
     }
