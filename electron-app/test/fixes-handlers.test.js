@@ -410,7 +410,7 @@ test('авто-копието се криптира с паролата на з�
     unlockPdp(getDb(), 'парола-на-библиотеката');
     handlers.autoBackupIfNeeded();
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = require('./helpers/local-day').localToday();
     const enc = path.join(dir, 'backups', `auto-${today}.invbak`);
     assert.ok(fs.existsSync(enc), 'очаква се криптирано авто-копие (.invbak)');
     assert.equal(fs.existsSync(path.join(dir, 'backups', `auto-${today}.db`)), false,
@@ -430,7 +430,7 @@ test('без защита на личните данни авто-копието
   pii.clearSession();
   handlers.autoBackupIfNeeded();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = require('./helpers/local-day').localToday();
   assert.ok(fs.existsSync(path.join(dir, 'backups', `auto-${today}.db`)),
     'копието трябва да се прави и без парола — липсата на копия е по-голямата беда');
   assert.ok(auditLog.some(a => /ВНИМАНИЕ/.test(a.detail) && /НЕ е криптирано/.test(a.detail)),
@@ -448,7 +448,7 @@ test('отключването на защитата презаписва дне
   try {
     pii.clearSession();
     handlers.autoBackupIfNeeded(); // при стартиране защитата още е заключена
-    const today = new Date().toISOString().slice(0, 10);
+    const today = require('./helpers/local-day').localToday();
     const plain = path.join(dir, 'backups', `auto-${today}.db`);
     const enc = path.join(dir, 'backups', `auto-${today}.invbak`);
     assert.ok(fs.existsSync(plain));

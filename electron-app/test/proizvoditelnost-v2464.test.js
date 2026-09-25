@@ -135,7 +135,7 @@ function setupBackup(opts) {
   return { dir, dbPath, handlers, auditLog, notices, close: () => { try { db.close(); } catch (e) { /* вече е затворена */ } } };
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const { localToday: todayStr } = require('./helpers/local-day'); // местната дата (v2.4.67)
 
 test('5. дневното копие продължава да се прави и продължава да бъде ПРОВЕРЕНО', () => {
   const s = setupBackup();

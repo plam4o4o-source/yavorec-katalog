@@ -138,7 +138,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     FROM readers r
     LEFT JOIN (
       SELECT reader_id, COUNT(*) AS open_loans,
-             SUM(CASE WHEN date_due IS NOT NULL AND date_due < date('now') THEN 1 ELSE 0 END) AS overdue_loans
+             SUM(CASE WHEN date_due IS NOT NULL AND date_due < date('now', 'localtime') THEN 1 ELSE 0 END) AS overdue_loans
       FROM loans WHERE date_in IS NULL GROUP BY reader_id
     ) o ON o.reader_id = r.id`;
   /* readers:list(query, limit) — масив (както досега: гише, предложения, етикети).

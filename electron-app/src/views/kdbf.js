@@ -102,7 +102,7 @@ async function renderKdbf() {
       ${r.part3.length ? r.part3.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${bg(a.date)}</td>
         <td class="num">${a.no} / ${esc(a.year || y)}</td>
         <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
-          ? `<div class="hint"><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+          ? `<div class="hint"><b>АНУЛИРАН</b> на ${bg(tsDay(a.revoked_at))} г.${
               a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}</div>` : ''}</td>
         <td class="num">${a.revoked_at ? 0 : a.item_count}</td>
         <td class="num">${mny(a.revoked_at ? 0 : a.item_value)}</td></tr>`).join('')
@@ -305,7 +305,7 @@ function printKdbfDoc() {
      ${r.part3.map((a, i) => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td>${i + 1}</td><td>${bg(a.date)}</td>
      <td>№ ${a.no} / ${esc(a.year || y)}</td>
      <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
-       ? `<br><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+       ? `<br><b>АНУЛИРАН</b> на ${bg(tsDay(a.revoked_at))} г.${
            a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
      <td>${esc(a.disposal || '')}</td>
      <td>${a.revoked_at ? '0' : a.item_count}</td><td>${a.revoked_at ? mny(0) : mny(a.item_value)}</td></tr>`).join('')}

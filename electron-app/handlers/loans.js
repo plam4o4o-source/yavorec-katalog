@@ -416,7 +416,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
       const perDay = Number(s.fine_per_day) || 0;
       const now = today();
-      const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+      const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.date_due`).all();
       rows.forEach(r => {
         r.daysLate = effectiveDaysLate(r.date_due, now);
         /* Начисленото по заемането се ДОБАВЯ, не се презаписва (преглед на
@@ -479,10 +479,10 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, r.category,
                r.guarantor_name, r.guarantor_relation, r.guarantor_phone, COUNT(*) AS n
         FROM loans l JOIN readers r ON r.id = l.reader_id
-        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
+        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime')
         GROUP BY l.reader_id
       `).all();
-      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.reader_id, l.date_due`).all();
+      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.reader_id, l.date_due`).all();
       const now = today();
       rows.forEach(r => {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);

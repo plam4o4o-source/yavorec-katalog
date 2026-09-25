@@ -548,7 +548,7 @@ async function circTodayPanel() {
   const rows = await call(window.api.audit.list('')) || [];
   const pad = (n) => String(n).padStart(2, '0');
   const localDate = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  // Следата пази UTC („YYYY-MM-DD HH:MM:SS“); „днес“ е местният ден, не today() (UTC).
+  // Следата пази UTC („YYYY-MM-DD HH:MM:SS“) — всеки запис се превежда към местния ден.
   const t = localDate(new Date());
   const local = (ts) => {
     const raw = String(ts || '');

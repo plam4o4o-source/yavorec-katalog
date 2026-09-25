@@ -31,6 +31,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   } = deps;
   const { isEncryptedBackup, encryptBackupFile, decryptBackupBuffer } = require('../backup-crypto');
   const pii = require('../pii-crypto');
+  const { localDate } = require('../local-date');
   const crypto = require('crypto'); // само за отпечатък на паролата в паметта, виж todayEncryptedWith
   /* Истинска връзка към SQLite — нужна е само за PRAGMA integrity_check върху
      ПРЯСНО ЗАПИСАНО копие и върху файл, предложен за възстановяване. Отваря се
@@ -513,7 +514,8 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   let todayEncryptedWith = null;
   const fingerprint = (password) => crypto.createHash('sha256').update(String(password)).digest('hex');
 
-  function todayStr() { return new Date().toISOString().slice(0, 10); }
+  // Местната дата (v2.4.67): копието след полунощ е на НОВИЯ ден, не на вчерашния.
+  function todayStr() { return localDate(); }
   function todayPaths() {
     const today = todayStr();
     const dir = backupsDir();

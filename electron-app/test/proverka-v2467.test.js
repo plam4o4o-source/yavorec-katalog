@@ -219,3 +219,94 @@ test('чл. 41: процентът се снима при приключване
   assert.equal((await ipc.invoke('inventorySessions:get', sessionId)).data.allowedLoss, 2,
     'подписаният протокол остава с норматива към деня на приключването');
 });
+
+/* ------------------------------------------------------------------------ */
+test('„днес“ е по часовника на компютъра, не по UTC: заемане след полунощ и просрочените', () => {
+  /* Часовата зона се избира така, че МЕСТНАТА дата СЕГА да е различна от
+     UTC датата — при UTC час < 12 зона UTC−12 (местно още е вчера), иначе
+     UTC+14 (местно вече е утре). Така тестът хваща грешката по всяко време на
+     деня, а не само между 00:00 и 03:00 българско време, когато се случва. */
+  const { spawnSync } = require('child_process');
+  const tz = new Date().getUTCHours() < 12 ? 'Etc/GMT+12' : 'Etc/GMT-14';
+  const script = `
+    const Database = require('better-sqlite3');
+    const { startMainApp } = require('./test/helpers/main-app');
+    const pad = (n) => String(n).padStart(2, '0');
+    const loc = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const now = new Date(), y = new Date(); y.setDate(y.getDate() - 1);
+    const today = loc(now), yesterday = loc(y);
+    (async () => {
+      const app = startMainApp();
+      await app.ready();
+      const db = new Database(require('path').join(app.userData, 'library.db'));
+      const r = db.prepare("INSERT INTO readers (name, status, gdpr_consent) VALUES ('Ч', 'активен', 1)").run().lastInsertRowid;
+      const book = (n) => {
+        const id = db.prepare("INSERT INTO books (inv_number, title, status) VALUES (?, 'К', 'наличен')").run(n).lastInsertRowid;
+        db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(id);
+        return id;
+      };
+      const a = book(1), b = book(2), c = book(3);
+      db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(r, a, '2026-01-02', today);
+      db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(r, b, '2026-01-02', yesterday);
+      const checkout = await app.invoke('loans:checkout', { reader_id: r, book_id: c, date_out: today, date_due: null });
+      const overdue = await app.invoke('loans:overdue');
+      process.stdout.write('\\n@@' + JSON.stringify({ today, a, b,
+        checkout: { ok: checkout.ok, error: checkout.error },
+        overdue: (overdue.data || []).map(l => l.book_id) }) + '@@\\n');
+      db.close(); app.stop();
+    })().catch(e => { process.stdout.write('\\n@@' + JSON.stringify({ crash: String(e && e.stack) }) + '@@\\n'); });`;
+  const res = spawnSync(process.execPath, ['-e', script], { cwd: APP_DIR, env: Object.assign({}, process.env, { TZ: tz }), encoding: 'utf8' });
+  const m = /\n@@(.*?)@@\n/s.exec(res.stdout || '');
+  assert.ok(m, 'детето не върна резултат: ' + res.stderr);
+  const out = JSON.parse(m[1]);
+  assert.ok(!out.crash, out.crash);
+  assert.equal(out.checkout.ok, true, 'заемане с днешната местна дата не е „бъдеща дата“: ' + out.checkout.error);
+  assert.deepEqual(out.overdue, [out.b], 'падеж днес още не е просрочен, падеж вчера вече е');
+});
+
+test('SQL „днес“ навсякъде е date(\'now\', \'localtime\') — нито едно голо date(\'now\') в кода', () => {
+  /* Поведението е проверено по-горе през „Просрочени“; тук — че никое от
+     останалите ~30 места (табло, напомняния, статистика, статуси) не е
+     изпуснато. Коментарите се пропускат: там старият израз е описан нарочно. */
+  const files = ['main.js', ...fs.readdirSync(path.join(APP_DIR, 'handlers')).map(f => 'handlers/' + f)];
+  const bad = [];
+  for (const f of files) {
+    /* Блоковите коментари се заменят с празни редове — номерата на редовете остават верни. */
+    const src = fs.readFileSync(path.join(APP_DIR, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ''));
+    src.split('\n').forEach((l, i) => {
+      if (/^\s*\/\//.test(l)) return;
+      if (/\bdate\('now'(?!, 'localtime')/.test(l)) bad.push(f + ':' + (i + 1));
+    });
+  }
+  assert.deepEqual(bad, [], 'UTC дата вместо местната');
+});
+
+test('екранът: „днес“ и денят на момент от базата (UTC) са МЕСТНИТЕ — напомняне и анулиран акт след полунощ', () => {
+  /* Зоната — както в теста по-горе: местната дата СЕГА се различава от UTC датата,
+     за да се хване и today() на екрана. 21:30 UTC на 24.09 е 09:30 на 24.09 в
+     UTC−12 и 11:30 на 25.09 в UTC+14. */
+  const { spawnSync } = require('child_process');
+  const east = new Date().getUTCHours() >= 12;
+  const tz = east ? 'Etc/GMT-14' : 'Etc/GMT+12';
+  const script = `
+    const pad = (n) => String(n).padStart(2, '0');
+    const d = new Date(), local = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const { buildDom, settle } = require('./test/helpers/audit-fixtures');
+    (async () => {
+      const dom = buildDom({}); await settle();
+      process.stdout.write(JSON.stringify([
+        dom.window.eval("tsDay('2026-09-24 21:30:00')"),
+        dom.window.eval("tsDay('2026-09-24')"),
+        dom.window.eval("tsDay('')"),
+        dom.window.eval("tsTime('2026-09-24 21:30:00')"),
+        dom.window.eval('today()') === local]));
+      dom.window.close();
+    })();`;
+  const res = spawnSync(process.execPath, ['-e', script], { cwd: APP_DIR, env: Object.assign({}, process.env, { TZ: tz }), encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(res.stdout || 'null'),
+    east ? ['2026-09-25', '2026-09-24', '', '11:30', true] : ['2026-09-24', '2026-09-24', '', '09:30', true], res.stderr);
+  for (const [f, rx] of [['src/views/notices.js', /lastNotice\.ts\)\.slice/], ['src/views/kdbf.js', /revoked_at\)\.slice/],
+    ['src/views/deaccession-acts.js', /(revoked_at|created_at)\)\.slice/]]) {
+    assert.doesNotMatch(fs.readFileSync(path.join(APP_DIR, f), 'utf8'), rx, f + ' реже UTC момента вместо tsDay()');
+  }
+});

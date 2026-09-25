@@ -16,7 +16,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
     const r = db.prepare('SELECT id FROM readers WHERE name = ?').get(NAME);
     if (r) return r.id;
     return db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
-      VALUES (?, '—', 'прекратен', date('now'), 0)`).run(NAME).lastInsertRowid;
+      VALUES (?, '—', 'прекратен', date('now', 'localtime'), 0)`).run(NAME).lastInsertRowid;
   }
   function anonCutoff(years) { return `${new Date().getFullYear() - years}-01-01`; }
 
@@ -412,7 +412,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         const setAsideBooks = db.prepare(`SELECT DISTINCT book_id FROM holds
              WHERE reader_id = ? AND status = 'заделена'`).all(id).map(h => h.book_id);
         const holdsCancelled = db.prepare(`UPDATE holds
-             SET status = 'отказана', resolved_at = date('now'),
+             SET status = 'отказана', resolved_at = date('now', 'localtime'),
                  note = 'отказана при заличаване по искане на читателя (чл. 17 ОРЗД)'
            WHERE reader_id = ? AND status IN ('чака', 'заделена')`).run(id).changes;
         const holdsMoved = db.prepare('UPDATE holds SET reader_id = ? WHERE reader_id = ?').run(anonId, id).changes;

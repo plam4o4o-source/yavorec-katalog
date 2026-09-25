@@ -45,7 +45,7 @@ const MAIN_SRC = fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8');
 test.after(cleanupTmpDirs);
 
 const DAY = 86400000;
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const { localToday: todayStr } = require('./helpers/local-day'); // местната дата (v2.4.67)
 const daysAgo = (n) => new Date(Date.now() - n * DAY);
 const iso = (d) => d.toISOString().slice(0, 10);
 

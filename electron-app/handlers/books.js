@@ -1180,7 +1180,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const placeholders = ids.map(() => '?').join(',');
       // Смяната на статус носи и датата си (Koha: датирани статуси) — иначе справката
       // „кога стана липсваща" няма отговор.
-      const extra = field === 'status' ? ", status_date = date('now')" : '';
+      const extra = field === 'status' ? ", status_date = date('now', 'localtime')" : '';
       /* ГРУПОВАТА РЕДАКЦИЯ ВЕЧЕ КАЗВА КОИ ДОКУМЕНТИ Е ПИПНАЛА (v2.4.65, кръг 42,
          находка Б9).
          (а) КАКВО СТАВАШЕ ДОТУК. Следата беше един ред без нито един
@@ -1506,7 +1506,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           + 'Ако актът е сгрешен, анулирайте го от „Отчисляване“.');
       }
       if (b.status !== 'отчислен') throw new Error('Документът не е в състояние „отчислен“.');
-      db.prepare("UPDATE books SET status = 'наличен', status_date = date('now') WHERE id = ?").run(id);
+      db.prepare("UPDATE books SET status = 'наличен', status_date = date('now', 'localtime') WHERE id = ?").run(id);
       logAudit('Поправка на състояние', 'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — „отчислен“ без акт се връща на „наличен“; '
         + 'отчисляване се прави само с акт по чл. 35, ал. 2');
       scheduleCatalogWrite();

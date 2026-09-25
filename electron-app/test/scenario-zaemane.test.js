@@ -922,8 +922,8 @@ test('13. „Читалня +1“, посещения и „Днес на гиш
   // „Днес на гишето“: броят е от одитната следа.
   await desk();
   await h.waitFor(() => /заеман/.test(h.text('#circToday')), 'панелът');
-  const out = q("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'Заемане' AND substr(ts,1,10) = ?", T).n;
-  const back = q("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'Връщане' AND substr(ts,1,10) = ?", T).n;
+  const out = q("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'Заемане' AND date(ts, 'localtime') = ?", T).n;
+  const back = q("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'Връщане' AND date(ts, 'localtime') = ?", T).n;
   const panel = h.text('#circToday');
   assert.match(panel, rx(out + ' заеман'));
   assert.match(panel, rx(back + ' връщан'));
@@ -982,7 +982,7 @@ test('15. годишният отчет брои заеманията по да�
       SUM(fine) AS fines FROM loans WHERE date_in BETWEEN ? AND ?`, Y + '-01-01', Y + '-12-31');
   assert.equal(r.returnedOnTime, ret.onTime); assert.equal(r.returnedLate, ret.late);
   assert.equal(cents(r.finesCharged), cents(ret.fines));
-  assert.equal(r.openOverdue, q("SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due < date('now')").n);
+  assert.equal(r.openOverdue, q("SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due < date('now', 'localtime')").n);
   assert.equal(cents(r.finesCollected), 25, 'платените 25 € по изгубения документ са събрано обезщетение');
   assert.ok(r.topLoans.some(x => x.title === 'Тютюн'), 'най-търсеното: ' + JSON.stringify(r.topLoans));
   await h.go('stats');

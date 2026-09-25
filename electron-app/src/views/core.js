@@ -18,8 +18,31 @@ const jsq = (s) => esc(String(s ?? '')
   .replace(/\\/g, '\\\\').replace(/'/g, "\\'")
   .replace(/\n/g, '\\n').replace(/\r/g, '\\r')
   .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
-const today = () => new Date().toISOString().slice(0, 10);
+/* Местната дата, не UTC (v2.4.67): между 00:00 и 03:00 българско време UTC още е
+   вчера — заемането се датираше с вчерашна дата. Виж local-date.js в main. */
+const today = () => {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+};
 const yr = (d) => (d || today()).slice(0, 4);
+/* Денят на МОМЕНТ от базата (v2.4.67). datetime('now') в SQLite пише UTC
+   („YYYY-MM-DD HH:MM:SS“, без зона), затова първите десет знака са датата в
+   Гринуич — между 00:00 и 03:00 българско време вчерашната. Напомняне, пратено
+   в 00:30, се показваше с вчерашна дата. Чиста дата (без час) не се пипа. */
+const tsLocal = (ts) => {
+  const raw = String(ts || '');
+  if (!/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(raw)) return null;
+  const d = new Date(/[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
+  return isNaN(d) ? null : d;
+};
+const tsDay = (ts) => {
+  const d = tsLocal(ts), p = (n) => String(n).padStart(2, '0');
+  return d ? d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) : String(ts || '').slice(0, 10);
+};
+const tsTime = (ts) => {
+  const d = tsLocal(ts), p = (n) => String(n).padStart(2, '0');
+  return d ? p(d.getHours()) + ':' + p(d.getMinutes()) : String(ts || '').slice(11, 16);
+};
 const bg = (d) => d ? d.split('-').reverse().join('.') : '';
 /* Годините за падащите менюта на Дневника, КДБФ, статистиката и справките (v2.2.0).
    Дотогава списъкът се строеше като [избраната, текущата] — тоест менюто имаше

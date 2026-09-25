@@ -87,7 +87,7 @@ test('registerBackupHandlers registers all four backup: IPC channels', () => {
 test('autoBackupIfNeeded creates an auto-<today>.db file and does not throw', () => {
   const { dir, handlers } = setup();
   handlers.autoBackupIfNeeded();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = require('./helpers/local-day').localToday();
   const expected = path.join(dir, 'backups', `auto-${today}.db`);
   assert.ok(fs.existsSync(expected), 'expected auto backup file to be created');
 });
@@ -95,7 +95,7 @@ test('autoBackupIfNeeded creates an auto-<today>.db file and does not throw', ()
 test('autoBackupIfNeeded is a no-op (does not overwrite) if today\'s auto backup already exists', () => {
   const { dir, handlers } = setup();
   handlers.autoBackupIfNeeded();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = require('./helpers/local-day').localToday();
   const expected = path.join(dir, 'backups', `auto-${today}.db`);
   const firstMtime = fs.statSync(expected).mtimeMs;
   handlers.autoBackupIfNeeded();

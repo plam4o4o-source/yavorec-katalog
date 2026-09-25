@@ -25,7 +25,9 @@ test.after(cleanupTmpDirs);
 let app = null, db = null;
 const Y = String(new Date().getUTCFullYear()); // както today() в програмата (UTC)
 const iso = (d) => d.toISOString().slice(0, 10);
-const dayOff = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return iso(d); };
+const { localDayOff } = require('./helpers/local-day');
+/* Местната дата (v2.4.67) — програмата брои „днес“ по часовника на компютъра. */
+const dayOff = localDayOff;
 function rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 async function boot() {
@@ -289,7 +291,7 @@ test('loans:overdue — дните забава и обезщетението с
   const s = q('SELECT fine_per_day, work_days FROM settings WHERE id = 1');
   const wd = new Set(String(s.work_days == null ? '0,1,2,3,4,5,6' : s.work_days).split(',').map(Number));
   const closed = new Set(all('SELECT date FROM calendar_closed').map(r => r.date));
-  const t = iso(new Date());
+  const t = localDayOff(0);
   for (const l of rows) {
     let n = 0; const d = new Date(l.date_due + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); const end = new Date(t + 'T00:00:00Z');
     for (let i = 0; d <= end && i < 5000; i++) { const ds = iso(d); if (!wd.has(d.getUTCDay()) || closed.has(ds)) n++; d.setUTCDate(d.getUTCDate() + 1); }

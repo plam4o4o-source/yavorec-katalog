@@ -296,7 +296,7 @@ test('таблото брои цели дни забава — заем точн
   const DASH = fs.readFileSync(path.join(APP_DIR, 'handlers', 'dashboard.js'), 'utf8');
   assert.doesNotMatch(DASH, /julianday\('now'\) - julianday\(date_due\)/,
     "julianday('now') носи и часа: заем точно на 7 дни даваше 7,6 и падаше в „8–30 дни“");
-  assert.match(DASH, /julianday\(date\('now'\)\) - julianday\(date_due\)/,
+  assert.match(DASH, /julianday\(date\('now', 'localtime'\)\) - julianday\(date_due\)/,
     'сравнява се ДАТА с ДАТА, както брои и касата (effectiveDaysLate)');
 
   const { db } = freshDb('inv-docs-day-');
@@ -309,22 +309,22 @@ test('таблото брои цели дни забава — заем точн
       VALUES (?, 'На границата', 1, '2026-01-01', 'зает', 'български')`).run(7001 + i).lastInsertRowid;
     db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
     db.prepare(`INSERT INTO loans (reader_id, book_id, date_out, date_due)
-      VALUES (?, ?, date('now','-90 days'), date('now', ?))`).run(rid, bid, '-' + days + ' days');
+      VALUES (?, ?, date('now', 'localtime', '-90 days'), date('now', 'localtime', ?))`).run(rid, bid, '-' + days + ' days');
   };
   [7, 8, 30, 31, 60, 61].forEach((d, i) => add(i, d));
 
   const q = (sql) => db.prepare(sql).get();
   const b = q(`SELECT
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 7
-                AND julianday(date('now')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
-    FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`);
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 7
+                AND julianday(date('now', 'localtime')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+    FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')`);
   assert.deepEqual([b.d7, b.d30, b.more], [1, 2, 3],
     'до 7 дни: само срокът отпреди 7 дни; 8–30: тези отпреди 8 и 30; над 30: 31, 60 и 61');
   const long = q(`SELECT COUNT(*) AS n FROM loans
     WHERE date_in IS NULL AND date_due IS NOT NULL
-      AND julianday(date('now')) - julianday(date_due) > 60`).n;
+      AND julianday(date('now', 'localtime')) - julianday(date_due) > 60`).n;
   assert.equal(long, 1, '„над 60 дни“ значи над 60 — заемът точно на 60 дни не е над 60');
 });
 

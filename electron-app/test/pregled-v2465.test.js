@@ -235,7 +235,7 @@ test('Ч10: служебният запис не се брои за „чита�
   const { db } = freshDb('inv-p65-c10-');
   addReader(db, 'Иван Петров', '777');   // със съгласие
   db.prepare(`INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
-      VALUES (?, '—', 'прекратен', date('now'), 0)`).run(ANON_READER_NAME);
+      VALUES (?, '—', 'прекратен', date('now', 'localtime'), 0)`).run(ANON_READER_NAME);
   const n = db.prepare(`SELECT COUNT(*) AS n FROM readers r WHERE ${sql}`).get().n;
   assert.equal(n, 0, 'библиотека, в която всеки истински читател има съгласие, не бива да вижда „1 без съгласие“');
 

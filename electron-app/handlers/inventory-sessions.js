@@ -343,7 +343,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         db.prepare('INSERT INTO inventory_session_scans (session_id, book_id) VALUES (?, ?)').run(sessionId, b.id);
         db.prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(b.id, s.date);
         db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
-        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
+        if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now', 'localtime') WHERE id=?").run(b.id);
       });
       try { tx.immediate(); } catch (err) {
         // Дубликат, спрян от уникалния индекс (другата станция ни е изпреварила).
@@ -532,7 +532,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
              „липсващ“ целият: една от бройките му е у читател и връщането ѝ трябва
              да мине нормално. Липсващите му бройки са в протокола с точния брой;
              „Проект за акт от липсите“ разделя стария запис, преди да отчисли. */
-          db.prepare(`UPDATE books SET status='липсващ', status_date=date('now')
+          db.prepare(`UPDATE books SET status='липсващ', status_date=date('now', 'localtime')
             WHERE ${fundByStatusPlain}
               AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)
               AND id NOT IN (SELECT book_id FROM loans WHERE date_in IS NULL)`)

@@ -38,7 +38,7 @@ const q = (sql, ...a) => db.prepare(sql).get(...a);
 const all = (sql, ...a) => db.prepare(sql).all(...a);
 const lastAudit = () => q('SELECT action, detail FROM audit_log ORDER BY id DESC LIMIT 1');
 const iso = (d) => d.toISOString().slice(0, 10);
-const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
+const daysAgo = require('./helpers/local-day').localDayOff; // местната дата (v2.4.67)
 let invSeq = 500;
 async function book(o) {
   const cat = q("SELECT id FROM categories WHERE name = 'книга'").id;

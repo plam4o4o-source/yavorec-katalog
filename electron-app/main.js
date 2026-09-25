@@ -10,6 +10,7 @@ const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail, normalizeScanCode } = require('./security-utils');
 const { ensureDbFolderAvailable } = require('./db-folder');
 const { ensureHolidaysSeeded } = require('./bg-holidays');
+const { localDate } = require('./local-date');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -43,7 +44,7 @@ function logToFileArr(level, args) {
   try {
     if (!app.isReady()) return; // да не пипаме fs пътища, зависещи от userData, преди 'ready'
     const dir = logsDir();
-    const day = new Date().toISOString().slice(0, 10);
+    const day = localDate();
     const file = path.join(dir, `log-${day}.txt`);
     const text = args.map(a => {
       if (a instanceof Error) return a.stack || a.message;
@@ -522,9 +523,9 @@ function initDb() {
   }
   // Датирани съгласия — при вече отбелязано съгласие без дата се записва датата на
   // регистрация: най-добрата налична долна граница, по-честна от днешната дата.
-  db.exec(`UPDATE readers SET gdpr_consent_date = COALESCE(registered_at, date('now'))
+  db.exec(`UPDATE readers SET gdpr_consent_date = COALESCE(registered_at, date('now', 'localtime'))
     WHERE gdpr_consent = 1 AND gdpr_consent_date IS NULL`);
-  db.exec(`UPDATE readers SET parent_consent_date = COALESCE(registered_at, date('now'))
+  db.exec(`UPDATE readers SET parent_consent_date = COALESCE(registered_at, date('now', 'localtime'))
     WHERE parent_consent = 1 AND parent_consent_date IS NULL`);
   // Номенклатури — при празна категория се засява от познатите списъци плюс
   // стойностите, които вече се срещат из фонда (за да не изчезне нищо от менютата).
@@ -982,7 +983,7 @@ const MIGRATIONS = [
      място с по-стара програма отказва да отвори базата (assertSchemaNotNewer),
      докато не бъде обновено — по същия начин като при всяка досегашна миграция. */
   { version: 17, run: () => {
-    ensureColumns('inventory_sessions', { free_access_pct: 'REAL' });
+    ensureColumns('inventory_sessions', { free_access_pct: 'INTEGER' });
     db.exec(`UPDATE inventory_sessions
       SET free_access_pct = (SELECT free_access_pct FROM settings WHERE id = 1)
       WHERE closed = 1 AND free_access_pct IS NULL`);
@@ -1822,7 +1823,8 @@ function diffFields(oldObj, newObj, fields) {
   }
   return out;
 }
-const today = () => new Date().toISOString().slice(0, 10);
+/* Местната дата, не UTC — виж local-date.js (v2.4.67). */
+const today = () => localDate();
 const yearOf = (d) => (d || today()).slice(0, 4);
 function value(rows) { return rows.reduce((s, r) => s + (Number(r.price) || 0), 0); }
 function pctRequired(n) { return n <= 50000 ? 10 : n <= 200000 ? 5 : 2; }
@@ -2297,7 +2299,7 @@ function buildCatalogPayload() {
   const shelfList = Object.entries(shelves).map(([name, items]) => ({ name, items }));
   return {
     library: s.lib_name || '', place: s.place || '',
-    generated: new Date().toISOString().slice(0, 10),
+    generated: localDate(),
     items: books.map(b => publicBookFields(b, opacMap)),
     ...(shelfList.length ? { shelves: shelfList } : {})
   };
@@ -2442,7 +2444,7 @@ const CATALOG_PAYLOAD_CACHE = { db: null, stamp: null, payload: null };
 function catalogDataStamp() {
   const n = db.prepare('SELECT total_changes() AS n').get().n;
   const v = db.pragma('data_version', { simple: true });
-  return n + '|' + v + '|' + new Date().toISOString().slice(0, 10);
+  return n + '|' + v + '|' + localDate();
 }
 function dropCatalogPayloadCache() {
   CATALOG_PAYLOAD_CACHE.db = null;

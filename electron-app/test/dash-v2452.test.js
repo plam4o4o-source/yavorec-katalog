@@ -27,7 +27,9 @@ const { startMainApp } = require('./helpers/main-app');
 test.after(cleanupTmpDirs);
 
 const iso = (d) => d.toISOString().slice(0, 10);
-const dayOff = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return iso(d); };
+const { localDayOff } = require('./helpers/local-day');
+/* Местната дата (v2.4.67) — програмата брои „днес“ по часовника на компютъра. */
+const dayOff = localDayOff;
 const CSS = fs.readFileSync(path.join(APP_DIR, 'src', 'style.css'), 'utf8');
 
 /* ---------------- истинското приложение върху засята база ---------------- */
@@ -78,8 +80,8 @@ test('предстоящите връщания се връщат на порц�
 
   /* Независимо изчисление върху суровите редове — същото условие, но преброено тук. */
   const raw = db.prepare(`SELECT date_due AS d, COUNT(*) AS n FROM loans
-    WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due >= date('now')
-      AND julianday(date_due) - julianday('now') <= 3
+    WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due >= date('now', 'localtime')
+      AND julianday(date_due) - julianday('now', 'localtime') <= 3
     GROUP BY date_due ORDER BY date_due`).all();
   const total = raw.reduce((s, r) => s + r.n, 0);
   assert.equal(total, 16, 'фикстурата дава 9 + 5 + 2 предстоящи');
@@ -125,11 +127,11 @@ test('просрочията се разделят на три взаимно и
   const d = (await app.invoke('dashboard:full')).data;
   const b = d.overdueBuckets;
   const indep = db.prepare(`SELECT
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 7
-                AND julianday(date('now')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
-      SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
-    FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get();
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 7
+                AND julianday(date('now', 'localtime')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+      SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+    FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')`).get();
   assert.deepEqual([b.d7, b.d30, b.more], [indep.d7, indep.d30, indep.more]);
   /* ПОПРАВЕНО В v2.4.54 — тук стоеше [3, 7, 4] и обяснение, че така е вярно.
      Не е. julianday('now') носи и ЧАСА, затова срок отпреди точно 7 дни даваше
@@ -137,7 +139,7 @@ test('просрочията се разделят на три взаимно и
      твърди, че закъснението е поне осем дни. Просрочие от точно 7 дни е 7 дни,
      не 8; същото и на границите 30 и 60. Освен това касата брои ЦЕЛИ дни
      (effectiveDaysLate в handlers/loans.js), тоест таблото и касата даваха два
-     различни отговора за един и същи заем. date('now') маха часа и двете вече
+     различни отговора за един и същи заем. date('now', 'localtime') маха часа и двете вече
      съвпадат. Сега [4, 7, 3]: заемът точно на 7 дни е в първата група. */
   assert.deepEqual([b.d7, b.d30, b.more], [4, 7, 3],
     'фикстурата дава точно тези три групи, при това с попадения на самите граници');
@@ -145,7 +147,7 @@ test('просрочията се разделят на три взаимно и
   // отпреди РОВНО 7 дни трябва да е в „до 7 дни“, независимо в колко часа
   // библиотекарката е отворила таблото.
   const exactly7 = db.prepare(`SELECT COUNT(*) AS n FROM loans
-    WHERE date_in IS NULL AND date_due = date('now','-7 days')`).get().n;
+    WHERE date_in IS NULL AND date_due = date('now', 'localtime', '-7 days')`).get().n;
   assert.ok(exactly7 > 0, 'фикстурата трябва да съдържа заем точно на границата');
   assert.equal(b.d7 + b.d30 + b.more, d.overdueCount,
     'трите групи трябва да се събират до общия брой — иначе показателят си противоречи');
@@ -157,10 +159,10 @@ test('заеманията по седмици са дванайсет числ�
   assert.equal(d.loansWeeks.length, 12);
   assert.ok(d.loansWeeks.every(n => Number.isInteger(n) && n >= 0), 'само цели неотрицателни числа');
   const last7 = db.prepare(`SELECT COUNT(*) AS n FROM loans
-    WHERE date_out >= date('now','-7 days') AND date_out <= date('now')`).get().n;
+    WHERE date_out >= date('now', 'localtime', '-7 days') AND date_out <= date('now', 'localtime')`).get().n;
   assert.equal(d.loansWeeks[11], last7, 'последното число е последните седем дни');
   const total84 = db.prepare(`SELECT COUNT(*) AS n FROM loans
-    WHERE date_out >= date('now','-84 days') AND date_out <= date('now')`).get().n;
+    WHERE date_out >= date('now', 'localtime', '-84 days') AND date_out <= date('now', 'localtime')`).get().n;
   assert.equal(d.loansWeeks.reduce((s, n) => s + n, 0), total84,
     'сборът на дванайсетте седмици е броят заемания за 84 дни');
   // Заемане отпреди 200 дни НЕ бива да влиза никъде в редицата.
@@ -188,8 +190,7 @@ const DASH = (over) => Object.assign({
    толкова редове, колкото е броячът, тестът не различава двете числа и минава дори
    когато изгледът брои показаните вместо всички. */
 function upcomingFixture() {
-  const t = new Date();
-  const day = (n) => { const d = new Date(t); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const day = (n) => localDayOff(-n); // местната дата, както я смята таблото (v2.4.67)
   const rows = [];
   for (let i = 0; i < 4; i++) rows.push({ id: i + 1, title: 'Днешна ' + i, reader_name: 'Читател ' + i, date_due: day(0) });
   for (let i = 0; i < 4; i++) rows.push({ id: 100 + i, title: 'Утрешна ' + i, reader_name: 'Читател ' + i, date_due: day(1) });

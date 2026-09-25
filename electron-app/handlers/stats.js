@@ -261,7 +261,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          на таблото ги брои. Просрочените в момента са КЪМ ДНЕС (както finesOpen), затова
          се връщат само за текущата година, и се показват отделно от процента. */
       const openOverdue = String(y) === String(new Date().getFullYear())
-        ? db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n
+        ? db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')`).get().n
         : 0;
       const fundByCategory = db.prepare(`
         SELECT COALESCE(c.name,'—') AS k,

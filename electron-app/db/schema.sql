@@ -490,7 +490,7 @@ CREATE TABLE IF NOT EXISTS inventory_sessions (
   -- пренаписваше норматива на вече подписан протокол — 7 липсващи при допустими 5
   -- („над норматива, прилага се редът по чл. 51 – 53“) ставаха 7 при допустими 10.
   -- NULL = неприключена сесия (тогава се чете текущата настройка).
-  free_access_pct REAL
+  free_access_pct INTEGER
 );
 CREATE TABLE IF NOT EXISTS inventory_session_scans (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

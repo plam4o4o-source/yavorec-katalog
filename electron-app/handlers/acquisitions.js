@@ -7,10 +7,11 @@
 module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf } = deps;
   const { parseRegisterNo, isValidIsoDate } = require('../security-utils');
+  const { localDate } = require('../local-date');
   /* Същите две помощни функции, както в handlers/deaccession-acts.js:25 – 26:
      `today` не е сред подадените на този модул зависимости, затова се пада към
      истинската дата; `bgDate` показва датата така, както я чете библиотекарката. */
-  const todayStr = () => (typeof deps.today === 'function' ? deps.today() : new Date().toISOString().slice(0, 10));
+  const todayStr = () => (typeof deps.today === 'function' ? deps.today() : localDate());
   const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
 
   ipcMain.handle('acquisitions:list', () =>

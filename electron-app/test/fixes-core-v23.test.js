@@ -90,7 +90,7 @@ test('книга с падеж ДНЕС не е просрочена', async () 
   const { db, ipcMain } = setupLoans();
   const bookId = addBook(db, { inv_number: 1 });
   const readerId = addReader(db);
-  db.prepare("INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?,?,?,date('now'))")
+  db.prepare("INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?,?,?,date('now', 'localtime'))")
     .run(readerId, bookId, '2026-07-01');
   const res = await ipcMain.invoke('loans:overdue');
   assert.equal(res.data.length, 0, 'читателят още има цял ден да я върне — не бива да влиза в напомнянията');

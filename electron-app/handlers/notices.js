@@ -176,10 +176,10 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
                r.guarantor_name, r.guarantor_relation, r.guarantor_phone, COUNT(*) AS n,
                MIN(l.date_due) AS oldest_due
         FROM loans l JOIN readers r ON r.id = l.reader_id
-        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
+        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime')
         GROUP BY l.reader_id ORDER BY r.name
       `).all();
-      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.date_due`).all();
       /* Одит v2.4.24: `== null` не хваща ПРАЗЕН НИЗ, а формата на настройките праща
          точно него, когато полето е изчистено (formData() чете el.value). '' не е
          null → подразбиращото се 14/30 не влизаше, а `overdueDays >= ''` се привежда
