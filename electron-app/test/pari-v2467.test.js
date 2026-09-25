@@ -243,4 +243,81 @@ test('частично зает стар запис: протоколът бро
     'оригиналният запис носи заемането — бройката у читателя не бива да влиза в акта за отчисляване');
   assert.equal(q('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL', id).n, 1,
     'заемането остава на оригиналния запис');
+  /* Преглед на кръга: отделените бройки са ЛИПСВАЩИ, не „налични“ — иначе до
+     утвърждаването на акта те се заемат и излизат в каталога, а подписаният
+     протокол казва, че липсват. */
+  for (const r of rows) {
+    const b = q('SELECT status, status_date FROM books WHERE id = ?', r.id);
+    assert.deepEqual([b.status, b.status_date], ['липсващ', T], 'инв. № ' + r.inv_number);
+  }
+  assert.equal(q('SELECT quantity FROM inventory WHERE book_id = ?', id).quantity, 1, 'у оригинала остава заетата бройка');
+});
+
+/* Общата подготовка за трите случая от прегледа: стар запис с `qty` бройки, от
+   които `loans` са у читатели, пълна инвентаризация, в която той не е сканиран. */
+async function partialSession(invNo, qty, loans, status) {
+  const T = E.today();
+  const id = h.db.prepare(`INSERT INTO books (inv_number, title, author, price, register_date, status, status_date,
+      category_id) VALUES (?, 'Частичен ' || ?, 'Автор', 4, ?, ?, ?, ?)`)
+    .run(invNo, invNo, T, status || 'наличен', T, q("SELECT id FROM categories WHERE name = 'книга'").id).lastInsertRowid;
+  h.db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, ?)').run(id, qty);
+  if ((q('SELECT next_inv_number AS n FROM settings WHERE id = 1').n || 1) <= invNo) {
+    h.db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(invNo + 1);
+  }
+  const loanIds = [];
+  for (let i = 0; i < loans; i++) {
+    const r = h.db.prepare("INSERT INTO readers (name, card_no, status, gdpr_consent) VALUES (?, ?, 'активен', 1)")
+      .run('Държи ' + invNo + '/' + i, invNo + '-' + i).lastInsertRowid;
+    loanIds.push(h.db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)')
+      .run(r, id, T, T).lastInsertRowid);
+  }
+  const s = await h.api.inventorySessions.start({ date: T, scope: 'пълна', department: null,
+    committee1: 'Иванова', committee2: 'Петров', committee3: 'Стоянова', order_no: null });
+  assert.equal(s.ok, true, s.error);
+  const sid = s.data.id || s.data;
+  const others = h.db.prepare(`SELECT b.inv_number FROM books b WHERE (b.status != 'отчислен' OR b.status IS NULL)
+    AND b.id <> ? AND b.inv_number IS NOT NULL AND b.id NOT IN (SELECT book_id FROM loans WHERE date_in IS NULL)`).all(id);
+  for (const o of others) await h.api.inventorySessions.scan({ sessionId: sid, code: String(o.inv_number) });
+  const closed = await h.api.inventorySessions.close({ sessionId: sid, mode: 'full' });
+  assert.equal(closed.ok, true, closed.error);
+  return { T, id, sid, loanIds, closed: closed.data };
+}
+async function draftRows(sid, id) {
+  const before = q('SELECT MAX(id) AS id FROM deaccession_drafts').id || 0;
+  h.hooks.confirmAnswer = true;
+  await h.window.draftFromMissing(sid); await h.settle();
+  const draft = q('SELECT MAX(id) AS id FROM deaccession_drafts').id || 0;
+  assert.ok(draft > before, 'проектът не е съставен; последно: ' + JSON.stringify(h.lastToast()));
+  const title = q('SELECT title FROM books WHERE id = ?', id).title;
+  return h.db.prepare(`SELECT b.id, b.inv_number, b.status FROM deaccession_draft_items d JOIN books b ON b.id = d.book_id
+      WHERE d.draft_id = ? AND b.title = ?`).all(draft, title);
+}
+
+test('частично липсващ запис с ДВЕ заемания: проектът се съставя, липсващите са точно двете свободни бройки', async () => {
+  const { id, sid } = await partialSession(9601, 4, 2);
+  const rows = await draftRows(sid, id);
+  assert.equal(rows.length, 2, JSON.stringify(rows));
+  assert.ok(rows.every(r => r.id !== id && r.status === 'липсващ'));
+  assert.equal(q('SELECT quantity FROM inventory WHERE book_id = ?', id).quantity, 2, 'двете заети бройки остават под стария номер');
+  assert.equal(q('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL', id).n, 2);
+});
+
+test('бройката, върната между приключването и проекта, не прави целия запис липсващ', async () => {
+  const { T, id, sid, loanIds } = await partialSession(9701, 3, 1);
+  h.db.prepare('UPDATE loans SET date_in = ? WHERE id = ?').run(T, loanIds[0]);
+  const rows = await draftRows(sid, id);
+  assert.equal(rows.length, 2, 'протоколът казва 2 липсващи — актът също: ' + JSON.stringify(rows));
+  assert.ok(!rows.some(r => r.id === id), 'върнатата бройка стои под стария номер и не се отчислява');
+  assert.equal(q('SELECT quantity FROM inventory WHERE book_id = ?', id).quantity, 1);
+});
+
+test('частично зает запис „за реставрация“ или „изгубен“: незаетите бройки НЕ са липса по чл. 40', async () => {
+  for (const [invNo, status, key] of [[9801, 'за реставрация', 'atBinder'], [9802, 'изгубен', 'lostBefore']]) {
+    const { id, sid, closed } = await partialSession(invNo, 3, 1, status);
+    const sess = (await h.api.inventorySessions.get(sid)).data;
+    assert.equal(sess.missing.filter(m => m.book_id === id).length, 0, status + ': не е в липсите');
+    assert.equal(closed.missing, 0, status + ': липсите по чл. 40 са 0');
+    assert.equal(closed[key], 2, status + ': двете незаети бройки са в своята категория');
+    assert.equal(q('SELECT status FROM books WHERE id = ?', id).status, status, 'състоянието не се пипа');
+  }
 });

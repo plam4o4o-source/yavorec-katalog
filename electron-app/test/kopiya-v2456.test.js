@@ -565,3 +565,29 @@ test('непренесено копие не проваля преместван
   assert.match(warn.detail, new RegExp(path.join(t.oldDir, 'backups').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')),
     'заедно с точния път — копията са единственият изход при повреда');
 });
+
+/* ==================================================================
+   v2.4.67 — ИМЕНАТА НА КОПИЯТА СА ПО МЕСТНОТО ВРЕМЕ
+   ================================================================== */
+test('копието при затваряне в 00:40 българско време носи ДНЕШНАТА местна дата, не вчерашната в Гринуич', (t) => {
+  /* Преглед на кръга: todayStr() стана местна дата, а междинните копия още се
+     именуваха по UTC — копието от 00:40 излизаше „auto-<вчера>-2140“ и
+     todayIntradayBackups() (правилото „криптирай/прекриптирай ДНЕШНИТЕ копия“)
+     не го намираше. Часовникът е подменен на 21:40 UTC на 24.09 = 00:40 на 25.09. */
+  const prevTz = process.env.TZ;
+  process.env.TZ = 'Europe/Sofia';
+  const realNowSec = Date.now() / 1000;
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 8, 24, 21, 40) });
+  try {
+    const s = setup();
+    s.handlers.autoBackupIfNeeded();
+    assert.ok(fs.existsSync(path.join(s.backupsDir, 'auto-2026-09-25.db')), names(s.backupsDir).join(', '));
+    const before = names(s.backupsDir);
+    fs.utimesSync(s.dbPath, realNowSec + 60, realNowSec + 60);   // базата е пипана след копието
+    assert.equal(s.handlers.backupBeforeQuit(), true);
+    assert.deepEqual(names(s.backupsDir).filter(n => !before.includes(n)), ['auto-2026-09-25-0040.db']);
+  } finally {
+    t.mock.timers.reset();
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz;
+  }
+});

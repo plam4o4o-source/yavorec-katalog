@@ -497,9 +497,16 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id) && !excusedIds.has(b.id));
         /* Частично заети: несканиран ред с отворени заемания, но с повече бройки от
            тях. Незаетите му бройки не са извинени от нищо — не са намерени. */
-        const partlyLoaned = pool.filter(b => !scannedSet.has(b.id) && openLoanIds.has(b.id)
+        const partlyAll = pool.filter(b => !scannedSet.has(b.id) && openLoanIds.has(b.id)
           && !excusedIds.has(b.id) && qtyOf(b) - loanedOf(b) > 0);
-        const restOf = new Map(partlyLoaned.map(b => [b.id, qtyOf(b) - loanedOf(b)]));
+        const restOf = new Map(partlyAll.map(b => [b.id, qtyOf(b) - loanedOf(b)]));
+        /* Състоянието на записа важи и за незаетите му бройки (преглед на кръга):
+           „за реставрация“ — те са в подвързията, „изгубен“ — у ползвател; нито
+           едните, нито другите са липса по чл. 40 и не се броят срещу чл. 41. */
+        const partlyExcused = partlyAll.filter(b => b.status === 'за реставрация');
+        const partlyLost = partlyAll.filter(b => b.status === BOOK_STATUS_LOST);
+        const partlyLoaned = partlyAll.filter(b => !partlyExcused.includes(b) && !partlyLost.includes(b));
+        const restSum = (rows) => rows.reduce((n, b) => n + restOf.get(b.id), 0);
         /* Бройките, които се водят като непроверени/липсващи за даден ред. */
         const missingQty = (b) => (restOf.has(b.id) ? restOf.get(b.id) : qtyOf(b));
         // При представителна проверка непроверените НЕ са липсващи — те просто не
@@ -572,8 +579,8 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const outOfScope = scannedIds.length - scannedInPoolRows.length;
         const poolDocs = docs(pool);
         const missingDocs = missing.reduce((n, b) => n + missingQty(b), 0);
-        const excusedDocs = docs(excused);
-        const lostDocs = docs(lostBefore);
+        const excusedDocs = docs(excused) + restSum(partlyExcused);
+        const lostDocs = docs(lostBefore) + restSum(partlyLost);
         /* Процентът за норматива по чл. 41 се СНИМА тук (v2.4.67) — виж миграция 17. */
         const pctNow = (db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {}).free_access_pct;
         db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ?, free_access_pct = ? WHERE id = ?')
@@ -587,24 +594,24 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           (missingDocs !== missing.length ? ' (под ' + missing.length + ' инвентарни номера)' : '') +
           ' от ' + poolDocs + ' библиотечни документа' +
           (outOfScope ? ', ' + outOfScope + ' сканирани излязоха от обхвата по време на проверката' : '') +
-          (excused.length ? ', ' + excusedDocs + (excusedDocs === 1 ? ' документ за реставрация (не се проверява на място)'
+          (excusedDocs ? ', ' + excusedDocs + (excusedDocs === 1 ? ' документ за реставрация (не се проверява на място)'
             : ' документа за реставрация (не се проверяват на място)') : '') +
           /* Изгубените от ползватели се назовават ОТДЕЛНО и в следата: дневникът
              е мястото, от което библиотекарката на другия ден вижда защо
              липсите в протокола са по-малко от несканираните. */
-          (lostBefore.length ? ', ' + lostDocs + (lostDocs === 1
+          (lostDocs ? ', ' + lostDocs + (lostDocs === 1
             ? ' документ, изгубен от ползвател преди проверката (чл. 30, т. 5 — не е липса по чл. 40)'
             : ' документа, изгубени от ползватели преди проверката (чл. 30, т. 5 — не са липси по чл. 40)') : ''));
         const s2 = { free_access_pct: pctNow };
         return {
           mode, scanned: scannedInPool, missing: missingDocs, missingRows: missing.length,
           pool: poolDocs, poolRows: pool.length, outOfScope,
-          unchecked: docs(unchecked) + partlyLoaned.reduce((n, b) => n + restOf.get(b.id), 0),
+          unchecked: docs(unchecked) + restSum(partlyLoaned),
           onLoan: onLoanInPool, atBinder: excusedDocs,
           /* Изгубените преди проверката се връщат със собствено число (v2.4.65),
              за да ги покаже прозорецът след приключването отделно от липсите —
              те не се отчисляват с един и същ акт и не се сравняват с чл. 41. */
-          lostBefore: lostDocs, lostBeforeRows: lostBefore.length,
+          lostBefore: lostDocs, lostBeforeRows: lostBefore.length + partlyLost.length,
           allowedLoss: naturalLoss(poolDocs, s2.free_access_pct)
         };
       });

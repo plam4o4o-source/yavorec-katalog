@@ -193,22 +193,18 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       let finesCollected = 0;
       const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ';
       const outstanding = new Map(); // reader_id → [{type, left}] по реда на възникване
-      /* ЗАВАРЕНАТА ЗАБАВА (v2.4.67) — само в loans.fine, отпреди v2.4.61, без ред в
-         сметката. Писмото по чл. 43 и „Просрочени“ я засяват като НАЙ-СТАРО
-         задължение (handlers/loans.js), а отчетът не я виждаше: плащането за нея
-         отиваше за аванс или за по-стара такса и „Събрани обезщетения“ показваше
-         0,00 € за пари, които писмото вече беше обявило за платени. Същата
-         функция, същото правило — засява се в началото на опашката на читателя. */
-      const legacy = require('./loans').legacyOverdueByReader(db);
+      /* Заварената забава (само в loans.fine, отпреди v2.4.61) НЕ се засява тук,
+         макар писмото по чл. 43 да я засява (handlers/loans.js). Тя няма дата и се
+         познава само по днешните отворени заемания — засята тук, тя би направила
+         „Събрани обезщетения“ за вече подписана минала година зависими от това
+         кои книги са върнати ДНЕС (преглед на кръга v2.4.67). Отчетът брои само
+         това, което сметката доказва с дата. */
       /* АВАНСЪТ (v2.4.67) — надплатеното остава кредит и покрива следващото
          начисление. Кредитът помни ГОДИНАТА НА ПЛАЩАНЕТО: „Събрани обезщетения
          за Y“ са парите, получени през Y, дори начислението да е вписано по-късно. */
       const credits = new Map(); // reader_id → [{left, inYear}]
       for (const l of lines) {
-        if (!outstanding.has(l.reader_id)) {
-          const seed = legacy.get(l.reader_id);
-          outstanding.set(l.reader_id, seed ? [{ type: 'обезщетение', left: seed }] : []);
-        }
+        if (!outstanding.has(l.reader_id)) outstanding.set(l.reader_id, []);
         const q = outstanding.get(l.reader_id);
         if (l.kind === 'начисление') {
           const item = { type: l.type || 'друго', left: Number(l.amount) || 0 };

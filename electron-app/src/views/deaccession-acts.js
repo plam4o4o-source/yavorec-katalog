@@ -42,7 +42,7 @@ async function renderActs() {
       <th>Заглавия</th><th>Поправен</th><th></th></tr></thead><tbody>
     ${drafts.map(d => `<tr><td class="num">${d.id}</td><td class="num">${bg(d.date) || '—'}</td>
       <td>${d.reason_code ? 'т. ' + d.reason_code + '. ' : ''}${esc(d.reason_text || '— без причина —')}</td>
-      <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(String(d.updated_at || '').slice(0, 16))}</td>
+      <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(d.updated_at ? tsDay(d.updated_at) + ' ' + tsTime(d.updated_at) : '')}</td>
       <td><button class="btn sm" onclick="openDraft(${d.id})">Отвори</button>
           <button class="btn sm dgr" onclick="delDraft(${d.id})">Изтрий</button></td></tr>`).join('')}
     </tbody></table></div>` : ''}

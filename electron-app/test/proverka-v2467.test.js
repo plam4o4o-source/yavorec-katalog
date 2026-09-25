@@ -100,12 +100,23 @@ test('КДБФ: наличността към 01.01 съвпада с тази �
   db.prepare("INSERT INTO deaccession_acts (id, no, year, date) VALUES (1, 1, '2026', '2026-03-01')").run();
   db.prepare("INSERT INTO deaccession_items (act_id, book_id, inv_number, title, price, quantity) VALUES (1, 2, 2, 'Без дата', 5, 1)").run();
   db.prepare("UPDATE books SET status = 'отчислен', deaccession_act_id = 1, deaccession_date = '2026-03-01' WHERE id = 2").run();
+  /* Прегледът на кръга: вписан ПРЕЗ годината, но след датата на акта (датата на
+     вписване е датата на въвеждане) — брои се в постъпилите, значи и в
+     отчислените от наличността. И две стари записвания на датата: „1.05.2019“
+     минава сравнението с 2025-12-31 (като текст „1“ < „2“) и Е в наличността,
+     „3.05.2019“ — не е. */
+  for (const [id, reg] of [[3, '2026-06-10'], [4, '1.05.2019'], [5, '3.05.2019']]) {
+    db.prepare("INSERT INTO books (id, inv_number, title, category_id, status, price, register_date) VALUES (?, ?, 'Случай', ?, 'наличен', 1, ?)").run(id, id, c, reg);
+    db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(id);
+    db.prepare("INSERT INTO deaccession_items (act_id, book_id, inv_number, title, price, quantity) VALUES (1, ?, ?, 'Случай', 1, 1)").run(id, id);
+    db.prepare("UPDATE books SET status = 'отчислен', deaccession_act_id = 1, deaccession_date = '2026-03-01' WHERE id = ?").run(id);
+  }
 
   const k25 = ipcMain.invoke('kdbf:report', '2025').data;
   const k26 = ipcMain.invoke('kdbf:report', '2026').data;
   /* Част № 3 си остава с всичко отчислено — актът е документ по чл. 39. */
-  assert.equal(k26.deaccYear.n, 1, 'Част № 3 брои отчисления документ');
-  assert.deepEqual(k26.deaccOutOfStock, { n: 1, v: 5 }, 'и казва, че той не е бил в наличността');
+  assert.equal(k26.deaccYear.n, 4, 'Част № 3 брои всички отчислени документи');
+  assert.deepEqual(k26.deaccOutOfStock, { n: 2, v: 6 }, 'извън наличността са само „без дата“ и „3.05.2019“');
   /* Част № 2 вади само бившите в наличността — и веригата се затваря. */
   const inStock = k26.deaccYear.n - k26.deaccOutOfStock.n;
   const start26 = k26.stockEnd.n - k26.acquiredYear.n + inStock;
@@ -141,7 +152,7 @@ test('аванс: плащане, записано ден ПРЕДИ начис�
   assert.equal(unpaidOverdueFines(db, r2, 0), 0, 'писмото по чл. 43 не бива да иска платеното');
 });
 
-test('годишен отчет: аванс от декември се брои в годината на плащането; платената заварена забава се брои', () => {
+test('годишен отчет: аванс от декември се брои в годината на плащането; числото за минала година не зависи от днешните заемания', () => {
   const db = freshDb('inv-p67-stats-');
   const ipcMain = fakeIpcMain();
   require(path.join(APP_DIR, 'handlers', 'stats'))(ipcMain, {
@@ -156,14 +167,20 @@ test('годишен отчет: аванс от декември се брои 
   assert.equal(collected('2026'), 5, 'парите са получени през 2026 г.');
   assert.equal(collected('2027'), 0, 'и не се броят втори път през 2027 г.');
 
-  /* Заварена забава само в loans.fine (продължение под v2.4.60), платена 2026. */
+  /* Заварена забава само в loans.fine (продължение под v2.4.60), платена 2026.
+     Прегледът на кръга: първата редакция я засяваше в отчета от ОТВОРЕНИТЕ днес
+     заемания — връщането на книгата догодина променяше „Събрани обезщетения“ за
+     вече подписаната 2026 г. Заварената сума няма дата, към която да се върже,
+     затова отчетът я оставя (както до v2.4.66) и числото е устойчиво. */
   const b = addReader(db, 'Заварена забава');
   const book = db.prepare("INSERT INTO books (inv_number, title, category_id, status) VALUES (7, 'Тютюн', ?, 'наличен')")
     .run(cat(db)).lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(book);
   db.prepare("INSERT INTO loans (reader_id, book_id, date_out, date_due, fine) VALUES (?, ?, '2026-01-10', '2026-02-10', 2.7)").run(b, book);
   addLine(db, b, '2026-05-05', 'плащане', 'плащане', -2.7);
-  assert.equal(collected('2026'), 7.7, 'и заварените 2,70 € за забава са събрано обезщетение (5 + 2,70)');
+  assert.equal(collected('2026'), 5);
+  db.prepare("UPDATE loans SET date_in = '2027-03-01' WHERE reader_id = ?").run(b);
+  assert.equal(collected('2026'), 5, 'връщането през 2027 г. не пренаписва отчета за 2026 г.');
 });
 
 /* ------------------------------------------------------------------------ */
@@ -305,8 +322,13 @@ test('екранът: „днес“ и денят на момент от баз
   const res = spawnSync(process.execPath, ['-e', script], { cwd: APP_DIR, env: Object.assign({}, process.env, { TZ: tz }), encoding: 'utf8' });
   assert.deepEqual(JSON.parse(res.stdout || 'null'),
     east ? ['2026-09-25', '2026-09-24', '', '11:30', true] : ['2026-09-24', '2026-09-24', '', '09:30', true], res.stderr);
-  for (const [f, rx] of [['src/views/notices.js', /lastNotice\.ts\)\.slice/], ['src/views/kdbf.js', /revoked_at\)\.slice/],
-    ['src/views/deaccession-acts.js', /(revoked_at|created_at)\)\.slice/]]) {
-    assert.doesNotMatch(fs.readFileSync(path.join(APP_DIR, f), 'utf8'), rx, f + ' реже UTC момента вместо tsDay()');
+  /* Никой изглед не реже момент от базата (UTC) на дата: колоните със
+     DEFAULT (datetime('now')) и тези, които се пишат с datetime('now'). */
+  const TS = /\b(ts|placed_at|created_at|updated_at|revoked_at|scanned_at|datelastseen|ready_at|resolved_at)\b[^;\n]{0,20}\.slice\(\s*(0|11)\s*,/;
+  for (const f of fs.readdirSync(path.join(APP_DIR, 'src', 'views')).filter(f => f !== 'core.js')) { // core.js — самите tsDay/tsTime
+    const src = fs.readFileSync(path.join(APP_DIR, 'src', 'views', f), 'utf8');
+    src.split('\n').forEach((l, i) => {
+      assert.doesNotMatch(l, TS, 'src/views/' + f + ':' + (i + 1) + ' реже UTC момента вместо tsDay()/tsTime()');
+    });
   }
 });

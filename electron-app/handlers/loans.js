@@ -20,6 +20,7 @@ const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/
 /* Начислението в читателската сметка минава през handlers/account.js — сметката
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
 const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
+const { toCents } = require('../db/fund-sql');
 
 /* Видът на начислението за ЗАБАВА в читателската сметка — дословно този, с който
    пише chargeOverdueFine в handlers/account.js. Стои като именувана константа,
@@ -95,7 +96,7 @@ function unpaidOverdueFines(db, readerId, legacy) {
     if (money > 0.0001) credit += money;
   }
   const rest = queue.reduce((s, q) => s + (q.type === OVERDUE_CHARGE_TYPE ? q.left : 0), 0);
-  return Math.round(rest * 100) / 100;
+  return toCents(rest);
 }
 
 /* ЗАВАРЕНАТА ЗАБАВА, КОЯТО НИКОГА НЕ Е ВЛИЗАЛА В СМЕТКАТА (v2.4.65).
@@ -126,28 +127,6 @@ function unpaidForRows(db, readerId, rows) {
       WHERE reader_id = ? AND kind = 'начисление' AND type = ?`).get(readerId, OVERDUE_CHARGE_TYPE).s;
   const legacy = Math.max(0, Math.round((onRows - Math.abs(Number(inAccount) || 0)) * 100) / 100);
   return unpaidOverdueFines(db, readerId, legacy);
-}
-
-/* ЗАВАРЕНАТА ЗАБАВА ПО ЧИТАТЕЛИ — ЗА ГОДИШНИЯ ОТЧЕТ (v2.4.67).
-   Същото правило като unpaidForRows, но за всички читатели наведнъж и по ВСИЧКИ
-   отворени заемания (не само по показаните като просрочени): продължено под
-   v2.4.60 заемане може вече да не е просрочено, а забавата по него пак е дълг.
-   Долна граница, както там: от сбора на loans.fine по отворените се вади
-   всичко начислено за забава в сметката. Две групирани заявки, не по две на
-   читател. Връща Map читател → сума. */
-function legacyOverdueByReader(db) {
-  const out = new Map();
-  const open = db.prepare(`SELECT reader_id, COALESCE(SUM(fine), 0) AS s FROM loans
-      WHERE date_in IS NULL AND COALESCE(fine, 0) > 0 GROUP BY reader_id`).all();
-  if (!open.length) return out;
-  const charged = new Map(db.prepare(`SELECT reader_id, COALESCE(SUM(amount), 0) AS s FROM account_lines
-      WHERE kind = 'начисление' AND type = ? GROUP BY reader_id`).all(OVERDUE_CHARGE_TYPE)
-    .map(r => [r.reader_id, Math.abs(Number(r.s) || 0)]));
-  for (const r of open) {
-    const legacy = Math.round(((Number(r.s) || 0) - (charged.get(r.reader_id) || 0)) * 100) / 100;
-    if (legacy > 0) out.set(r.reader_id, legacy);
-  }
-  return out;
 }
 
 /* РАЗНАСЯ НЕПЛАТЕНАТА ЗАБАВА ПО ПРОСРОЧЕНИТЕ ЗАЕМАНИЯ НА ЕДИН ЧИТАТЕЛ.
@@ -259,8 +238,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      Домашното правило е изрично: всяка ЗАПИСАНА или ОТПЕЧАТАНА сума минава през
      закръгляне до стотинка. Затова функцията се качва тук, над всички
      обработчици, и се ползва навсякъде, където се пипа loans.fine. */
-  /* Едно закръгляне за цялата програма — виж toCents в db/fund-sql.js (v2.4.67). */
-  const { toCents } = require('../db/fund-sql');
+  /* Едно закръгляне за цялата програма — toCents от db/fund-sql.js (v2.4.67), вписан най-горе. */
   /* Датата, както я пише и чете библиотекарят — „18.09.2026“ (v2.4.61). Целият
      екран, всички печатни документи и всички останали съобщения на гишето са в
      този вид; ISO низът от базата („2026-09-18“) се показваше само на едно
@@ -1573,4 +1551,3 @@ module.exports.OVERDUE_CHARGE_TYPE = OVERDUE_CHARGE_TYPE;
 module.exports.unpaidOverdueFines = unpaidOverdueFines;
 module.exports.spreadUnpaidFine = spreadUnpaidFine;
 module.exports.unpaidForRows = unpaidForRows;
-module.exports.legacyOverdueByReader = legacyOverdueByReader;

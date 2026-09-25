@@ -10,7 +10,7 @@ async function renderHolds(tabs) {
     </tr></thead><tbody>
       ${rows.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
         <td>${esc(h.reader_name)} <span class="hint">(${esc(h.card_no || '')})</span></td>
-        <td class="num">${bg((h.placed_at || '').slice(0, 10))}</td>
+        <td class="num">${bg(tsDay(h.placed_at))}</td>
         <td>${h.status === 'заделена' ? '<span class="badge ok">заделена — чака взимане</span>' : '<span class="badge">чака в опашка</span>'}</td>
         <td><button class="btn sm" onclick="cancelHold(${h.id})">Откажи</button></td></tr>`).join('')}
     </tbody></table></div>`}`;

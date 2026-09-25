@@ -390,31 +390,40 @@ async function draftFromMissing(sessionId) {
      протоколът казва „3 документа“ и актът също казва „3 документа“, само че
      вече поименно, по номер, както го иска инвентарната книга. Пита се веднъж,
      за всички такива записи наведнъж. */
-  /* ЧАСТИЧНО ЗАЕТ СТАР ЗАПИС (v2.4.67). Приключването вече записва в липсите
+  /* ЧАСТИЧНО ЛИПСВАЩ СТАР ЗАПИС (v2.4.67). Приключването записва в липсите
      само НЕНАМЕРЕНИТЕ бройки на запис, чиято друга бройка е у читател (например
-     3 бройки, 1 заета → 2 липсващи). Разделянето оставя заемането на
-     ОРИГИНАЛНИЯ запис (splitOneCopy в handlers/books.js), а новите номера са
-     свободните бройки — тоест точно липсващите. Затова за такъв запис в акта
-     влизат САМО новите номера, не и оригиналът: иначе актът щеше да отчисли и
-     бройката, която читателят още държи. */
-  /* Едноброен запис с отворено заемане е НАМЕРЕН след проверката (иначе
-     нямаше да е зает) — той не влиза в акта изобщо. */
-  const partial = (m) => (Number(m.on_loan_now) || 0) > 0;
+     3 бройки, 1 заета → 2 липсващи). Колко да влязат в акта се решава от
+     СНИМКАТА в протокола (m.quantity), ограничена от бройките, които СЕГА не са
+     у читател: заета след проверката бройка е намерена. От такъв запис се
+     отделят точно толкова нови номера със състояние „липсващ“
+     (books:splitCopiesBatch → detachMissingCopies); заеманията и останалите
+     бройки остават на оригинала, който не влиза в акта. */
   const liveQty = (m) => (m.live_qty == null ? invQty(m) : Number(m.live_qty) || 0);
-  const found = miss.filter(m => partial(m) && liveQty(m) <= 1);
-  const legacy = miss.filter(m => !found.includes(m) && (invQty(m) > 1 || partial(m)));
-  const ids = miss.filter(m => !partial(m)).map(m => m.book_id);
-  for (const m of found) {
-    toast('Инв. № ' + m.inv_number + ' е в протокола като липсващ, но сега е зает от читател — значи е намерен. '
+  const snapQty = (m) => { const v = Number(m.quantity); return Number.isFinite(v) && v >= 0 ? v : 1; };
+  const plan = miss.map(m => {
+    const L = liveQty(m);
+    return { m, L, q: snapQty(m), k: Math.min(snapQty(m), L - (Number(m.on_loan_now) || 0)) };
+  });
+  const found = plan.filter(p => p.k <= 0);
+  const whole = plan.filter(p => p.k > 0 && p.k >= p.L);   // липсва целият запис
+  const part = plan.filter(p => p.k > 0 && p.k < p.L);     // липсват k от L бройки
+  const legacy = whole.filter(p => p.L > 1);
+  const ids = whole.map(p => p.m.book_id);
+  for (const { m } of found) {
+    toast('Инв. № ' + m.inv_number + ' е в протокола като липсващ, но сега е у читател — значи е намерен. '
       + 'Не влиза в проекта за акт.', 'warn');
   }
-  if (legacy.length) {
-    const ok = await askConfirm((legacy.length === 1 ? 'Един от липсващите е стар запис' : legacy.length
-      + ' от липсващите са стари записи') + ' с няколко екземпляра под един инвентарен номер ('
-      + legacy.map(m => 'инв. № ' + m.inv_number + ' × ' + invQty(m)).join(', ') + '). '
-      + 'Актът описва всеки отчислен екземпляр поотделно, с неговия номер. Програмата ще раздели '
-      + (legacy.length === 1 ? 'записа' : 'записите') + ' — всеки екземпляр получава свой инвентарен номер — '
-      + 'и ще включи всички тях в проекта, защото нито един от тях не е намерен при проверката. '
+  for (const p of part.filter(p => p.k < p.q)) {
+    toast('Инв. № ' + p.m.inv_number + ': по протокола липсват ' + p.q + ', но ' + (p.q - p.k)
+      + ' от тях вече са у читател — в проекта влизат ' + p.k + '.', 'warn');
+  }
+  if (legacy.length || part.length) {
+    const ok = await askConfirm('Сред липсващите има стари записи с няколко екземпляра под един инвентарен номер ('
+      + legacy.map(p => 'инв. № ' + p.m.inv_number + ' × ' + p.L).concat(
+        part.map(p => 'инв. № ' + p.m.inv_number + ' — липсват ' + p.k + ' от ' + p.L)).join(', ') + '). '
+      + 'Актът описва всеки отчислен екземпляр поотделно, с неговия номер. Програмата ще даде на всеки '
+      + 'липсващ екземпляр свой инвентарен номер и ще включи в проекта само тях'
+      + (part.length ? ' — намерените и заетите бройки остават под стария номер' : '') + '. '
       + 'Бройката и стойността не се променят. Да продължа?', { okLabel: 'Раздели и състави проекта' });
     if (!ok) return;
     /* ЕДНА транзакция за ВСИЧКИ записи (books:splitCopiesBatch, поправка след
@@ -430,7 +439,8 @@ async function draftFromMissing(sessionId) {
        по-малко N от истинското. Сега или се разделят всички поискани записи,
        или (при истинска грешка по кой да е от тях) нито един — вече разделен
        запис не е грешка, той просто се прескача. */
-    const r = await window.api.books.splitCopiesBatch(legacy.map(m => m.book_id));
+    const r = await window.api.books.splitCopiesBatch(legacy.map(p => p.m.book_id)
+      .concat(part.map(p => ({ id: p.m.book_id, missing: p.k, date: s.date }))));
     if (!r || !r.ok) return toast((r && r.error) || 'Записите не можаха да бъдат разделени.', 'err');
     for (const res of r.data.results) ids.push(...(res.createdIds || []));
     /* Вече разделен запис (например от „Проверка на данните“ след
@@ -442,6 +452,7 @@ async function draftFromMissing(sessionId) {
         + 'Добавете в проекта и останалите липсващи екземпляри по новите им номера.', 'warn');
     }
   }
+  if (!ids.length) return toast('Всички липси от протокола вече са намерени — няма какво да влезе в проект за акт.', 'warn');
   const id = await call(window.api.deaccessionActs.saveDraft({
     draft: {
       date: today(), reason_code: 6,

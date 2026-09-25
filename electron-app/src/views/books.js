@@ -504,7 +504,7 @@ async function bookForm(id, presetAcqId, prefill) {
           opts: avSelectOpts(AV.location, [], v.permanent_location), val: v.permanent_location || '',
           emptyLabel: '— без отбелязване —' })}
         <div class="field"><label>Последно видяна</label>
-          <input value="${v.datelastseen ? esc(bg(String(v.datelastseen).slice(0, 10))) : '—'}" disabled
+          <input value="${v.datelastseen ? esc(bg(tsDay(v.datelastseen))) : '—'}" disabled
             title="Попълва се само от сканиране при инвентаризация"></div>
       </div>
       <div class="hint" style="margin-top:-4px">„Постоянно място“ пази рафта/шкафа, докато документът е временно
