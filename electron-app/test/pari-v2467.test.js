@@ -143,3 +143,55 @@ test('търсенето в одитната следа намира „под �
   assert.equal(await found('50%'), 1, '„50%“ трябва да търси буквално');
   assert.equal(await found('_'), 0, '„_“ не бива да съвпада с всеки ред');
 });
+
+/* ============================================================================
+   Заличаването по чл. 17 повиква следващия в опашката.
+   ============================================================================
+   Находка при същата проверка — в поправката от v2.4.65: заличаването отказваше
+   ЗАДЕЛЕНАТА резервация на читателя, но не викаше activateHoldOnReturn(), тоест
+   следващият чакащ оставаше „чака“ завинаги (документът не е зает — никое
+   връщане няма да го повика). Минава през ИСТИНСКИЯ main.js: там gdpr се
+   регистрира ПРЕДИ holds и функцията се подава мързеливо — директно подаване би
+   гръмнало при стартиране, а този тест би го показал. */
+test('заличаването на читател със заделена книга повиква следващия в опашката', async () => {
+  const cat = q("SELECT id FROM categories WHERE name = 'книга'").id;
+  const b = h.db.prepare("INSERT INTO books (inv_number, title, category_id, status) VALUES (9301, 'Железният светилник', ?, 'наличен')")
+    .run(cat).lastInsertRowid;
+  h.db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(b);
+  const addR = (name, card) => h.db.prepare(
+    "INSERT INTO readers (name, card_no, status, gdpr_consent) VALUES (?, ?, 'активен', 1)").run(name, card).lastInsertRowid;
+  const a = addR('Заличаван Читател', '9301');
+  const next = addR('Следващ Чакащ', '9302');
+  h.db.prepare("INSERT INTO holds (book_id, reader_id, status, placed_at) VALUES (?, ?, 'заделена', '2026-09-01 10:00:00')").run(b, a);
+  h.db.prepare("INSERT INTO holds (book_id, reader_id, status, placed_at) VALUES (?, ?, 'чака', '2026-09-02 10:00:00')").run(b, next);
+
+  const r = await h.api.gdpr.forgetReader({ id: a });
+  assert.ok(r && r.ok, 'заличаване: ' + (r && r.error));
+
+  assert.equal(q('SELECT status FROM holds WHERE reader_id = ?', next).status, 'заделена',
+    'следващият в опашката трябва да бъде повикан — книгата е свободна и никое връщане няма да го направи');
+  const trail = q("SELECT detail FROM audit_log WHERE action = 'Заличаване по искане на читател' ORDER BY id DESC");
+  assert.match(trail.detail, /повикан е следващият в опашката/, 'следата трябва да казва, че е повикан:\n' + trail.detail);
+});
+
+/* ============================================================================
+   КДБФ: броячът „не участват в наличността“ брои и неразпознаваемите дати.
+   ============================================================================
+   Находка при същата проверка: броячът гледаше само register_date IS NULL, а
+   наличността (fundByDate) изключва ВСЕКИ ред, за който „+register_date <= край“
+   не е истина. Документ с дата „НЕВАЛИДНА-99-99“ изпадаше от наличността на
+   подписаното Приложение № 2, а броячът казваше 0 — бележката под КДБФ мълчеше. */
+test('КДБФ брои като изпаднали от наличността и документите с неразпознаваема дата', async () => {
+  const cat = q("SELECT id FROM categories WHERE name = 'книга'").id;
+  const ins = h.db.prepare(`INSERT INTO books (inv_number, title, category_id, status, price, register_date)
+      VALUES (?, ?, ?, 'наличен', ?, ?)`);
+  const add = (inv, date) => { const id = ins.run(inv, 'КДБФ-проба ' + inv, cat, 1, date).lastInsertRowid;
+    h.db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(id); };
+  const before = (await h.api.kdbf.report('2026')).data.undated.missing_from_stock;
+  add(9401, 'НЕВАЛИДНА-99-99');   // изпада: като текст „Н“ > „2“
+  add(9402, '3.05.2019');         // изпада: „3“ > „2“
+  add(9403, null);                // изпада: NULL
+  add(9404, '1.05.2019');         // ОСТАВА в наличността: „1“ < „2“ — и броячът не бива да го брои
+  const after = (await h.api.kdbf.report('2026')).data.undated.missing_from_stock;
+  assert.equal(after - before, 3, 'трите документа, които наистина изпадат от наличността, трябва да бъдат обявени');
+});
