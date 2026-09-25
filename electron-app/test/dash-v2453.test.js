@@ -31,7 +31,9 @@ const { startMainApp } = require('./helpers/main-app');
 test.after(cleanupTmpDirs);
 
 const iso = (d) => d.toISOString().slice(0, 10);
-const dayOff = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return iso(d); };
+const { localDayOff } = require('./helpers/local-day');
+/* Местната дата (v2.4.67) — програмата брои „днес“ по часовника на компютъра. */
+const dayOff = localDayOff;
 const MAIN = fs.readFileSync(path.join(APP_DIR, 'handlers', 'dashboard.js'), 'utf8');
 
 /* ==================================================================
@@ -41,9 +43,9 @@ const MAIN = fs.readFileSync(path.join(APP_DIR, 'handlers', 'dashboard.js'), 'ut
 test('границата на заявката изключва заемане от ТОЧНО 84 дни, не само коментарът го твърди', () => {
   /* Проверка на самия SQL текст, преди да се пусне база: границата трябва да е
      стриктно „>“, а не „>=“ — символът решава дали граничният ден влиза. */
-  assert.match(MAIN, /date_out > date\('now', '-84 days'\) AND date_out <= date\('now'\)/,
+  assert.match(MAIN, /date_out > date\('now', 'localtime', '-84 days'\) AND date_out <= date\('now', 'localtime'\)/,
     'долната граница на 12-те седмици трябва да е стриктна');
-  assert.doesNotMatch(MAIN, /date_out >= date\('now', '-84 days'\)/,
+  assert.doesNotMatch(MAIN, /date_out >= date\('now'/,
     'нестриктната граница е точно грешката: включва заемане от преди 84 дни, w=12, извън масива');
 });
 
@@ -57,8 +59,8 @@ test('заемане от точно преди 84 дни изчезва от г
   db.prepare('INSERT INTO loans VALUES (?)').run(dayOff(84));
   db.prepare('INSERT INTO loans VALUES (?)').run(dayOff(83));
   db.prepare('INSERT INTO loans VALUES (?)').run(dayOff(0));
-  const rows = db.prepare(`SELECT CAST((julianday('now') - julianday(date_out)) / 7 AS INTEGER) AS w, COUNT(*) AS n
-    FROM loans WHERE date_out > date('now', '-84 days') AND date_out <= date('now') GROUP BY w`).all();
+  const rows = db.prepare(`SELECT CAST((julianday('now', 'localtime') - julianday(date_out)) / 7 AS INTEGER) AS w, COUNT(*) AS n
+    FROM loans WHERE date_out > date('now', 'localtime', '-84 days') AND date_out <= date('now', 'localtime') GROUP BY w`).all();
   const total = rows.reduce((s, r) => s + r.n, 0);
   assert.equal(total, 2, 'само двете заемания в прозореца (83 и 0 дни), НЕ трите');
   assert.ok(rows.every(r => r.w >= 0 && r.w <= 11), 'нито един ред извън 0..11 — индексът на масива е безопасен');
@@ -105,7 +107,7 @@ test('таблото не брои заемане от точно преди 84 
      dash-v2452.test.js, чиято фикстура изобщо не съдържа заемане от точно
      84 дни и затова не различава двете граници. */
   const indep = db.prepare(`SELECT COUNT(*) AS n FROM loans
-    WHERE date_out > date('now', '-84 days') AND date_out <= date('now')`).get().n;
+    WHERE date_out > date('now', 'localtime', '-84 days') AND date_out <= date('now', 'localtime')`).get().n;
   assert.equal(indep, 2, 'фикстурата: 83 и 0 дни, НЕ 84');
   assert.equal(d.loansWeeks.reduce((s, n) => s + n, 0), indep,
     'таблото трябва да съвпада с независимо преброените 84 дни, включително на самата граница');

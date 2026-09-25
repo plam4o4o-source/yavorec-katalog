@@ -31,6 +31,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   } = deps;
   const { isEncryptedBackup, encryptBackupFile, decryptBackupBuffer } = require('../backup-crypto');
   const pii = require('../pii-crypto');
+  const { localDate } = require('../local-date');
   const crypto = require('crypto'); // само за отпечатък на паролата в паметта, виж todayEncryptedWith
   /* Истинска връзка към SQLite — нужна е само за PRAGMA integrity_check върху
      ПРЯСНО ЗАПИСАНО копие и върху файл, предложен за възстановяване. Отваря се
@@ -513,7 +514,8 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   let todayEncryptedWith = null;
   const fingerprint = (password) => crypto.createHash('sha256').update(String(password)).digest('hex');
 
-  function todayStr() { return new Date().toISOString().slice(0, 10); }
+  // Местната дата (v2.4.67): копието след полунощ е на НОВИЯ ден, не на вчерашния.
+  function todayStr() { return localDate(); }
   function todayPaths() {
     const today = todayStr();
     const dir = backupsDir();
@@ -696,11 +698,14 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      дневното (auto-ГГГГ-ММ-ДД), за да не се блъскат: дневното е онова, което
      autoBackupIfNeeded() търси при стартиране, и ако междинните носеха същото
      име, копието от 17:00 щеше да мине за „днешното“ и да бъде прекриптирано,
-     изтрито или прескочено по чужди правила. Часът е по UTC — точно както
-     backupTimestamp() за ръчните копия, за да се подреждат еднакво. */
+     изтрито или прескочено по чужди правила. Датата и часът са МЕСТНИТЕ (от
+     v2.4.67; дотук — UTC) — точно както backupTimestamp() за ръчните копия. */
   function intradayPath(password) {
-    const iso = new Date().toISOString();
-    const stamp = iso.slice(0, 10) + '-' + iso.slice(11, 13) + iso.slice(14, 16);
+    /* Местни дата и час (v2.4.67), както todayStr(): иначе копието от 00:40
+       българско време носеше вчерашната дата в Гринуич и todayIntradayBackups()
+       не го намираше — оставаше некриптирано или със старата парола. */
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    const stamp = localDate(d) + '-' + p(d.getHours()) + p(d.getMinutes());
     return path.join(backupsDir(), 'auto-' + stamp + (password ? '.invbak' : '.db'));
   }
 
@@ -1226,7 +1231,9 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   );
 
   function backupTimestamp() {
-    return new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    // Местното време (v2.4.67) — часът в името е онзи, който библиотекарят вижда на часовника.
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    return localDate(d) + '-' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
   }
 
   ipcMain.handle('backup:list', () =>

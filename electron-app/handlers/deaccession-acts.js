@@ -11,6 +11,7 @@ const { isValidIsoDate, parseRegisterNo, resolveScannedBook } = require('../secu
    ЕДНО място, което пише в нея (виж дългата бележка над функцията). */
 const { chargeCoverage, chargeLost, chargeOverdueFine } = require('./account');
 const { EVENT_KIND_LOST } = require('../db/enum-triggers');
+const { localDate } = require('../local-date');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode,
@@ -22,9 +23,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
 
   /* Днешната дата — през main.js, когато е подадена, за да е ЕДНА и съща с тази,
      с която се датират заемането, връщането и дневникът. */
-  const todayStr = () => (typeof today === 'function' ? today() : new Date().toISOString().slice(0, 10));
+  const todayStr = () => (typeof today === 'function' ? today() : localDate());
   const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
-  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  /* Едно закръгляне за цялата програма — виж toCents в db/fund-sql.js (v2.4.67). */
+  const { toCents } = require('../db/fund-sql');
   /* Дни забава, изчистени от затворените дни в календара — ОГЛЕДАЛО на
      effectiveDaysLate() в handlers/loans.js, която ползва същата функция
      closedDaysBetween() от handlers/calendar.js. Тук тя се подава през deps,
@@ -1229,11 +1231,12 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            анулиран (или изобщо несъществуващ) акт се връщаше с ok:true, прозорецът
            обявяваше „Актът е анулиран“, а в дневника се вписваше събитие за акт,
            който никога не е бил съставен. */
-        const act = db.prepare('SELECT no, year, date, revoked_at FROM deaccession_acts WHERE id = ?').get(id);
+        /* revoked_at е UTC момент — денят се показва по местно време (v2.4.67). */
+        const act = db.prepare("SELECT no, year, date, revoked_at, date(revoked_at, 'localtime') AS revoked_day FROM deaccession_acts WHERE id = ?").get(id);
         if (!act) throw new Error('Актът не е намерен.');
         if (act.revoked_at) {
           throw new Error('Акт № ' + act.no + '/' + act.year + ' вече е анулиран на '
-            + String(act.revoked_at).slice(0, 10) + ' г. — вторично анулиране няма смисъл.');
+            + act.revoked_day + ' г. — вторично анулиране няма смисъл.');
         }
         /* АНУЛИРАНЕ НА АКТ ОТ ПРИКЛЮЧЕНА ГОДИНА (v2.4.61).
            =================================================================
@@ -1274,7 +1277,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           .filter(it => it.shelves_before)
           .map(it => ({ inv_number: it.inv_number, shelves: it.shelves_before }));
         // Сглобена веднъж, извън обхождането — по същата причина като при съставянето.
-        const backStmt = db.prepare(`UPDATE books SET status=?, status_date=date('now'),
+        const backStmt = db.prepare(`UPDATE books SET status=?, status_date=date('now', 'localtime'),
           deaccession_act_id=NULL, deaccession_date=NULL WHERE id=?`);
         items.forEach(it => {
           if (it.book_id) {

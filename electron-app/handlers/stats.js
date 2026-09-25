@@ -191,11 +191,33 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         ORDER BY reader_id, date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
       `).all();
       let finesCollected = 0;
+      const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ';
       const outstanding = new Map(); // reader_id → [{type, left}] по реда на възникване
+      /* Заварената забава (само в loans.fine, отпреди v2.4.61) НЕ се засява тук,
+         макар писмото по чл. 43 да я засява (handlers/loans.js). Тя няма дата и се
+         познава само по днешните отворени заемания — засята тук, тя би направила
+         „Събрани обезщетения“ за вече подписана минала година зависими от това
+         кои книги са върнати ДНЕС (преглед на кръга v2.4.67). Отчетът брои само
+         това, което сметката доказва с дата. */
+      /* АВАНСЪТ (v2.4.67) — надплатеното остава кредит и покрива следващото
+         начисление. Кредитът помни ГОДИНАТА НА ПЛАЩАНЕТО: „Събрани обезщетения
+         за Y“ са парите, получени през Y, дори начислението да е вписано по-късно. */
+      const credits = new Map(); // reader_id → [{left, inYear}]
       for (const l of lines) {
-        const q = outstanding.get(l.reader_id) || [];
+        if (!outstanding.has(l.reader_id)) outstanding.set(l.reader_id, []);
+        const q = outstanding.get(l.reader_id);
         if (l.kind === 'начисление') {
-          q.push({ type: l.type || 'друго', left: Number(l.amount) || 0 });
+          const item = { type: l.type || 'друго', left: Number(l.amount) || 0 };
+          const cr = credits.get(l.reader_id) || [];
+          while (item.left > 0.0001 && cr.length) {
+            const c = cr[0];
+            const used = Math.min(c.left, item.left);
+            if (c.inYear && isFine(item.type)) finesCollected += used;
+            c.left -= used; item.left -= used;
+            if (c.left <= 0.0001) cr.shift();
+          }
+          credits.set(l.reader_id, cr);
+          if (item.left > 0.0001) q.push(item);
         } else if (l.kind === 'плащане') {
           let money = Math.abs(Number(l.amount) || 0);
           const inYear = String(l.date || '').slice(0, 4) === String(y);
@@ -206,14 +228,17 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
                то също е обезщетение по чл. 43 и събраното по него е приход на
                библиотеката. Дотук сравнението беше буквално с една стойност и
                новият вид просто нямаше да се появи в „Събрани обезщетения“. */
-            if (inYear && (head.type === 'обезщетение' || head.type === 'обезщетение за изгубен документ')) finesCollected += used;
+            if (inYear && isFine(head.type)) finesCollected += used;
             head.left -= used;
             money -= used;
             if (head.left <= 0.0001) q.shift();
           }
-          // Надплатеното (аванс) не се приписва на нищо — остава извън отчета.
+          if (money > 0.0001) {
+            const cr = credits.get(l.reader_id) || [];
+            cr.push({ left: money, inYear });
+            credits.set(l.reader_id, cr);
+          }
         }
-        outstanding.set(l.reader_id, q);
       }
       finesCollected = Math.round(finesCollected * 100) / 100;
       const finesCharged = returned.finesCharged;
@@ -232,7 +257,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          на таблото ги брои. Просрочените в момента са КЪМ ДНЕС (както finesOpen), затова
          се връщат само за текущата година, и се показват отделно от процента. */
       const openOverdue = String(y) === String(new Date().getFullYear())
-        ? db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n
+        ? db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')`).get().n
         : 0;
       const fundByCategory = db.prepare(`
         SELECT COALESCE(c.name,'—') AS k,

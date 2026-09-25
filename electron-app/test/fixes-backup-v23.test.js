@@ -46,7 +46,7 @@ test.after(() => {
 
 const SRC_DIR = path.join(__dirname, '..', 'src');
 const VIEWS_DIR = path.join(SRC_DIR, 'views');
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = require('./helpers/local-day').localToday(); // местната дата (v2.4.67)
 const OLD_PASS = 'временна-парола-1';
 const NEW_PASS = 'истинската-парола-2';
 

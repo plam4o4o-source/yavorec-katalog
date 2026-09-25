@@ -15,6 +15,8 @@
 // защото app.whenReady()/window-all-closed ги викат — но само вътре в
 // отложени callback-и, не веднага при зареждане, така че редът тук е
 // без значение (за разлика от scheduleCatalogWrite по-горе).
+const { localDate } = require('../local-date');
+
 module.exports = function registerCatalogHandlers(ipcMain, deps) {
   /* BOOK_SELECT вече НЕ се взима тук (v2.4.64): и трите износа минават през
      EXPORT_SELECT по-долу — лека изброена проекция с агрегат вместо `b.*` с
@@ -532,7 +534,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
        Дотук се изнасяше „2026-09-01“: стриктният валидатор — същият, заради който
        полето 801 изобщо беше добавено — отхвърля точно него. */
     add('801', ' ', '0', [['a', 'BG'], ['b', agency],
-      ['c', new Date().toISOString().slice(0, 10).replace(/-/g, '')], ['g', 'unimarc']]);
+      ['c', localDate().replace(/-/g, '')], ['g', 'unimarc']]);
     // 995 е полето за екземпляри в българската практика (COMARC).
     add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', b.call_number],
       ['o', b.category_name], ['r', b.status]]);

@@ -182,7 +182,7 @@ function overdueSetup(dbSettings = {}) {
   return ctx;
 }
 /* Заемане, просрочено с точно N дни спрямо заместителя today() = 2026-08-02.
-   Степента се смята от today(), а филтърът „просрочено" в SQL — от date('now');
+   Степента се смята от today(), а филтърът „просрочено" в SQL — от date('now', 'localtime');
    и двете са изпълнени, защото датите тук са преди 02.08.2026. */
 const STUB_TODAY = '2026-08-02';
 function overdueByDays(db, days, inv) {

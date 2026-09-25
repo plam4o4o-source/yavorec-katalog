@@ -89,7 +89,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
           addScan.run(sessionId, b.id);
           addCheck.run(b.id, s.date);
           db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
-          if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now') WHERE id=?").run(b.id);
+          if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now', 'localtime') WHERE id=?").run(b.id);
           res.added++;
         }
       }).immediate();

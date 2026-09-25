@@ -304,7 +304,7 @@ test('autoBackupIfNeeded остава напълно синхронна — фа
   };
   const handlers = registerBackupHandlers(ipcMain, deps);
   handlers.autoBackupIfNeeded(); // без await — точно както main.js я вика
-  const today = new Date().toISOString().slice(0, 10);
+  const today = require('./helpers/local-day').localToday();
   const expected = path.join(dir, 'backups', `auto-${today}.db`);
   assert.ok(fs.existsSync(expected), 'auto-backup файлът трябва да съществува веднага, синхронно');
   const copy = new Database(expected, { readonly: true });
@@ -366,7 +366,7 @@ test('#18: повторно отключване със СЪЩАТА парол�
     // pdp:setup вече отключи сесията и предизвика upgradeTodayAutoBackup(reason:'setup'),
     // който (тъй като още няма нищо за деня) вика autoBackupIfNeeded() — днешното
     // копие вече е криптирано и todayEncryptedWith е запомнен.
-    const encPath = path.join(s.dir, 'backups', `auto-${new Date().toISOString().slice(0, 10)}.invbak`);
+    const encPath = path.join(s.dir, 'backups', `auto-${require('./helpers/local-day').localToday()}.invbak`);
     assert.ok(fs.existsSync(encPath), 'днешното копие трябва вече да е криптирано');
 
     const callsBeforeSecondUnlock = decryptCalls;

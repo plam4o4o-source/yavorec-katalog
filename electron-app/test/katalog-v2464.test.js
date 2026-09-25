@@ -227,6 +227,7 @@ function payloadSandbox(db) {
     console: { error() {}, log() {} },
     db,
     Date,
+    localDate: require('../local-date').localDate, // от v2.4.67 печатът носи МЕСТНАТА дата
     buildCatalogPayload: () => { builds.push(1); return { library: 'Б', items: [{ inv: 1 }] }; }
   });
   const names = ['CATALOG_PAYLOAD_CACHE', 'catalogDataStamp', 'dropCatalogPayloadCache', 'catalogPayloadNow'];

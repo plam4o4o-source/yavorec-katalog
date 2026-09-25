@@ -161,7 +161,7 @@ test('periodicalIssues:delete removes a specific issue', async () => {
 /* Предвиждане на следващия очакван брой (Koha: serials prediction pattern,
    облекчен вариант — виж коментара в handlers/periodicals.js). today() тук е
    ФИКСИРАНО зададено в setup() ('2026-08-02'), а изчисленията ползват само
-   тази стойност и вписаните дати — без пряко date('now') — затова тестовете
+   тази стойност и вписаните дати — без пряко date('now', 'localtime') — затова тестовете
    не могат тихо да изтекат с реалния часовник (правилото от ARCHITECTURE.md). */
 test('periodicals:list computes next_expected and issue_overdue_days for a predictable, overdue monthly title', async () => {
   const { ipcMain } = setup();

@@ -102,7 +102,7 @@ async function renderKdbf() {
       ${r.part3.length ? r.part3.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${bg(a.date)}</td>
         <td class="num">${a.no} / ${esc(a.year || y)}</td>
         <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
-          ? `<div class="hint"><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+          ? `<div class="hint"><b>АНУЛИРАН</b> на ${bg(tsDay(a.revoked_at))} г.${
               a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}</div>` : ''}</td>
         <td class="num">${a.revoked_at ? 0 : a.item_count}</td>
         <td class="num">${mny(a.revoked_at ? 0 : a.item_value)}</td></tr>`).join('')
@@ -117,6 +117,7 @@ async function renderKdbf() {
     : `
       <div class="note"><b>Приложение № 2 към чл. 13, ал. 3, т. 2</b> — резултати от движението на фонда към 31.12.${y} г.</div>
       ${kdbfUndatedNote(r) ? `<div class="note d">${kdbfUndatedNote(r)}</div>` : ''}
+      ${kdbfOutOfStockNote(r) ? `<div class="note d">${kdbfOutOfStockNote(r)}</div>` : ''}
       ${kdbfCrossNote(r, y) ? `<div class="note">${kdbfCrossNote(r, y)}</div>` : ''}
       ${kdbfPart2Html(r, y)}`}
   `;
@@ -143,6 +144,30 @@ function kdbfCrossNote(r, y) {
 }
 /* 2) Документ без дата на вписване не влиза нито в наличността, нито в
       постъпленията — датата е ключът на Част № 2. Числото не се пипа; казва се. */
+/* ОТЧИСЛЕНИТЕ, КОИТО СА БИЛИ В НАЛИЧНОСТТА (v2.4.67) — за Част № 2.
+   Част № 3 (актовете) си остава с всичко отчислено. Отчислен документ без
+   валидна дата на вписване никога не е бил в наличността; ако Част № 2 го
+   вадеше, изведената наличност към 01.01 излизаше по-голяма от тази към 31.12
+   на предходната година — два подписани документа за един и същ ден. Стара
+   справка без полето deaccOutOfStock → 0, тоест както досега. */
+function kdbfDeaccInStock(r) {
+  const out = r.deaccOutOfStock || { n: 0, v: 0 };
+  return { n: r.deaccYear.n - (out.n || 0), v: Math.round((r.deaccYear.v - (out.v || 0)) * 100) / 100 };
+}
+window.kdbfDeaccInStock = kdbfDeaccInStock;
+/* Бележката, която обявява разликата между Част № 2 и Част № 3. */
+function kdbfOutOfStockNote(r) {
+  const out = r.deaccOutOfStock || { n: 0 };
+  if (!out.n) return '';
+  const doc = (n) => n + (n === 1 ? ' документ' : ' документа');
+  return `<b>${doc(out.n)} от отчислените през ${r.year} г. по актове (Част № 3) ${out.n === 1 ? 'няма' : 'нямат'}
+    валидна дата на вписване</b> и никога не ${out.n === 1 ? 'е бил' : 'са били'} в наличността. Затова в Част № 2
+    ${out.n === 1 ? 'не намалява' : 'не намаляват'} наличността — иначе наличността към 01.01.${r.year} г. нямаше да
+    съвпада с тази към 31.12.${Number(r.year) - 1} г. в миналогодишната книга. Отчислените в Част № 2 са с
+    ${out.n} по-малко от Част № 3 точно заради ${out.n === 1 ? 'него' : 'тях'}.
+    Поправя се в „Инвентарна книга“ → „Редакция“ на записа → полето „Дата на вписване“.`;
+}
+window.kdbfOutOfStockNote = kdbfOutOfStockNote;
 function kdbfUndatedNote(r) {
   const u = r.undated || {};
   if (!u.n) return '';
@@ -165,7 +190,9 @@ function kdbfUndatedNote(r) {
 function kdbfPart2Html(r, y) {
   const endN = r.stockEnd.n, endV = r.stockEnd.v;
   const accN = r.acquiredYear.n, accV = r.acquiredYear.v;
-  const decN = r.deaccYear.n, decV = r.deaccYear.v;
+  /* Отчислените за Част № 2 са само онези, които са били В НАЛИЧНОСТТА — виж
+     kdbfDeaccInStock и бележката в handlers/kdbf.js (deaccOutOfStock). */
+  const { n: decN, v: decV } = kdbfDeaccInStock(r);
   /* ЗАКРЪГЛЯНЕ ДО СТОТИНКИ ПРЕДИ ПОКАЗВАНЕ (v2.4.61).
      Началното салдо се ИЗВЕЖДА (31.12 − постъпили + отчислени), за да съвпада
      винаги с крайното. При библиотека в първата ѝ година трите събираеми са едно
@@ -278,7 +305,7 @@ function printKdbfDoc() {
      ${r.part3.map((a, i) => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td>${i + 1}</td><td>${bg(a.date)}</td>
      <td>№ ${a.no} / ${esc(a.year || y)}</td>
      <td>т. ${esc(a.reason_code)}. ${esc(a.reason_text || '')}${a.revoked_at
-       ? `<br><b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+       ? `<br><b>АНУЛИРАН</b> на ${bg(tsDay(a.revoked_at))} г.${
            a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
      <td>${esc(a.disposal || '')}</td>
      <td>${a.revoked_at ? '0' : a.item_count}</td><td>${a.revoked_at ? mny(0) : mny(a.item_value)}</td></tr>`).join('')}
@@ -299,10 +326,10 @@ function printKdbfDoc() {
      <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, € / лв.</th></tr></thead><tbody>
      ${/* Закръгляне до стотинки преди печат — виж бележката при kdbfPart2Html:
           иначе Приложение № 2 на първата година излиза с „-0.00 €“. */''}
-     <tr><td>Наличност към 01.01.${y} г.</td><td>${r.stockEnd.n - r.acquiredYear.n + r.deaccYear.n}</td>
-       <td>${mny(Math.round((r.stockEnd.v - r.acquiredYear.v + r.deaccYear.v) * 100) / 100)}</td></tr>
+     <tr><td>Наличност към 01.01.${y} г.</td><td>${r.stockEnd.n - r.acquiredYear.n + kdbfDeaccInStock(r).n}</td>
+       <td>${mny(Math.round((r.stockEnd.v - r.acquiredYear.v + kdbfDeaccInStock(r).v) * 100) / 100)}</td></tr>
      <tr><td>Постъпили през ${y} г.</td><td>${r.acquiredYear.n}</td><td>${mny(r.acquiredYear.v)}</td></tr>
-     <tr><td>Отчислени през ${y} г.</td><td>${r.deaccYear.n}</td><td>${mny(r.deaccYear.v)}</td></tr>
+     <tr><td>Отчислени през ${y} г.</td><td>${kdbfDeaccInStock(r).n}</td><td>${mny(kdbfDeaccInStock(r).v)}</td></tr>
      <tr style="font-weight:700"><td>Наличност към 31.12.${y} г.</td><td>${r.stockEnd.n}</td><td>${mny(r.stockEnd.v)}</td></tr>
      </tbody></table>
      <!-- РАЗБИВКА ПО ВИДОВЕ (v2.4.56). Образецът на Приложение № 2 съдържа
@@ -317,6 +344,7 @@ function printKdbfDoc() {
        <td>${mny(r.byKind.reduce((s, k) => s + (k.v || 0), 0))}</td></tr>
      </tbody></table>` : ''}
      ${kdbfUndatedNote(r) ? `<div class="pmeta">${kdbfUndatedNote(r)}</div>` : ''}
+     ${kdbfOutOfStockNote(r) ? `<div class="pmeta">${kdbfOutOfStockNote(r)}</div>` : ''}
      ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
      ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }

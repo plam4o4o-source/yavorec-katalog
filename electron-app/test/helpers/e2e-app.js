@@ -313,7 +313,7 @@ function effectiveDaysLate(db, dueDate, inDate) {
   const raw = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
   return Math.max(0, raw - closedDaysBetween(db, dueDate, inDate));
 }
-const today = () => new Date().toISOString().slice(0, 10);
+const { localToday: today } = require('./local-day'); // местната дата, както в програмата (v2.4.67)
 const bgDate = (d) => d ? d.split('-').reverse().join('.') : '';
 /* Огледало на mny() от src/views/core.js: от v2.4.51 записаната стойност е в
    ЕВРО, а левът е справочен. */

@@ -20,6 +20,7 @@ const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/
 /* Начислението в читателската сметка минава през handlers/account.js — сметката
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
 const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
+const { toCents } = require('../db/fund-sql');
 
 /* Видът на начислението за ЗАБАВА в читателската сметка — дословно този, с който
    пише chargeOverdueFine в handlers/account.js. Стои като именувана константа,
@@ -70,8 +71,20 @@ function unpaidOverdueFines(db, readerId, legacy) {
      „най-старото се покрива първо“ плащане без съответно начисление (аванс,
      записан, докато забавата живееше само в loans.fine) отива първо за нея. */
   const queue = legacy > 0.0001 ? [{ type: OVERDUE_CHARGE_TYPE, left: legacy }] : [];
+  /* АВАНСЪТ ПОКРИВА СЛЕДВАЩОТО НАЧИСЛЕНИЕ (v2.4.67). Дотук надплатеното „не се
+     приписваше на нищо“ — плащане, записано преди начислението, изчезваше, а
+     салдото по сметката го брои. Сега остава като кредит и покрива следващото
+     начисление по същия ред „най-старото първо“. Същото правило в
+     handlers/account.js (chargeCoverage) и handlers/stats.js. */
+  let credit = 0;
   for (const l of lines) {
-    if (l.kind === 'начисление') { queue.push({ type: l.type, left: Math.abs(Number(l.amount) || 0) }); continue; }
+    if (l.kind === 'начисление') {
+      const item = { type: l.type, left: Math.abs(Number(l.amount) || 0) };
+      const used = Math.min(credit, item.left);
+      item.left -= used; credit -= used;
+      if (item.left > 0.0001) queue.push(item);
+      continue;
+    }
     let money = Math.abs(Number(l.amount) || 0);
     while (money > 0.0001 && queue.length) {
       const head = queue[0];
@@ -80,10 +93,10 @@ function unpaidOverdueFines(db, readerId, legacy) {
       money -= used;
       if (head.left <= 0.0001) queue.shift();
     }
-    // Надплатеното (аванс) не се приписва на нищо — както в chargeCoverage и stats.js.
+    if (money > 0.0001) credit += money;
   }
   const rest = queue.reduce((s, q) => s + (q.type === OVERDUE_CHARGE_TYPE ? q.left : 0), 0);
-  return Math.round(rest * 100) / 100;
+  return toCents(rest);
 }
 
 /* ЗАВАРЕНАТА ЗАБАВА, КОЯТО НИКОГА НЕ Е ВЛИЗАЛА В СМЕТКАТА (v2.4.65).
@@ -225,7 +238,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      Домашното правило е изрично: всяка ЗАПИСАНА или ОТПЕЧАТАНА сума минава през
      закръгляне до стотинка. Затова функцията се качва тук, над всички
      обработчици, и се ползва навсякъде, където се пипа loans.fine. */
-  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  /* Едно закръгляне за цялата програма — toCents от db/fund-sql.js (v2.4.67), вписан най-горе. */
   /* Датата, както я пише и чете библиотекарят — „18.09.2026“ (v2.4.61). Целият
      екран, всички печатни документи и всички останали съобщения на гишето са в
      този вид; ISO низът от базата („2026-09-18“) се показваше само на едно
@@ -381,7 +394,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const s = db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {};
       const perDay = Number(s.fine_per_day) || 0;
       const now = today();
-      const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due`).all();
+      const rows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.date_due`).all();
       rows.forEach(r => {
         r.daysLate = effectiveDaysLate(r.date_due, now);
         /* Начисленото по заемането се ДОБАВЯ, не се презаписва (преглед на
@@ -444,10 +457,10 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         SELECT l.reader_id, r.name, r.address, r.address2, r.phone, r.email, r.category,
                r.guarantor_name, r.guarantor_relation, r.guarantor_phone, COUNT(*) AS n
         FROM loans l JOIN readers r ON r.id = l.reader_id
-        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
+        WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime')
         GROUP BY l.reader_id
       `).all();
-      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.reader_id, l.date_due`).all();
+      const detail = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.reader_id, l.date_due`).all();
       const now = today();
       rows.forEach(r => {
         r.loans = detail.filter(d => d.reader_id === r.reader_id);

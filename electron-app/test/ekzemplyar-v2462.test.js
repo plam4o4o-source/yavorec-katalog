@@ -226,13 +226,14 @@ test('6. проект от липсите: изцяло липсващ стар 
 
 test('7. проектът от липсите разделя НЯКОЛКО стари записа в ЕДНА транзакция: истинска грешка по един не оставя другите наполовина разделени (преглед на кръга)', async () => {
   /* Два стари записа липсват едновременно: 570 (3 екземпляра) и 571 (2 екземпляра).
-     Между приключването на проверката и съставянето на проекта някой заема ДВА от
-     трите екземпляра на 571 — нищо в програмата не пречи на заемане на документ със
-     статус „липсващ“, а снимката на липсата вече е записана и не се обновява.
      books:splitCopiesBatch трябва да разделя двата записа в ЕДНА транзакция: щом 571
-     откаже (2 незавършени заемания сочат към стария общ ред), 570 НЕ бива да остане
-     разделен — иначе следващият опит го подминава по пътя „вече е разделен“ и новите
-     му номера падат от проекта без следа, а екранът твърди грешна бройка. */
+     откаже, 570 НЕ бива да остане разделен — иначе следващият опит го подминава по
+     пътя „вече е разделен“ и новите му номера падат от проекта без следа, а екранът
+     твърди грешна бройка.
+     До v2.4.66 отказът тук идваше от ДВЕ заемания на 571 след проверката. От
+     v2.4.67 заетата след проверката бройка е НАМЕРЕНА и изобщо не влиза в проекта
+     (виж test/pari-v2467.test.js), затова истинската грешка е друга: 571 е
+     отчислен от друго работно място между приключването и проекта. */
   const a = legacyRecord({ inv: 570, title: 'Дядо Йоцо гледа', price: 6, qty: 3 });
   const b = legacyRecord({ inv: 571, title: 'Записки по българските въстания', price: 3, qty: 2 });
   const s = await h.api.inventorySessions.start({ date: T, scope: 'пълна', department: null,
@@ -245,17 +246,15 @@ test('7. проектът от липсите разделя НЯКОЛКО ст
   const closed = await h.api.inventorySessions.close({ sessionId: sid, mode: 'full' });
   assert.equal(closed.ok, true, closed.error);
 
-  // Читателят заема 2 от 2-та екземпляра на 571 — след приключването, преди проекта.
-  const readerId = h.db.prepare("INSERT INTO readers (name) VALUES ('Читателка за теста')").run().lastInsertRowid;
-  h.db.prepare("INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)").run(b, readerId, T, T);
-  h.db.prepare("INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?, ?, ?, ?)").run(b, readerId, T, T);
+  // 571 е отчислен от друго работно място — след приключването, преди проекта.
+  h.db.prepare("UPDATE books SET status = 'отчислен', deaccession_date = ? WHERE id = ?").run(T, b);
 
   const draftsBefore = q('SELECT COUNT(*) AS n FROM deaccession_drafts').n;
   await h.go('invent');
   h.hooks.confirmAnswer = true;
   const n0 = h.toasts.length;
   await h.window.draftFromMissing(sid); await h.settle();
-  assert.ok(h.toastsSince(n0).some(t => t.type === 'err' && /2 незавършени заемания/.test(t.msg)),
+  assert.ok(h.toastsSince(n0).some(t => t.type === 'err' && /571 е отчислен/.test(t.msg)),
     JSON.stringify(h.toastsSince(n0)));
   assert.equal(q('SELECT COUNT(*) AS n FROM deaccession_drafts').n, draftsBefore, 'неуспешният опит не съставя никакъв проект');
   assert.equal(q('SELECT quantity FROM inventory WHERE book_id = ?', a).quantity, 3,
@@ -263,8 +262,8 @@ test('7. проектът от липсите разделя НЯКОЛКО ст
   assert.equal(all("SELECT 1 FROM books WHERE title = 'Дядо Йоцо гледа' AND id <> ?", a).length, 0,
     'нито един нов ред не е създаден от отменената партида');
 
-  // Читателят връща книгите — вторият опит минава изцяло.
-  h.db.prepare('UPDATE loans SET date_in = ? WHERE book_id = ?').run(T, b);
+  // Отчисляването е отменено — вторият опит минава изцяло.
+  h.db.prepare("UPDATE books SET status = 'липсващ', deaccession_date = NULL WHERE id = ?").run(b);
   const n1 = h.toasts.length;
   await h.window.draftFromMissing(sid); await h.settle();
   assert.ok(h.toastsSince(n1).some(t => /е съставен от 5 липсващи документа/.test(t.msg)), JSON.stringify(h.toastsSince(n1)));

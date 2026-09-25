@@ -147,7 +147,7 @@ test('readers.category is intentionally NOT constrained — the GDPR anonymisati
   // rejected, since it is the permanent placeholder row for anonymised loans.
   assert.doesNotThrow(() => db.prepare(`
     INSERT INTO readers (name, category, status, registered_at, gdpr_consent)
-    VALUES ('— анонимизирани заемания —', '—', 'прекратен', date('now'), 0)
+    VALUES ('— анонимизирани заемания —', '—', 'прекратен', date('now', 'localtime'), 0)
   `).run());
 });
 

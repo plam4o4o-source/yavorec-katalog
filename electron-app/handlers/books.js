@@ -153,7 +153,7 @@ function parseBookPrice(x) {
       + 'никъде. Въведете сумата с цифри — десетичната част със запетая или с точка (напр. 12,50), '
       + 'или оставете 0, ако стойност не е обявена.');
   }
-  return Math.round(Number(norm) * 100) / 100;
+  return require('../db/fund-sql').toCents(Number(norm)); // едно закръгляне (v2.4.67)
 }
 
 module.exports = function registerBooksHandlers(ipcMain, deps) {
@@ -1180,7 +1180,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const placeholders = ids.map(() => '?').join(',');
       // Смяната на статус носи и датата си (Koha: датирани статуси) — иначе справката
       // „кога стана липсваща" няма отговор.
-      const extra = field === 'status' ? ", status_date = date('now')" : '';
+      const extra = field === 'status' ? ", status_date = date('now', 'localtime')" : '';
       /* ГРУПОВАТА РЕДАКЦИЯ ВЕЧЕ КАЗВА КОИ ДОКУМЕНТИ Е ПИПНАЛА (v2.4.65, кръг 42,
          находка Б9).
          (а) КАКВО СТАВАШЕ ДОТУК. Следата беше един ред без нито един
@@ -1315,6 +1315,41 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      се отмени. С отделна транзакция ВЪТРЕ във всяко повикване това не е
      възможно: better-sqlite3 НЕ поддържа влагане на db.transaction(), а и дори
      да поддържаше, всяко вътрешно завършване веднага се записва трайно. */
+  /* Вписва `count` нови реда-копия на запис `b` — всеки със свой инвентарен номер
+     (следващият свободен), бройка 1 и без баркод. `reset` — полетата, които НЕ
+     се копират от оригинала (състоянието на един физически екземпляр). Общо за
+     разделянето на целия запис и за отделянето само на липсващите бройки. */
+  function insertCopies(db, b, count, reset) {
+    const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
+    let next = parseInt(s.next_inv_number, 10) || 1;
+    const taken = db.prepare('SELECT 1 FROM books WHERE inv_number = ?');
+    const cols = BOOK_FIELDS.filter(f => f !== 'inv_number' && f !== 'barcode');
+    const insert = db.prepare(`
+      INSERT INTO books (inv_number, ${cols.join(',')})
+      VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
+    `);
+    const created = [];
+    const createdIds = [];
+    for (let k = 0; k < count; k++) {
+      while (taken.get(next)) next++;   // никога върху зает номер
+      const row = { inv_number: next };
+      cols.forEach(f => {
+        row[f] = Object.prototype.hasOwnProperty.call(reset, f)
+          ? reset[f]
+          : (b[f] === undefined ? null : b[f]);
+      });
+      const info = insert.run(row);
+      /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
+         дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
+         Новият екземпляр получава свой етикет от „Баркод етикети“. */
+      db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
+      created.push(next);
+      createdIds.push(Number(info.lastInsertRowid));
+      next++;
+    }
+    db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(next);
+    return { created, createdIds };
+  }
   function splitOneCopy(db, id, opts) {
     const b = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
     if (!b) throw new Error('Документът не е намерен.');
@@ -1331,14 +1366,6 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         + 'не може да се определи кой читател кой екземпляр държи. Приемете върнатите документи (да остане '
         + 'най-много едно заемане) и разделете записа отново.');
     }
-    const s = db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {};
-    let next = parseInt(s.next_inv_number, 10) || 1;
-    const taken = db.prepare('SELECT 1 FROM books WHERE inv_number = ?');
-    const cols = BOOK_FIELDS.filter(f => f !== 'inv_number' && f !== 'barcode');
-    const insert = db.prepare(`
-      INSERT INTO books (inv_number, ${cols.join(',')})
-      VALUES (@inv_number, ${cols.map(f => '@' + f).join(',')})
-    `);
     /* Одит v2.4.22 (преглед на поправката от v2.4.21): status/status_date/
        description описват СЪСТОЯНИЕТО НА ЕДИН ФИЗИЧЕСКИ ЕКЗЕМПЛЯР — стар
        неразделен запис с бележка „скъсана корица, липсва том 2“ или
@@ -1383,35 +1410,49 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     const perCopyReset = inheritMissing
       ? { description: null }
       : { status: 'наличен', status_date: null, description: null };
-    const created = [];
     /* И номерата на новите РЕДОВЕ (v2.4.62), не само инвентарните им номера.
        Нужни са на проекта за акт от липсите (src/views/inventory-sessions.js):
        стар запис с три екземпляра под един номер, който изцяло липсва при
        инвентаризацията, влиза в акта като ТРИ документа с три инвентарни
        номера — а проектът се пише по номерата на редовете. */
-    const createdIds = [];
-    for (let k = 1; k < n; k++) {
-      while (taken.get(next)) next++;   // никога върху зает номер
-      const row = { inv_number: next };
-      cols.forEach(f => {
-        row[f] = Object.prototype.hasOwnProperty.call(perCopyReset, f)
-          ? perCopyReset[f]
-          : (b[f] === undefined ? null : b[f]);
-      });
-      const info = insert.run(row);
-      /* Баркодът НЕ се копира: той е физически залепен на един екземпляр и
-         дубликат в него разваля сканирането (виж books:findDuplicateBarcodes).
-         Новият екземпляр получава свой етикет от „Баркод етикети“. */
-      db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(info.lastInsertRowid);
-      created.push(next);
-      createdIds.push(Number(info.lastInsertRowid));
-      next++;
-    }
+    const { created, createdIds } = insertCopies(db, b, n - 1, perCopyReset);
     db.prepare('UPDATE inventory SET quantity = 1 WHERE book_id = ?').run(id);
-    db.prepare('UPDATE settings SET next_inv_number = ? WHERE id = 1').run(next);
     logAudit('Разделяне на екземпляри',
       'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + n + ' екземпляра станаха '
       + n + ' отделни записа; нови инвентарни номера: ' + created.join(', '));
+    return { created, createdIds, inv_number: b.inv_number, title: b.title };
+  }
+  /* ОТДЕЛЯНЕ САМО НА ЛИПСВАЩИТЕ БРОЙКИ (v2.4.67, след прегледа на кръга).
+     Стар запис с N бройки под един номер, от които при пълна инвентаризация
+     липсват k < N (останалите са у читатели или вече са намерени). Разделянето
+     на ЦЕЛИЯ запис (splitOneCopy) не става тук по три причини:
+       • при повече от едно заемане то отказва — и понеже партидата е една
+         транзакция, проектът за акт не се съставяше за НИТО една липса;
+       • новите редове излизаха „наличен“: оригиналът не е „липсващ“ (у читател
+         е бройка от него), тоест липсващите бройки влизаха във фонда, в
+         заемането и в каталога като налични, а подписаният протокол казва
+         „липсват“;
+       • то отделя всички N−1 бройки, а липсват k — актът щеше да отчисли и
+         намерени.
+     Тук се отделят ТОЧНО k нови реда със състояние „липсващ“ и датата на
+     проверката, а заеманията и останалите N−k бройки остават на оригинала. */
+  function detachMissingCopies(db, id, k, statusDate) {
+    const b = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
+    if (!b) throw new Error('Документът не е намерен.');
+    if (b.status === 'отчислен' || b.deaccession_date) {
+      throw new Error('Инв. № ' + (b.inv_number ?? '—') + ' е отчислен — не се разделя.');
+    }
+    const n = parseInt((db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {}).quantity, 10) || 0;
+    if (!(k >= 1 && k < n)) {
+      throw new Error('Инв. № ' + (b.inv_number ?? '—') + ': ' + k + ' липсващи от ' + n + ' бройки — няма какво да се отдели.');
+    }
+    const { created, createdIds } = insertCopies(db, b, k,
+      { status: 'липсващ', status_date: statusDate || today(), description: null });
+    db.prepare('UPDATE inventory SET quantity = ? WHERE book_id = ?').run(n - k, id);
+    logAudit('Разделяне на екземпляри',
+      'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — ' + k + ' липсващи от ' + n
+      + ' екземпляра получиха свои инвентарни номера: ' + created.join(', ')
+      + '; останалите ' + (n - k) + ' остават под инв. № ' + (b.inv_number ?? '—'));
     return { created, createdIds, inv_number: b.inv_number, title: b.title };
   }
   ipcMain.handle('books:splitCopies', (e, id) =>
@@ -1447,11 +1488,20 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       const out = db.transaction(() => {
         const results = [];
         const skipped = [];
-        for (const id of (ids || [])) {
+        for (const item of (ids || [])) {
+          /* Число — целият запис липсва; { id, missing, date } — липсват само
+             `missing` от бройките му (v2.4.67, виж detachMissingCopies). */
+          const id = item && typeof item === 'object' ? item.id : item;
           const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(id) || {};
-          if ((parseInt(inv.quantity, 10) || 0) <= 1) {
+          const qty = parseInt(inv.quantity, 10) || 0;
+          if (qty <= 1) {
             const b = db.prepare('SELECT inv_number, title FROM books WHERE id = ?').get(id);
             skipped.push({ id, inv_number: b ? b.inv_number : null, title: b ? b.title : null });
+            continue;
+          }
+          const k = item && typeof item === 'object' ? parseInt(item.missing, 10) : NaN;
+          if (k >= 1 && k < qty) {
+            results.push(Object.assign({ id, partial: true }, detachMissingCopies(db, id, k, item.date)));
             continue;
           }
           /* inheritMissingStatus: тази партида идва САМО от „Проект за акт от
@@ -1506,7 +1556,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           + 'Ако актът е сгрешен, анулирайте го от „Отчисляване“.');
       }
       if (b.status !== 'отчислен') throw new Error('Документът не е в състояние „отчислен“.');
-      db.prepare("UPDATE books SET status = 'наличен', status_date = date('now') WHERE id = ?").run(id);
+      db.prepare("UPDATE books SET status = 'наличен', status_date = date('now', 'localtime') WHERE id = ?").run(id);
       logAudit('Поправка на състояние', 'инв. № ' + (b.inv_number ?? '—') + ' (' + b.title + ') — „отчислен“ без акт се връща на „наличен“; '
         + 'отчисляване се прави само с акт по чл. 35, ал. 2');
       scheduleCatalogWrite();

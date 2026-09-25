@@ -170,7 +170,7 @@ test('dashboard:full counts currently suspended readers', async () => {
 
 /* today.dueReminders — читатели, дължащи напомняне, за които няма логнато
    напомняне (notice_log) от началото на ТЕКУЩОТО им просрочие. Заявката
-   сравнява с реалния часовник (date_due < date('now')), затова датите тук са
+   сравнява с реалния часовник (date_due < date('now', 'localtime')), затова датите тук са
    изчислени динамично спрямо Date.now(), не твърдо зададени — виж коментара
    в „dashboard:full aggregates..." по-горе за защо това е задължително. */
 test('dashboard:full counts a reader as needing a reminder when no notice has been logged for the current overdue period', async () => {
@@ -219,7 +219,7 @@ test('dashboard:full still counts a reader whose logged notice predates their cu
 
 /* today.overduePeriodicals — виж setupWithPeriodicals() по-горе. today() тук е
    ФИКСИРАНО ('2026-08-02'), а изчислението е изцяло спрямо тази стойност и
-   вписаните дати — не пипа date('now'), затова е безопасно с твърда дата. */
+   вписаните дати — не пипа date('now', 'localtime'), затова е безопасно с твърда дата. */
 test('dashboard:full surfaces overduePeriodicals via the real countOverduePeriodicals from handlers/periodicals.js', async () => {
   const { ipcMain } = setupWithPeriodicals();
   await ipcMain.invoke('periodicals:create', { title: 'Месечно списание', freq: 'месечно' });

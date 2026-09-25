@@ -40,7 +40,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         loansOpen: db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n,
         overdue: db.prepare(`
           SELECT COUNT(*) AS n FROM loans
-          WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')
+          WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')
         `).get().n
       };
     })
@@ -55,7 +55,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       ).get();
       const activeReaders = db.prepare("SELECT COUNT(*) AS n FROM readers WHERE status != 'прекратен'").get().n;
       const loansOpen = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').get().n;
-      const overdueRows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now') ORDER BY l.date_due LIMIT 7`).all();
+      const overdueRows = db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime') ORDER BY l.date_due LIMIT 7`).all();
       /* Дните забава се смятат тук, със същата функция както в „Просрочени" и на
          гишето (v2.3.0). Дотогава таблото ги смяташе в изгледа по сурови календарни
          дни — и след като „Просрочени" мина на ефективните дни, едно и също заемане
@@ -63,7 +63,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       overdueRows.forEach(r => {
         r.daysLate = effectiveDaysLate ? effectiveDaysLate(r.date_due, today()) : null;
       });
-      const overdueCount = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')`).get().n;
+      const overdueCount = db.prepare(`SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')`).get().n;
       // Бройки, не заглавия — на едно и също табло „Библиотечен фонд" по-горе вече
       // брои документи; ако тези два реда останеха на заглавия, Таблото щеше да си
       // противоречи само със себе си.
@@ -113,7 +113,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          идва отделно, за да не лъже нито показателят горе, нито бутонът „Всички“. */
       const UPCOMING_WINDOW = 40;
       const upcomingWhere = `l.date_in IS NULL AND l.date_due IS NOT NULL
-        AND l.date_due >= date('now') AND julianday(l.date_due) - julianday('now') <= 3`;
+        AND l.date_due >= date('now', 'localtime') AND julianday(l.date_due) - julianday('now', 'localtime') <= 3`;
       const upcoming = db.prepare(`
         ${LOAN_SELECT} WHERE ${upcomingWhere} ORDER BY l.date_due LIMIT ${UPCOMING_WINDOW}
       `).all();
@@ -132,7 +132,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          КАЛЕНДАРНИ дни, защото е групиране на едро; точните дни забава (с
          приспаднати затворени дни) стоят на реда във всеки от седемте показани.
 
-         ДЕНЯТ СЕ БРОИ ОТ ПОЛУНОЩ ДО ПОЛУНОЩ: `julianday('now')` носи и ЧАСА, а
+         ДЕНЯТ СЕ БРОИ ОТ ПОЛУНОЩ ДО ПОЛУНОЩ: `julianday('now', 'localtime')` носи и ЧАСА, а
          `julianday(date_due)` е полунощ, тоест разликата за срок отпреди точно
          седем дни е 7,6 в шест вечерта и никога не е равна на 7. Така граничният
          случай всеки ден попадаше в ПО-ТЕЖКАТА група: книга с точно седем дни
@@ -142,11 +142,11 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          поправен в заеманията по седмици при прегледа на v2.4.52. */
       const overdueBuckets = db.prepare(`
         SELECT
-          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
-          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 7
-                    AND julianday(date('now')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
-          SUM(CASE WHEN julianday(date('now')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
-        FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now')
+          SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) <= 7 THEN 1 ELSE 0 END) AS d7,
+          SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 7
+                    AND julianday(date('now', 'localtime')) - julianday(date_due) <= 30 THEN 1 ELSE 0 END) AS d30,
+          SUM(CASE WHEN julianday(date('now', 'localtime')) - julianday(date_due) > 30 THEN 1 ELSE 0 END) AS more
+        FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL AND date_due < date('now', 'localtime')
       `).get();
       for (const k of ['d7', 'd30', 'more']) overdueBuckets[k] = overdueBuckets[k] || 0;
       /* Заеманията по седмици за последните 12 седмици — посоката, която едно число
@@ -157,7 +157,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          ГРАНИЦАТА Е `>`, НЕ `>=` (преглед на v2.4.52 → v2.4.53). 12 седмици = точно
          84 дни: днес (седмица 0) до преди 83 дни включително (седмица 11). Долната
          граница беше `>= date('now','-84 days')` — заемане от ТОЧНО преди 84 дни
-         влизаше и то: julianday('now') носи часа на деня, тоест разликата е винаги
+         влизаше и то: julianday('now', 'localtime') носи часа на деня, тоест разликата е винаги
          над 84.0, CAST(…/7 AS INTEGER) дава w=12, а `loansWeeks[11-12]` е
          `loansWeeks[-1]`. Масив от 12 елемента няма такъв индекс — JS тихо слага
          странично свойство „-1“ вместо да презапише елемент, и `for…in`/`.reduce()`
@@ -166,8 +166,8 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
          Не е рядък ръб: случва се на ВСЕКИ ден, в който има заемане от точно преди
          84 дни. Възпроизведено директно с better-sqlite3, не по четене на кода. */
       const weekRows = db.prepare(`
-        SELECT CAST((julianday('now') - julianday(date_out)) / 7 AS INTEGER) AS w, COUNT(*) AS n
-        FROM loans WHERE date_out > date('now', '-84 days') AND date_out <= date('now')
+        SELECT CAST((julianday('now', 'localtime') - julianday(date_out)) / 7 AS INTEGER) AS w, COUNT(*) AS n
+        FROM loans WHERE date_out > date('now', 'localtime', '-84 days') AND date_out <= date('now', 'localtime')
         GROUP BY w
       `).all();
       /* Прозорецът е определен на ЕДНО място — в границите на заявката по-горе,
@@ -186,7 +186,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const reregDue = db.prepare(`
         SELECT COUNT(*) AS n FROM readers
         WHERE status = 'активен' AND name != ?
-          AND date(COALESCE(re_registered_at, registered_at), '+1 year') <= date('now', '+14 days')
+          AND date(COALESCE(re_registered_at, registered_at), '+1 year') <= date('now', 'localtime', '+14 days')
       `).get(ANON_READER_NAME).n;
       /* Пак от полунощ до полунощ — виж бележката при overdueBuckets. Дотук
          „Просрочие над 60 дни — преценете «липсваща»“ броеше и заемането с точно
@@ -195,7 +195,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       const longOverdue = db.prepare(`
         SELECT COUNT(*) AS n FROM loans
         WHERE date_in IS NULL AND date_due IS NOT NULL
-          AND julianday(date('now')) - julianday(date_due) > 60
+          AND julianday(date('now', 'localtime')) - julianday(date_due) > 60
       `).get().n;
       const sAnon = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
       const anonYears = parseInt(sAnon.anonymize_years, 10) || 0;
@@ -205,7 +205,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
           WHERE date_in < ? AND anon_category IS NULL`)
           .get(`${new Date().getFullYear() - anonYears}-01-01`).n;
       }
-      const suspendedNow = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE suspended_until > date('now')`).get().n;
+      const suspendedNow = db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE suspended_until > date('now', 'localtime')`).get().n;
       /* Читатели, дължащи напомняне ДНЕС — не просто "има просрочие" (това е
          overdueCount по-горе, брой ЗАЕМАНИЯ), а различни ЧИТАТЕЛИ, за които
          няма логнато напомняне (notice_log) от началото на ТЕКУЩОТО им
@@ -215,7 +215,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
         SELECT COUNT(*) AS n FROM (
           SELECT l.reader_id, MIN(l.date_due) AS oldest_due
           FROM loans l
-          WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now')
+          WHERE l.date_in IS NULL AND l.date_due IS NOT NULL AND l.date_due < date('now', 'localtime')
           GROUP BY l.reader_id
         ) t
         WHERE NOT EXISTS (

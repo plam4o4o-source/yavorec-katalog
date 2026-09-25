@@ -88,7 +88,9 @@ function extractDeclaration(name) {
 }
 
 const MAIN_HELPERS = ['today', 'yearOf', 'value', 'pctRequired', 'naturalLoss', 'diffFields'];
-const sandbox = vm.createContext({});
+/* today() в main.js от v2.4.67 вика localDate() от local-date.js — той се подава
+   в пясъчника такъв, какъвто е, за да се изпълни истинската декларация. */
+const sandbox = vm.createContext({ localDate: require('../../local-date').localDate });
 vm.runInContext(
   MAIN_HELPERS.map(extractDeclaration).join('\n') +
   '\n;({ ' + MAIN_HELPERS.join(', ') + ' })',

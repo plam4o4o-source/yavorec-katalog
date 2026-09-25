@@ -42,7 +42,7 @@ async function renderActs() {
       <th>Заглавия</th><th>Поправен</th><th></th></tr></thead><tbody>
     ${drafts.map(d => `<tr><td class="num">${d.id}</td><td class="num">${bg(d.date) || '—'}</td>
       <td>${d.reason_code ? 'т. ' + d.reason_code + '. ' : ''}${esc(d.reason_text || '— без причина —')}</td>
-      <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(String(d.updated_at || '').slice(0, 16))}</td>
+      <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(d.updated_at ? tsDay(d.updated_at) + ' ' + tsTime(d.updated_at) : '')}</td>
       <td><button class="btn sm" onclick="openDraft(${d.id})">Отвори</button>
           <button class="btn sm dgr" onclick="delDraft(${d.id})">Изтрий</button></td></tr>`).join('')}
     </tbody></table></div>` : ''}
@@ -52,7 +52,7 @@ async function renderActs() {
     ${rows.length ? rows.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${a.no} / ${a.year}</td>
       <td class="num">${bg(a.date)}</td>
       <td>т. ${a.reason_code}. ${esc(a.reason_text)}${a.revoked_at
-        ? `<br><span class="badge warn">АНУЛИРАН</span> ${esc(String(a.revoked_at).slice(0, 10))}${
+        ? `<br><span class="badge warn">АНУЛИРАН</span> ${esc(tsDay(a.revoked_at))}${
             a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
       <td class="num">${a.revoked_at ? '—' : a.item_count}</td>
       <td class="num">${a.revoked_at ? '—' : mny(a.item_value)}</td><td style="font-size:12px">${esc(a.disposal || '')}</td>
@@ -499,7 +499,7 @@ async function openAct(id) {
   const a = await call(window.api.deaccessionActs.get(id));
   if (!a) return;
   modal('Акт за отчисляване № ' + a.no + ' / ' + a.year + (a.revoked_at ? ' — АНУЛИРАН' : ''), `
-    ${a.revoked_at ? `<div class="note w"><b>Този акт е анулиран</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${
+    ${a.revoked_at ? `<div class="note w"><b>Този акт е анулиран</b> на ${bg(tsDay(a.revoked_at))} г.${
       a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}${a.revoked_by ? ' (' + esc(a.revoked_by) + ')' : ''}.<br>
       Документите по него са върнати във фонда и не се броят никъде. Самият акт остава в документацията
       по чл. 39, а номер ${a.no}/${a.year} остава зает и не се дава на друг акт.</div>` : ''}
@@ -512,8 +512,8 @@ async function openAct(id) {
     ${/* Датата се изписва по български (bg()), а не както е записана в базата:
           ISO низ върху лист, който се подписва, се чете като компютърна следа. */''}
     ${(a.created_at || a.created_by)
-      ? `<br><span class="hint">Съставен${a.created_at ? ' на ' + bg(String(a.created_at).slice(0, 10)) + ' г.'
-          + ' в ' + esc(String(a.created_at).slice(11, 16)) + ' ч.' : ''}${
+      ? `<br><span class="hint">Съставен${a.created_at ? ' на ' + bg(tsDay(a.created_at)) + ' г.'
+          + ' в ' + esc(tsTime(a.created_at)) + ' ч.' : ''}${
           a.created_by ? ' от ' + esc(a.created_by) : ''}</span>` : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
     ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
@@ -562,7 +562,7 @@ async function printActDoc(id) {
          излиза документ, неразличим от действащ — а екземплярът в счетоводството
          вече е зачертан. */''}
     ${a.revoked_at ? `<div class="pmeta" style="text-align:center;border:2px solid #000;padding:3mm;margin-bottom:5mm">
-      <b>АНУЛИРАН</b> на ${bg(String(a.revoked_at).slice(0, 10))} г.${a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}${
+      <b>АНУЛИРАН</b> на ${bg(tsDay(a.revoked_at))} г.${a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}${
       a.revoked_by ? '<br>Анулирал: ' + esc(a.revoked_by) : ''}<br>
       Документите по този акт са върнати във фонда. Номерът остава зает.</div>` : ''}
     <div class="pmeta">Днес, ${bg(a.date)} г., комисия, назначена със заповед ${a.order_no ? '№ ' + esc(a.order_no) : '№ …………'} на
@@ -597,7 +597,7 @@ async function printActDoc(id) {
     Актът е съставен в два екземпляра — по един за счетоводството и за библиотеката.${
       (a.created_by || a.created_at)
         ? '<br>Съставил: ' + esc(a.created_by || '…………………')
-          + (a.created_at ? ' · ' + bg(String(a.created_at).slice(0, 10)) + ' г.' : '') : ''}</div>
+          + (a.created_at ? ' · ' + bg(tsDay(a.created_at)) + ' г.' : '') : ''}</div>
     ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printActDoc = printActDoc;

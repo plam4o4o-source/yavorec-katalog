@@ -67,6 +67,34 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
         FROM deaccession_items i
         JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? AND d.revoked_at IS NULL
       `).get(y);
+      /* ОТЧИСЛЕНИ, КОИТО НИКОГА НЕ СА БИЛИ В НАЛИЧНОСТТА (v2.4.67).
+         =====================================================================
+         Част № 2 извежда наличността към 01.01 като 31.12 − постъпили +
+         отчислени. Документ без валидна дата на вписване (NULL, „НЕВАЛИДНА-99-99“,
+         „3.05.2019“) никога не влиза в stockAt() — но ако бъде отчислен, влизаше в
+         deaccYear. Възпроизведено: КДБФ 2025 приключва с наличност 1 към
+         31.12.2025, а КДБФ 2026 извежда наличност 2 към 01.01.2026 — два
+         подписани документа с различни числа за един и същ ден.
+         deaccYear остава какъвто е: той е сборът на Част № 3 (актовете), които се
+         подписват и пазят по чл. 39. Отделно се брои колко от тях документът им
+         не е влизал НИТО в наличността към 31.12 на миналата година (условието
+         на fundByDate()), НИТО в постъпилите през годината (acquiredYear). Точно
+         тогава 31.12 − постъпили + отчислени дава миналогодишното число за
+         всеки документ. (Първата редакция сравняваше с ДАТАТА НА АКТА — документ,
+         вписан през годината след датата на акта, се брои в постъпилите, а
+         отпадаше от отчислените, и 01.01 излизаше с един по-малко; преглед на
+         кръга.) Част № 2 вади тези, а екранът и разпечатката обявяват разликата
+         с Част № 3. Документ, изтрит от базата (без ред в books), не може да се
+         провери и се брои както досега — като бил в наличността. */
+      const deaccOutOfStock = db.prepare(`
+        SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) AS n,
+               COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) AS v
+        FROM deaccession_items i
+        JOIN deaccession_acts d ON d.id = i.act_id
+        JOIN books b ON b.id = i.book_id
+        WHERE d.year = ? AND d.revoked_at IS NULL
+          AND NOT (COALESCE(+b.register_date <= ?, 0) OR COALESCE(substr(b.register_date,1,4) = ?, 0))
+      `).get(y, (Number(y) - 1) + '-12-31', String(y));
       /* ---- Съгласуване между Част № 1 и Част № 2 ----------------------------
          Двете части броят по РАЗЛИЧНИ ключа и това е по същество, не по грешка:
            Част № 1 подрежда ПАРТИДИТЕ по годината на самата партида (a.year);
@@ -106,7 +134,14 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
                -- такъв ред изчезва от stockAt(); празният низ СЕ сравнява по азбучен
                -- ред, минава проверката и остава в наличността — но пак пропада от
                -- постъпленията, защото substr('',1,4) не е година.
-               COALESCE(SUM(CASE WHEN b.register_date IS NULL THEN ${QTYJ} ELSE 0 END),0) AS missing_from_stock
+               -- v2.4.67: не само NULL. Наличността (fundByDate) изключва ВСЕКИ ред, за
+               -- който „+register_date <= край“ не е истина — и NULL, и „НЕВАЛИДНА-99-99“,
+               -- и „3.05.2019“ (като текст „3“ > „2“). А „1.05.2019“ минава сравнението и
+               -- остава в наличността. Затова броячът е точно обратното на същото условие,
+               -- а не догадка по вида на датата: дотук счупена дата изпадаше от
+               -- наличността, а броячът казваше 0 — и бележката под КДБФ мълчеше, че
+               -- наличността е по-ниска с цената на този документ.
+               COALESCE(SUM(CASE WHEN COALESCE(+b.register_date <= ?, 0) THEN 0 ELSE ${QTYJ} END),0) AS missing_from_stock
         ${BOOKS_INV}
         ${/* v2.4.57: условието идва от FUND.BAD_DATE и включва ТРЕТИЯ случай —
               НЕРАЗПОЗНАВАЕМА дата („НЕВАЛИДНА-99-99“). Дотук тук стоеше само
@@ -118,7 +153,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
               вече ги хващаха; самият документ, който се подписва — не. */''}
         WHERE ${BAD_DATE}
           AND (b.deaccession_date IS NULL OR b.deaccession_date > ?)
-      `).get(end);
+      `).get(end, end);
       /* Разбивка по видове документи към края на годината (v2.4.56) — за
          Приложение № 2, чийто образец я съдържа, а програмата дотук печаташе
          само трите общи реда. Ключът е ВИДЪТ (categories.name: книга, продължаващо
@@ -135,7 +170,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
       const part1Sum = part1.reduce((s, a) => ({
         n: s.n + (a.registered_count || 0), v: s.v + (a.registered_value || 0)
       }), { n: 0, v: 0 });
-      return { part1, part3, stockEnd, acquiredYear, deaccYear, year: y, crossIn, crossOut, undated, part1Sum, byKind };
+      return { part1, part3, stockEnd, acquiredYear, deaccYear, deaccOutOfStock, year: y, crossIn, crossOut, undated, part1Sum, byKind };
     })
   );
 };

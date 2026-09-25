@@ -10,6 +10,7 @@ const { createDebouncer } = require('./debounce');
 const { csvCell, isValidEmail, normalizeScanCode } = require('./security-utils');
 const { ensureDbFolderAvailable } = require('./db-folder');
 const { ensureHolidaysSeeded } = require('./bg-holidays');
+const { localDate } = require('./local-date');
 const { autoUpdater } = require('electron-updater');
 
 let db;
@@ -43,7 +44,7 @@ function logToFileArr(level, args) {
   try {
     if (!app.isReady()) return; // да не пипаме fs пътища, зависещи от userData, преди 'ready'
     const dir = logsDir();
-    const day = new Date().toISOString().slice(0, 10);
+    const day = localDate();
     const file = path.join(dir, `log-${day}.txt`);
     const text = args.map(a => {
       if (a instanceof Error) return a.stack || a.message;
@@ -522,9 +523,9 @@ function initDb() {
   }
   // Датирани съгласия — при вече отбелязано съгласие без дата се записва датата на
   // регистрация: най-добрата налична долна граница, по-честна от днешната дата.
-  db.exec(`UPDATE readers SET gdpr_consent_date = COALESCE(registered_at, date('now'))
+  db.exec(`UPDATE readers SET gdpr_consent_date = COALESCE(registered_at, date('now', 'localtime'))
     WHERE gdpr_consent = 1 AND gdpr_consent_date IS NULL`);
-  db.exec(`UPDATE readers SET parent_consent_date = COALESCE(registered_at, date('now'))
+  db.exec(`UPDATE readers SET parent_consent_date = COALESCE(registered_at, date('now', 'localtime'))
     WHERE parent_consent = 1 AND parent_consent_date IS NULL`);
   // Номенклатури — при празна категория се засява от познатите списъци плюс
   // стойностите, които вече се срещат из фонда (за да не изчезне нищо от менютата).
@@ -625,7 +626,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 16;
+const CURRENT_SCHEMA_VERSION = 17;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -966,6 +967,26 @@ const MIGRATIONS = [
         + 'изданието и изтрийте излишния ред — сборът за годината става цена на годишния комплект в инвентарната книга.');
     }
     db.exec('CREATE INDEX IF NOT EXISTS idx_per_issue_year ON periodical_issues(periodical_id, date)');
+  } },
+  /* v2.4.67 — ПРОЦЕНТЪТ ЗА НОРМАТИВА ПО ЧЛ. 41 СЕ СНИМА ПРИ ПРИКЛЮЧВАНЕ.
+     Допустимите естествени загуби (0,5 % при свободен достъп до 50 %, 1 % над
+     него) се смятаха при всяко отпечатване на протокола от ТЕКУЩАТА настройка
+     free_access_pct. Смяната ѝ по-късно пренаписваше норматива на вече подписан
+     протокол по чл. 40: 7 липсващи при допустими 5 („над норматива — чл. 51 – 53“)
+     ставаха 7 при допустими 10 („в рамките на нормата“).
+     ЗАВАРЕНИТЕ приключени сесии получават процента, който е в настройките в
+     момента на обновяването — той е най-доброто налично доказателство, а всяка
+     по-късна смяна вече не ги пипа. Протоколите, отпечатани преди обновяването
+     със същия процент, остават същите; ако процентът е бил сменян ПРЕДИ
+     обновяването, това е невъзстановимо и не се предполага нищо.
+     ВНИМАНИЕ ПРИ ОБЩА МРЕЖОВА БАЗА: версията на схемата става 17, тоест работно
+     място с по-стара програма отказва да отвори базата (assertSchemaNotNewer),
+     докато не бъде обновено — по същия начин като при всяка досегашна миграция. */
+  { version: 17, run: () => {
+    ensureColumns('inventory_sessions', { free_access_pct: 'INTEGER' });
+    db.exec(`UPDATE inventory_sessions
+      SET free_access_pct = (SELECT free_access_pct FROM settings WHERE id = 1)
+      WHERE closed = 1 AND free_access_pct IS NULL`);
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от
@@ -1802,7 +1823,8 @@ function diffFields(oldObj, newObj, fields) {
   }
   return out;
 }
-const today = () => new Date().toISOString().slice(0, 10);
+/* Местната дата, не UTC — виж local-date.js (v2.4.67). */
+const today = () => localDate();
 const yearOf = (d) => (d || today()).slice(0, 4);
 function value(rows) { return rows.reduce((s, r) => s + (Number(r.price) || 0), 0); }
 function pctRequired(n) { return n <= 50000 ? 10 : n <= 200000 ? 5 : 2; }
@@ -1977,7 +1999,15 @@ require('./handlers/housebound')(ipcMain, {
    служебния запис „— анонимизирани заемания —", а категорията и годината се снимат в
    anon_category — статистиката остава вярна („дете, 2024 г."), името изчезва.
    Настройка anonymize_years = 0 изключва всичко. Необратимо е — затова е ръчен бутон. */
-require('./handlers/gdpr')(ipcMain, { getDb: () => db, run, logAudit });
+/* activateHoldOnReturn идва от handlers/holds.js, който се регистрира ПО-ДОЛУ
+   (виж „Резервации“) — тоест тук името още е в TDZ. Подава се като функция, която
+   стига до него чак при извикване (заличаване по искане на читател), когато
+   всичко вече е заредено. Директно подаване би хвърлило ReferenceError при
+   стартиране — капанът с реда на зареждане от docs/ARCHITECTURE.md. */
+require('./handlers/gdpr')(ipcMain, {
+  getDb: () => db, run, logAudit,
+  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId)
+});
 
 /* ---------------- Календар на библиотеката ----------------
    Извадени в handlers/calendar.js (Фаза 4, стъпка 4 от разбиването на
@@ -2269,7 +2299,7 @@ function buildCatalogPayload() {
   const shelfList = Object.entries(shelves).map(([name, items]) => ({ name, items }));
   return {
     library: s.lib_name || '', place: s.place || '',
-    generated: new Date().toISOString().slice(0, 10),
+    generated: localDate(),
     items: books.map(b => publicBookFields(b, opacMap)),
     ...(shelfList.length ? { shelves: shelfList } : {})
   };
@@ -2414,7 +2444,7 @@ const CATALOG_PAYLOAD_CACHE = { db: null, stamp: null, payload: null };
 function catalogDataStamp() {
   const n = db.prepare('SELECT total_changes() AS n').get().n;
   const v = db.pragma('data_version', { simple: true });
-  return n + '|' + v + '|' + new Date().toISOString().slice(0, 10);
+  return n + '|' + v + '|' + localDate();
 }
 function dropCatalogPayloadCache() {
   CATALOG_PAYLOAD_CACHE.db = null;

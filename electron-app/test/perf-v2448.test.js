@@ -49,7 +49,9 @@ const { startMainApp } = require('./helpers/main-app');
 test.after(cleanupTmpDirs);
 
 const iso = (d) => d.toISOString().slice(0, 10);
-const dayOff = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return iso(d); };
+const { localDayOff } = require('./helpers/local-day');
+/* Местната дата (v2.4.67) — програмата брои „днес“ по часовника на компютъра. */
+const dayOff = localDayOff;
 
 /* ---------- истинското приложение + база при работен мащаб ----------
    4 000 документа, а не 15 000: измерването беше на 15 000, но разликата се

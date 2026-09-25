@@ -11,6 +11,152 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.67
+
+**BG:** **Проверка за грешки: единадесет поправки в парите, отчетите, инвентаризацията
+и датата „днес“.** Всяка находка е възпроизведена на истинска база, преди да бъде
+пипната, и всеки нов тест е проверен с връщане на поправката.
+
+> **Споделена база на няколко компютъра:** това издание вдига версията на базата
+> (миграция 17). Обновете **всички** работни места — по-старата версия отказва да
+> отвори вече обновена база, за да не я повреди.
+
+**Пари**
+
+- **Десетичната запетая в полетата за суми.** „12,50“ в поле за цена, глоба или
+  такса ставаше **1250** — полето за число в Chromium изхвърля запетаята, без
+  грешка. Същото и в „Настройки“ (обезщетение „0,10“ ставаше 10 € на ден). Полетата
+  за пари вече приемат и запетая, и точка.
+- **Закръгляне до евроцент.** 1,005 € ставаше 1,00 вместо 1,01 — двоичният запис на
+  1,005 е малко под половината. Едно общо закръгляне за сметката, заеманията,
+  актовете, периодиката и цените.
+- **Аванс.** Плащане, записано ден **преди** начислението, не покриваше по-късното
+  начисление — сметката, писмото и годишният отчет продължаваха да искат сумата.
+  Надплатеното вече остава като кредит за следващите начисления, а годишният отчет
+  брои събраното обезщетение в годината на плащането — и числото за вече подписана
+  година не се мени по-късно.
+
+**Отчети**
+
+- **КДБФ: наличността към 01.01 = наличността към 31.12 на миналата година** и когато
+  има отчислен документ без дата на постъпване. Такъв документ вече се показва отделно
+  с бележка, вместо да разминава двете години.
+- **КДБФ: броячът „не участват в наличността“** брои и неразпознаваемите дати
+  („НЕВАЛИДНА-99-99“, „3.05.2019“), не само празните — бележката под книгата вече не
+  мълчи, когато наличността е по-ниска.
+- **Търсенето в одитната следа** намира и с малки букви на кирилица, а „%“ и „_“ се
+  търсят буквално.
+
+**Инвентаризация**
+
+- **Многобройни записи и частично заети бройки.** Запис с 3 бройки, от които 1 е
+  заета, се броеше или изцяло липсващ, или изцяло наличен. Протоколът вече брои по
+  бройки: заетите не са липса, останалите несканирани — са (а при запис „за
+  реставрация“ или „изгубен“ — в своята категория, не срещу чл. 41). „Проект за акт
+  от липсите“ дава свой инвентарен номер **само на липсващите бройки** и те остават
+  „липсващ“ до утвърждаването; заетите и намерените след проверката остават под
+  стария номер и не влизат в акта.
+- **Нормативът по чл. 41 се „снима“ при приключване.** Смяната на процента на
+  свободния достъп в „Настройки“ пренаписваше допустимата липса и на вече подписани
+  протоколи. Процентът вече се пази в самия протокол; заварените приключени протоколи
+  получават процента от момента на обновяването (миграция 17).
+
+**Резервации**
+
+- **Втора върната бройка** не се заделя повторно за читател, който вече има заделена.
+- **Заличаването по чл. 17** на читател със заделена книга повиква следващия в
+  опашката — досега той оставаше „чака“ завинаги.
+
+**Датата „днес“ по часовника на компютъра, не по Гринуич.** Между 00:00 и 03:00
+българско време UTC е още вчера: заемане след полунощ се записваше с вчерашна дата (а
+екранът, вече по местно време, можеше да го откаже като „бъдеща дата“), книга с падеж
+вчера не беше просрочена, копието от 00:30 носеше вчерашна дата (и не се криптираше
+като „днешно“), а напомнянето, резервацията и анулираният акт се показваха с
+вчерашния ден и часа в Гринуич. Сега „днес“ е местната
+дата навсякъде — в програмата, в заявките към базата и на екрана. Смятането с дати
+(добави N дни, ден от седмицата) остава защитено от смяната на часа.
+
+**Проверено:** нови `test/pari-v2467.test.js` (14 теста, през истинския екран и
+истинския `main.js`) и `test/proverka-v2467.test.js` (11 теста), всяка поправка — с
+мутация, която я връща и тестът пада; след това независим преглед на кода и втори
+кръг поправки по него. Датата „днес“ е проверена и с **подменен часовник на 00:30
+софийско време** (libfaketime): старият код там дава UTC дата 2026-09-24 вместо
+2026-09-25; при този час минава цялата поредица освен три теста за копията, които
+падат и със стария код, защото времената на файловете идват от истинския часовник. Пълна поредица:
+**2100 успешни, 0 неуспешни**, в UTC и Europe/Sofia; сайтът — 8 сценария и мащаб
+15 002 записа.
+
+**EN:** **Bug hunt: eleven fixes in money, reports, stocktaking and the date "today".**
+Every finding was reproduced on a real database before it was touched, and every new
+test was verified by reverting the fix.
+
+> **Shared database on several computers:** this release raises the database version
+> (migration 17). Update **all** workstations — an older version refuses to open an
+> already upgraded database so as not to damage it.
+
+**Money**
+
+- **Decimal comma in amount fields.** "12,50" in a price, fine or fee field became
+  **1250** — Chromium's number input silently drops the comma. The same in Settings
+  (a fine of "0,10" became €10 per day). Money fields now accept both comma and point.
+- **Rounding to the euro cent.** €1.005 became 1.00 instead of 1.01 — the binary value
+  of 1.005 is just below the half. One shared rounding for the account, loans, acts,
+  periodicals and prices.
+- **Advance payments.** A payment recorded a day **before** the charge did not cover
+  the later charge — the account, the letter and the annual report kept asking for it.
+  Overpayment now stays as credit for later charges, and the annual report counts
+  collected compensation in the year of payment — and a signed year's figure does
+  not change later.
+
+**Reports**
+
+- **Accession ledger (KDBF): stock on 1 Jan = stock on 31 Dec of the previous year**,
+  also when a deaccessioned document has no accession date. Such a document is now
+  shown separately with a note instead of making the two years disagree.
+- **KDBF: the "not counted in stock" counter** also counts unparseable dates
+  ("НЕВАЛИДНА-99-99", "3.05.2019"), not only empty ones.
+- **Audit trail search** finds lower-case Cyrillic, and "%" and "_" are matched
+  literally.
+
+**Stocktaking**
+
+- **Multi-copy records and partly loaned copies.** A record with 3 copies, 1 of them
+  on loan, was counted either fully missing or fully present. The report now counts
+  copies: loaned ones are not missing, the remaining unscanned ones are (for a record
+  "at the bindery" or "lost", they go to that category, not against Art. 41). The
+  draft act from shortages gives its own inventory number **only to the missing
+  copies**, which stay "missing" until approval; loaned copies and copies found after
+  the check stay under the old number and are not deaccessioned.
+- **The Art. 41 allowance is snapshotted at closing.** Changing the open-access
+  percentage in Settings rewrote the allowed loss of already signed reports. The
+  percentage is now stored in the report itself; existing closed reports get the
+  percentage in effect at upgrade time (migration 17).
+
+**Holds**
+
+- **A second returned copy** is not set aside again for a reader who already has one.
+- **GDPR erasure (Art. 17)** of a reader with a set-aside copy calls the next reader in
+  the queue — until now they stayed "waiting" forever.
+
+**"Today" by the computer's clock, not Greenwich.** Between 00:00 and 03:00 Bulgarian
+time UTC is still yesterday: a loan after midnight was dated yesterday (and the screen,
+already on local time, could refuse it as a "future date"), a book due yesterday was
+not overdue, the 00:30 backup carried yesterday's date (and was not encrypted as
+"today's"), and reminders, holds and revoked acts were shown with yesterday's day and
+Greenwich time. "Today" is now the local date
+everywhere — in the program, in database queries and on screen. Date arithmetic (add N
+days, weekday) stays safe from DST changes.
+
+**Verified:** new `test/pari-v2467.test.js` (14 tests, through the real screen and
+the real `main.js`) and `test/proverka-v2467.test.js` (11 tests), each fix with a
+mutation that reverts it and makes the test fail; then an independent code review and a
+second round of fixes from it. "Today" was also checked with a **faked clock at 00:30
+Sofia time** (libfaketime): the old code there yields the UTC date 2026-09-24 instead of
+2026-09-25; at that hour the whole suite passes except three backup tests that also
+fail with the old code, because file times come from the real clock. Full suite: **2100
+passed, 0 failed**, in UTC and Europe/Sofia; the site — 8 scenarios and a 15,002-record
+scale test.
+
 ## v2.4.66
 
 **BG:** **Цена в левове от стар файл се превръща в евро при внос.** Решение на

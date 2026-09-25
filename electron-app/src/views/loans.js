@@ -132,7 +132,7 @@ async function renderCirc() {
         <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
         <th>Инв. №</th><th>Заглавие</th><th>Заявена</th><th>Състояние</th><th style="width:110px"></th></tr></thead><tbody>
         ${myHolds.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
-          <td class="num">${bg((h.placed_at || '').slice(0, 10))}</td>
+          <td class="num">${bg(tsDay(h.placed_at))}</td>
           <td>${h.status === 'заделена' ? '<span class="badge ok">заделена — чака взимане</span>' : '<span class="badge">чака</span>'}</td>
           <td><button class="btn sm" onclick="cancelHold(${h.id})">Откажи</button></td></tr>`).join('')}
         </tbody></table></div></div>`;
@@ -546,16 +546,9 @@ const CIRC_TODAY_TITLE = 'Вписано днес на гишето';
 async function circTodayPanel() {
   const box = $('#circToday'); if (!box) return;
   const rows = await call(window.api.audit.list('')) || [];
-  const pad = (n) => String(n).padStart(2, '0');
-  const localDate = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  // Следата пази UTC („YYYY-MM-DD HH:MM:SS“); „днес“ е местният ден, не today() (UTC).
-  const t = localDate(new Date());
-  const local = (ts) => {
-    const raw = String(ts || '');
-    const d = new Date(/[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
-    if (isNaN(d)) return null;
-    return { date: localDate(d), time: pad(d.getHours()) + ':' + pad(d.getMinutes()) };
-  };
+  // Следата пази UTC („YYYY-MM-DD HH:MM:SS“) — всеки запис се превежда към местния ден (tsDay/tsTime в core.js).
+  const t = today();
+  const local = (ts) => (tsLocal(ts) ? { date: tsDay(ts), time: tsTime(ts) } : null);
   const ops = rows.map(r => ({ ...r, at: local(r.ts) }))
     .filter(r => r.at && r.at.date === t && (r.action === 'Заемане' || r.action === 'Връщане'));
   if (!$('#circToday')) return; // междувременно е избран читател

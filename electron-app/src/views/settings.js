@@ -1287,7 +1287,8 @@ function setupFormData() {
   document.querySelectorAll('#view [data-setup-form]').forEach(block => {
     block.querySelectorAll('input,select,textarea').forEach(el => {
       if (!el.name) return;
-      out[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+      /* Същото правило като formData() — виж fieldValue в core.js. */
+      out[el.name] = fieldValue(el);
     });
   });
   return out;
