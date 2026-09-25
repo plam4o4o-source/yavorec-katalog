@@ -407,11 +407,30 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            поискал заличаване, тоест неговото желание да вземе книгата вече не
            съществува: резервацията се отказва, а заделеният документ се
            освобождава за следващия. */
+        /* Кои документи са били ЗАДЕЛЕНИ за този читател — след отказа следващият
+           в опашката трябва да бъде повикан (виж по-долу). */
+        const setAsideBooks = db.prepare(`SELECT DISTINCT book_id FROM holds
+             WHERE reader_id = ? AND status = 'заделена'`).all(id).map(h => h.book_id);
         const holdsCancelled = db.prepare(`UPDATE holds
              SET status = 'отказана', resolved_at = date('now'),
                  note = 'отказана при заличаване по искане на читателя (чл. 17 ОРЗД)'
            WHERE reader_id = ? AND status IN ('чака', 'заделена')`).run(id).changes;
         const holdsMoved = db.prepare('UPDATE holds SET reader_id = ? WHERE reader_id = ?').run(anonId, id).changes;
+        /* СЛЕДВАЩИЯТ В ОПАШКАТА СЕ ПОВИКВА (v2.4.67). Отказът на заделена
+           резервация не стига: документът не е зает, тоест никое връщане няма да
+           повика следващия чакащ — а activateHoldOnReturn() е единственият път,
+           по който „чака“ става „заделена“. Дотук чакащият оставаше „чака“ завинаги,
+           а другите читатели бяха отказвани на гишето, защото той е пред тях.
+           Точно така прави и обикновеният отказ (holds:cancel) и изтичането на
+           заделена резервация. Незадължителна зависимост: main.js я подава;
+           отделните тестове на този модул могат да я пропуснат. */
+        const promoted = [];
+        if (typeof deps.activateHoldOnReturn === 'function') {
+          for (const bookId of setAsideBooks) {
+            const next = deps.activateHoldOnReturn(bookId);
+            if (next && next.status === 'заделена') promoted.push(next.reader_name);
+          }
+        }
         const visitsMoved = db.prepare('UPDATE housebound_visits SET reader_id = ? WHERE reader_id = ?')
           .run(anonId, id).changes;
         const noticesGone = db.prepare('DELETE FROM notice_log WHERE reader_id = ?').run(id).changes;
@@ -472,7 +491,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
 
         const readerCleared = readerGone + loansMoved + accountMoved + eventsCleared + holdsMoved
           + visitsMoved + noticesGone + suggCleared + suggByName + mzsCleared;
-        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled };
+        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled, promoted: promoted.length };
       });
       const res = tx.immediate();
 
@@ -489,8 +508,9 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         + 'останали обезличени записа (резервации, предложения, МЗС, напомняния, посещения по домовете): '
         + (res.readerCleared - res.loansMoved - res.accountMoved - 1) + '. '
         + (res.holdsCancelled
-          ? 'Отказани активни резервации: ' + res.holdsCancelled + ' — заделените документи са освободени за '
-            + 'следващия читател в опашката. '
+          ? 'Отказани активни резервации: ' + res.holdsCancelled
+            + (res.promoted ? '; повикан е следващият в опашката за ' + res.promoted
+              + (res.promoted === 1 ? ' документ' : ' документа') : '') + '. '
           : '')
         + 'Самоличността на читателя нарочно НЕ се вписва тук. '
         + 'ВНИМАНИЕ: резервните копия НЕ са пипани — данните на този читател остават в тях, '

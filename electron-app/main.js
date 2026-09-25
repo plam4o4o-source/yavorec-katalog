@@ -1977,7 +1977,15 @@ require('./handlers/housebound')(ipcMain, {
    служебния запис „— анонимизирани заемания —", а категорията и годината се снимат в
    anon_category — статистиката остава вярна („дете, 2024 г."), името изчезва.
    Настройка anonymize_years = 0 изключва всичко. Необратимо е — затова е ръчен бутон. */
-require('./handlers/gdpr')(ipcMain, { getDb: () => db, run, logAudit });
+/* activateHoldOnReturn идва от handlers/holds.js, който се регистрира ПО-ДОЛУ
+   (виж „Резервации“) — тоест тук името още е в TDZ. Подава се като функция, която
+   стига до него чак при извикване (заличаване по искане на читател), когато
+   всичко вече е заредено. Директно подаване би хвърлило ReferenceError при
+   стартиране — капанът с реда на зареждане от docs/ARCHITECTURE.md. */
+require('./handlers/gdpr')(ipcMain, {
+  getDb: () => db, run, logAudit,
+  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId)
+});
 
 /* ---------------- Календар на библиотеката ----------------
    Извадени в handlers/calendar.js (Фаза 4, стъпка 4 от разбиването на
