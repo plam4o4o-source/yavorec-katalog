@@ -793,7 +793,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
            отчисляване) влачи опашката нататък и сборовете спират да се събират с
            отпечатаните. Правилото на проекта е изрично: закръгляне до цент навсякъде,
            където сума се ЗАПИСВА или ПЕЧАТА. */
-        const cents = (x) => Math.round((Number(x) || 0) * 100) / 100;
+        const cents = require('../db/fund-sql').toCents; // едно закръгляне (v2.4.67)
         const price = cents(rawPrice);
         const issueSum = cents(agg.s);
 

@@ -67,6 +67,30 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
         FROM deaccession_items i
         JOIN deaccession_acts d ON d.id = i.act_id WHERE d.year = ? AND d.revoked_at IS NULL
       `).get(y);
+      /* ОТЧИСЛЕНИ, КОИТО НИКОГА НЕ СА БИЛИ В НАЛИЧНОСТТА (v2.4.67).
+         =====================================================================
+         Част № 2 извежда наличността към 01.01 като 31.12 − постъпили +
+         отчислени. Документ без валидна дата на вписване (NULL, „НЕВАЛИДНА-99-99“,
+         „3.05.2019“) никога не влиза в stockAt() — но ако бъде отчислен, влизаше в
+         deaccYear. Възпроизведено: КДБФ 2025 приключва с наличност 1 към
+         31.12.2025, а КДБФ 2026 извежда наличност 2 към 01.01.2026 — два
+         подписани документа с различни числа за един и същ ден.
+         deaccYear остава какъвто е: той е сборът на Част № 3 (актовете), които се
+         подписват и пазят по чл. 39. Отделно се брои колко от тях документът им
+         НЕ е бил в наличността към датата на акта — същото условие като
+         fundByDate(): „+register_date <= дата“ не е истина. Част № 2 вади тях, а
+         екранът и разпечатката обявяват разликата с Част № 3. Документ, изтрит
+         от базата (без ред в books), не може да се провери и се брои както
+         досега — като бил в наличността. */
+      const deaccOutOfStock = db.prepare(`
+        SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) AS n,
+               COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) AS v
+        FROM deaccession_items i
+        JOIN deaccession_acts d ON d.id = i.act_id
+        JOIN books b ON b.id = i.book_id
+        WHERE d.year = ? AND d.revoked_at IS NULL
+          AND NOT COALESCE(+b.register_date <= d.date, 0)
+      `).get(y);
       /* ---- Съгласуване между Част № 1 и Част № 2 ----------------------------
          Двете части броят по РАЗЛИЧНИ ключа и това е по същество, не по грешка:
            Част № 1 подрежда ПАРТИДИТЕ по годината на самата партида (a.year);
@@ -142,7 +166,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
       const part1Sum = part1.reduce((s, a) => ({
         n: s.n + (a.registered_count || 0), v: s.v + (a.registered_value || 0)
       }), { n: 0, v: 0 });
-      return { part1, part3, stockEnd, acquiredYear, deaccYear, year: y, crossIn, crossOut, undated, part1Sum, byKind };
+      return { part1, part3, stockEnd, acquiredYear, deaccYear, deaccOutOfStock, year: y, crossIn, crossOut, undated, part1Sum, byKind };
     })
   );
 };

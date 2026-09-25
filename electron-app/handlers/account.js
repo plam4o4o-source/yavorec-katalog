@@ -14,7 +14,8 @@ const { LOST_CHARGE_TYPE } = require('../db/enum-triggers');
    (извън обхвата на регистрацията) — иначе там щеше да се появи второ, „почти
    същото“ закръгляне, а разликата от 1e-16 вече веднъж боядиса платена сметка в
    червено. */
-const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+/* Едно закръгляне за цялата програма — виж toCents в db/fund-sql.js (v2.4.67). */
+const { toCents } = require('../db/fund-sql');
 
 /* НАЧИСЛЕНИЕТО ЗА ИЗГУБЕН ДОКУМЕНТ СЕ ПИШЕ ОТ ТУК, А НЕ ОТ ЗАЕМАНИЯТА (v2.4.56).
    =====================================================================
@@ -100,17 +101,32 @@ function chargeCoverage(db, lineId) {
     ORDER BY date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
   `).all(line.reader_id);
   const queue = [];
+  /* АВАНСЪТ ПОКРИВА СЛЕДВАЩОТО НАЧИСЛЕНИЕ (v2.4.67). Дотук надплатеното „не се
+     приписваше на нищо“. Възпроизведено: читател плаща 5,00 € на 10.03,
+     начислението за изгубен документ се вписва на 11.03 — account:get показва
+     салдо 0,00, а това покритие казваше „неплатени 5,00 €“, и актът по
+     чл. 30, т. 5 обявяваше обезщетението за несъбрано. Сега надплатеното е
+     кредит и покрива следващото начисление. Същото правило в
+     handlers/loans.js (unpaidOverdueFines) и handlers/stats.js. */
+  let credit = 0;
   for (const l of lines) {
-    if (l.kind === 'начисление') { queue.push({ id: l.id, left: Number(l.amount) || 0 }); continue; }
+    if (l.kind === 'начисление') {
+      const item = { id: l.id, left: Number(l.amount) || 0 };
+      const used = Math.min(credit, item.left);
+      item.left -= used; credit -= used;
+      queue.push(item);   // и напълно покритото остава — по него се търси `rest` по-долу
+      continue;
+    }
     let money = Math.abs(Number(l.amount) || 0);
     while (money > 0.0001 && queue.length) {
       const head = queue[0];
+      if (head.left <= 0.0001) { queue.shift(); continue; }
       const used = Math.min(money, head.left);
       head.left -= used;
       money -= used;
       if (head.left <= 0.0001) queue.shift();
     }
-    // Надплатеното (аванс) не се приписва на нищо — както в handlers/stats.js.
+    if (money > 0.0001) credit += money;
   }
   const charged = toCents(Math.abs(Number(line.amount) || 0));
   const rest = queue.find(q => q.id === line.id);

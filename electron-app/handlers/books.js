@@ -153,7 +153,7 @@ function parseBookPrice(x) {
       + 'никъде. Въведете сумата с цифри — десетичната част със запетая или с точка (напр. 12,50), '
       + 'или оставете 0, ако стойност не е обявена.');
   }
-  return Math.round(Number(norm) * 100) / 100;
+  return require('../db/fund-sql').toCents(Number(norm)); // едно закръгляне (v2.4.67)
 }
 
 module.exports = function registerBooksHandlers(ipcMain, deps) {

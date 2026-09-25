@@ -35,7 +35,7 @@ const F = require('../db/fund-sql');
 module.exports = function registerFundCheckHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, yearOf } = deps;
 
-  const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const money = require('../db/fund-sql').toCents; // едно закръгляне (v2.4.67)
 
   /* Фондът по ключа „регистър“ към дадена дата — същият, който ползват КДБФ
      Част № 2 и годишният отчет. */

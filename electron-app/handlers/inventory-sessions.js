@@ -232,8 +232,15 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       /* Подредбата е по инвентарен номер — така се чете списъкът на липсите в
          протокола и така се сверява с рафта. Дотук редовете излизаха в реда, в
          който приключването ги е вписало (ред на таблицата books). */
+      /* on_loan_now (v2.4.67): колко бройки на същия запис са у читател В МОМЕНТА.
+         Частично зает стар запис влиза в липсите само с ненамерените си бройки;
+         „Проект за акт от липсите“ трябва да знае това, за да не отчисли и
+         бройката, която читателят още държи (виж draftFromMissing). */
       s.missing = db.prepare(`
-        SELECT m.*, COALESCE(m.quantity, ${QTY_MISSING}) AS quantity FROM inventory_session_missing m
+        SELECT m.*, COALESCE(m.quantity, ${QTY_MISSING}) AS quantity,
+               (SELECT COUNT(*) FROM loans l WHERE l.book_id = m.book_id AND l.date_in IS NULL) AS on_loan_now,
+               inv.quantity AS live_qty
+        FROM inventory_session_missing m
         LEFT JOIN inventory inv ON inv.book_id = m.book_id
         WHERE m.session_id = ? ORDER BY m.inv_number, m.id
       `).all(id);
@@ -249,9 +256,13 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          документът, който излиза от сградата, ги нямаше. Тоест единственият въпрос,
          на който протоколът съществува да отговори (в рамките на допустимото ли са
          липсите), беше неотговорим от хартията. */
+      /* Процентът — снимката от приключването (v2.4.67, миграция 17); текущата
+         настройка само за неприключена сесия. Иначе смяна на настройката по-късно
+         пренаписва норматива на вече подписан протокол. */
       const cfg = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {};
+      const pct = s.free_access_pct != null ? s.free_access_pct : cfg.free_access_pct;
       const poolForLoss = s.pool_final != null ? s.pool_final : (s.pool_size || 0);
-      s.allowedLoss = naturalLoss(poolForLoss, cfg.free_access_pct);
+      s.allowedLoss = naturalLoss(poolForLoss, pct);
       /* ИЗГУБЕНИТЕ ОТ ПОЛЗВАТЕЛИ — СОБСТВЕН РЕД В ПРОТОКОЛА (v2.4.65).
          =================================================================
          Приключването вече ги извинява отделно (виж дългата бележка в
@@ -413,7 +424,17 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           return Number.isFinite(q) && q >= 0 ? q : 1;
         };
         const docs = (arr) => arr.reduce((n, b) => n + qtyOf(b), 0);
-        const openLoanIds = new Set(db.prepare('SELECT book_id FROM loans WHERE date_in IS NULL').all().map(r => r.book_id));
+        /* КОЛКО бройки на документа са заети, а не само ДАЛИ (v2.4.67). Стар
+           неразделен запис с 3 бройки и едно отворено заемане се броеше целият като
+           „зает“ — възпроизведено: протоколът гласеше „заети 3 · липсващи 0“, а
+           двете ненамерени бройки изчезваха от документа по чл. 40. Заетите вече са
+           min(отворени заемания, бройки); останалите бройки на несканиран ред са
+           непроверени (при пълна проверка — липсващи). */
+        const openLoanCount = new Map(db.prepare(
+          'SELECT book_id, COUNT(*) AS n FROM loans WHERE date_in IS NULL GROUP BY book_id').all()
+          .map(r => [r.book_id, r.n]));
+        const openLoanIds = new Set(openLoanCount.keys());
+        const loanedOf = (b) => Math.min(openLoanCount.get(b.id) || 0, qtyOf(b));
         const scannedSet = new Set(scannedIds);
         /* Одит v2.4.24: извинени са само заетите. Документ „за реставрация“ е при
            подвързвача — по определение не може да бъде сканиран на място, а
@@ -474,9 +495,16 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           && !scannedSet.has(b.id) && !openLoanIds.has(b.id));
         const excusedIds = new Set(excused.map(b => b.id).concat(lostBefore.map(b => b.id)));
         const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id) && !excusedIds.has(b.id));
+        /* Частично заети: несканиран ред с отворени заемания, но с повече бройки от
+           тях. Незаетите му бройки не са извинени от нищо — не са намерени. */
+        const partlyLoaned = pool.filter(b => !scannedSet.has(b.id) && openLoanIds.has(b.id)
+          && !excusedIds.has(b.id) && qtyOf(b) - loanedOf(b) > 0);
+        const restOf = new Map(partlyLoaned.map(b => [b.id, qtyOf(b) - loanedOf(b)]));
+        /* Бройките, които се водят като непроверени/липсващи за даден ред. */
+        const missingQty = (b) => (restOf.has(b.id) ? restOf.get(b.id) : qtyOf(b));
         // При представителна проверка непроверените НЕ са липсващи — те просто не
         // са влизали в обхвата на тазгодишната извадка.
-        const missing = mode === 'full' ? unchecked : [];
+        const missing = mode === 'full' ? unchecked.concat(partlyLoaned) : [];
         /* БРОЙКАТА СЕ СНИМА ЗАЕДНО С ЦЕНАТА И ЗАГЛАВИЕТО (v2.4.61).
            Редът тук е снимка към деня на приключването — затова носи заглавие,
            автор и цена, а не само book_id. Бройката липсваше от снимката и се
@@ -489,7 +517,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         missing.forEach(b => {
-          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price, qtyOf(b));
+          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price, missingQty(b));
         });
         /* Отбелязването като „липсващ“ е ЕДНА заявка върху току-що вписаните редове,
            а не по една на документ. Дотук в обхождането стоеше db.prepare(...) —
@@ -500,9 +528,14 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            Условието за статуса се пази дословно: то е излишно, защото обхватът и без
            това изключва отчислените, но е предпазна мярка и не се маха мимоходом. */
         if (missing.length) {
+          /* Ред с отворено заемане (частично зает стар запис) не се отбелязва като
+             „липсващ“ целият: една от бройките му е у читател и връщането ѝ трябва
+             да мине нормално. Липсващите му бройки са в протокола с точния брой;
+             „Проект за акт от липсите“ разделя стария запис, преди да отчисли. */
           db.prepare(`UPDATE books SET status='липсващ', status_date=date('now')
             WHERE ${fundByStatusPlain}
-              AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)`)
+              AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)
+              AND id NOT IN (SELECT book_id FROM loans WHERE date_in IS NULL)`)
             .run(sessionId);
         }
         /* Видът се ЗАПИСВА в базата (v2.3.0). Дотогава оставаше само в отговора към
@@ -518,7 +551,8 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            по-горе: четирите числа в протокола трябва да се събират до обхвата.
            Заета книга, която все пак е сканирана (върната на гишето, но още
            нерегистрирана), е ПРОВЕРЕНА — тя е била в ръцете на комисията. */
-        const onLoanInPool = docs(pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id)));
+        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id))
+          .reduce((n, b) => n + loanedOf(b), 0);
         /* „Проверени“ се брои СРЕЩУ ОБХВАТА, а не като брой сканирания. Обхватът
            се смята наново при приключване (книга, отчислена или преместена в друг
            отдел, докато проверката тече, вече не е в него), а сканиранията са
@@ -537,11 +571,13 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const scannedInPool = docs(scannedInPoolRows);
         const outOfScope = scannedIds.length - scannedInPoolRows.length;
         const poolDocs = docs(pool);
-        const missingDocs = docs(missing);
+        const missingDocs = missing.reduce((n, b) => n + missingQty(b), 0);
         const excusedDocs = docs(excused);
         const lostDocs = docs(lostBefore);
-        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ? WHERE id = ?')
-          .run(mode, poolDocs, onLoanInPool, excusedDocs, scannedInPool, sessionId);
+        /* Процентът за норматива по чл. 41 се СНИМА тук (v2.4.67) — виж миграция 17. */
+        const pctNow = (db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {}).free_access_pct;
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ?, free_access_pct = ? WHERE id = ?')
+          .run(mode, poolDocs, onLoanInPool, excusedDocs, scannedInPool, pctNow, sessionId);
         logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
           /* Числата в следата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ, както в протокола.
              Когато инвентарните номера са по-малко (стар неразделен запис), се
@@ -559,11 +595,12 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           (lostBefore.length ? ', ' + lostDocs + (lostDocs === 1
             ? ' документ, изгубен от ползвател преди проверката (чл. 30, т. 5 — не е липса по чл. 40)'
             : ' документа, изгубени от ползватели преди проверката (чл. 30, т. 5 — не са липси по чл. 40)') : ''));
-        const s2 = db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get();
+        const s2 = { free_access_pct: pctNow };
         return {
           mode, scanned: scannedInPool, missing: missingDocs, missingRows: missing.length,
           pool: poolDocs, poolRows: pool.length, outOfScope,
-          unchecked: docs(unchecked), onLoan: onLoanInPool, atBinder: excusedDocs,
+          unchecked: docs(unchecked) + partlyLoaned.reduce((n, b) => n + restOf.get(b.id), 0),
+          onLoan: onLoanInPool, atBinder: excusedDocs,
           /* Изгубените преди проверката се връщат със собствено число (v2.4.65),
              за да ги покаже прозорецът след приключването отделно от липсите —
              те не се отчисляват с един и същ акт и не се сравняват с чл. 41. */

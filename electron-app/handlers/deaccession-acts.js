@@ -24,7 +24,8 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      с която се датират заемането, връщането и дневникът. */
   const todayStr = () => (typeof today === 'function' ? today() : new Date().toISOString().slice(0, 10));
   const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
-  const toCents = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  /* Едно закръгляне за цялата програма — виж toCents в db/fund-sql.js (v2.4.67). */
+  const { toCents } = require('../db/fund-sql');
   /* Дни забава, изчистени от затворените дни в календара — ОГЛЕДАЛО на
      effectiveDaysLate() в handlers/loans.js, която ползва същата функция
      closedDaysBetween() от handlers/calendar.js. Тук тя се подава през deps,
