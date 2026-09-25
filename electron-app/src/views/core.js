@@ -49,14 +49,24 @@ const EUR_RATE = 1.95583;
    не съвпада със сбора на собствените си редове — точно това проверява
    регионалната библиотека. Сега сборовете се правят във валутата на записа.
    `bgn()` остава като СПРАВОЧНА стойност (стари фактури, заварени документи). */
-const bgn = (n) => ((Number(n) || 0) * EUR_RATE).toFixed(2);
+/* ЧИСЛО ОТ ПОЛЕ ЗА ПАРИ — С ДЕСЕТИЧНА ЗАПЕТАЯ ИЛИ ТОЧКА (v2.4.67).
+   Полетата за пари вече са текстови (виж mnyField), тоест стойността може да е
+   „12,50“ — какъвто е българският запис и каквото дава клавиатурата. Number()
+   връща NaN за „12,50“, затова всичко, което смята от поле за пари, минава оттук.
+   Интервалите се махат („1 234,50“). За вече записано число е същото като Number. */
+const moneyNum = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+};
+const bgn = (n) => (moneyNum(n) * EUR_RATE).toFixed(2);
 /* Съгласуване по число (одит v2.4.25): „1 документ“, „2 документа“. Връща числото
    и формата; за наречията/глаголите (остана/останаха) се подава цял израз. */
 const pl = (n, one, many) => n + ' ' + (Number(n) === 1 ? one : many);
 const dni = (n) => pl(n, 'ден', 'дни');
-const eur = (n) => (Number(n) || 0).toFixed(2);
+const eur = (n) => moneyNum(n).toFixed(2);
 /* Обратното преобразуване — за полето „лв.“ при въвеждане на стара фактура. */
-const bgnToEur = (n) => ((Number(n) || 0) / EUR_RATE).toFixed(2);
+const bgnToEur = (n) => (moneyNum(n) / EUR_RATE).toFixed(2);
 const mny = (n) => eur(n) + ' € / ' + bgn(n) + ' лв.';
 /* Същата сума за КЛЕТКА в таблица. Еврото е водещо (v2.4.51), левът остава в
    скоби — заварените документи и фактурите отпреди 2026 г. са в лева и хората
@@ -676,6 +686,21 @@ window.askConfirm = askConfirm;
    Полето в лева НЯМА атрибут name — formData() събира само наименувани полета,
    тоест към обработчика заминава единствено сумата в евро и нито един канал не
    се променя заради второто поле. */
+/* ПОЛЕТАТА СА ТЕКСТОВИ, НЕ <input type="number"> (v2.4.67).
+   Измерено в истински Chromium (същият двигател като в Electron), с език на
+   прозореца bg-BG: при type="number" запетаята просто НЕ СЕ ПРИЕМА — нито при
+   писане, нито при поставяне — и полето остава с цифрите без нея:
+       написано или поставено „12,50“ → value „1250“,  validity.badInput = false
+       „2,7“                          → value „27“
+   Тоест цена, вписана с българската десетична запетая, се записваше СТО ПЪТИ
+   по-голяма — в инвентарната книга, в КДБФ, в годишния отчет, — без нито един
+   сигнал. Тестовете на екраните вървят в jsdom, който не прави това филтриране,
+   затова нищо не го беше хванало.
+   Сега полетата са текстови (inputmode="decimal" пази цифровата клавиатура), а
+   formData() превръща „12,50“ в „12.50“ за всяко поле с data-money — тоест
+   обработчиците получават точно онова, което получаваха от числовото поле при
+   вярно въвеждане, и не са пипани. Невалиден текст стига до обработчика както
+   е и той решава: цената на документ се отказва поименно (parseBookPrice). */
 function mnyField(label, name, opts) {
   opts = opts || {};
   const празно = opts.val === '' || opts.val == null;
@@ -685,9 +710,9 @@ function mnyField(label, name, opts) {
   return `<div class="field">
     <label for="mf_${name}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <div class="mnyPair">
-      <input id="mf_${name}" name="${name}" type="number" step="0.01"${мин} ${opts.req ? 'required' : ''} value="${esc(e)}"
+      <input id="mf_${name}" name="${name}" type="text" inputmode="decimal" data-money ${opts.req ? 'required' : ''} value="${esc(e)}"
         aria-label="${esc(label)} в евро"><span class="mnyCur">€</span>
-      <input type="number" step="0.01"${мин} data-bgn-for="${name}" value="${esc(b)}"
+      <input type="text" inputmode="decimal" data-bgn-for="${name}" value="${esc(b)}"
         aria-label="${esc(label)} в лева (за документ отпреди 2026 г.)"><span class="mnyCur">лв.</span>
     </div>
     <div class="fh mnyNote">Записва се в евро; дясното поле е за сума по документ в лева.</div>
@@ -712,11 +737,28 @@ document.addEventListener('input', (e) => {
   if (огледало) огледало.value = el.value === '' ? '' : bgn(el.value);
 });
 
+/* СТОЙНОСТТА НА ЕДНО ПОЛЕ ЗА ОБРАБОТЧИКА — на едно място (v2.4.67).
+   Ползват я и formData(), и setupFormData() в src/views/settings.js: докато
+   правилото стоеше само във formData, Настройки (които събират полетата си сами)
+   записваха „0,10“ € забава на ден като 0 — parseFloat спира на запетаята.
+   Поле за пари (data-money, виж mnyField): „12,50“ и „1 234,50“ → „12.50“ и
+   „1234.50“ — точно видът, който числовото поле даваше. Друг текст минава
+   непроменен и обработчикът го отказва или решава какво е. */
+function fieldValue(el) {
+  if (el.type === 'checkbox') return el.checked;
+  if (el.hasAttribute && el.hasAttribute('data-money')) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    const compact = raw.replace(/\s/g, '');
+    return /^[+-]?\d+(?:[.,]\d+)?$/.test(compact) ? compact.replace(',', '.') : raw;
+  }
+  return el.value;
+}
+window.fieldValue = fieldValue;
 function formData(sel) {
   const out = {};
   $(sel).querySelectorAll('input,select,textarea').forEach(el => {
     if (!el.name) return;
-    out[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+    out[el.name] = fieldValue(el);
   });
   return out;
 }
