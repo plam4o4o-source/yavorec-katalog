@@ -341,6 +341,16 @@ function initDb() {
     lbl_cols: 'INTEGER DEFAULT 3',
     lbl_gap: 'REAL DEFAULT 3',
     lbl_margin: 'REAL DEFAULT 8',
+    /* v2.4.68 (находка Е2 от пълния тест): отделно поле отгоре и отляво и
+       отделно разстояние хоризонтално и вертикално. С едно поле за четирите
+       страни и едно разстояние за двете посоки готовите листове (Avery L7160:
+       горе 15,1 мм, ляво 7,2 мм, 2,5 мм между колоните, 0 между редовете) не
+       можеха да се настроят — първият ред излизаше с 8 мм по-високо. Миграция
+       18 ги попълва от lbl_margin/lbl_gap, за да не мръдне нищо при обновяване. */
+    lbl_mt: 'REAL DEFAULT 8',
+    lbl_ml: 'REAL DEFAULT 8',
+    lbl_gx: 'REAL DEFAULT 3',
+    lbl_gy: 'REAL DEFAULT 3',
     lbl_border: 'INTEGER DEFAULT 1',
     sig_w: 'INTEGER DEFAULT 25',
     sig_h: 'INTEGER DEFAULT 35',
@@ -626,7 +636,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 17;
+const CURRENT_SCHEMA_VERSION = 18;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -987,6 +997,34 @@ const MIGRATIONS = [
     db.exec(`UPDATE inventory_sessions
       SET free_access_pct = (SELECT free_access_pct FROM settings WHERE id = 1)
       WHERE closed = 1 AND free_access_pct IS NULL`);
+  } },
+  /* v18 (v2.4.68) — основите, от които зависят поправките от пълния тест.
+     1. account_lines.type „забава“ (находка Г2): тригерите се пресъздават ПРЕДИ
+        преименуването, защото тригерът за UPDATE OF type иначе би отказал новата
+        стойност. Преименуват се само редове, писани от chargeOverdueFine() —
+        начисления вид „обезщетение“ с бележка, която започва с „Забава“ (така
+        пише програмата от v2.4.61 насам, и при гишето, и при акта по т. 5).
+        Ръчно въведено „обезщетение“ за повредена корица остава каквото е.
+     2. periodical_issues.volume_year (находка Л2): годината на комплекта;
+        заварените получават годината на датата — точно онова, по което
+        програмата ги е групирала досега, тоест нищо вече вписано не мърда.
+     3. mzs_requests: book_id, reader_id и датите по състояния (К6–К8).
+     4. settings.lbl_mt/lbl_ml/lbl_gx/lbl_gy (Е2) — от досегашното общо поле и
+        разстояние, за да излиза всеки вече настроен лист точно както преди. */
+  { version: 18, run: () => {
+    applyEnumTriggers(db);
+    db.exec(`UPDATE account_lines SET type = 'забава'
+      WHERE kind = 'начисление' AND type = 'обезщетение' AND note LIKE 'Забава%'`);
+    ensureColumns('periodical_issues', { volume_year: 'INTEGER' });
+    db.exec(`UPDATE periodical_issues SET volume_year = CAST(substr(date, 1, 4) AS INTEGER)
+      WHERE volume_year IS NULL AND date GLOB '[0-9][0-9][0-9][0-9]*'`);
+    ensureColumns('mzs_requests', {
+      book_id: 'INTEGER REFERENCES books(id) ON DELETE SET NULL',
+      reader_id: 'INTEGER REFERENCES readers(id) ON DELETE SET NULL',
+      date_sent: 'TEXT', date_received: 'TEXT', date_returned: 'TEXT'
+    });
+    db.exec(`UPDATE settings SET lbl_mt = lbl_margin, lbl_ml = lbl_margin,
+      lbl_gx = lbl_gap, lbl_gy = lbl_gap WHERE id = 1`);
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от

@@ -16,7 +16,7 @@ const { isValidIsoDate, resolveScannedBook } = require('../security-utils');
    applyEnumTriggers се изисква по същата причина, поради която го прави и
    миграция 9 в main.js: списъкът с позволени стойности живее в кода, а тригерите
    в базата са снимка от деня, в който са създадени. */
-const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/enum-triggers');
+const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST, LATE_FEE_CHARGE_TYPE } = require('../db/enum-triggers');
 /* Начислението в читателската сметка минава през handlers/account.js — сметката
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
 const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
@@ -27,7 +27,11 @@ const { toCents } = require('../db/fund-sql');
    защото по него се решава кои начисления вече са платени (виж
    unpaidOverdueFines по-долу), а разминаване в един низ би дало мълчаливо
    „нищо не е платено“, тоест точно сумата, която този кръг поправя. */
-const OVERDUE_CHARGE_TYPE = 'обезщетение';
+/* От v2.4.68 забавата има СОБСТВЕН вид („забава“), отделен от ръчните
+   обезщетения — виж LATE_FEE_CHARGE_TYPE в db/enum-triggers.js (находка Г2 от
+   пълния тест: ръчно „обезщетение“ за повредена корица „изяждаше“ плащането на
+   вече платената забава и писмото пак я искаше). */
+const OVERDUE_CHARGE_TYPE = LATE_FEE_CHARGE_TYPE;
 
 /* КОЛКО ОТ ВЕЧЕ НАЧИСЛЕНАТА ЗАБАВА ЧИТАТЕЛЯТ ОЩЕ НЕ Е ПЛАТИЛ (v2.4.65).
    =====================================================================

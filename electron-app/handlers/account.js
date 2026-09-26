@@ -2,7 +2,7 @@
 // модул (Фаза 4, стъпка 18). amount > 0 = начислено (дължи се), amount < 0 =
 // платено. Балансът е SUM(amount). Не е касов модул — само дневник на
 // движенията + квитанция за печат.
-const { LOST_CHARGE_TYPE } = require('../db/enum-triggers');
+const { LOST_CHARGE_TYPE, LATE_FEE_CHARGE_TYPE } = require('../db/enum-triggers');
 
 /* Балансът се закръгля до стотинки, преди да излезе оттук. Сумите се пазят
    като REAL и 1.10+1.10+1.10−3.30 дава 4.44e-16, а не 0 — платената докрай
@@ -73,7 +73,11 @@ function chargeOverdueFine(db, { reader_id, amount, date, note }) {
   // в сметката — той изглежда като задължение и мърси картона.
   if (!amt) return null;
   const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(reader_id, date, 'начисление', 'обезщетение', amt, note || null);
+    /* Видът е ЗАБАВА, не „обезщетение“ (v2.4.68) — виж LATE_FEE_CHARGE_TYPE в
+       db/enum-triggers.js: по вида се решава кое е платено, а „обезщетение“ се
+       ползва и за ръчни начисления (повредена корица), които нямат нищо общо със
+       забавата и не бива да „изяждат“ плащането ѝ. */
+    .run(reader_id, date, 'начисление', LATE_FEE_CHARGE_TYPE, amt, note || null);
   return { id: info.lastInsertRowid, amount: amt };
 }
 
@@ -211,6 +215,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
    не регистрира нищо повторно — модулът вече е в кеша на Node и се взима
    готов. */
 module.exports.LOST_CHARGE_TYPE = LOST_CHARGE_TYPE;
+module.exports.LATE_FEE_CHARGE_TYPE = LATE_FEE_CHARGE_TYPE;
 module.exports.chargeLost = chargeLost;
 module.exports.chargeOverdueFine = chargeOverdueFine;
 module.exports.chargeCoverage = chargeCoverage;

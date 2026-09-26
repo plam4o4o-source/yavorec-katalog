@@ -191,7 +191,10 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         ORDER BY reader_id, date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
       `).all();
       let finesCollected = 0;
-      const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ';
+      /* „забава“ — отделен вид от v2.4.68 (преди се пишеше като „обезщетение“);
+         за справката „Събрани обезщетения и забави“ и трите са едно и също:
+         пари, събрани по чл. 43. */
+      const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ' || t === 'забава';
       const outstanding = new Map(); // reader_id → [{type, left}] по реда на възникване
       /* Заварената забава (само в loans.fine, отпреди v2.4.61) НЕ се засява тук,
          макар писмото по чл. 43 да я засява (handlers/loans.js). Тя няма дата и се
