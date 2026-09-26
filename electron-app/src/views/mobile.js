@@ -85,9 +85,9 @@ async function importScansRun(sessionId) {
         <b>${skipped.length} документа са извън обхвата на тази проверка</b> и затова не са записани в протокола.</div>
       <div class="hint" style="font-family:var(--mono);line-height:1.8">${
         skipped.map(x => esc('инв. № ' + x.inv_number + ' — ' + x.reason)).join('<br>')}</div>` : ''}`,
-      `<button class="btn pri" onclick="closeModal();renderInventRun(${sessionId})">Разбрах</button>`);
+      `<button class="btn pri" onclick="closeModal();renderInventRun()">Разбрах</button>`);
   } else {
-    renderInventRun(sessionId);
+    renderInventRun();
   }
 }
 window.importScansRun = importScansRun;

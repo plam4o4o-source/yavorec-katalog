@@ -1031,8 +1031,8 @@ function assertSchemaNotNewer(late) {
   /* Дръжката се затваря веднага: файлът е на споделена папка и няма причина да
      стои заключен от нас, докато библиотекарят чете съобщението. */
   try { db.close(); } catch (e) { /* при отказ няма какво да поправяме */ }
-  const err = new Error('Базата данни е с версия на схемата ' + v + ', а тази инсталация на InvLib '
-    + 'познава до версия ' + CURRENT_SCHEMA_VERSION + '. Базата е обновена от по-нова версия на програмата.');
+  const err = /** @type {DbNewerSchemaError} */ (new Error('Базата данни е с версия на схемата ' + v + ', а тази инсталация на InvLib '
+    + 'познава до версия ' + CURRENT_SCHEMA_VERSION + '. Базата е обновена от по-нова версия на програмата.'));
   err.code = 'DB_NEWER_SCHEMA';
   err.late = !!late;
   /* Диалогът разграничава двата случая: при обща (мрежова) папка изходът минава
@@ -1632,8 +1632,8 @@ app.whenReady().then(() => {
         if (Number.isFinite(v) && v > CURRENT_SCHEMA_VERSION) {
           // Както прави самият пазач: файлът на споделената папка не стои заключен от нас.
           try { if (db) db.close(); } catch (e) { /* няма какво да поправяме */ }
-          const e2 = new Error('Базата данни е с версия на схемата ' + v + ', а тази инсталация на InvLib познава до версия '
-            + CURRENT_SCHEMA_VERSION + '. Базата е обновена от по-нова версия на програмата. (Спряно при: ' + detail + ')');
+          const e2 = /** @type {DbNewerSchemaError} */ (new Error('Базата данни е с версия на схемата ' + v + ', а тази инсталация на InvLib познава до версия '
+            + CURRENT_SCHEMA_VERSION + '. Базата е обновена от по-нова версия на програмата. (Спряно при: ' + detail + ')'));
           e2.code = 'DB_NEWER_SCHEMA'; e2.late = true; e2.isNetwork = dbIsNetwork(); e2.configPath = configPath(); e2.dbPath = p;
           err = e2;
         }

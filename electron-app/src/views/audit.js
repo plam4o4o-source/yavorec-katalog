@@ -52,7 +52,7 @@ function auditTs(ts) {
   // зона (T…Z или отместване), не се пипа.
   const iso = /[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
   const d = new Date(iso);
-  return isNaN(d) ? raw : d.toLocaleString('bg-BG');
+  return isNaN(d.getTime()) ? raw : d.toLocaleString('bg-BG');
 }
 function auditRowsHtml(rows) {
   return rows.length ? rows.map(a => `<tr><td class="num ts">${auditTsCell(a.ts)}</td><td>${esc(a.user || '—')}</td>

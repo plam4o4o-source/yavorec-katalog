@@ -1,0 +1,15 @@
+{
+  // Проверка на типовете в ИЗГЛЕДИТЕ (src/) — обикновени <script> файлове с общо
+  // глобално пространство, в браузърната среда на Electron. Само проверка.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": [],
+    "skipLibCheck": true,
+    "strict": false
+  },
+  "include": ["src/udk.js", "src/views/*.js", "types/renderer-globals.d.ts", "types/api.generated.d.ts"]
+}

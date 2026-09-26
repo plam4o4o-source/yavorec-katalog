@@ -74,7 +74,7 @@ async function lnkDel(id, label) {
   /* Копчето се запомня ПРЕДИ въпроса: глобалното `event` важи само докато тече
      самият обработчик, а след await-а (диалогът, после каналът) то вече е
      празно и резервният път по-долу би останал без панел. */
-  const btn = (typeof event !== 'undefined' && event) ? event.target : null;
+  const btn = /** @type {HTMLElement} */ ((typeof event !== 'undefined' && event) ? event.target : null);
   const panel = btn && btn.closest('.card');
   if (!await askConfirm('Да се махне ли връзката' + (label ? ' „' + label + '“' : '') + '?',
     { kind: 'delete', okLabel: 'Махни' })) return;

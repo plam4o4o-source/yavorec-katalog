@@ -392,7 +392,7 @@ async function renderSetup() {
     </section>
 
     </div></div>`;
-  if (openMore.size) document.querySelectorAll('#view .setupMore').forEach(d => {
+  if (openMore.size) /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('#view .setupMore')).forEach(d => {
     const t = d.querySelector('.setupMoreTitle'); if (t && openMore.has(t.textContent)) d.open = true;
   });
   setupInitNav();
@@ -971,7 +971,7 @@ async function loadCalendarBox() {
 }
 async function saveWorkDays() {
   const days = [];
-  WEEKDAY_NAMES.forEach((_, i) => { const el = document.querySelector(`[name=wd${i}]`); if (el && el.checked) days.push(i); });
+  WEEKDAY_NAMES.forEach((_, i) => { const el = /** @type {HTMLInputElement} */ (document.querySelector(`[name=wd${i}]`)); if (el && el.checked) days.push(i); });
   // Празният списък се отказва от обработчика с обяснение — дотук тук стоеше
   // предупреждение, което обещаваше обратното на това, което програмата правеше.
   const ok = await call(window.api.calendar.saveWorkDays(days), 'Работните дни са записани.');
@@ -979,8 +979,8 @@ async function saveWorkDays() {
 }
 window.saveWorkDays = saveWorkDays;
 async function addClosedDay() {
-  const date = document.querySelector('[name=calDate]').value;
-  const reason = document.querySelector('[name=calReason]').value;
+  const date = /** @type {HTMLInputElement} */ (document.querySelector('[name=calDate]')).value;
+  const reason = /** @type {HTMLInputElement} */ (document.querySelector('[name=calReason]')).value;
   if (!date) return toast('Изберете дата.', 'err');
   const ok = await call(window.api.calendar.addClosed({ date, reason }), 'Добавен затворен ден.');
   if (ok !== null) { markSaved(); loadCalendarBox(); }
@@ -1285,7 +1285,7 @@ window.saveLimits = saveLimits;
 function setupFormData() {
   const out = {};
   document.querySelectorAll('#view [data-setup-form]').forEach(block => {
-    block.querySelectorAll('input,select,textarea').forEach(el => {
+    /** @type {NodeListOf<HTMLInputElement>} */ (block.querySelectorAll('input,select,textarea')).forEach(el => {
       if (!el.name) return;
       /* Същото правило като formData() — виж fieldValue в core.js. */
       out[el.name] = fieldValue(el);
@@ -1323,7 +1323,7 @@ window.setupGo = setupGo;
 let SETUP_ACTIVE = '';
 function setupMarkActive(id) {
   SETUP_ACTIVE = id;
-  document.querySelectorAll('.setupNav a[data-sec]').forEach(a => a.classList.toggle('on', a.dataset.sec === id));
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.setupNav a[data-sec]')).forEach(a => a.classList.toggle('on', a.dataset.sec === id));
 }
 let SETUP_OBSERVER = null;
 function setupInitNav() {
@@ -1358,14 +1358,14 @@ function setupFilter(q) {
   let shown = 0, total = 0;
   document.querySelectorAll('.setupSec').forEach(sec => {
     let secShown = 0;
-    sec.querySelectorAll('.setupCard, .setupMore').forEach(card => {
+    /** @type {NodeListOf<HTMLDetailsElement>} */ (sec.querySelectorAll('.setupCard, .setupMore')).forEach(card => {
       total++;
       const hit = !q || card.textContent.toLowerCase().includes(q);
       card.hidden = !hit;
       if (hit) { secShown++; shown++; }
       if (q && hit && card.tagName === 'DETAILS') card.open = true;
     });
-    const head = sec.querySelector('.setupHead');
+    const head = /** @type {HTMLElement} */ (sec.querySelector('.setupHead'));
     if (head) head.hidden = !!q && !secShown;
   });
   const hint = $('#setupSearchHint');

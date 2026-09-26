@@ -191,7 +191,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   `;
 
   // Ползване в читалня — бърз брояч от „Заемане и връщане"; читателят е незадължителен.
-  ipcMain.handle('events:localuse', (e, { date } = {}) =>
+  ipcMain.handle('events:localuse', /** @param {unknown} e @param {{ date?: string }} [arg] */ (e, { date } = {}) =>
     run(() => { logEvent('читалня', { date }); return true; })
   );
 
@@ -207,7 +207,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      двата пресмятания даваха различен резултат). */
   function effectiveDaysLate(dueDate, inDate) {
     if (!dueDate || !inDate || inDate <= dueDate) return 0;
-    const rawDaysLate = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+    const rawDaysLate = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(dueDate).getTime()) / 864e5));
     return Math.max(0, rawDaysLate - closedDaysBetween(dueDate, inDate));
   }
   /* Прибавяне на дни към дата — изцяло в UTC („T00:00:00Z" + setUTCDate), НЕ през
@@ -373,7 +373,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     }
   }
 
-  ipcMain.handle('loans:list', (e, { onlyOpen } = {}) =>
+  ipcMain.handle('loans:list', /** @param {unknown} e @param {{ onlyOpen?: boolean }} [arg] */ (e, { onlyOpen } = {}) =>
     run(() => {
       const db = getDb();
       if (onlyOpen) return db.prepare(`${LOAN_SELECT} WHERE l.date_in IS NULL ORDER BY l.date_due`).all();
@@ -954,7 +954,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      защото точно там библиотекарката вижда, че предложената сума не отговаря на
      решението на настоятелството, и няма смисъл да я пращаме през цял друг
      екран. Двата пътя пишат в едни и същи колони, а следата казва кой и кога. */
-  ipcMain.handle('loans:lostPolicySave', (e, { multiplier, fallback } = {}) =>
+  ipcMain.handle('loans:lostPolicySave', /** @param {unknown} e @param {{ multiplier?: any, fallback?: any }} [arg] */ (e, { multiplier, fallback } = {}) =>
     run(() => {
       const db = getDb();
       ensureLostSchema(db);
@@ -973,7 +973,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      процес по същите функции, по които после ще се запише — иначе екранът пак би
      показал едно число, а гишето да начисли друго (същата болест, поправена вече
      три пъти при обезщетението за просрочие, виж loans:overdue по-горе). */
-  ipcMain.handle('loans:lostQuote', (e, { id, date } = {}) =>
+  ipcMain.handle('loans:lostQuote', /** @param {unknown} e @param {{ id?: number, date?: string }} [arg] */ (e, { id, date } = {}) =>
     run(() => {
       const db = getDb();
       ensureLostSchema(db);
@@ -1000,7 +1000,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('loans:markLost', (e, { id, resolution, amount, replacement_code, replacement_note, note, date } = {}) =>
+  ipcMain.handle('loans:markLost', /** @param {unknown} e @param {{ id?: number, resolution?: string, amount?: any, replacement_code?: string, replacement_note?: string, note?: string, date?: string }} [arg] */ (e, { id, resolution, amount, replacement_code, replacement_note, note, date } = {}) =>
     run(() => {
       if (date != null && date !== '' && !isValidIsoDate(date)) {
         throw new Error('Датата (' + date + ') е невалидна.');
@@ -1149,7 +1149,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      `acted` казва дали документът вече е влязъл в акт — редовете не изчезват след
      отчисляването, защото връзката „акт → начислено/събрано обезщетение“ е
      точно това, което трябва да остане видимо и след него. */
-  ipcMain.handle('loans:lost', (e, { includeActed } = {}) =>
+  ipcMain.handle('loans:lost', /** @param {unknown} e @param {{ includeActed?: boolean }} [arg] */ (e, { includeActed } = {}) =>
     run(() => {
       const db = getDb();
       ensureLostSchema(db);
@@ -1222,7 +1222,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      АНУЛИРАНЕ НА АКТА, което връща и заемането, и начисленията, и резервациите.
      Затова тук се отказва с изречение, което казва точно кой акт и откъде се
      анулира, вместо да се получат два несъгласувани пътя към едно състояние. */
-  ipcMain.handle('loans:found', (e, { id, reverseCharge, date, note } = {}) =>
+  ipcMain.handle('loans:found', /** @param {unknown} e @param {{ id?: number, reverseCharge?: boolean, date?: string, note?: string }} [arg] */ (e, { id, reverseCharge, date, note } = {}) =>
     run(() => {
       if (date != null && date !== '' && !isValidIsoDate(date)) {
         throw new Error('Датата (' + date + ') е невалидна.');

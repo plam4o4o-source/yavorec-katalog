@@ -136,7 +136,7 @@ async function importRun() {
   }
   if (!seen.title) return toast('Посочете коя колона съдържа заглавието — без него записът е безсмислен.', 'err');
   const options = formData('#impOptF');
-  const btn = event && event.target;
+  const btn = /** @type {HTMLButtonElement} */ (event && event.target);
   if (btn) { btn.disabled = true; btn.textContent = 'Въвеждане…'; }
   const res = await window.api.importData.run({ mapping, options });
   if (btn) { btn.disabled = false; btn.textContent = 'Въведи'; }

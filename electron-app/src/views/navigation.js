@@ -117,7 +117,7 @@ function toggleNavGroup(name) {
   /* drawNav() пресъздава цялата лента и заедно с нея копчето, което току-що е
      натиснато — фокусът иначе пада в началото на страницата и следващият Tab
      тръгва отначало (проверено в Chromium: activeElement става <body>). */
-  const пак = [...document.querySelectorAll('#nav .nav-grp')]
+  const пак = [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#nav .nav-grp'))]
     .find(b => b.querySelector('.nav-grpTx') && b.querySelector('.nav-grpTx').textContent === name);
   if (пак && typeof пак.focus === 'function') пак.focus();
 }

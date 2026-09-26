@@ -40,7 +40,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      начисли каквото и да било. */
   function effectiveDaysLate(dueDate, inDate) {
     if (!dueDate || !inDate || inDate <= dueDate) return 0;
-    const raw = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
+    const raw = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(dueDate).getTime()) / 864e5));
     let closed = 0;
     if (typeof closedDaysBetween === 'function') {
       try { closed = Number(closedDaysBetween(dueDate, inDate)) || 0; }
