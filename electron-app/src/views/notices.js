@@ -21,7 +21,10 @@ async function openReminders() {
         </div>
         <div class="remBody">
           <div class="remMeta">
-            Имейл: <b>${r.email ? esc(r.email) : '— няма записан —'}</b> ·
+            Имейл: <b>${r.email ? esc(r.email) : '— няма записан —'}</b>${
+              /* v2.4.69 (Г11): при дете писмото е до родителя, а имейлът в картона е
+                 на детето — обработчикът не го ползва и казва защо в email_note. */
+              r.email_note ? ` <span class="hint">(${esc(r.email_note)})</span>` : ''} ·
             Телефон: <b>${r.phone ? esc(r.phone) : '— няма записан —'}</b>
           </div>
           <label class="fh">Писмо по електронна поща</label>

@@ -428,7 +428,9 @@ test('8. акт за отчисляване чрез сканиране → до
   assert.match(h.text('#actList'), /ОБЩО 1 документ 3\.00 €/);
   n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
-  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 1: отчислен е 1 документ.'), JSON.stringify(h.toastsSince(n)));
+  /* v2.4.69 (находка О6): съобщението носи номера И ГОДИНАТА на акта (чл. 35 — номерацията е
+     годишна) и съгласува глагола с броя („1 документ е отчислен“). Заменено нарочно. */
+  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 1/' + T.slice(0, 4) + ' е утвърден и 1 документ е отчислен.'), JSON.stringify(h.toastsSince(n)));
   const act = q('SELECT * FROM deaccession_acts WHERE no = 1');
   assert.ok(act, 'актът не е записан');
   assert.equal(act.reason_code, 5);

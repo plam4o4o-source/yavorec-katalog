@@ -138,7 +138,9 @@ test('стойността на невърнатия документ се на�
      видът ги различава, за да може справката за приходите да ги раздели. Затова
      редът се търси ПО ВИД, а не „първия ред на читателя“. */
   const line = db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'обезщетение за изгубен документ'").get(r);
-  const fineLine = db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'обезщетение'").get(r);
+  /* v2.4.69 (кръг 44, Г2): забавата се пише със собствен вид „забава“ (chargeOverdueFine),
+     за да не се смесва с ръчното „обезщетение“ за повреда в писмото по чл. 43. */
+  const fineLine = db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'забава'").get(r);
   assert.ok(line, 'няма ред в сметката — библиотеката отписва документ, без някой да ѝ го дължи');
   assert.ok(fineLine, 'забавата също е обезщетение по чл. 43 и също се дължи — иначе не влиза в „Дължи по сметка“');
   assert.equal(fineLine.amount, 4, '40 дни × 0.10 € — същата сума, която е записана и в loans.fine');

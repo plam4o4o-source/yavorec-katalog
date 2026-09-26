@@ -70,7 +70,9 @@ function chronicleRowsHtml(rows) {
         ${head ? `<div class="chrYearHead">${esc(c.year)}</div>` : ''}
         <div class="chrItem" tabindex="0" role="button" aria-label="${esc(c.title)}"
           onclick="chronicleView(${c.id})" onkeydown="cardActivate(event, () => chronicleView(${c.id}))">
-          ${c.photo ? `<img class="chrThumb" src="${esc(c.photo)}" alt="">` : ''}
+          ${/* v2.4.69 (Л7): само признак — снимката (до 1 МБ) идва с chronicle:get при
+                отварянето. Дотук тук стоеше миниатюра с цялата снимка за всеки ред. */''}
+          ${c.has_photo ? '<span class="tag" title="Записът има снимка — вижда се в картона">📷 снимка</span>' : ''}
           <div class="chrBody">
             <div class="chrTop">
               <span class="chrTitle">${esc(c.title)}</span>
@@ -222,9 +224,11 @@ async function saveChronicle(id) {
 window.saveChronicle = saveChronicle;
 
 async function chronicleView(id) {
-  const [c, links] = await Promise.all([
+  // Обратните връзки — кой сочи към този запис (v2.4.69, Л6; виж personView).
+  const [c, links, backs] = await Promise.all([
     call(window.api.chronicle.get(id)),
-    call(window.api.links.list({ fromKind: 'летопис', fromId: id }))
+    call(window.api.links.list({ fromKind: 'летопис', fromId: id })),
+    call(window.api.links.backlinks({ toKind: 'летопис', toId: id }))
   ]);
   if (!c) return;
   window._LINK_CTX = { kind: 'летопис', id };
@@ -233,7 +237,7 @@ async function chronicleView(id) {
       <div class="prsViewPhoto">
         ${c.photo ? `<img src="${esc(c.photo)}" alt="">` : '<div class="logoEmpty">няма<br>снимка</div>'}
         <div class="toolbar" style="margin-top:8px">
-          <button class="btn sm" onclick="localPhotoChoose('chronicle', ${id})">${c.photo ? 'Смени…' : 'Снимка…'}</button>
+          <button class="btn sm" onclick="localPhotoChoose('chronicle', ${id}, ${c.photo ? 'true' : 'false'})">${c.photo ? 'Смени…' : 'Снимка…'}</button>
           ${c.photo ? `<button class="btn sm dgr" onclick="localPhotoClear('chronicle', ${id})">Махни</button>` : ''}
         </div>
       </div>
@@ -247,7 +251,8 @@ async function chronicleView(id) {
         ${c.sources ? `<div class="hint"><b>Източници:</b> ${esc(c.sources)}</div>` : ''}
       </div>
     </div>
-    ${linksPanelHtml('летопис', id, links || [])}`,
+    ${linksPanelHtml('летопис', id, links || [])}
+    ${backlinksPanelHtml(backs || [])}`,
     `<button class="btn" onclick="closeModal();linksRefreshListIfChanged()">Затвори</button>
      <button class="btn" onclick="closeModal();chronicleForm(${id})">Редакция</button>
      <button class="btn dgr" onclick="chronicleDelete(${id})">Изтрий</button>`);
@@ -255,7 +260,7 @@ async function chronicleView(id) {
 window.chronicleView = chronicleView;
 async function chronicleDelete(id) {
   if (!await askConfirm('Изтриване на записа от летописа?')) return;
-  await call(window.api.chronicle.delete(id), 'Записът е изтрит.');
+  if (await call(window.api.chronicle.delete(id), 'Записът е изтрит.') === null) return;
   closeModal(); renderChronicle();
 }
 window.chronicleDelete = chronicleDelete;

@@ -17,6 +17,23 @@ let READERS_FILTER_STATUS = '';
    също: липсващо съгласие по чл. 47, ал. 2 ИЛИ дете до 14 г. без съгласие на
    родител/настойник. */
 let READERS_FILTER_CONSENT = '';
+/* Филтър „дължима пререгистрация“ (v2.4.69, находка Г10). Таблото казва
+   „Дължими пререгистрации (до 14 дни): N“ и числото водеше тук — в целия
+   списък, без начин да се видят кои са тези N. Правилото е в обработчика
+   (readers:list, REREG_DUE_SQL — дословно условието на таблото); тук е само
+   огледалото за масив от стар обработчик. */
+let READERS_FILTER_REREG = '';
+let READERS_REREG_DUE = 0;
+function readerReregDue(r) {
+  if ((r.status || '') !== 'активен') return false;
+  const base = r.re_registered_at || r.registered_at;
+  if (!base || !/^\d{4}-\d{2}-\d{2}/.test(base)) return false;
+  const d = new Date(String(base).slice(0, 10) + 'T12:00:00Z');
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  const lim = new Date(today() + 'T12:00:00Z');
+  lim.setUTCDate(lim.getUTCDate() + 14);
+  return d.toISOString().slice(0, 10) <= lim.toISOString().slice(0, 10);
+}
 const READER_CHILD_CAT = 'дете до 14 г.';
 function readerNoConsent(r) {
   if (!r.gdpr_consent) return 'чл. 47, ал. 2';
@@ -28,6 +45,7 @@ function readersFilterMatch(r) {
   if (READERS_FILTER_STATUS && (r.status || '') !== READERS_FILTER_STATUS) return false;
   if (READERS_FILTER_CONSENT === 'no' && !readerNoConsent(r)) return false;
   if (READERS_FILTER_CONSENT === 'yes' && readerNoConsent(r)) return false;
+  if (READERS_FILTER_REREG === 'due' && !readerReregDue(r)) return false;
   return true;
 }
 function readersRowsHtml(shown) {
@@ -89,15 +107,18 @@ let READERS_NO_CONSENT = 0;
 async function readersFetch(offset, limit) {
   const res = await call(window.api.readers.list(READERS_QUERY, null,
     { offset, limit: Math.min(limit || READERS_PAGE_SIZE, 2000), cat: READERS_FILTER_CAT || '',
-      status: READERS_FILTER_STATUS || '', consent: READERS_FILTER_CONSENT || '' }));
+      status: READERS_FILTER_STATUS || '', consent: READERS_FILTER_CONSENT || '',
+      rereg: READERS_FILTER_REREG || '' }));
   if (!res) return null;
   if (Array.isArray(res)) {
     READERS_WINDOWED = false;
     READERS_NO_CONSENT = res.filter(readerNoConsent).length;
+    READERS_REREG_DUE = res.filter(readerReregDue).length;
     return { all: res };
   }
   READERS_WINDOWED = true; READERS_TOTAL = res.total || 0;
   READERS_NO_CONSENT = Number(res.noConsent) || 0;
+  READERS_REREG_DUE = Number(res.reregDue) || 0;
   return res;
 }
 let READERS_MORE_PENDING = false;
@@ -136,6 +157,14 @@ function readersConsentFilter(v) {
   return renderReaders();
 }
 window.readersConsentFilter = readersConsentFilter;
+/* Като филтъра по съгласие: пречертава целия раздел, защото бележката над
+   списъка („Показани са само дължимите…“) зависи от него. */
+function readersReregFilter(v) {
+  READERS_FILTER_REREG = v || '';
+  READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
+  return renderReaders();
+}
+window.readersReregFilter = readersReregFilter;
 function renderReadersBody(append) {
   const readers = READERS_WINDOWED ? (window._READERS_LIST || []) : (window._READERS_LIST || []).filter(readersFilterMatch);
   /* total — за тавана на общия брой изчертани редове (RENDER_MAX_ROWS в core.js,
@@ -203,6 +232,10 @@ async function renderReaders() {
         <option value="no" ${READERS_FILTER_CONSENT === 'no' ? 'selected' : ''}>без отбелязано съгласие</option>
         <option value="yes" ${READERS_FILTER_CONSENT === 'yes' ? 'selected' : ''}>с отбелязано съгласие</option>
       </select>
+      <select id="rReregFilter" onchange="readersReregFilter(this.value)" title="Филтър по пререгистрация — както „Дължими пререгистрации“ на таблото">
+        <option value="">— пререгистрация: всички —</option>
+        <option value="due" ${READERS_FILTER_REREG === 'due' ? 'selected' : ''}>дължима пререгистрация (до 14 дни)</option>
+      </select>
       <button class="btn" onclick="exportReadersCsv()">Извеждане в CSV</button>
     </div>
     ${/* ЗАВАРЕНИТЕ БЕЗ СЪГЛАСИЕ СЕ КАЗВАТ НАВЕДНЪЖ (v2.4.65). В проба със
@@ -219,6 +252,12 @@ async function renderReaders() {
       Отворете картона на всеки, отбележете съгласието и <b>впишете датата, на която ползвателят се е
       подписал</b> на читателския си картон — не днешната.
       <button class="btn sm" style="margin-left:8px" onclick="readersConsentFilter('no')">Покажи ги</button>
+    </div>` : ''}
+    ${READERS_FILTER_REREG === 'due' ? `<div class="note w">
+      Показани са само активните читатели с дължима пререгистрация — година от последното записване
+      или пререгистрация, изтекла или изтичаща до 14 дни (${READERS_REREG_DUE} общо; същото число като на таблото).
+      Пререгистрацията се вписва в картона, в полето „Пререгистрация“.
+      <button class="btn sm" style="margin-left:8px" onclick="readersReregFilter('')">Покажи всички</button>
     </div>` : ''}
     ${READERS_FILTER_CONSENT === 'no' ? `<div class="note w">
       Показани са само читателите без отбелязано съгласие (${READERS_NO_CONSENT} общо).
@@ -427,9 +466,25 @@ window.saveReader = saveReader;
 async function deleteReader(id) {
   // Виж confirmDangerousDelete в views/books.js — второто щракване показва дословно
   // предупреждението от отказа, вместо пак безобидното „Да изтрия ли…".
+  /* v2.4.69 (находка Г5): изтриването повиква следващия в опашката за книга,
+     ЗАДЕЛЕНА за изтрития читател (readers:delete). Кой е повикан се казва тук —
+     иначе книгата стои заделена за човек, когото никой не е потърсил. */
+  let last = null;
   await confirmDangerousDelete('reader:' + id, 'Да изтрия ли този читател?',
-    () => window.api.readers.delete(id), 'Читателят е изтрит.', () => renderReaders());
+    async () => { last = await window.api.readers.delete(id); return last; },
+    'Читателят е изтрит.', () => { toastHoldsActivated(last && last.ok && last.data); return renderReaders(); });
 }
+/* „Повикан е следващият в опашката“ — общо за изтриването и за заличаването по
+   чл. 17. `holdsActivated` = [{ name, phone, title, inv_number }]. */
+function toastHoldsActivated(d) {
+  const list = d && Array.isArray(d.holdsActivated) ? d.holdsActivated : [];
+  for (const h of list) {
+    toast('📌 Инв. № ' + (h.inv_number ?? '—') + ' — „' + (h.title || '') + '“ е заделен за ' + (h.name || 'следващия в опашката')
+      + (h.phone ? ' (тел. ' + h.phone + ')' : '') + ' — съобщете му, че книгата го чака.', 'err');
+  }
+  return list.length;
+}
+window.toastHoldsActivated = toastHoldsActivated;
 window.deleteReader = deleteReader;
 
 /* „ЗАБРАВИ ЧИТАТЕЛЯ“ — ЗАЛИЧАВАНЕ ПО НЕГОВО ИСКАНЕ (v2.4.65).
@@ -467,6 +522,28 @@ async function forgetReader(id) {
   closeModal();
   toast('Личните данни на ' + (d.name || who) + ' са заличени'
     + (d.auditCleared ? ' — обезличени ' + d.auditCleared + ' реда в одитната следа' : '') + '.', 'ok');
+  /* КОЙ Е ПОВИКАН ЗА ЗАДЕЛЕНАТА КНИГА (v2.4.69, находка Г7).
+     (а) Заличаването отказва резервациите на читателя и повиква следващия в
+         опашката — резервацията му става „заделена“ и тридневният срок тече, —
+         а известието казваше само „Личните данни … са заличени“.
+     (б) Повиканият не знае, че книгата го чака; ако никой не му се обади,
+         срокът изтича и книгата отива на следващия, без той да е разбрал.
+     (в) Обработчикът (handlers/gdpr.js) връща `holdsActivated:
+         [{ name, phone, title, inv_number }]` и всеки повикан се казва по име,
+         с телефона. Докато по-стар обработчик още не връща полето, а е отказал
+         резервации, екранът казва къде да се види кой е повикан, вместо да
+         мълчи. */
+  /* МЗС (v2.4.69, находка К7): заявителят в регистъра на МЗС се заличава по картата
+     (reader_id), а за старите заявки — по „цялото име + същата карта“. Подобни
+     имена обработчикът НЕ пипа (може да е друг човек), а ги връща в mzsNote —
+     библиотекарката трябва да ги прегледа сама, иначе заличаването изглежда
+     пълно, а не е. */
+  if (d.mzsNote) toast(d.mzsNote, 'err');
+  if (!toastHoldsActivated(d) && !Array.isArray(d.holdsActivated) && d.holdsCancelled) {
+    toast('Отказани са ' + d.holdsCancelled + (d.holdsCancelled === 1 ? ' резервация' : ' резервации')
+      + ' на заличения читател. Ако някоя книга е била заделена за него, следващият в опашката е повикан — '
+      + 'вижте „Заемане и връщане“ → „Резервации“ и му се обадете.', 'err');
+  }
   markSaved();
   if (VIEW === 'readers') await renderReaders(); else if (RENDERERS[VIEW]) await RENDERERS[VIEW]();
 }

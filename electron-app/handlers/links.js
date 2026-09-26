@@ -11,6 +11,9 @@ const KRAE_FN_READY = new WeakSet();
 function ensureKraeFunctions(db) {
   if (KRAE_FN_READY.has(db)) return db;
   db.function('bglower', (s) => (s == null ? null : String(s).toLowerCase()));
+  // Ключът на името на персоналия — същият като personKey в handlers/persons.js (Л12, v2.4.69).
+  db.function('personkey', (s) => (s == null ? null : String(s).toLowerCase().replace(/[.,;]+/g, ' ')
+    .split(/\s+/).filter(Boolean).sort().join(' ')));
   KRAE_FN_READY.add(db);
   return db;
 }
@@ -112,7 +115,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
               FROM books b ${DEACC_JOIN}`,
     'статия': 'SELECT a.id, a.author, a.title, a.year FROM analytics a',
     'летопис': 'SELECT c.id, c.year, c.title FROM chronicle c',
-    'персона': 'SELECT p.id, p.name FROM persons p',
+    'персона': 'SELECT p.id, p.name, p.birth_date, p.death_date, p.activity FROM persons p',
     'периодика': 'SELECT p.id, p.title FROM periodicals p'
   };
   const ROW_ID = { 'книга': 'b.id', 'статия': 'a.id', 'летопис': 'c.id', 'персона': 'p.id', 'периодика': 'p.id' };
@@ -130,7 +133,26 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
       return `${[r.author, r.title].filter(Boolean).join('. ')}${r.year ? ' (' + r.year + ')' : ''}`;
     }
     if (kind === 'летопис') return `${r.year} — ${r.title}`;
-    if (kind === 'персона') return r.name;
+    /* СЪИМЕННИЦИТЕ СЕ РАЗЛИЧАВАТ (v2.4.69, Л10).
+       Дотук етикетът беше само името: двата картона „Вълчев, Стефан“ (дядото и
+       внукът — съименниците в селото са правило, виж handlers/persons.js)
+       излизаха в „Намерени“ като два еднакви реда, и връзката отиваше при
+       случайния от тях. Сега след името стоят годините и дейността — точно
+       каквото различава двама души с едно име в краеведската картотека, — а
+       когато картонът няма нито едното И има съименник, номерът му („картон
+       № 12“), за да не останат два реда неразличими. Номерът не се лепи на
+       всяко име: без съименник той е само шум в картона и на хартия. */
+    if (kind === 'персона') {
+      const yr = (v) => { const m = /\d{3,4}/.exec(String(v || '')); return m ? m[0] : ''; };
+      const b = yr(r.birth_date), d = yr(r.death_date);
+      const years = b && d ? b + '–' + d : b ? 'р. ' + b : d ? 'п. ' + d : '';
+      const act = String(r.activity || '').trim();
+      const extra = [years, act].filter(Boolean).join(', ');
+      if (extra) return r.name + ' (' + extra + ')';
+      const namesake = ensureKraeFunctions(getDb())
+        .prepare('SELECT 1 FROM persons WHERE id <> ? AND personkey(name) = personkey(?) LIMIT 1').get(r.id, r.name);
+      return r.name + (namesake ? ' (картон № ' + r.id + ')' : '');
+    }
     if (kind === 'периодика') return r.title;
     return String(r.id);
   }
@@ -172,6 +194,20 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         r.label = linkLabel(r.from_kind, r.from_id);
         r.to_label = linkLabel(r.to_kind, r.to_id);
       });
+      /* СТАТИИТЕ, ЧИЙТО ИЗТОЧНИК Е ТОЗИ ДОКУМЕНТ (v2.4.69, Л6).
+         Към книга и към периодично издание сочат не само връзките (персоналия →
+         книга, летопис → книга), а и аналитичните описания — статия „в“ сборника
+         (analytics.book_id) или „в“ броя на вестника (analytics.periodical_id).
+         Находката е дословно: „картонът на книга не показва кои персоналии и
+         СТАТИИ сочат към нея“. Те се връщат в същия списък с from_kind 'статия'
+         и `source: true` — не са ред в `links` и нямат „Махни“ (махат се, като
+         се смени източникът в самото описание). */
+      if (toKind === 'книга' || toKind === 'периодика') {
+        const col = toKind === 'книга' ? 'book_id' : 'periodical_id';
+        getDb().prepare(`SELECT id FROM analytics WHERE ${col} = ? ORDER BY year DESC, title`).all(toId)
+          .forEach(a => rows.push({ id: null, source: true, from_kind: 'статия', from_id: a.id, to_kind: toKind, to_id: toId,
+            label: linkLabel('статия', a.id), to_label: linkLabel(toKind, toId) }));
+      }
       return rows;
     })
   );

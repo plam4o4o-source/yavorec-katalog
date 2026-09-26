@@ -236,7 +236,11 @@ test('А: предложението връща четирите „Всичко
     { age: r.sectionA.age, sex: r.sectionA.sex, edu: r.sectionA.edu, prof: r.sectionA.prof },
     { age: 2, sex: 0, edu: 1, prof: 0 },
     'разминаването се ВРЪЩА — програмата не измисля пол, образование и занятие, но ги казва');
-  assert.equal(r.sectionA.visitHome, 0);
+  /* v2.4.69 (Л3): тук стоеше visitHome = 0 при visitChild = 1 — точно
+     противоречието, което находката описва („деца до 14 г.“ по-голямо от
+     множеството си). „В заемна за дома“ вече са читателите със заемане или
+     връщане за деня — двамата заели, от тях едно дете. */
+  assert.equal(r.sectionA.visitHome, 2);
   assert.equal(r.sectionA.visitChild, 1);
 });
 

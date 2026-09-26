@@ -58,6 +58,16 @@ interface Window {
 
   /** Старото име на AudioContext в WebKit — резервният път за звука при сканиране. */
   webkitAudioContext?: typeof AudioContext;
+
+  /* v2.4.69 (пълният тест на v2.4.67). */
+  /** Бележката „откъде се започва“ на празния фонд — споделя се от „Книги“,
+      „Инвентарна книга“ и КДБФ (находка П14). */
+  FUND_START_HTML: string;
+  /** Разчитане на число с българска десетична запетая („2,5“) — за полетата
+      decField извън парите (находка П1). NaN, ако не е число. */
+  decimalParse: (v: string) => number;
+  /** Просрочените заявки по МЗС, заредени от mzs:overdue, по id на заявката (находка К6). */
+  _MZS_OVERDUE: Record<string, any>;
 }
 
 interface File {

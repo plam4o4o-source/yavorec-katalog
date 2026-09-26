@@ -117,9 +117,46 @@ let PER_ISSUES_LIMIT = PER_ISSUES_PAGE_SIZE;
 let PER_ISSUES_PAINTED = 0;
 /* Редовете на кардекса. Изданието (нужно на invNoForIssue) идва от
    window._PER_KARDEX, защото rowsHtml() получава само порцията редове. */
+/* ГОДИНАТА НА КОМПЛЕКТА ВЪВ ФОРМАТА ЗА БРОЙ (v2.4.69, Л2).
+   =====================================================================
+   ДОТУК формата имаше само „Дата на постъпване“, а обработчикът слагаше броя в
+   комплекта на годината на тази дата: бр. 250 на „Труд“ от 31.12.2025, получен
+   на 03.01.2026, влизаше в комплекта за 2026 г. заедно с цената си — всеки
+   януари, за всеки ежедневник, и оттам в инвентарната книга. Сега годината на
+   комплекта е отделен избор: по подразбиране — годината на датата (обичайният
+   случай не иска нито едно щракване повече), а предходната стои ВТОРА в списъка,
+   на една стрелка разстояние — точно за броя от края на декември. Следващата е
+   за януарския брой на месечник, получен през декември. Правилото (най-много
+   година разлика) е в обработчика; тук е само изборът. */
+function perVolumeYearOptionsHtml(date) {
+  const y = parseInt(String(date || today()).slice(0, 4), 10) || parseInt(yr(), 10);
+  return [[y, 'годината на датата'], [y - 1, 'брой от края на предходната'], [y + 1, 'брой за следващата']]
+    .map(([v, t], i) => `<option value="${v}" ${i === 0 ? 'selected' : ''}>${v} г. — ${t}</option>`).join('');
+}
+function perVolumeYearField(date) {
+  return `<div class="field"><label>Годишен комплект <span class="fh">към коя година се подвързва броят</span></label>
+    <select name="volume_year" id="perIssueVolYear">${perVolumeYearOptionsHtml(date)}</select></div>`;
+}
+function perIssueDateChanged() {
+  const f = $('#issueF'); const sel = $('#perIssueVolYear');
+  if (!f || !sel) return;
+  const d = f.querySelector('[name=date]');
+  sel.innerHTML = perVolumeYearOptionsHtml(d && d.value);
+}
+window.perIssueDateChanged = perIssueDateChanged;
+/* Годината на комплекта на един брой (v2.4.69, Л2): volume_year, а за ред без
+   нея (стар внос) — годината на датата, както я чете и обработчикът. */
+function perIssueVolYear(i) {
+  if (i && i.volume_year != null && String(i.volume_year) !== '') return String(i.volume_year);
+  return i && i.date ? String(i.date).slice(0, 4) : null;
+}
 function perIssueRowsHtml(list) {
   const p = window._PER_KARDEX || {};
-  return list.map(i => `<tr><td class="num">${esc(i.issue_no)}</td><td class="num">${bg(i.date)}</td>
+  /* Брой от чужда за датата си година се НАДПИСВА на реда — иначе в кардекса
+     за 2025 г. стои дата 03.01.2026 и изглежда като грешка. */
+  return list.map(i => `<tr><td class="num">${esc(i.issue_no)}</td><td class="num">${bg(i.date)}${
+      perIssueVolYear(i) && i.date && perIssueVolYear(i) !== String(i.date).slice(0, 4)
+        ? ` <span class="hint" title="Постъпил на ${esc(bg(i.date))}, подвързва се с комплекта за ${esc(perIssueVolYear(i))} г.">(компл. ${esc(perIssueVolYear(i))})</span>` : ''}</td>
       <td class="num">${mny(i.price)}</td><td><button type="button" class="btn sm dgr"
         onclick="delIssue(${i.id},${jsNum(p.id)},${jsNum(invNoForIssue(p, i))})">×</button></td></tr>`).join('');
 }
@@ -203,9 +240,10 @@ async function openPeriodical(id, year) {
     <div class="hint" style="margin-bottom:10px">${esc(p.freq || '')} · ${esc(p.publisher || '')}${p.issn ? ' · ISSN ' + esc(p.issn) : ''}</div>
     <fieldset><legend>Нов постъпил брой</legend>
       <form id="issueF" onsubmit="return false">
-        <div class="grid g3">
+        <div class="grid g4">
         ${fld('Номер на брой', 'issue_no', { req: 1, onkey: `if(event.key==='Enter'){event.preventDefault();addIssue(${id})}` })}
-        ${fld('Дата на постъпване', 'date', { val: today(), type: 'date' })}
+        ${fld('Дата на постъпване', 'date', { val: today(), type: 'date', onchange: 'perIssueDateChanged()' })}
+        ${perVolumeYearField(today())}
         ${mnyField('Цена', 'price', { min: 0 })}
         </div>
         ${/* ПОЛЕТО „ЗАБЕЛЕЖКА“ (v2.4.65, находка В5).
@@ -329,7 +367,7 @@ function jsNum(v) { return v == null ? 'null' : String(Number(v)); }
    да предупреди „×“, че се трие брой от вече подвързан и вписан във фонда
    комплект — виж delIssue по-долу. */
 function invNoForIssue(p, issue) {
-  const year = issue && issue.date ? String(issue.date).slice(0, 4) : null;
+  const year = perIssueVolYear(issue); // годината на комплекта, не на постъпването (Л2)
   if (!year) return null;
   const v = (p.volumes || []).find(x => String(x.year) === year && x.book_id != null);
   return v ? v.inv_number : null;
@@ -567,7 +605,8 @@ async function addIssue(periodicalId) {
   /* Кардексът се отваря на годината на ТОКУ-ЩО вписания брой (v2.4.61): иначе
      при отворена стара година новият брой изчезва от екрана и изглежда, че
      вписването не е станало. */
-  openPeriodical(periodicalId, String(d.date || today()).slice(0, 4));
+  /* v2.4.69 (Л2): годината на КОМПЛЕКТА на броя — там той вече стои. */
+  openPeriodical(periodicalId, String(d.volume_year || String(d.date || today()).slice(0, 4)));
 }
 window.addIssue = addIssue;
 async function delIssue(id, periodicalId, invNo) {
@@ -714,7 +753,10 @@ async function printPeriodicalCard(id, year) {
        ${p.freq ? ' · ' + esc(p.freq) : ''}${p.publisher ? ' · ' + esc(p.publisher) : ''}
        ${p.department ? ' · отдел ' + esc(p.department) : ''}<br>Постъпили броеве — ${esc(scope)}</div>
      <table><thead><tr><th>№ на брой</th><th>Дата на постъпване</th><th>Цена</th><th>Забележка</th></tr></thead><tbody>
-     ${issues.length ? issues.map(i => `<tr><td>${esc(i.issue_no)}</td><td>${bg(i.date)}</td>
+     ${issues.length ? issues.map(i => `<tr><td>${esc(i.issue_no)}</td><td>${bg(i.date)}${
+         /* Брой от друга за датата си година — надписан и на хартия (v2.4.69, Л2). */
+         perIssueVolYear(i) && i.date && perIssueVolYear(i) !== String(i.date).slice(0, 4)
+           ? ' (за комплекта ' + esc(perIssueVolYear(i)) + ' г.)' : ''}</td>
        <td>${mny(i.price)}</td><td>${esc(i.note || '')}</td></tr>`).join('')
        : `<tr><td colspan="4" style="text-align:center">Няма вписани броеве за ${esc(scope)}.</td></tr>`}
      ${issues.length ? `<tr style="font-weight:700"><td>ОБЩО</td><td>${issues.length} ${issues.length === 1 ? 'брой' : 'броя'}</td>

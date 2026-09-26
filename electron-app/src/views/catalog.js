@@ -19,7 +19,27 @@ async function renderCatalog() {
       ${esc(ap.at ? new Date(ap.at).toLocaleString('bg-BG', { dateStyle: 'short', timeStyle: 'short' }) : '')} ч. — ${esc(ap.error)}<br>
       Каталогът на сайта <b>остава със старото съдържание</b>, докато това не се оправи.
       Натиснете „Публикувай сега“ по-долу, за да видите пълното съобщение.</div>` : '';
+  /* ЗАПИСЪТ НА katalog.json — ОТДЕЛНО ОТ ПУБЛИКУВАНЕТО (v2.4.69, кръг 44, К1 и К3).
+     (а) Дотук този екран знаеше само за провален `git push`. Спрян от
+         предпазителя запис (празна или пробна база върху истинския каталог) и
+         неуспешен запис в недостъпна папка се виждаха само при вписване на НОВА
+         книга — редакция, гише и изтриване мълчаха.
+     (б) И в двата случая сайтът показва стар фонд, а библиотекарката няма
+         откъде да го разбере.
+     (в) Обработчикът помни последния опит (catalog:autoPushStatus → `write`) и
+         лентата стои, докато следващият запис не мине. При спрян запис до нея
+         стои изходът — „Запиши въпреки това…“, с въпрос, който казва двете
+         числа. Правилото (кое се спира) е в main.js; тук е само показването. */
+  const wr = ap && ap.write;
+  const writeWarn = wr && !wr.ok ? `<div class="note" id="catWriteWarn" style="border-left-color:var(--red)">
+      <b style="color:var(--red)">${wr.blocked ? 'Записът на онлайн каталога е спрян.' : 'Записът на онлайн каталога не успява.'}</b>
+      Последен опит: ${esc(new Date(wr.at).toLocaleString('bg-BG', { dateStyle: 'short', timeStyle: 'short' }))} ч.<br>
+      ${esc(wr.message ? wr.message.charAt(0).toUpperCase() + wr.message.slice(1) : (wr.error || ''))}
+      ${wr.blocked ? `<div class="toolbar" style="margin-top:8px">
+        <button class="btn dgr" onclick="catalogForceWrite(${Number(wr.published) || 0}, ${Number(wr.now) || 0})">Запиши въпреки това…</button></div>` : ''}
+    </div>` : '';
   $('#view').innerHTML = `
+    ${writeWarn}
     ${autoPushWarn}
     <div class="note"><b>Публичен каталог.</b> Извеждат се само библиографски данни и наличност.
     Лични данни на читатели, цени и служебни бележки <b>не</b> се включват никъде в изведения файл. Каталогът се
@@ -312,15 +332,37 @@ window.exportDc = exportDc;
 async function catalogChooseFolder() {
   const res = await window.api.catalog.chooseFolder();
   if (!res.ok) return toast(res.error, 'err');
+  /* К1 (v2.4.69): спрян или неуспешен първи запис се казва ВЕДНАГА, а не с
+     обещанието „katalog.json се обновява автоматично“ — вж. catalog:chooseFolder. */
+  const w = res.write || {};
   if (res.adopted) {
     toast(`Папката е свързана с хранилището ${res.adopted.user}/${res.adopted.repo} — настройките са попълнени сами.`, 'ok');
   } else if (res.mismatch) {
     toast('Папката е свързана, но сочи към друго хранилище — вижте предупреждението по-горе.', 'err');
-  } else {
+  } else if (!w.blocked && !w.error) {
     toast('Папката е свързана — katalog.json се обновява автоматично.', 'ok');
+  }
+  if (w.blocked || w.error) {
+    toast('Папката е свързана, но ' + (w.message ? w.message.charAt(0).toLowerCase() + w.message.slice(1)
+      : 'записът на katalog.json не мина — вижте предупреждението в „Онлайн каталог“.'), 'err');
   }
   renderCatalog();
 }
+/* Изходът от предпазителя (К1): записва каталога въпреки рязкото свиване, след
+   въпрос с двете числа. Самият ред в следата се пише в обработчика. */
+async function catalogForceWrite(published, now) {
+  if (!await askConfirm('ЗАПИС ВЪПРЕКИ ПРЕДПАЗИТЕЛЯ\n\n'
+    + 'Публикуваният онлайн каталог има ' + published + ' записа, а тази база ще го замени с ' + now + '.\n\n'
+    + 'Потвърдете само ако това НАИСТИНА е фондът за публикуване (например след голямо отчисляване). '
+    + 'Ако базата е нова, пробна или възстановена от старо копие — откажете и първо възстановете правилната база: '
+    + 'след следващото публикуване сайтът ще показва само ' + now + ' записа.',
+  { kind: 'danger', okLabel: 'Запиши въпреки това' })) return;
+  const res = await window.api.catalog.writeNow({ force: true });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Каталогът е записан с ' + now + ' записа. Ще се появи на сайта след следващото публикуване.', 'ok');
+  renderCatalog();
+}
+window.catalogForceWrite = catalogForceWrite;
 window.catalogChooseFolder = catalogChooseFolder;
 /* ВЪПРОСЪТ КАЗВА КАКВО СЛЕДВА, А НЕ САМО КАКВО СПИРА (v2.4.65, кръг 42, Б21).
    Дотук питаше „Спиране на автоматичния запис на katalog.json?“ и отговаряше

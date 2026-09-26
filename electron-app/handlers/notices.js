@@ -10,7 +10,7 @@
    трябва да искат едно и също число; всеки път, когато това пресмятане е било на
    две места, е давало две различни суми за едно задължение (виж бележките при
    loans:reminders по-долу — тъкмо това поправиха v2.4.24 и v2.4.25). */
-const { unpaidForRows, spreadUnpaidFine } = require('./loans');
+const { overdueForRows, spreadUnpaidFine } = require('./loans');
 
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
   const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
@@ -86,15 +86,37 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
      гарант: ученик или възрастен с вписан гарант получава писмото на СВОЕ име —
      той отговаря сам за заетите документи. */
   const CHILD_CATEGORY = 'дете до 14 г.';
+  /* ИМЕЙЛЪТ НА ДЕТЕТО НЕ Е ИМЕЙЛ НА РОДИТЕЛЯ (v2.4.69, находка Г11).
+     (а) КАКВО СТАВАШЕ ДОТУК. Писмото започваше с „Уважаем(а) Петя Детска
+         (родител на Ани Детска)“, а „Отвори в пощата“ го пращаше на
+         ani.kid@example.bg — пощата от картона на ДЕТЕТО (тестер № 2, сценарий
+         8в). Бележката по-горе приемаше, че при дете полето „по правило“ носи
+         пощата на родителя; пробата показа, че не е така, а картонът няма как
+         да каже чия е.
+     (б) ЗАЩО Е ГРЕШНО. Напомнянето по чл. 43 иска пари и при трета степен
+         предупреждава за преустановяване — адресирано е до родителя и не бива
+         да стига до седемгодишно дете, докато родителят не знае нищо.
+     (в) ЗАЩО ТОЧНО ТАКА. Отделно поле за имейла на родителя/настойника в
+         базата още няма (колоната е промяна в схемата — поискана в доклада);
+         щом се появи като `guarantor_email`, писмото отива там. Дотогава
+         имейлът на детето НЕ се ползва за писмо до родителя: `email` остава
+         празен, а `email_note` казва защо и какво да се направи — екранът
+         показва „няма записан“ вместо чужд адрес, а SMS-ът и печатното писмо
+         си отиват до родителя както досега. */
   function noticeAddressee(r) {
     const guardian = (r.category === CHILD_CATEGORY && r.guarantor_name) ? String(r.guarantor_name).trim() : '';
-    if (!guardian) return { to: r.name, viaGuarantor: null, phone: r.phone };
+    if (!guardian) return { to: r.name, viaGuarantor: null, phone: r.phone, email: r.email };
+    const gEmail = String(r.guarantor_email || '').trim();
     return {
       to: guardian,
       viaGuarantor: (r.guarantor_relation || 'родител/настойник'),
       // Телефонът на гаранта, ако го има; иначе остава записаният при читателя —
       // по-добре стар номер, отколкото никакъв начин да се съобщи.
-      phone: r.guarantor_phone || r.phone
+      phone: r.guarantor_phone || r.phone,
+      email: gEmail || null,
+      emailNote: gEmail || !r.email ? null
+        : 'Имейлът в картона (' + r.email + ') е на детето — напомнянето до родителя/настойника не се праща '
+          + 'там. Изпратете го по SMS или с печатното писмо.'
     };
   }
   function reminderTexts(r, s) {
@@ -203,7 +225,11 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
         /* И третият път приспада платеното (v2.4.65). Дотук писмото по пощата и
            SMS-ът искаха начисленото, без да поглеждат сметката: читател, платил
            2,70 € на гишето, получаваше SMS за 3,10 €. */
-        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
+        /* И авансът (v2.4.69): надплатеното по сметката намалява още
+           неначислената забава — виж overdueLedger() в handlers/loans.js.
+           Читател с аванс 1,00 € и забава 1,20 € получаваше SMS за 1,20 €. */
+        const o = overdueForRows(db, r.reader_id, r.loans);
+        spreadUnpaidFine(r.loans, o.unpaid, o.credit);
         r.fine = Math.round(r.loans.reduce((sum, d) => sum + d.fine, 0) * 100) / 100;
         r.fineAccrued = Math.round(r.loans.reduce((sum, d) => sum + d.fineAccrued, 0) * 100) / 100;
         r.finePaid = Math.round(r.loans.reduce((sum, d) => sum + d.finePaid, 0) * 100) / 100;
@@ -216,6 +242,10 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
         r.notice_via_guarantor = addr.viaGuarantor;
         r.reader_phone = r.phone;      // телефонът от картона на самия читател
         r.phone = addr.phone;
+        // Имейлът — по същото правило (v2.4.69, виж noticeAddressee).
+        r.reader_email = r.email;
+        r.email = addr.email;
+        r.email_note = addr.emailNote || null;
         const overdueDays = Math.round((new Date(today()).getTime() - new Date(r.oldest_due).getTime()) / 864e5);
         r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
         const last = lastNoticeQ.get(r.reader_id);

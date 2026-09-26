@@ -361,7 +361,9 @@ test('Търсенето и филтърът остават ПЪЛЕН ренд�
     'филтърът се връща на първата страница от новия резултат');
   assert.equal(window.document.querySelector('#bBody tr').getAttribute('data-probe'), null,
     'при смяна на филтъра таблицата се преизчертава изцяло');
-  const rows = [...window.document.querySelectorAll('#bBody tr td:nth-child(6)')].map(td => td.textContent);
+  /* v2.4.69 (кръг 44, П4): „Книги“ получи колона „Сигнатура“ след „Автор“, тоест
+     „Отдел“ вече е седмата клетка на реда, не шестата. Проверката е същата. */
+  const rows = [...window.document.querySelectorAll('#bBody tr td:nth-child(7)')].map(td => td.textContent);
   assert.ok(rows.every(x => x === 'за деца'), 'показват се само редовете от филтъра');
 });
 

@@ -279,10 +279,13 @@ test('mzs:create/update проверяват датата и срока; mzs:del
   const id = await ok('mzs:create', { no: '1', date: '2026-03-01', due_date: '2026-04-01', partner: 'НБКМ', title: 'Тютюн' });
   assert.match(await fail('mzs:update', { id, due_date: '2026-01-01' }), /преди датата/);
   assert.match(await fail('mzs:update', { id, date: '2026-99-01' }), /Датата на заявката/);
-  await ok('mzs:update', { id, status: 'получено' });
+  /* v2.4.69 (кръг 44, К8): състоянията вървят стъпка по стъпка — „заявено“ →
+     „получено“ е прескачане и се отказва. Смисълът на проверката (смяна САМО на
+     състоянието на стар ред с празна дата минава) е същият, с позволените стъпки. */
+  await ok('mzs:update', { id, status: 'изпратено' });
   // Стар ред с празна дата (отпреди проверката): смяна само на статуса минава, поправка с невалидна дата — не.
   db.prepare("UPDATE mzs_requests SET date = '' WHERE id = ?").run(id);
-  await ok('mzs:update', { id, status: 'върнато' });
+  await ok('mzs:update', { id, status: 'получено' });
   assert.match(await fail('mzs:update', { id, date: 'abc' }), /Датата на заявката/);
   /* Проверка при прегледа: стар ред с НЕПРАЗНА, но невалидна дата (реалистично за
      база отпреди v2.4.29, когато mzs:create/update изобщо не проверяваше нищо) —

@@ -341,7 +341,7 @@ function initDb() {
     lbl_cols: 'INTEGER DEFAULT 3',
     lbl_gap: 'REAL DEFAULT 3',
     lbl_margin: 'REAL DEFAULT 8',
-    /* v2.4.68 (находка Е2 от пълния тест): отделно поле отгоре и отляво и
+    /* v2.4.69 (находка Е2 от пълния тест): отделно поле отгоре и отляво и
        отделно разстояние хоризонтално и вертикално. С едно поле за четирите
        страни и едно разстояние за двете посоки готовите листове (Avery L7160:
        горе 15,1 мм, ляво 7,2 мм, 2,5 мм между колоните, 0 между редовете) не
@@ -524,12 +524,19 @@ function initDb() {
     SELECT MAX(sc.scanned_at) FROM inventory_session_scans sc WHERE sc.book_id = books.id
   ) WHERE datelastseen IS NULL AND EXISTS (
     SELECT 1 FROM inventory_session_scans sc WHERE sc.book_id = books.id)`);
-  // cn_sort — от съществуващите сигнатури.
-  const noCn = db.prepare(`SELECT id, call_number FROM books
-    WHERE cn_sort IS NULL AND call_number IS NOT NULL AND TRIM(call_number) <> ''`).all();
+  /* cn_sort — от сигнатурата ПО ОБЩОТО ПРАВИЛО (v2.4.69, находка П4 от пълния
+     тест). Дотук се пълнеше само от попълненото поле „Сигнатура“; книга, описана с
+     помощниците на програмата (УДК от „Избери…“, авторски знак от „Предложи“),
+     поле няма, и подредбата „По сигнатура“ я слагаше най-отзад. Сега ключът идва
+     от effectiveCallNumber() — същата функция, по която сигнатурата излиза в
+     „Книги“, в инвентарната книга, на етикета и в онлайн каталога. */
+  const { effectiveCallNumber } = require('./handlers/books');
+  const noCn = db.prepare(`SELECT id, call_number, udk, author_mark FROM books
+    WHERE cn_sort IS NULL AND (TRIM(COALESCE(call_number, '')) <> ''
+      OR TRIM(COALESCE(udk, '')) <> '' OR TRIM(COALESCE(author_mark, '')) <> '')`).all();
   if (noCn.length) {
     const upd = db.prepare('UPDATE books SET cn_sort = ? WHERE id = ?');
-    db.transaction(() => noCn.forEach(b => upd.run(cnSortKey(b.call_number), b.id))).immediate();
+    db.transaction(() => noCn.forEach(b => upd.run(cnSortKey(effectiveCallNumber(b)), b.id))).immediate();
   }
   // Датирани съгласия — при вече отбелязано съгласие без дата се записва датата на
   // регистрация: най-добрата налична долна граница, по-честна от днешната дата.
@@ -998,7 +1005,7 @@ const MIGRATIONS = [
       SET free_access_pct = (SELECT free_access_pct FROM settings WHERE id = 1)
       WHERE closed = 1 AND free_access_pct IS NULL`);
   } },
-  /* v18 (v2.4.68) — основите, от които зависят поправките от пълния тест.
+  /* v18 (v2.4.69) — основите, от които зависят поправките от пълния тест.
      1. account_lines.type „забава“ (находка Г2): тригерите се пресъздават ПРЕДИ
         преименуването, защото тригерът за UPDATE OF type иначе би отказал новата
         стойност. Преименуват се само редове, писани от chargeOverdueFine() —
@@ -1926,7 +1933,11 @@ ipcMain.handle('settings:noticeDefaults', () =>
 /* ---------------- Категории ----------------
    Извадени в handlers/categories.js (Фаза 4, стъпка 7 от разбиването на
    монолита main.js на модули по домейн). */
-require('./handlers/categories')(ipcMain, { getDb: () => db, run, logAudit });
+/* scheduleCatalogWrite (v2.4.69, находка К2 от пълния тест): промените тук
+   сменят онова, което сайтът показва, а дотук katalog.json оставаше стар до
+   следващата случайна промяна по фонда. Функцията е обявена по-долу и се вдига
+   (function declaration), затова може да се подаде още тук. */
+require('./handlers/categories')(ipcMain, { getDb: () => db, run, logAudit, scheduleCatalogWrite });
 /* Авторски знак — предлага знака по фамилията от таблица, внесена от файл на
    самата библиотека (програмата не носи таблицата, виж модула). */
 require('./handlers/author-mark')(ipcMain, {
@@ -1953,12 +1964,12 @@ const { BOOK_SELECT, BOOK_FIELDS, checkRecordLimit } = require('./handlers/books
 /* ---------------- Контрол на авторитетните данни ----------------
    Извадени в handlers/authorities.js (Фаза 4, стъпка 11 от разбиването на
    монолита main.js на модули по домейн). */
-require('./handlers/authorities')(ipcMain, { getDb: () => db, run, logAudit });
+require('./handlers/authorities')(ipcMain, { getDb: () => db, run, logAudit, scheduleCatalogWrite });
 
 /* ---------------- Контролирани номенклатури (Koha: authorised_values) ----------------
    Извадени в handlers/av.js (Фаза 4, стъпка 12 от разбиването на монолита
    main.js на модули по домейн). */
-require('./handlers/av')(ipcMain, { getDb: () => db, run, logAudit });
+require('./handlers/av')(ipcMain, { getDb: () => db, run, logAudit, scheduleCatalogWrite });
 
 /* ---------------- Инвентарна книга (Приложение № 4 към чл. 16, ал. 1) ----------------
    Извадени в handlers/inv-book.js (Фаза 4, стъпка 13 от разбиването на
@@ -2002,7 +2013,12 @@ require('./handlers/fund-check')(ipcMain, { getDb: () => db, run, logAudit, year
 require('./handlers/readers')(ipcMain, {
   getDb: () => db, run, logAudit, today, ftsQuery,
   maskReaderRow, maskReaderRows, preparePiiForWrite, diffFields, checkRecordLimit,
-  dialog, getMainWindow: () => mainWindow, fs, csvCell, normalizeScanCode
+  dialog, getMainWindow: () => mainWindow, fs, csvCell, normalizeScanCode,
+  /* v2.4.69 (находка Г5): изтриването на читател със заделена книга повиква
+     следващия в опашката — със същата функция, с която го прави заличаването
+     по чл. 17 (handlers/gdpr.js). Модулът има резервен път през
+     require('./loans'), но зависимостта трябва да се вижда тук. */
+  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId)
 });
 
 /* ---------------- Печат → PDF файл ----------------
@@ -2044,7 +2060,10 @@ require('./handlers/housebound')(ipcMain, {
    стартиране — капанът с реда на зареждане от docs/ARCHITECTURE.md. */
 require('./handlers/gdpr')(ipcMain, {
   getDb: () => db, run, logAudit,
-  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId)
+  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId),
+  /* v2.4.69: отказаната при заличаване заделена резервация сменя наличността
+     на сайта. */
+  scheduleCatalogWrite
 });
 
 /* ---------------- Календар на библиотеката ----------------
@@ -2102,7 +2121,7 @@ function logEvent(kind, opts) {
    consumeHoldOnCheckout/activateHoldOnReturn се връщат обратно тук, защото
    ги ползва домейнът "Заемания" по-долу. */
 const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, freeCopies, activeHolds, expireStaleHolds } =
-  require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit, normalizeScanCode });
+  require('./handlers/holds')(ipcMain, { getDb: () => db, run, logAudit, normalizeScanCode, scheduleCatalogWrite });
 
 /* ---------------- Заемания ----------------
    Извадени в handlers/loans.js (Фаза 4, стъпка 22 от разбиването на
@@ -2139,7 +2158,10 @@ require('./handlers/dashboard')(ipcMain, {
 
 /* ---------------- Инвентаризация ---------------- */
 require('./handlers/inventory-sessions')(ipcMain, {
-  getDb: () => db, run, logAudit, pctRequired, naturalLoss, normalizeScanCode
+  getDb: () => db, run, logAudit, pctRequired, naturalLoss, normalizeScanCode,
+  /* v2.4.69 (К2): намерен „липсващ“ и приключена проверка с липси сменят
+     наличността на сайта. */
+  scheduleCatalogWrite
 });
 
 /* ---------------- Просрочени: напомняния ----------------
@@ -2153,7 +2175,9 @@ const { DEFAULT_NOTICE_SUBJECT, DEFAULT_NOTICE_BODY, DEFAULT_NOTICE_SMS, NOTICE_
   });
 
 /* ---------------- МЗС ---------------- */
-require('./handlers/mzs')(ipcMain, { getDb: () => db, run, logAudit, yearOf });
+/* scheduleCatalogWrite (v2.4.69, находка К8): наш документ, изпратен по входяща
+   заявка за МЗС, е „зает“ онлайн, докато е при другата библиотека. */
+require('./handlers/mzs')(ipcMain, { getDb: () => db, run, logAudit, yearOf, scheduleCatalogWrite });
 
 // Дневник на библиотеката (Раздел А / Раздел Б) → handlers/dnevnik.js
 // (Фаза 4, стъпка 30). dnevnikSumRow се връща обратно, защото
@@ -2196,7 +2220,10 @@ require('./handlers/links')(ipcMain, { getDb: () => db, run, logAudit });
    ============================================================================ */
 require('./handlers/data-import')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, BOOK_FIELDS, today, cnSortKey,
-  EUR_RATE
+  EUR_RATE,
+  /* v2.4.69 (К2): внесените книги дотук не стигаха до сайта, а екранът
+     „Онлайн каталог“ броеше повече записи, отколкото имаше във файла. */
+  scheduleCatalogWrite
 });
 
 /* ============================================================================
@@ -2205,7 +2232,8 @@ require('./handlers/data-import')(ipcMain, {
    четец. Списъкът се пренася обратно като текст или файл.
    ============================================================================ */
 require('./handlers/mobile')(ipcMain, {
-  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, normalizeScanCode
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, normalizeScanCode,
+  scheduleCatalogWrite   // v2.4.69 (К2) — виж inventory-sessions по-горе
 });
 
 /* ============================================================================
@@ -2276,12 +2304,27 @@ require('./handlers/stats')(ipcMain, { getDb: () => db, run, yearOf, value, dnev
 /* opacMap: вътрешна стойност → публичен надпис от номенклатурите (opac_label).
    Навън не трябва да се вижда вътрешният жаргон — затова отделът и езикът минават
    през превода, ако библиотекарят е задал публичен надпис. */
+/* СИГНАТУРАТА В КАТАЛОГА Е ПО ОБЩОТО ПРАВИЛО (v2.4.69, кръг 44, П4 — каталожната част).
+   (а) Дотук полето `g` беше голото `b.call_number`. Книга, описана с помощниците
+       на програмата (УДК от „Избери…“, авторски знак от „Предложи“), няма нищо в
+       „Сигнатура“ — етикетът на гърба ѝ казва „638(497.2) Й 83“, а онлайн
+       каталогът показваше празно място точно там, където страницата пише „по нея
+       се намира на рафта“.
+   (б) Читателят, дошъл с телефона пред рафта, търси по адреса, който е на гърба
+       на книгата. Празен или различен адрес го праща да пита на гишето — а
+       сигнатурата е и реквизит на инвентарната книга (чл. 16, ал. 1), тоест
+       онлайн каталогът не бива да казва друго.
+   (в) Правилото НЕ се преписва тук: вика се изнесеното effectiveCallNumber() от
+       handlers/books.js (попълнена „Сигнатура“ печели, иначе УДК + авторски знак),
+       същото, което ползват етикетът, „Книги“ и инвентарната книга. Затова и
+       SELECT-ът на товара тегли `b.author_mark`. */
+const { effectiveCallNumber } = require('./handlers/books');
 function publicBookFields(b, opacMap) {
   const pub = (cat, v) => (opacMap && opacMap[cat] && opacMap[cat][v]) || v || '';
   return {
     inv: b.inv_number, a: b.author || '', t: b.title || '', s: b.subtitle || '',
     c: b.city || '', p: b.publisher || '', y: b.year || '', v: b.category_name || '',
-    l: pub('language', b.language), u: b.udk || '', g: b.call_number || '', o: pub('department', b.department),
+    l: pub('language', b.language), u: b.udk || '', g: effectiveCallNumber(b), o: pub('department', b.department),
     // „Налична" зависи и от състоянието, не само от свободните бройки: книга със
     // статус „липсващ" или „за реставрация" физически я няма на рафта, а публичният
     // каталог я обявяваше за налична само защото по нея няма отворено заемане —
@@ -2306,15 +2349,36 @@ function buildCatalogPayload() {
      каталогът ползва 18 полета (publicBookFields) и „налична“ — един агрегат по
      idx_loans_open върши същото. Измерено: 547 ms → ~150 ms на запис на каталога,
      който се пуска след всяка промяна във фонда и на всеки 5 минути. */
+  /* „НАЛИЧНА“ ИЗВАЖДА И ЗАДЕЛЕНОТО, И ИЗПРАТЕНОТО ПО МЗС (v2.4.69, кръг 44, К4 и К8).
+     (а) Дотук свободни бройки = бройки − отворени заемания. Книга със ЗАДЕЛЕНА
+         резервация стои на рафта за резервации и гишето отказва да я даде на друг
+         („Книгата е резервирана за …“), а katalog.json я обявяваше `av: 1` —
+         тестер № 5 го видя с книга, върната и заделена за читател Б. Същото с
+         наш документ, изпратен по входяща МЗС заявка: той физически е в другата
+         библиотека, а сайтът го показваше „наличен“.
+     (б) Онлайн каталогът е единственото, което читателят вижда, преди да тръгне
+         към библиотеката. „Налична“ за книга, която никой няма да му даде, е
+         празен път — а за заделената е и обида към онзи, за когото е заделена.
+     (в) Изваждат се две малки агрегатни таблици (заделените резервации и
+         входящите МЗС заявки в състояние „изпратено“/„получено“ със свързан наш
+         документ), със същия вид LEFT JOIN като заеманията — без подзаявка на
+         ред. Броят се бройки, не „има/няма“, защото стар неразделен запис с 3
+         бройки и 1 заделена все пак има 2 свободни. СЪЩАТА формула стои в
+         catalog:status (handlers/catalog.js), за да казва екранът колкото файлът;
+         test/katalog-mzs-v2469.test.js ги сравнява. */
   const books = db.prepare(`
     SELECT b.inv_number, b.author, b.title, b.subtitle, b.city, b.publisher, b.year, b.language,
-           b.udk, b.call_number, b.department, b.keywords, b.annotation, b.cover_url, b.status, b.register_date,
+           b.udk, b.call_number, b.author_mark, b.department, b.keywords, b.annotation, b.cover_url, b.status, b.register_date,
            c.name AS category_name,
-           COALESCE(i.quantity, 0) - COALESCE(o.n, 0) AS available
+           COALESCE(i.quantity, 0) - COALESCE(o.n, 0) - COALESCE(hz.n, 0) - COALESCE(mz.n, 0) AS available
     FROM books b
     LEFT JOIN categories c ON c.id = b.category_id
     LEFT JOIN inventory i ON i.book_id = b.id
     LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM loans WHERE date_in IS NULL GROUP BY book_id) o ON o.book_id = b.id
+    LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM holds WHERE status = 'заделена' GROUP BY book_id) hz ON hz.book_id = b.id
+    LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM mzs_requests
+               WHERE direction = 'входящо' AND book_id IS NOT NULL AND status IN ('изпратено', 'получено')
+               GROUP BY book_id) mz ON mz.book_id = b.id
     WHERE b.status != 'отчислен' AND COALESCE(b.department,'') != 'служебен' ORDER BY b.title`).all();
   const s = db.prepare('SELECT lib_name, place FROM settings WHERE id = 1').get() || {};
   const opacMap = {};
@@ -2335,11 +2399,31 @@ function buildCatalogPayload() {
     return m;
   }, {});
   const shelfList = Object.entries(shelves).map(([name, items]) => ({ name, items }));
+  /* ПУБЛИЧНИТЕ НАДПИСИ НА ОТДЕЛИТЕ ЗА ПЛОЧКИТЕ НА САЙТА (v2.4.69, кръг 44, К9).
+     (а) Страницата на сайта има готови плочки „Детски книги“ (отдел „за деца“),
+         „Краезнание“ („краеведски“), „Справочници“ („справочен“). Щом отделът
+         получи публичен надпис в Настройки (напр. „Детски отдел“), поле `o`
+         вече носи надписа, плочката не намира нито едно заглавие и изчезва —
+         тестер № 5, снимка katalog-1366-publichen-nadpis-plochki.png.
+     (б) Публичният надпис е точно за да изглежда каталогът по-добре навън, а
+         не за да изчезне най-посещаваният раздел за деца.
+     (в) Товарът носи речник „стойност → публичен надпис“ САМО за отделите,
+         които имат надпис и се срещат в публикуваните записи; страницата
+         превежда през него стойността на плочката. Служебните и
+         непубликуваните отдели не влизат, тоест навън не излиза нищо, което
+         сайтът вече не показва. Стар katalog.json без ключа работи както досега. */
+  const deptLabels = {};
+  const depMap = opacMap.department || {};
+  for (const b of books) {
+    const v = b.department;
+    if (v && depMap[v] && depMap[v] !== v) deptLabels[v] = depMap[v];
+  }
   return {
     library: s.lib_name || '', place: s.place || '',
     generated: localDate(),
     items: books.map(b => publicBookFields(b, opacMap)),
-    ...(shelfList.length ? { shelves: shelfList } : {})
+    ...(shelfList.length ? { shelves: shelfList } : {}),
+    ...(Object.keys(deptLabels).length ? { departments: deptLabels } : {})
   };
 }
 function catalogPayloadItemCount(payload) {
@@ -2500,23 +2584,127 @@ function catalogPayloadNow() {
   CATALOG_PAYLOAD_CACHE.payload = payload;
   return payload;
 }
-function writeCatalogIfConfigured() {
+/* ПРЕДПАЗИТЕЛЯТ ХВАЩА И РЯЗКОТО СВИВАНЕ, НЕ САМО НУЛАТА (v2.4.69, кръг 44, К1).
+   =====================================================================
+   (а) КАКВО СТАВАШЕ. Предпазителят спираше записа само когато новият товар е
+       ТОЧНО празен. Тестер № 5: публикуван каталог с 10 записа → „Изтриване на
+       всички данни“ → същата папка се свързва отново → ЕДНА пробна книга. След
+       4 секунди katalog.json мина от 10 записа на 1, а следващото автоматично
+       публикуване го качи в GitHub. Една проба стигаше, за да изчезне целият
+       публичен каталог, и нищо на екрана не го каза.
+   (б) ЗАЩО Е ГРЕШНО. Онлайн каталогът е единственото, което читателите виждат
+       от фонда. Нова база на нов компютър, възстановено старо копие или
+       започване на чисто, свързани към папката на ИСТИНСКИЯ каталог, го
+       заменят с нещо, което не е фондът на библиотеката — а „празен върху
+       непразен“ пази само от първата секунда на тази грешка.
+   (в) ЗАЩО ТОЧНО ТАКА. Спира се и когато новият товар е под ПОЛОВИНАТА от вече
+       публикувания. Истинският фонд не губи половината си между два записа —
+       дори голямо отчисляване по акт е десетки документа от хиляди, а
+       изключенията (пилотна библиотека с 3 книги) имат изход: екранът „Онлайн
+       каталог“ показва предупреждението и бутон „Запиши въпреки това…“, който
+       минава през въпрос и оставя ред в следата (catalog:writeNow с force в
+       handlers/catalog.js). Броят в публикувания файл се чете веднъж и се
+       помни до промяна на файла (дата + размер) — иначе всеки запис би четял
+       и разбирал отново 4–5 МБ само за да преброи редовете. */
+const CATALOG_SHRINK_RATIO = 0.5;
+const CATALOG_PUBLISHED_COUNT = { file: null, mtimeMs: null, size: null, n: null };
+function publishedCatalogCount(file) {
+  let st;
+  try { st = fs.statSync(file); }
+  catch (err) {
+    if (err.code === 'ENOENT') return null;   // още няма публикуван файл — няма какво да се пази
+    throw err;                                 // недостъпна папка е грешка на записа, не „празно“
+  }
+  const c = CATALOG_PUBLISHED_COUNT;
+  if (c.file === file && c.mtimeMs === st.mtimeMs && c.size === st.size) return c.n;
+  let n = null;
+  try {
+    n = catalogPayloadItemCount(JSON.parse(fs.readFileSync(file, 'utf8')));
+  } catch (err) {
+    /* Повреден файл не бива да спира поправянето си: записът продължава, а
+       причината остава в конзолата — следващият успешен запис го подменя. */
+    console.error('katalog.json в папката не се разчита (' + err.message + ') — предпазителят няма с какво да сравни и записът продължава.');
+  }
+  Object.assign(c, { file, mtimeMs: st.mtimeMs, size: st.size, n });
+  return n;
+}
+function rememberPublishedCount(file, n) {
+  try {
+    const st = fs.statSync(file);
+    Object.assign(CATALOG_PUBLISHED_COUNT, { file, mtimeMs: st.mtimeMs, size: st.size, n });
+  } catch (err) {
+    console.error('katalog.json е записан, но датата му не се чете (' + err.message + ') — следващият запис ще го преброи наново.');
+    Object.assign(CATALOG_PUBLISHED_COUNT, { file: null, mtimeMs: null, size: null, n: null });
+  }
+}
+/* ПОСЛЕДНИЯТ ЗАПИС СЕ ПОМНИ И СЕ ПОКАЗВА (v2.4.69, кръг 44, К3).
+   =====================================================================
+   (а) КАКВО СТАВАШЕ. Автоматичният запис (редакция, заемане, връщане,
+       изтриване) връщаше { written:false, error } на отложения таймер, който го
+       изхвърляше — грешката стигаше само до конзолата. Предупреждаваше
+       единствено вписването на НОВА книга. Тестер № 5 с изключен мрежов диск:
+       редакцията и гишето не казаха нищо, „Онлайн каталог“ не показа нищо, а
+       таймерът за публикуване махаше червената лента, защото папката „вече не
+       е git хранилище“.
+   (б) ЗАЩО Е ГРЕШНО. Сайтът показва стар фонд — отчислени книги „налични“,
+       нови ги няма — докато някой случайно не впише нова книга. Библиотекарката
+       няма как да разбере, че нещо трябва да се оправи.
+   (в) ЗАЩО ТОЧНО ТАКА. Всеки опит за запис (автоматичен или ръчен) обновява
+       CATALOG_LAST_WRITE; екранът „Онлайн каталог“ го чете през
+       catalog:autoPushStatus и показва червена лента, докато следващият запис не
+       мине. В одитната следа се пише само ПРЕХОДЪТ (спря / тръгна отново), не
+       всеки опит: 50 неуспешни връщания на гишето не бива да правят 50 реда. */
+const CATALOG_LAST_WRITE = { at: null, ok: null, blocked: false, error: null, published: null, now: null, message: null, folder: null };
+function catalogWriteState() {
+  return CATALOG_LAST_WRITE.at ? Object.assign({}, CATALOG_LAST_WRITE) : null;
+}
+function noteCatalogWrite(res, folder) {
+  const s = CATALOG_LAST_WRITE;
+  const failed = !!(res.blocked || res.error);
+  const kind = res.blocked ? 'blocked' : (res.error ? 'error:' + res.error : 'ok');
+  const prevKind = s.at ? (s.blocked ? 'blocked' : (s.error ? 'error:' + s.error : 'ok')) : null;
+  Object.assign(s, {
+    at: new Date().toISOString(), ok: !failed, blocked: !!res.blocked, error: res.error || null,
+    published: res.published ?? null, now: res.now ?? null, message: res.message || null, folder
+  });
+  try {
+    if (failed && kind !== prevKind) logAudit('Онлайн каталог', 'ВНИМАНИЕ: ' + res.message);
+    else if (!failed && prevKind && prevKind !== 'ok') {
+      logAudit('Онлайн каталог', 'записът на katalog.json в „' + folder + '“ отново минава — сайтът получава актуалния фонд при следващото публикуване.');
+    }
+  } catch (err) {
+    console.error('Онлайн каталог — редът в следата не се записа:', err.message);
+  }
+  return res;
+}
+function writeCatalogIfConfigured(opts) {
+  let folder = null;
   try {
     const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-    if (!s || !s.catalog_folder) return { written: false };
+    if (!s || !s.catalog_folder) {
+      // Няма свързана папка — няма и какво да се съобщава за стар запис в нея.
+      CATALOG_LAST_WRITE.at = null;
+      return { written: false };
+    }
+    folder = s.catalog_folder;
     const file = path.join(s.catalog_folder, 'katalog.json');
     const payload = catalogPayloadNow();
-    // Предпазна мярка: не презаписвай непразен публикуван каталог с празен. Това пази от
-    // случаен запис от прясна/тестова инсталация (празен фонд) върху вече публикувани
-    // реални данни — например, ако папката е свързана, преди фондът да е зареден в тази база.
-    if (payload.items.length === 0 && fs.existsSync(file)) {
-      try {
-        const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (catalogPayloadItemCount(existing) > 0) {
-          console.error('Пропуснат автоматичен запис на каталога: новите данни са празни, а публикуваният файл не е.');
-          return { written: false, blocked: true };
-        }
-      } catch (e) { /* повреден/нечетим съществуващ файл — продължи с обичайния запис */ }
+    const n = payload.items.length;
+    const published = publishedCatalogCount(file);
+    // Предпазна мярка: не презаписвай непразен публикуван каталог с празен ИЛИ с рязко
+    // свит (под половината) — виж дългия коментар при CATALOG_SHRINK_RATIO по-горе.
+    if (!(opts && opts.force) && published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO)) {
+      const exit = 'Ако това наистина е фондът за публикуване, отворете „Онлайн каталог“ и натиснете „Запиши въпреки това…“ '
+        + '(или „Ръчно извеждане“ → „Каталог (JSON)…“ върху katalog.json в папката). Ако не е — не вписвайте нищо ново, '
+        + 'а възстановете правилната база от резервно копие; публикуваният каталог остава непроменен дотогава.';
+      const message = (n === 0
+        ? 'записът на онлайн каталога е СПРЯН: фондът в тази база излиза празен, а публикуваният katalog.json има '
+          + published + (published === 1 ? ' запис. ' : ' записа. ')
+        : 'записът на онлайн каталога е СПРЯН: публикуваният katalog.json има ' + published + ' записа, а тази база би го '
+          + 'свела до ' + n + ' — под половината. Така се пази публичният каталог от пробна или непълна база (нов компютър, '
+          + 'изтрити данни, възстановено старо копие). ') + exit;
+      console.error('Пропуснат запис на каталога: ' + published + ' → ' + n + ' записа.');
+      return noteCatalogWrite({ written: false, blocked: true, published, now: n, message }, folder);
     }
     /* Записва се настрани и се преименува (одит v2.4.24) — точно както writeConfig
        по-горе, и по същата причина, само че тук залогът е по-голям: файлът е
@@ -2528,7 +2716,9 @@ function writeCatalogIfConfigured() {
     const tmp = file + '.tmp';
     fs.writeFileSync(tmp, catalogJsonText(payload), 'utf8');
     fs.renameSync(tmp, file);
-    return { written: true };
+    rememberPublishedCount(file, n);
+    return noteCatalogWrite({ written: true, published, now: n,
+      forced: !!(opts && opts.force) && published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO) }, folder);
   } catch (err) {
     console.error('Автоматичен запис на каталога:', err.message);
     // Одит v2.3.1 №8: до тук стигаше само конзолата — catalog:writeNow
@@ -2537,7 +2727,12 @@ function writeCatalogIfConfigured() {
     // библиотекарят виждаше зелено "Каталогът е обновен.", докато
     // публикуваният katalog.json си оставаше стар/недокоснат. `error` тук
     // носи причината до самия IPC канал, за да я покаже интерфейсът.
-    return { written: false, error: err.message };
+    // От v2.4.69 (К3) резултатът се и ПОМНИ — вж. CATALOG_LAST_WRITE по-горе.
+    return noteCatalogWrite({ written: false, error: err.message,
+      message: 'записът на онлайн каталога в папката „' + (folder || '') + '“ не успя: ' + err.message
+        + '. Проверете дали папката е достъпна (свързан ли е мрежовият диск?). Докато записът не мине, сайтът '
+        + 'показва стария каталог; програмата опитва отново при всяка следваща промяна, а „Генерирай katalog.json“ '
+        + 'в „Онлайн каталог“ опитва веднага.' }, folder);
   }
 }
 /* ДВЕ СКОРОСТИ НА ОТЛОЖЕНИЯ ЗАПИС (v2.4.64).
@@ -2615,12 +2810,20 @@ function scheduleCatalogWrite(kind) {
    handlers/catalog.js). Двата таймера се гасят предварително: flush() на
    createDebouncer изпълнява функцията си, но тя вижда свален флаг и не пише —
    така изгасването не струва втори запис на 4,82 МБ. */
-function flushCatalogWrite() {
+/* opts.force (v2.4.69, К1) идва САМО от catalog:writeNow след изричното „Запиши
+   въпреки това…“ на екрана — вж. предпазителя при CATALOG_SHRINK_RATIO. */
+function flushCatalogWrite(opts) {
   CATALOG_WRITE_STATE.pending = false;
   catalogFundWriter.flush();
   catalogCircWriter.flush();
-  return writeCatalogIfConfigured();
+  return writeCatalogIfConfigured(opts);
 }
+/* Състоянието на последния запис стига до handlers/catalog.js ПРЕЗ самата
+   функция, която модулът вече получава (flushCatalogWrite), за да не се пипа
+   регистрацията му: `flushCatalogWrite.lastWrite()` → копие на
+   CATALOG_LAST_WRITE или null. Модулът предпочита изрична зависимост
+   `getCatalogWriteState`, ако някой ден бъде подадена. */
+flushCatalogWrite.lastWrite = catalogWriteState;
 const catalogWriteDebouncer = { pending: () => CATALOG_WRITE_STATE.pending, schedule: scheduleCatalogWrite, flush: flushCatalogWrite };
 
 /* ---------------- Онлайн каталог (публикуване през GitHub) + Витрини +

@@ -22,11 +22,27 @@ function mzsBadgeClass(s) { return { 'заявено': '', 'изпратено':
 const MZS_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let MZS_RENDER_LIMIT = MZS_PAGE_SIZE;
 let MZS_PAINTED = 0;
+/* ПРОСРОЧЕНИТЕ И ВРЪЗКИТЕ СЕ ВИЖДАТ В РЕГИСТЪРА (v2.4.69, кръг 44, К6 и К8).
+   (а) Дотук редът казваше само състоянието: получена чужда книга със срок,
+       изтекъл преди 10 дни, стоеше „получено“ като всяка друга (тестер № 5), а
+       свързаните читател и наш документ не се виждаха никъде.
+   (б) Срокът към другата библиотека е задължение на читалището; ако не се вижда
+       тук, не се вижда никъде.
+   (в) Кои заявки са просрочени решава обработчикът (mzs:overdue — същото
+       правило ползва и таблото); тук само се слага червен знак със срока и
+       дните. Колоната „Заявител“ показва свързания читател с картата му, а
+       „Документ“ — нашия инв. №. */
 function mzsRowsHtml(rows) {
-  return rows.length ? rows.map(m => `<tr><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
-      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}</td>
-      <td>${esc(m.requester || '')}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span></td>
-      <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`).join('')
+  const late = window._MZS_OVERDUE || {};
+  return rows.length ? rows.map(m => {
+    const od = late[m.id];
+    const who = m.reader_name ? m.reader_name + (m.reader_card ? ' (карта ' + m.reader_card + ')' : '') : (m.requester || '');
+    return `<tr${od ? ' class="overdue"' : ''}><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
+      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}${m.book_inv != null ? ' <span class="muted">· наш инв. № ' + esc(m.book_inv) + '</span>' : ''}</td>
+      <td>${esc(who)}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span>${od
+        ? ` <span class="badge warn" title="${esc(od.text)}">просрочена ${od.days_over === 1 ? '1 ден' : od.days_over + ' дни'} (срок ${bg(od.due_date)})</span>` : ''}</td>
+      <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`;
+  }).join('')
     : `<tr><td colspan="8" class="empty">Няма заявки.</td></tr>`;
 }
 function mzsMoreHtml(more, total) {
@@ -49,13 +65,24 @@ function renderMzsBody(append) {
   });
 }
 window.renderMzsBody = renderMzsBody;
+/* Просрочените по МЗС — от обработчика (К6). Ако каналът липсва (по-стара
+   обвръзка), регистърът се показва без знаците, а не се чупи. */
+async function loadMzsOverdue() {
+  window._MZS_OVERDUE = {};
+  if (!window.api.mzs.overdue) return [];
+  const list = await call(window.api.mzs.overdue());
+  for (const o of (list || [])) window._MZS_OVERDUE[o.id] = o;
+  return list || [];
+}
 async function renderMzs() {
-  const rows = await call(window.api.mzs.list());
+  const [rows, overdue] = await Promise.all([call(window.api.mzs.list()), loadMzsOverdue()]);
   if (!rows) return;
   window._MZS_ROWS = rows;
   MZS_RENDER_LIMIT = MZS_PAGE_SIZE; // ново отваряне на раздела — пак от първата порция
   $('#view').innerHTML = `
     <div class="note">Регистър на заявките за междубиблиотечно заемане — изходящи и входящи.</div>
+    ${overdue.length ? `<div class="note" id="mzsOverdueNote" style="border-left-color:var(--red)"><b style="color:var(--red)">Изтекъл срок за връщане:
+      ${overdue.length === 1 ? '1 заявка' : overdue.length + ' заявки'}.</b><br>${overdue.map(o => esc(o.text)).join('<br>')}</div>` : ''}
     <div class="toolbar"><button class="btn pri" onclick="mzsForm()">+ Нова заявка</button></div>
     <!-- Номерът е (година, №): регистърът брои отначало всяка година и проверката за
          дубликат е по двойката (handlers/mzs.js). Голото „№ 1" в списъка сочи към
@@ -66,16 +93,57 @@ async function renderMzs() {
     <div class="toolbar" id="mzsMore" style="justify-content:center"></div>`;
   renderMzsBody();
 }
+/* ФОРМАТА ПРЕДУПРЕЖДАВА ПО-РАНО; ПРАВИЛОТО Е В ОБРАБОТЧИКА (v2.4.69, К8).
+   • Състояние: всички се виждат, но позволени са само текущото, следващите по
+     реда и една стъпка назад (поправка) — останалите са сиви. Същото правило
+     отказва прескачането и в handlers/mzs.js, с обяснение.
+   • Изходяща заявка — „Читател (карта №)“: получената чужда книга се дава на
+     него по самата заявка, без вписване във фонда. Входяща — „Наш документ
+     (инв. № / баркод)“: докато е при партньора, не се заема и е „зает“ онлайн.
+   • Номерът на новата заявка следва годината на ДАТАТА: смяна на датата към
+     друга година предлага следващия свободен № за нея (и saveMzs() го
+     проверява още веднъж, ако промяната не е стигнала навреме). */
+const MZS_NEXT = { 'заявено': ['изпратено', 'отказано'], 'изпратено': ['получено', 'отказано'], 'получено': ['върнато'], 'върнато': [], 'отказано': [] };
+function mzsBackOf(m) {
+  return { 'изпратено': 'заявено', 'получено': 'изпратено', 'върнато': 'получено' }[m.status]
+    || (m.status === 'отказано' ? (m.date_sent ? 'изпратено' : 'заявено') : null);
+}
+function mzsStatusOpts(m) {
+  const cur = m && m.id ? (m.status || 'заявено') : null;
+  const ok = cur ? [cur, ...(MZS_NEXT[cur] || []), mzsBackOf(m)].filter(Boolean) : ['заявено', 'отказано'];
+  return MZS_STATUS.map(s => ok.includes(s) ? s : { v: s, t: s + ' (не следва от „' + (cur || 'нова') + '“)' });
+}
+function mzsDirToggle() {
+  const d = ($('#mzsF [name=direction]') || {}).value;
+  const r = $('#mzsReaderBox'), b = $('#mzsBookBox');
+  if (r) r.style.display = d === 'входящо' ? 'none' : '';
+  if (b) b.style.display = d === 'входящо' ? '' : 'none';
+}
+window.mzsDirToggle = mzsDirToggle;
+async function mzsDateChanged() {
+  const f = $('#mzsF [name=no]');
+  if (!f || f.dataset.auto !== '1') return;
+  const y = yr(($('#mzsF [name=date]') || {}).value || today());
+  if (y === f.dataset.year) return;
+  const n = await call(window.api.mzs.nextNo(y));
+  // Междувременно saveMzs() може вече да го е пресметнал — второ съобщение не трябва.
+  if (n == null || f.dataset.year === y) return;
+  f.value = n; f.dataset.year = y; f.dataset.proposed = String(n);
+  toast('Номерът е сменен на ' + n + '/' + y + ' — следващият свободен за годината на датата.', 'ok');
+}
+window.mzsDateChanged = mzsDateChanged;
 async function mzsForm(m) {
   const y = yr();
   const no = m ? m.no : await call(window.api.mzs.nextNo(y));
   const v = m || { no, date: today(), direction: 'изходящо', status: 'заявено' };
+  const dates = [['изпратено', v.date_sent], ['получено', v.date_received], ['върнато', v.date_returned]]
+    .filter(x => x[1]).map(x => x[0] + ' на ' + bg(x[1]));
   modal(m ? 'Заявка № ' + v.no : 'Нова заявка за МЗС', `
     <form id="mzsF" onsubmit="return false">
       <div class="grid g3">
         ${fld('№', 'no', { val: v.no, req: 1 })}
-        ${fld('Дата', 'date', { val: v.date, type: 'date', req: 1 })}
-        ${fld('Посока', 'direction', { type: 'select', opts: ['изходящо', 'входящо'], val: v.direction })}
+        ${fld('Дата', 'date', { val: v.date, type: 'date', req: 1, onchange: m ? '' : 'mzsDateChanged()' })}
+        ${fld('Посока', 'direction', { type: 'select', opts: ['изходящо', 'входящо'], val: v.direction, allowEmpty: false, onchange: 'mzsDirToggle()' })}
       </div>
       ${fld('Библиотека партньор', 'partner', { val: v.partner || '', req: 1 })}
       <div class="grid g2">
@@ -85,15 +153,30 @@ async function mzsForm(m) {
       <div class="grid g3">
         ${fld('ISBN/ISSN', 'isbn', { val: v.isbn || '' })}
         ${fld('Заявител (читател)', 'requester', { val: v.requester || '' })}
-        ${fld('Статус', 'status', { type: 'select', opts: MZS_STATUS, val: v.status })}
+        ${fld('Статус', 'status', { type: 'select', opts: mzsStatusOpts(v), val: v.status, allowEmpty: false })}
       </div>
-      ${fld('Срок за връщане', 'due_date', { val: v.due_date || '', type: 'date' })}
+      <div class="grid g2">
+        <div id="mzsReaderBox">${fld('Наш читател (карта №)', 'reader_card', { val: v.reader_card || '',
+          hint: 'по желание — получената книга се дава на него по заявката, без вписване във фонда' })}</div>
+        <div id="mzsBookBox">${fld('Наш документ (инв. № / баркод)', 'book_code', { val: v.book_inv != null ? v.book_inv : '',
+          hint: 'задължително при „изпратено“ — докато е при партньора, не се заема и е „зает“ онлайн' })}</div>
+        ${fld('Срок за връщане', 'due_date', { val: v.due_date || '', type: 'date',
+          hint: 'задължителен при „получено“ на изходяща заявка — по него се следи просрочието' })}
+      </div>
+      ${dates.length ? `<div class="hint">Отбелязано: ${esc(dates.join(' · '))}. Датите се попълват сами при смяна на състоянието.</div>` : ''}
       ${fld('Забележка', 'note', { val: v.note || '', type: 'textarea', rows: 2 })}
     </form>`,
     `${m ? `<button class="btn l dgr" onclick="delMzs(${m.id})">Изтрий</button>
      <button class="btn l" onclick="printMzsDoc(${m.id})">Печат / PDF</button>` : ''}
      <button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveMzs(${m ? m.id : 'null'})">Запиши</button>`);
+  // Сивите състояния не се избират с мишката — правилото остава в обработчика.
+  for (const o of document.querySelectorAll('#mzsF [name=status] option')) {
+    if (/не следва от/.test(o.textContent)) /** @type {HTMLOptionElement} */ (o).disabled = true;
+  }
+  const nf = $('#mzsF [name=no]');
+  if (nf && !m) { nf.dataset.auto = '1'; nf.dataset.year = y; nf.dataset.proposed = String(no); }
+  mzsDirToggle();
 }
 window.mzsForm = mzsForm;
 function printMzsDoc(id) {
@@ -121,8 +204,12 @@ function printMzsDoc(id) {
          <b>Заявяваща библиотека:</b> ${esc(m.partner)}<br>`
       : `<b>До:</b> ${esc(m.partner)}<br>`}
     <b>${inc ? 'Заявен документ' : 'Търсен документ'}:</b> ${esc([m.author, m.title].filter(Boolean).join('. '))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
-    ${m.requester ? `<b>${inc ? 'Читател при заявяващата библиотека' : 'Заявител (читател)'}:</b> ` + esc(m.requester) + '<br>' : ''}
+    ${m.requester || m.reader_name ? `<b>${inc ? 'Читател при заявяващата библиотека' : 'Заявител (читател)'}:</b> `
+      + esc(m.requester || (m.reader_name + (m.reader_card ? ' (карта ' + m.reader_card + ')' : ''))) + '<br>' : ''}
+    ${m.book_inv != null ? `<b>Наш документ:</b> инв. № ${esc(m.book_inv)}<br>` : ''}
     <b>Статус:</b> ${esc(m.status)}${m.due_date ? ' · срок за връщане ' + bg(m.due_date) : ''}
+    ${[['изпратено', m.date_sent], ['получено', m.date_received], ['върнато', m.date_returned]].filter(x => x[1])
+      .map(x => ' · ' + x[0] + ' на ' + bg(x[1])).join('')}
     ${m.note ? '<br><b>Забележка:</b> ' + esc(m.note) : ''}</div>
     ${ssig(inc
       ? ['Предал документа: ' + esc(s.librarian || '…………………'), 'Получил: …………………']
@@ -133,6 +220,19 @@ async function saveMzs(id) {
   const missing = firstMissingRequired('#mzsF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#mzsF'); d.id = id;
+  /* К8: предложеният № е за годината, с която формата е отворена. Ако датата е
+     сменена към друга година, а onchange не е стигнал (бързо „Запиши“), номерът
+     се пресмята тук — стига библиотекарката да не го е писала на ръка. */
+  const nf = $('#mzsF [name=no]');
+  if (!id && nf && nf.dataset.auto === '1' && d.date && yr(d.date) !== nf.dataset.year
+    && String(d.no) === nf.dataset.proposed) {
+    const n = await call(window.api.mzs.nextNo(yr(d.date)));
+    if (n == null) return;
+    d.no = n; nf.value = n; nf.dataset.year = yr(d.date); nf.dataset.proposed = String(n);
+    toast('Номерът е сменен на ' + n + '/' + yr(d.date) + ' — следващият свободен за годината на датата.', 'ok');
+  }
+  // Полетата за връзка се пращат само за своята посока — другото остава празно.
+  if (d.direction === 'входящо') d.reader_card = ''; else if (d.direction) d.book_code = '';
   // Затваря се само при успех (v2.2.0) — при отказан запис попълненото остава.
   const ok = id ? await call(window.api.mzs.update(d), 'Записано.')
     : await call(window.api.mzs.create(d), 'Записано.');

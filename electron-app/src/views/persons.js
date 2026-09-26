@@ -37,7 +37,10 @@ let PRS_PAINTED = 0;
 function personsRowsHtml(rows) {
   return rows.map(p => `<div class="prsCard" tabindex="0" role="button" aria-label="${esc(p.name)}"
         onclick="personView(${p.id})" onkeydown="cardActivate(event, () => personView(${p.id}))">
-        <div class="prsPhoto">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<span>без снимка</span>'}</div>
+        ${/* v2.4.69 (Л7): списъкът носи само признака „има снимка“ — самата снимка
+              (до 1 МБ) идва с persons:get при отварянето на картона. Дотук тук
+              стоеше <img> с цялата снимка за всяка карта, при всяко търсене. */''}
+        <div class="prsPhoto">${p.has_photo ? '<span aria-label="има снимка">📷<br>има снимка</span>' : '<span>без снимка</span>'}</div>
         <div class="prsBody">
           <div class="prsName">${esc(p.name)}</div>
           <div class="prsDates">${esc(personDates(p))}</div>
@@ -95,9 +98,15 @@ async function refreshPersons() {
 window.refreshPersons = refreshPersons;
 function prsCancelSearch() { clearTimeout(window._prsT); window._prsT = null; }
 window.prsCancelSearch = prsCancelSearch;
+/* Датите на персоналията са точна дата (ISO) ИЛИ година като текст („1890“,
+   „ок. 1890“ — v2.4.69, Л9). bg() се ползва само за точната дата. */
+function personDateText(v) {
+  const s = String(v || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? bg(s) : s;
+}
 function personDates(p) {
-  const b = p.birth_date ? bg(p.birth_date) : '';
-  const d = p.death_date ? bg(p.death_date) : '';
+  const b = p.birth_date ? personDateText(p.birth_date) : '';
+  const d = p.death_date ? personDateText(p.death_date) : '';
   if (b && d) return b + ' – ' + d;
   if (b) return 'р. ' + b;
   if (d) return 'п. ' + d;
@@ -153,16 +162,20 @@ async function personForm(id) {
   const p = id ? await call(window.api.persons.get(id)) : null;
   const v = p || {};
   modal(id ? 'Редакция — ' + (v.name || '') : 'Нова персоналия', `
-    <form id="prsF" onsubmit="return false">
+    <form id="prsF" onsubmit="return false" data-prev-name="${esc(v.name || '')}">
     <fieldset><legend>Самоличност</legend>
       <div class="grid g2">
         ${fld('Име (фамилия, име, бащино)', 'name', { val: v.name || '', req: 1, ph: 'Иванов, Петър Георгиев' })}
         ${fld('Други изписвания и псевдоними', 'alt_names', { val: v.alt_names || '' })}
       </div>
       <div class="grid g4">
-        ${fld('Дата на раждане', 'birth_date', { val: v.birth_date || '', type: 'date' })}
+        ${/* ТЕКСТОВО ПОЛЕ, НЕ type="date" (v2.4.69, Л9): за местния деец отпреди
+              век често е известна само годината („1890“) или приблизително
+              („ок. 1890“) — както в летописа. Полето за дата не приема това, а
+              обработчикът вече го приема (handlers/persons.js, personDate). */''}
+        ${fld('Дата на раждане', 'birth_date', { val: personDateText(v.birth_date), hint: '12.03.1890, 1890 или „ок. 1890“' })}
         ${fld('Място на раждане', 'birth_place', { val: v.birth_place || '' })}
-        ${fld('Дата на смъртта', 'death_date', { val: v.death_date || '', type: 'date' })}
+        ${fld('Дата на смъртта', 'death_date', { val: personDateText(v.death_date), hint: 'точна дата или само година' })}
         ${fld('Място на смъртта', 'death_place', { val: v.death_place || '' })}
       </div>
       ${fld('Дейност (накратко)', 'activity', { val: v.activity || '', hint: 'напр. „учител, читалищен деец, краевед“' })}
@@ -184,6 +197,31 @@ async function savePerson(id) {
   const d = formData('#prsF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
   d.id = id;
+  /* ВЕЧЕ ВПИСАНО ИМЕ — И ПРИ ПРЕИМЕНУВАНЕ, И С ДРУГО ИЗПИСВАНЕ (v2.4.69, Л12).
+     Дотук се питаше само при НОВ картон и само при буквално същото име (малки
+     букви): „Вълчев,  Стефан“ (двоен интервал), „Вълчев Стефан“ (без запетая) и
+     редакцията, която преименува заварен картон в „Вълчев, Стефан“, минаваха
+     без дума. Сега обработчикът сравнява КЛЮЧА на името (persons:list със
+     { sameAs, exceptId }) и връща годините и дейността на заварените картони —
+     по тях библиотекарката разпознава дали е същият човек или съименник. */
+  const prevName = id ? (($('#prsF') && $('#prsF').dataset.prevName) || '') : '';
+  const nameChanged = !id || prevName.trim().toLowerCase() !== d.name.trim().toLowerCase();
+  if (nameChanged) {
+    const exact = (await call(window.api.persons.list({ sameAs: d.name.trim(), exceptId: id || null }))) || [];
+    if (exact.length) {
+      const who = exact.map(x => '• ' + x.name + (personDates(x) ? ', ' + personDates(x) : '')
+        + (x.activity ? ', ' + x.activity : '') + ' (картон № ' + x.id + ')').join('\n');
+      const goOn = await askConfirm('„' + exact[0].name + '“ вече е вписан'
+        + (exact.length > 1 ? ' — в картотеката има ' + exact.length + ' картона с това име:' : ' в картотеката:')
+        + '\n' + who
+        + '\n\nДва картона за един човек разделят сведенията и връзките му и нито една справка за него не излиза '
+        + 'пълна. Ако това е СЪЩИЯТ човек, откажете и допишете сведенията в съществуващия картон '
+        + '(„Персоналии“ → търсене по името).\n\n'
+        + 'Ако е друг човек със същото име (съименник), продължете — картонът ще бъде '
+        + (id ? 'преименуван' : 'вписан') + ', а в дневника ще остане бележка, че имената съвпадат.');
+      if (!goOn) return;
+    }
+  }
   // Затваря се само при успех (v2.2.0) — иначе отказаният запис отнасяше със
   // себе си и биографията, която библиотекарят току-що е преписал от хартия.
   if (id) {
@@ -205,18 +243,8 @@ async function savePerson(id) {
      bglower(), тоест знае кирилицата, и нов канал не е нужен. Търсенето връща и
      съвпадения по псевдоним, дейност и биография, затова съвпадението по САМОТО
      ИМЕ се сверява още веднъж тук. */
-  const sameName = (await call(window.api.persons.list(d.name.trim()))) || [];
-  const exact = sameName.filter(x => String(x.name || '').trim().toLowerCase() === d.name.trim().toLowerCase());
-  if (exact.length) {
-    const goOn = await askConfirm('„' + exact[0].name + '“ вече е вписан'
-      + (exact.length > 1 ? ' — в картотеката има ' + exact.length + ' картона с това име.' : ' в картотеката.')
-      + '\n\nДва картона за един човек разделят сведенията и връзките му и нито една справка за него не излиза '
-      + 'пълна. Ако това е СЪЩИЯТ човек, откажете и допишете сведенията в съществуващия картон '
-      + '(„Персоналии“ → търсене по името).\n\n'
-      + 'Ако е друг човек със същото име (съименник), продължете — картонът ще бъде вписан, а в дневника '
-      + 'ще остане бележка, че имената съвпадат.');
-    if (!goOn) return;
-  }
+  /* (Питането за вече вписано име е по-горе — общо за нов картон и за
+     преименуване, v2.4.69, Л12.) */
   const newId = await call(window.api.persons.create(d), 'Персоналията е добавена.');
   if (newId === null) return;
   closeModal(); await renderPersons(); markSaved();
@@ -225,9 +253,14 @@ async function savePerson(id) {
 window.savePerson = savePerson;
 
 async function personView(id) {
-  const [p, links] = await Promise.all([
+  /* Обратните връзки — КОЙ СОЧИ КЪМ ТОЗИ ЧОВЕК (v2.4.69, Л6): летописът, който
+     го посочва, и други персоналии. Дотук каналът links:backlinks съществуваше,
+     но не го викаше нито един екран, и картонът казваше „Няма свързани
+     материали“, докато летописът сочи към него. */
+  const [p, links, backs] = await Promise.all([
     call(window.api.persons.get(id)),
-    call(window.api.links.list({ fromKind: 'персона', fromId: id }))
+    call(window.api.links.list({ fromKind: 'персона', fromId: id })),
+    call(window.api.links.backlinks({ toKind: 'персона', toId: id }))
   ]);
   if (!p) return;
   window._LINK_CTX = { kind: 'персона', id };
@@ -236,7 +269,7 @@ async function personView(id) {
       <div class="prsViewPhoto">
         ${p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<div class="logoEmpty">няма<br>снимка</div>'}
         <div class="toolbar" style="margin-top:8px">
-          <button class="btn sm" onclick="localPhotoChoose('persons', ${id})">${p.photo ? 'Смени…' : 'Снимка…'}</button>
+          <button class="btn sm" onclick="localPhotoChoose('persons', ${id}, ${p.photo ? 'true' : 'false'})">${p.photo ? 'Смени…' : 'Снимка…'}</button>
           ${p.photo ? `<button class="btn sm dgr" onclick="localPhotoClear('persons', ${id})">Махни</button>` : ''}
         </div>
       </div>
@@ -249,7 +282,8 @@ async function personView(id) {
         ${p.sources ? `<div class="hint"><b>Източници:</b> ${esc(p.sources)}</div>` : ''}
       </div>
     </div>
-    ${linksPanelHtml('персона', id, links || [])}`,
+    ${linksPanelHtml('персона', id, links || [])}
+    ${backlinksPanelHtml(backs || [])}`,
     `<button class="btn" onclick="closeModal();linksRefreshListIfChanged()">Затвори</button>
      <button class="btn" onclick="closeModal();personForm(${id})">Редакция</button>
      <button class="btn dgr" onclick="personDelete(${id})">Изтрий</button>`);
@@ -257,7 +291,8 @@ async function personView(id) {
 window.personView = personView;
 async function personDelete(id) {
   if (!await askConfirm('Изтриване на персоналията и всичките ѝ връзки?')) return;
-  await call(window.api.persons.delete(id), 'Персоналията е изтрита.');
+  // Отказът на обработчика (вече изтрита — Л13) оставя картона отворен с грешката.
+  if (await call(window.api.persons.delete(id), 'Персоналията е изтрита.') === null) return;
   closeModal(); renderPersons();
 }
 window.personDelete = personDelete;

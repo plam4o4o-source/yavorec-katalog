@@ -192,7 +192,14 @@ function circDom(extra) {
     'account.get': { balance: 0 },
     'circRules.effective': { loan_days: 30, max_books: 5, extensions_count: 2 },
     'loans.byReader': [],
-    'holds.list': []
+    'holds.list': [],
+    /* v2.4.69 (кръг 44, Г1 и Г4): преди заемането гишето проверява дали
+       сканираният код не е читателска карта (readers.byCard) и в какво
+       състояние е документът (books.byBarcode). „Безопасният“ Proxy по
+       подразбиране е truthy и би изглеждал и като карта, и като документ —
+       тук кодът не е карта, а документът е обикновен, „наличен“. */
+    'readers.byCard': null,
+    'books.byBarcode': null
   }, extra || {}));
 }
 async function openCirc(dom, readerId) {

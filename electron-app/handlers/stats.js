@@ -86,6 +86,16 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          date_in (иначе документът виси зает завинаги), но книгата никога не се е
          върнала. Без този филтър показателят „спазени срокове“ броеше като
          върната в срок книга, която библиотеката вече няма. */
+      /* НАМЕРЕНАТА КНИГА (loans:found) — БРОИ СЕ, И ТОВА Е НАРОЧНО (v2.4.69, Г11).
+         От v2.4.69 „Документът се намери“ пише date_in = деня на намирането и
+         събитие „връщане“ със същата дата (handlers/loans.js), а белегът lost се
+         сваля. Така заемането влиза тук ВЕДНЪЖ — в годината, в която документът
+         наистина се е върнал във фонда, — и почти винаги като „със забава“:
+         документът е бил вън от библиотеката след срока си, докато се намери.
+         Това е истината за показателя „спазени срокове“, затова отделен филтър
+         няма. Грешното беше друго и е поправено в loans.js: дотук date_in
+         оставаше датата на ИЗГУБВАНЕТО и връщането се броеше в чужда година,
+         без нито едно събитие „връщане“ в регистъра. */
       const returned = db.prepare(`
         SELECT SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0) = 0
                          AND date_due IS NOT NULL AND date_in <= date_due THEN 1 ELSE 0 END) AS onTime,
@@ -191,7 +201,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         ORDER BY reader_id, date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
       `).all();
       let finesCollected = 0;
-      /* „забава“ — отделен вид от v2.4.68 (преди се пишеше като „обезщетение“);
+      /* „забава“ — отделен вид от v2.4.69 (преди се пишеше като „обезщетение“);
          за справката „Събрани обезщетения и забави“ и трите са едно и също:
          пари, събрани по чл. 43. */
       const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ' || t === 'забава';
@@ -323,7 +333,10 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          № 2 брои реално инвентираните книги. Двете законно се разминават, докато
          партида не е инвентирана докрай, и двете се прилагат към годишния отчет —
          затова разликата трябва да е написана, а не да изглежда като грешка. */
-      hint: 'По начин на придобиване/причина за отчисляване, по ДЕКЛАРИРАНОТО в партидите (както Част № 1 на КДБФ). Част № 2 брои реално инвентираните — при неинвентирана докрай партида двете законно се различават.' },
+      /* v2.4.69 (Л4): подсказката твърдеше „както Част № 1 на КДБФ“, а стойността
+         тук беше сумата ПО ДОКУМЕНТА, докато Част № 1 печата ВПИСАНАТА стойност
+         на инвентираните документи — виж бележката при fund_movement по-долу. */
+      hint: 'По начин на придобиване/причина за отчисляване. За постъпленията се показват две стойности: по първичния документ (фактура, акт за дарение) и вписаната в инвентарната книга стойност на инвентираните документи — втората е числото „ОБЩО“ в КДБФ Част № 1. Двете законно се различават при отстъпка по фактурата или неинвентирана докрай партида.' },
     { id: 'mzs_annual', title: 'Междубиблиотечно заемане (МЗС) — обобщение', needsYear: true,
       hint: 'Брой заявки по посока и състояние през годината.' },
     { id: 'fees_income', title: 'Приходи от такси и обезщетения', needsYear: true,
@@ -446,13 +459,36 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
            се отпечатваше като „30 бр., 0,00 лв.“ — в справка, чиято подсказка твърди,
            че чете „както Част № 1 на КДБФ“, а Част № 1 печата точно вписаната
            стойност (registered_value в handlers/kdbf.js), не a.sum. */
+        /* ДВЕ СТОЙНОСТИ, НАЗОВАНИ, ВМЕСТО ЕДНА, КОЯТО „ПРИЛИЧА“ НА КДБФ (v2.4.69, Л4).
+           =====================================================================
+           ДОТУК `val` беше сумата ПО ДОКУМЕНТА (acquisitions.sum), а подсказката
+           на справката твърдеше „както Част № 1 на КДБФ“. Част № 1 обаче печата
+           в колона „Стойност“ ВПИСАНАТА стойност на инвентираните документи
+           (registered_value в handlers/kdbf.js — сборът от цените им в
+           инвентарната книга). Измерено (тестер № 6, s5-svarka.js): фактура за
+           100 € с три книги по 40 € — справката 100,00 €, Част № 1 — 120,00 €;
+           във фикстурата за 2025 г. — 3 028,16 € срещу 6 417,43 €. Двата листа
+           се прилагат към един годишен отчет и проверяващият ги слага един до
+           друг.
+           И двете числа са законни: фактурата е първичният документ (с отстъпка,
+           с пощенски разходи), а инвентарната книга по чл. 16 води цената на
+           всеки документ. Затова справката вече връща и ДВЕТЕ, с имена:
+           `val` — по документа (както досега, падане към вписаната, ако
+           документът не обявява стойност — одит v2.4.24), и `regN`/`regV` —
+           инвентираните бройки и вписаната им стойност, изчислени ДОСЛОВНО
+           като в kdbf:report (същото количество от inventory, същата цена), тоест
+           сборът им е числото „ОБЩО“ на Част № 1. Екранът и разпечатката ги
+           показват една до друга и казват разликата с думи. */
+        const REG_QTY = "COALESCE((SELECT inv.quantity FROM inventory inv WHERE inv.book_id = b.id), 1)";
         const acquired = db.prepare(`
           SELECT COALESCE(a.how,'—') AS k, COUNT(*) AS n, COALESCE(SUM(a.total_count),0) AS cnt,
                  COALESCE(SUM(COALESCE(a.sum, (
                    SELECT COALESCE(SUM(b.price * COALESCE(i.quantity, 1)), 0)
                    FROM books b LEFT JOIN inventory i ON i.book_id = b.id
                    WHERE b.acquisition_id = a.id
-                 ))), 0) AS val
+                 ))), 0) AS val,
+                 COALESCE(SUM((SELECT COALESCE(SUM(${REG_QTY}), 0) FROM books b WHERE b.acquisition_id = a.id)), 0) AS regN,
+                 COALESCE(SUM((SELECT COALESCE(SUM(b.price * ${REG_QTY}), 0) FROM books b WHERE b.acquisition_id = a.id)), 0) AS regV
           FROM acquisitions a WHERE a.year = ? GROUP BY k ORDER BY cnt DESC
         `).all(y);
         // Бройки, за да се събира до deaccessionedCount в stats:report — двете
@@ -469,6 +505,10 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           acquired: acquired.map(r => [r.k, r.cnt, r.val]),
           acquiredTotal: acquired.reduce((s, r) => s + r.cnt, 0),
           acquiredValue: acquired.reduce((s, r) => s + r.val, 0),
+          // = „ОБЩО“ на КДБФ Част № 1 (бройки „Инвентирани“ и „Стойност“) — Л4, v2.4.69.
+          acquiredRegistered: acquired.map(r => [r.k, r.regN, r.regV]),
+          acquiredRegisteredCount: acquired.reduce((s, r) => s + r.regN, 0),
+          acquiredRegisteredValue: FUND.toCents(acquired.reduce((s, r) => s + r.regV, 0)),
           deaccessioned: deaccessioned.map(r => [r.k, r.cnt, r.val]),
           deaccessionedTotal: deaccessioned.reduce((s, r) => s + r.cnt, 0),
           deaccessionedValue: deaccessioned.reduce((s, r) => s + r.val, 0)

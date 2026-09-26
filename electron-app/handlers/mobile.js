@@ -3,9 +3,17 @@
 // на телефона и ползва камерата като баркод четец. Списъкът се пренася
 // обратно като текст или файл и се внася в отворена сесия за инвентаризация.
 const { resolveScannedBook } = require('../security-utils');
+/* Изгубен документ, намерен при проверката — същото предупреждение като при
+   сканиране на компютъра (v2.4.69, находка О3; виж lostCaseOf там). */
+const { lostCaseOf } = require('./inventory-sessions');
+const { BOOK_STATUS_LOST } = require('../db/enum-triggers');
 
 module.exports = function registerMobileHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, normalizeScanCode } = deps;
+  /* Вносът връща „липсващ“ в „наличен“ — онлайн каталогът трябва да го разбере
+     (v2.4.69, находка К2; виж същата бележка в handlers/inventory-sessions.js).
+     Незадължителна зависимост: модулът се зарежда и самостоятелно. */
+  const scheduleCatalogWrite = deps.scheduleCatalogWrite || (() => {});
 
   /* Името на библиотеката НЕ се изписва в самата страница (по искане на
      библиотеката, v2.4.46) — нито в лентата, нито в заглавието на раздела.
@@ -51,8 +59,39 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       // normalizeScanCode() (v1.70.1) — предпазна мярка и тук, за случаите, в
       // които страницата за телефонно сканиране позволи и ръчно въвеждане на
       // номер (виж books:byBarcode в handlers/books.js за пълното обяснение).
-      const list = [...new Set((codes || []).map(c => normalizeScanCode(c)).filter(Boolean))];
-      if (!list.length) throw new Error('Списъкът е празен.');
+      /* ЕДИН РЕД = ЕДИН КОД (v2.4.69, находка О2).
+         =================================================================
+         КАКВО СТАВАШЕ. Екранът делеше поставения текст по интервали и запетаи
+         (split(/[\s,;]+/)). Телефонът пази всеки номер като ОТДЕЛЕН ред, а в
+         ръчното му поле човек пише „6 102“ — с разделител за хилядите. Вносът
+         правеше от него „6“ и „102“: два други документа влизаха като
+         проверени, а истинският инв. № 6102 оставаше несканиран и след пълната
+         проверка — „липсващ“ в протокола и оттам в проекта за акт по чл. 30,
+         т. 6. Броевете случайно се събираха и никой не забелязваше.
+         ЗАЩО Е ГРЕШНО. Протоколът по чл. 40 удостоверява, че КОНКРЕТЕН документ
+         е държан в ръка. Един сгрешен ред тук отчислява книга, която е на рафта.
+         ПРАВИЛОТО ОТСЕГА — ТУК, В ОБРАБОТЧИКА, А НЕ САМО В ЕКРАНА. Всеки елемент
+         на `codes` е един код; екранът пък дели само по нов ред. Код с интервал,
+         запетая или точка и запетая ВЪТРЕ не се гадае (дали „6 102“ е 6102 или
+         два номера, не може да се знае) — връща се поименно в `malformed`, с
+         причина, за да се въведе на ръка. Празните редове и редовете, започващи
+         с „#“ (заглавният ред на списъка от телефона — датата на започване), не
+         са кодове и се подминават. */
+      const res = { added: 0, duplicates: 0, unknown: [], skipped: [], malformed: [], lost: [] };
+      const cleaned = [];
+      for (const raw of (codes || [])) {
+        const t = String(raw == null ? '' : raw).trim();
+        if (!t || t.startsWith('#')) continue;
+        if (/[\s,;]/.test(t)) {
+          res.malformed.push({ code: t, reason: 'има интервал или запетая вътре — един ред е един номер; '
+            + 'програмата не гадае дали това е един номер, или няколко' });
+          continue;
+        }
+        const c = normalizeScanCode(t);
+        if (c) cleaned.push(c);
+      }
+      const list = [...new Set(cleaned)];
+      if (!list.length && !res.malformed.length) throw new Error('Списъкът е празен.');
       /* Одит v2.4.24: `barcode = ? OR inv_number = CAST(? AS INTEGER)` с .get()
          връщаше при двусмислен код просто реда с по-малък rowid — в протокол за
          инвентаризация това значи „проверен" за чужд документ, а истинският остава
@@ -70,7 +109,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
          inventorySessions:start) без следа откъде. Пропуснатите се връщат
          поименно, а не се подминават тихо — библиотекарят трябва да види кои
          номера не са влезли в протокола и защо. */
-      const res = { added: 0, duplicates: 0, unknown: [], skipped: [] };
+      let restored = 0;
       db.transaction(() => {
         for (const code of list) {
           let b;
@@ -89,13 +128,27 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
           addScan.run(sessionId, b.id);
           addCheck.run(b.id, s.date);
           db.prepare("UPDATE books SET datelastseen = datetime('now') WHERE id = ?").run(b.id);
-          if (b.status === 'липсващ') db.prepare("UPDATE books SET status='наличен', status_date=date('now', 'localtime') WHERE id=?").run(b.id);
+          if (b.status === 'липсващ') {
+            db.prepare("UPDATE books SET status='наличен', status_date=date('now', 'localtime') WHERE id=?").run(b.id);
+            restored++;
+          }
+          /* Изгубен от читател, а е на рафта — брои се като проверен, но се
+             връща поименно с читателя и с действието (находка О3). */
+          if (b.status === BOOK_STATUS_LOST) {
+            res.lost.push(Object.assign({ inv_number: b.inv_number, title: b.title }, lostCaseOf(db, b)));
+          }
           res.added++;
         }
       }).immediate();
+      if (restored) scheduleCatalogWrite();
       logAudit('Инвентаризация', `въведени ${res.added} сканирания от телефон` +
         (res.unknown.length ? `, ${res.unknown.length} непознати` : '') +
-        (res.skipped.length ? `, ${res.skipped.length} извън обхвата на проверката` : ''));
+        (res.skipped.length ? `, ${res.skipped.length} извън обхвата на проверката` : '') +
+        (res.malformed.length ? `, ${res.malformed.length} реда с интервал/запетая вътре не са внесени (`
+          + res.malformed.map(m => '„' + m.code + '“').join(', ') + ')' : '') +
+        (res.lost.length ? `; ${res.lost.length === 1 ? 'намерен е 1 документ, отбелязан като изгубен'
+          : 'намерени са ' + res.lost.length + ' документа, отбелязани като изгубени'} от читател (`
+          + res.lost.map(l => 'инв. № ' + l.inv_number).join(', ') + ') — състоянието им остава „изгубен“ до „Документът се намери“' : ''));
       return res;
     })
   );

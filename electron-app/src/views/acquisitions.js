@@ -149,6 +149,11 @@ function acqDocTypeChanged(sel) {
 }
 window.acqDocTypeChanged = acqDocTypeChanged;
 async function saveAcq(id) {
+  const лоша = badMoneyField('#acqF'); // П3 (v2.4.69) — виж saveBook в books.js
+  if (лоша) {
+    return toast(лоша.label + ': „' + лоша.value + '“ не е число' + (лоша.leva ? ' (сума в лева)' : '')
+      + ' — партидата НЕ е записана. Напишете сумата с цифри (напр. 7,20) или оставете полето празно.', 'err');
+  }
   const missing = firstMissingRequired('#acqF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
   const d = formData('#acqF');
@@ -198,7 +203,36 @@ function acqMark(i) { return acqQty(i) !== 1 ? acqQty(i) + ' × ' : ''; }
    заместващ първичен счетоводен документ, го създаваше сама.
    Закръглянето е същото, което ползва и handlers/account.js (toCents). */
 const cents = (n) => Math.round((Number(n) || 0) * 100);
-function acqDiffers(declared, items) { return cents(declared) !== cents(acqValue(items)); }
+/* ДОПУСК ОТ ПРЕВРЪЩАНЕТО ЛВ → € (v2.4.69, кръг 44, находка П5).
+   (а) КАКВО СТАВАШЕ ДОТУК. Фактура в лева: партида 7,20 лв. и три книги по
+       2,40 лв. Всяка сума се превръща и закръглява до евроцент ПООТДЕЛНО —
+       7,20 лв. → 3,68 €, а 2,40 лв. → 1,23 € (×3 = 3,69 €). Актът за дарение
+       печаташе „обявената стойност (3,68 €) се различава от сбора (3,69 €)“ —
+       тоест сигнализираше разминаване там, където документи не липсват и
+       цените са преписани вярно (тестер № 1, сценарий 3).
+   (б) ЗАЩО Е ГРЕШНО. Подписаният акт/протокол отива в счетоводството; изречение
+       „се различава“ се чете като липсващ документ или сгрешена цена и
+       тласка комисията да „поправя“ вярно вписани цени, за да изравни сбора.
+   (в) ЗАЩО ТОЧНО ТАКА. Всяко отделно превръщане носи грешка до половин
+       евроцент, тоест сборът от N превърнати цени може да се отклони от
+       превърнатата обща сума с до N × 0,005 €. В този допуск разликата е от
+       закръглянето и документът го КАЗВА с изречение (acqRoundingNote), а не
+       мълчи — сумите остават каквито са. Над допуска остава досегашното
+       „се различава“. Сравнението е в цели евроценти (виж по-горе). */
+function acqDiffCents(declared, items) { return cents(declared) - cents(acqValue(items)); }
+function acqRoundingOnly(declared, items) {
+  const d = Math.abs(acqDiffCents(declared, items));
+  return d > 0 && d * 2 <= acqCount(items);
+}
+function acqDiffers(declared, items) { return acqDiffCents(declared, items) !== 0 && !acqRoundingOnly(declared, items); }
+function acqRoundingNote(declared, items) {
+  if (declared == null || !acqRoundingOnly(declared, items)) return '';
+  const d = Math.abs(acqDiffCents(declared, items)) / 100;
+  return `<b>Относно стойността:</b> обявената стойност (${mny(declared)}) и сборът на изброените документи
+    (${mny(acqValue(items))}) се различават с ${d.toFixed(2)} € — разликата идва от превръщането лв. → € по
+    фиксирания курс 1,95583: всяка цена и обявената сума се превръщат и закръглят до евроцент поотделно
+    (до половин евроцент на документ). Документи не липсват и цените са вписани вярно.<br>`;
+}
 /* Обявената в първичния документ стойност, или null, ако документът не обявява
    такава. Одит v2.4.17: разпечатките четяха `a.sum || acqValue(a.items)` и
    печатаха ИЗЧИСЛЕНИЯ сбор под надписа „Обща стойност по документа“, без да го
@@ -220,12 +254,9 @@ function acqCommittee(a) {
   return names.length ? names.join(', ') : '…………………';
 }
 // Същите имена, но подредени за реда за подпис: „1. Иванов 2. Петров 3. …".
-function acqSigNames(a) {
-  const names = [a.committee1, a.committee2, a.committee3];
-  return names.some(Boolean)
-    ? names.map((n, i) => (i + 1) + '. ' + (n ? esc(n) : '…………')).join(' ')
-    : '1. ………… 2. ………… 3. …………';
-}
+/* acqSigNames() — премахната в v2.4.69: сглобяваше тримата членове на комисията в
+   един низ за ЕДНА линия за подпис. Подписите вече са всеки на своя линия —
+   commissionSig() в src/views/core.js (находка Е5). */
 /* Обявеният общ брой срещу изброените отдолу. Актът излиза подписан и отива в
    счетоводството; заглавието му казва „Общ брой документи: 50“, а таблицата под
    него изброява 3 — дотук без нито дума. */
@@ -294,8 +325,12 @@ async function openAcq(id) {
       ${acqLeftCard(a)}
     </div>
     ${acqOverNote(a)}
+    ${/* П6 (v2.4.69): частите на документа се пишат само ако ги има. Дотук партида
+          по чл. 3, ал. 2 излизаше „без документ — протокол на комисия № от “ —
+          висящи „№“ и „от“ без нищо след тях (същото вече е поправено в
+          списъка и в КДБФ). */''}
     <div class="hint" style="margin-bottom:10px">${esc(a.how || '')} · ${esc(a.from_source || '')} ·
-      ${esc(a.doc_type || '')} № ${esc(a.doc_no || '')} от ${bg(a.doc_date)}${a.note ? ' · ' + esc(a.note) : ''}<br>
+      ${[esc(a.doc_type || ''), a.doc_no ? '№ ' + esc(a.doc_no) : '', a.doc_date ? 'от ' + bg(a.doc_date) : ''].filter(Boolean).join(' ')}${a.note ? ' · ' + esc(a.note) : ''}<br>
       ${acqDeclared(a) != null ? 'Обявена стойност по документа: <b>' + mny(acqDeclared(a)) + '</b>'
         : 'Документът не обявява стойност — разпечатките сумират оценките на инвентираните документи.'}
       · Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || 'не е записана (стара партида) — актът се печата с празни редове за подпис'}</div>
@@ -305,7 +340,9 @@ async function openAcq(id) {
       </tbody></table></div>` : '<div class="hint">Все още няма инвентирани документи по тази партида.</div>'}`,
     `<button class="btn l dgr" onclick="delAcq(${id})">Изтрий</button>
      <button class="btn l" onclick="editAcq(${id})">Поправи</button>
-     ${a.how === 'дарение' ? `<button class="btn l" onclick="printDonationDoc(${id})">Акт за дарение / PDF</button>` : ''}
+     ${/* П6 (v2.4.69): акт за дарение само когато дарител ИМА — не и при партида без
+           документ, чийто документ е протоколът по чл. 3, ал. 2 (копчето под него). */''}
+     ${a.how === 'дарение' && !acqWithoutDoc(a.doc_type) ? `<button class="btn l" onclick="printDonationDoc(${id})">Акт за дарение / PDF</button>` : ''}
      ${a.doc_type && a.doc_type.indexOf('без документ') > -1 ? `<button class="btn l" onclick="printAcqNoDocDoc(${id})">Протокол за придобиване / PDF</button>` : ''}
      <button class="btn" onclick="closeModal();bookForm(null, ${id})">+ Инвентирай документ</button>
      <button class="btn pri" onclick="closeModal()">Затвори</button>`);
@@ -314,6 +351,16 @@ window.openAcq = openAcq;
 async function printDonationDoc(id) {
   const a = await call(window.api.acquisitions.get(id));
   if (!a) return;
+  /* П6 (v2.4.69): „Акт за дарение“ за партида без първичен документ излизаше с
+     „Дарител: намерени при подреждане“ и ред за подпис на дарителя — противно на
+     правилото, че при чл. 3, ал. 2 дарител в правния смисъл няма (виж
+     assertDonorAddress в handlers/acquisitions.js). Копчето вече не се предлага;
+     тук е преградата за всяко друго извикване. */
+  if (acqWithoutDoc(a.doc_type)) {
+    return toast('Партида № ' + a.no + '/' + a.year + ' е без първичен документ — за нея не се съставя акт за дарение '
+      + '(дарител в правния смисъл няма). Документът ѝ е протоколът по чл. 3, ал. 2: „Протокол за придобиване / PDF“ '
+      + 'в прозореца на партидата.', 'err');
+  }
   const s = SETTINGS_CACHE || {};
   const declared = acqDeclared(a);
   setPrintPage({ name: `Акт за дарение № ${a.no}-${a.year}`, landscape: false, margin: '14mm 12mm' });
@@ -333,7 +380,7 @@ async function printDonationDoc(id) {
         ? `&nbsp; <b>Обща стойност (изчислена по инвентираните документи — документът не обявява стойност):</b> ${mny(acqValue(a.items))}<br>`
         : `<br><b>Обща стойност:</b> не е обявена в документа и не може да бъде изчислена — по партидата още няма инвентирани документи.<br>`)}
     ${(declared != null && acqDiffers(declared, a.items)) ? `<b>Относно стойността:</b> обявената стойност (${mny(declared)}) се различава от сбора
-    на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
+    на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : acqRoundingNote(declared, a.items)}
     ${acqCountNote(a)}
     <b>Основание за придобиване:</b> дарение</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th>${
@@ -357,8 +404,9 @@ async function printDonationDoc(id) {
           има право да утвърди приемането на дарението, а длъжността вече е
           въведена веднъж в Настройки („Председател“, „Директор“, „Кмет“ —
           читалищата и общинските библиотеки я пишат различно). */''}
-    ${ssig(['Дарител: …………………', 'Комисия: ' + acqSigNames(a),
-      'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${/* Комисията — всеки член на своя линия (v2.4.69, Е5; виж commissionSig в core.js). */''}
+    ${commissionSig([a.committee1, a.committee2, a.committee3])}
+    ${ssig(['Дарител: …………………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printDonationDoc = printDonationDoc;
 async function printAcqNoDocDoc(id) {
@@ -381,7 +429,7 @@ async function printAcqNoDocDoc(id) {
         ? `&nbsp; <b>Обща стойност по описа (сбор на оценките на изброените документи):</b> ${mny(acqValue(a.items))}<br>`
         : `<br><b>Обща оценена стойност:</b> не е определена — по партидата още няма инвентирани документи.<br>`)}
     ${(declared != null && acqDiffers(declared, a.items)) ? `<b>Относно стойността:</b> обявената при завеждането стойност (${mny(declared)}) се различава от
-    сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : ''}
+    сбора на инвентираните до момента документи (${mny(acqValue(a.items))}).<br>` : acqRoundingNote(declared, a.items)}
     ${acqCountNote(a)}
     ${/* Трите пояснения по-горе носят РАЗЛИЧНИ етикети („Относно стойността“,
           „Относно броя“, „Относно описа“) именно защото могат да излязат
@@ -398,7 +446,8 @@ async function printAcqNoDocDoc(id) {
     : '<div class="pmeta">Все още няма инвентирани документи по тази партида.</div>'}
     <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,
     част № 1, като заместващ първичен документ.</div>
-    ${ssig(['Комисия: ' + acqSigNames(a), 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${commissionSig([a.committee1, a.committee2, a.committee3])}
+    ${ssig(['УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printAcqNoDocDoc = printAcqNoDocDoc;
 async function delAcq(id) {

@@ -120,8 +120,16 @@ test('флагът „налична" (av) отчита статуса, а не 
   assert.equal(byInv[23].av, 0, 'документ за реставрация не е на рафта');
 });
 
+/* v2.4.69 (кръг 44, К1): предпазителят спира и РЯЗКО СВИВАНЕ (под половината
+   от публикуваното), не само празен товар. Тестовете в този файл сменят фонда
+   изцяло между проверките (3 публикувани → 1), тоест точно случая, който
+   предпазителят вече спира нарочно. Затова тестовете, които проверяват нещо
+   друго, започват с ново публикуване — без стар katalog.json в папката. */
+function freshPublication() { fs.rmSync(katalogFile(), { force: true }); }
+
 test('заета книга е 0, а върнатата пак става 1 — броенето на бройки не е счупено', async () => {
   clearBooks();
+  freshPublication();
   const id = addBook({ inv_number: 31, title: 'Единствен екземпляр', quantity: 1 });
   const readerId = db.prepare("INSERT INTO readers (name, category) VALUES ('Читател', 'възрастен')").run().lastInsertRowid;
   const loanId = db.prepare('INSERT INTO loans (book_id, reader_id, date_out, date_due) VALUES (?,?,?,?)')
@@ -139,6 +147,7 @@ test('заета книга е 0, а върнатата пак става 1 — 
 
 test('празен фонд НЕ презаписва вече публикуван непразен katalog.json', async () => {
   clearBooks();
+  freshPublication();
   addBook({ inv_number: 41, title: 'Реален фонд' });
   assert.equal((await writeCatalog()).ok, true);
   const published = fs.readFileSync(katalogFile(), 'utf8');

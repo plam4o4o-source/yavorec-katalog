@@ -86,19 +86,62 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
     const n = parseFloat(v);
     return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
   };
+  /* ФОРМАТЪТ НА ЛИСТА — ЧЕТИРИ ЧИСЛА ВМЕСТО ДВЕ (v2.4.69, кръг 44, Е2).
+     (а) Дотук се пазеха само lbl_margin (едно поле за четирите страни) и lbl_gap
+         (едно разстояние за двете посоки). Готовите листове не са симетрични —
+         Avery L7160 е горе 15,1, ляво 7,2, хоризонтално 2,5, вертикално 0 — и с
+         две числа етикетите не падаха в клетките (кръг 44, mreja.py: 4×10 — 0 от
+         37 етикета в клетката си).
+     (б) Сега се пазят lbl_mt/lbl_ml/lbl_gx/lbl_gy (колоните са от миграция 18).
+         Стар извикващ, който праща само lbl_margin/lbl_gap, получава същото като
+         преди — четирите се попълват от тях. Старите две колони остават равни на
+         лявото поле и хоризонталното разстояние, за да вижда същото всеки, който
+         още ги чете.
+     (в) НИЩО МЪЛЧАЛИВО: стойност извън разумните граници се записва с най-близката
+         граница, но обработчикът връща коя е била подрязана ({ clamped: [...] }), а
+         екранът го казва. Дотук „63,5“ в числово поле ставаше 635 и тихо — 210. */
+  const LABEL_LIMITS = {
+    lbl_w: ['Ширина на етикета за фонда', 10, 210, 40], lbl_h: ['Височина на етикета за фонда', 8, 297, 30],
+    lbl_cols: ['Колони на листа', 1, 8, 3],
+    lbl_mt: ['Поле отгоре', 0, 60, 8], lbl_ml: ['Поле отляво', 0, 60, 8],
+    lbl_gx: ['Разстояние хоризонтално', 0, 30, 3], lbl_gy: ['Разстояние вертикално', 0, 30, 3],
+    sig_w: ['Ширина на сигнатурния етикет', 10, 100, 25], sig_h: ['Височина на сигнатурния етикет', 10, 120, 35],
+    card_w: ['Ширина на картата', 40, 210, 90], card_h: ['Височина на картата', 30, 297, 60]
+  };
   ipcMain.handle('settings:updateLabelFormat', (e, o) =>
     run(() => {
-      o = o || {};
-      getDb().prepare(`UPDATE settings SET lbl_mode=?, lbl_w=?, lbl_h=?, lbl_cols=?, lbl_gap=?, lbl_margin=?,
+      o = Object.assign({}, o || {});
+      const has = (k) => o[k] !== undefined && o[k] !== null && String(o[k]).trim() !== '';
+      // Стар извикващ (две числа) → четирите нови от тях.
+      if (!has('lbl_mt') && has('lbl_margin')) o.lbl_mt = o.lbl_margin;
+      if (!has('lbl_ml') && has('lbl_margin')) o.lbl_ml = o.lbl_margin;
+      if (!has('lbl_gx') && has('lbl_gap')) o.lbl_gx = o.lbl_gap;
+      if (!has('lbl_gy') && has('lbl_gap')) o.lbl_gy = o.lbl_gap;
+      const clamped = [];
+      const v = {};
+      for (const [k, [label, lo, hi, def]] of Object.entries(LABEL_LIMITS)) {
+        v[k] = clampNum(o[k], lo, hi, def);
+        const given = parseFloat(o[k]);
+        if (Number.isFinite(given) && given !== v[k]) clamped.push({ field: k, label, given, saved: v[k] });
+      }
+      const db = getDb();
+      db.prepare(`UPDATE settings SET lbl_mode=?, lbl_w=?, lbl_h=?, lbl_cols=?, lbl_gap=?, lbl_margin=?,
                   lbl_border=?, sig_w=?, sig_h=?, card_w=?, card_h=? WHERE id=1`)
         .run(
           o.lbl_mode === 'roll' ? 'roll' : 'sheet',
-          clampNum(o.lbl_w, 10, 210, 40), clampNum(o.lbl_h, 8, 297, 30),
-          clampNum(o.lbl_cols, 1, 8, 3), clampNum(o.lbl_gap, 0, 30, 3), clampNum(o.lbl_margin, 0, 40, 8),
+          v.lbl_w, v.lbl_h, v.lbl_cols, v.lbl_gx, v.lbl_ml,
           o.lbl_border ? 1 : 0,
-          clampNum(o.sig_w, 10, 100, 25), clampNum(o.sig_h, 10, 120, 35),
-          clampNum(o.card_w, 40, 210, 90), clampNum(o.card_h, 30, 297, 60)
+          v.sig_w, v.sig_h, v.card_w, v.card_h
         );
+      /* Четирите нови колони идват от ensureColumns/миграция 18 в main.js; база,
+         създадена само от db/schema.sql (тестовите обвръзки), още ги няма — тогава
+         остават двете стари, от които екранът ги чете (lbl_mt ?? lbl_margin). */
+      const cols = new Set(db.prepare('PRAGMA table_info(settings)').all().map(c => c.name));
+      if (['lbl_mt', 'lbl_ml', 'lbl_gx', 'lbl_gy'].every(c => cols.has(c))) {
+        db.prepare('UPDATE settings SET lbl_mt=?, lbl_ml=?, lbl_gx=?, lbl_gy=? WHERE id=1')
+          .run(v.lbl_mt, v.lbl_ml, v.lbl_gx, v.lbl_gy);
+      }
+      return { clamped };
     })
   );
   /* ---------------- Лого на организацията ----------------

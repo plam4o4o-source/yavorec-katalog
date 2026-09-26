@@ -7,6 +7,17 @@ const { resolveScannedBook } = require('../security-utils');
 
 module.exports = function registerHoldsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, normalizeScanCode } = deps;
+  /* ОНЛАЙН КАТАЛОГЪТ СЛЕД ОТКАЗАНА ИЛИ ИЗТЕКЛА РЕЗЕРВАЦИЯ (v2.4.69, към находка К4).
+     От v2.4.69 заделената книга излиза „заета“ на сайта (main.js,
+     buildCatalogPayload). Отказът и изтичането я освобождават — ако никой не
+     чака, тя пак е на рафта, — а дотук нищо не насрочваше запис, тоест сайтът
+     показваше „заета“ до следващото случайно заемане. Насрочва се като
+     циркулация (дългото изчакване от v2.4.64), защото е промяна на гишето, не
+     на фонда. Зависимостта е незадължителна: по-стар main.js просто не я подава. */
+  const CIRCULATION = 'circulation';   // същото като CATALOG_WRITE_CIRCULATION в main.js
+  const catalogChanged = () => {
+    if (typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite(CIRCULATION);
+  };
 
   const HOLD_ACTIVE = "('чака','заделена')";
   const HOLD_SELECT = `
@@ -190,6 +201,7 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
         return h.status === 'заделена' ? activateHoldOnReturn(h.book_id) : null;
       });
       const next = tx.immediate();
+      catalogChanged();
       return next ? { next: { reader_name: next.reader_name, card_no: next.card_no, phone: next.phone,
         title: next.title, inv_number: next.inv_number } } : null;
     })
@@ -262,7 +274,9 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
       }
       return n;
     });
-    return tx.immediate();
+    const expired = tx.immediate();
+    if (expired) catalogChanged();
+    return expired;
   }
   /* НЯМА ipcMain.handle('holds:expireStale', ...) тук — нарочно. Нов канал би
      означавал и нов мост в preload.js (test/preload-ipc-channels.test.js

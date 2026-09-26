@@ -335,13 +335,42 @@ const LEVA_RE = /^(?:лв\.?|лева|bgn)\s*|\s*(?:лв\.?|лева|bgn)$/iu;
 const EURO_RE = /^(?:€|eur|евро)\s*|\s*(?:€|eur|евро)$/iu;
 function splitCurrency(raw) {
   const s = String(raw ?? '').trim();
-  if (LEVA_RE.test(s)) return { amount: s.replace(LEVA_RE, '').trim(), leva: true };
-  if (EURO_RE.test(s)) return { amount: s.replace(EURO_RE, '').trim(), leva: false };
-  return { amount: s, leva: false };
+  /* `currency` (v2.4.69) казва дали клетката САМА означава валутата — нужно е, за
+     да може валутата от заглавието на колоната да важи за неозначените клетки
+     (виж headerCurrency по-долу), без да надвие изрично написаното. */
+  if (LEVA_RE.test(s)) return { amount: s.replace(LEVA_RE, '').trim(), leva: true, currency: 'leva' };
+  if (EURO_RE.test(s)) return { amount: s.replace(EURO_RE, '').trim(), leva: false, currency: 'euro' };
+  return { amount: s, leva: false, currency: null };
+}
+/* ВАЛУТАТА ОТ ЗАГЛАВИЕТО НА КОЛОНАТА (v2.4.69, кръг 44, находка П2).
+   (а) КАКВО СТАВАШЕ ДОТУК. Стар опис от Excel с колона „Цена (лв.)“ и ЧИСЛА в
+       клетките (2,4 / 1,6 / 12,5 — Excel не пише валута в числова клетка): всяка
+       цена влизаше като ЕВРО, тоест 1,95583 пъти по-голяма, без нито дума в
+       отчета — бележката „числата без валута са приети за евро“ излизаше само
+       ако поне една клетка съдържа „лв.“ (тестер № 1, сценарий 6; същото като
+       Н1 от кръг 43).
+   (б) ЗАЩО Е ГРЕШНО. Стойността на фонда (чл. 13, ал. 3, т. 2; годишният отчет)
+       се надува почти двойно за целия пренесен стар фонд — а това е първият
+       ден с програмата и най-големият единичен запис в нея.
+   (в) ЗАЩО ТОЧНО ТАКА. Заглавието на колоната е единственото място, където
+       човекът, водил описа, е казал валутата — и тя важи за ЦЯЛАТА колона.
+       Разпознава се същият запис като в клетката („лв“, „лв.“, „лева“, „BGN“;
+       „€“, „EUR“, „евро“), където и да стои в заглавието — „Цена (лв.)“,
+       „Цена, лв“, „Стойност в лева“. Изрично означена клетка печели пред
+       заглавието. Отчетът ВИНАГИ казва колко цени са приети за евро и колко са
+       превърнати (handlers/data-import.js). */
+const HEADER_LEVA_RE = /(?:^|[\s(,;:/\-])(?:лв\.?|лева|bgn)(?=$|[\s),;:/.\-])/iu;
+const HEADER_EURO_RE = /€|(?:^|[\s(,;:/\-])(?:eur|евро)(?=$|[\s),;:/.\-])/iu;
+function headerCurrency(header) {
+  const h = String(header ?? '').trim();
+  if (!h) return null;
+  if (HEADER_LEVA_RE.test(h)) return 'leva';
+  if (HEADER_EURO_RE.test(h)) return 'euro';
+  return null;
 }
 
 module.exports = {
-  readTable, guessMapping, HEADER_MAP, splitCurrency, decodeBuffer, parseDelimited, parseXlsx,
+  readTable, guessMapping, HEADER_MAP, splitCurrency, headerCurrency, decodeBuffer, parseDelimited, parseXlsx,
   hasUnterminatedQuote, rowColumnCountWarning, MAX_DELIMITED_FILE_SIZE,
   /* unzipEntries се ползва и от handlers/author-mark.js: .docx и .odt са същият
      ZIP контейнер като .xlsx, а тук той вече е с таваните срещу „zip bomb“. */

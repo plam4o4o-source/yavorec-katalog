@@ -1045,9 +1045,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
          (Дневник/audit_log), вместо само в конзолата, която той никога не вижда. */
       const w = flushCatalogWrite ? flushCatalogWrite() : (scheduleCatalogWrite(), null);
       if (w && w.blocked) {
+        /* К11 (v2.4.69): не сочи несъществуващия бутон „Ръчен запис“ — виж handlers/books.js. */
         logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
-          + ' е спрян — фондът излиза празен, а публикуваният каталог не е. '
-          + 'Използвайте „Ръчен запис“ в „Онлайн каталог“, ако наистина искате празен каталог.');
+          + ' е спрян. ' + (w.message || ('Публикуваният каталог има много повече записи от фонда в тази база. '
+          + 'Ако това е нарочно, в „Онлайн каталог“ натиснете „Запиши въпреки това…“.')));
       } else if (w && !w.written) {
         logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
           + ' не успя' + (w.error ? ': ' + w.error : '.') + ' Проверете папката за онлайн каталога в „Настройки“.');
@@ -1236,7 +1237,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         if (!act) throw new Error('Актът не е намерен.');
         if (act.revoked_at) {
           throw new Error('Акт № ' + act.no + '/' + act.year + ' вече е анулиран на '
-            + act.revoked_day + ' г. — вторично анулиране няма смисъл.');
+            + bgDate(act.revoked_day) + ' г. — вторично анулиране няма смисъл.');
         }
         /* АНУЛИРАНЕ НА АКТ ОТ ПРИКЛЮЧЕНА ГОДИНА (v2.4.61).
            =================================================================
@@ -1306,7 +1307,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            не се пипа никога (плащането е факт, парите са в касата) — тогава редът
            остава и анулирането го КАЗВА, за да се уреди на гишето. */
         const reopenRows = db.prepare(`SELECT l.id, l.book_id, l.reader_id, l.fine, l.deaccession_fine,
-            l.deaccession_fine_line_id,
+            l.deaccession_fine_line_id, l.date_due,
             l.lost_amount, l.lost_account_line_id, b.inv_number, r.name AS reader_name
           FROM loans l LEFT JOIN books b ON b.id = l.book_id LEFT JOIN readers r ON r.id = l.reader_id
           WHERE l.deaccession_act_id = ?`).all(id);
@@ -1349,21 +1350,63 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             lost_account_line_id = NULL, lost_note = NULL,
             fine = ?, deaccession_fine = NULL, deaccession_fine_line_id = NULL
           WHERE id = ?`);
+        /* ЗАБАВАТА, КОЯТО ОСТАВА В СМЕТКАТА, ОСТАВА И В ЗАЕМАНЕТО (v2.4.69, находка О1).
+           =================================================================
+           КАКВО СТАВАШЕ. Заемането се отваряше с loans.fine = (fine − забавата
+           от акта) и със СТАРИЯ падеж — и това беше вярно само когато
+           начислението за забавата се маха от сметката (неплатено). Когато
+           читателят вече е платил, редът в сметката ОСТАВА (платеното не се
+           пипа), а заемането „забравяше“ за него. Възпроизведено: просрочие
+           286 дни, акт по т. 5 (28,60 € забава + 18 € обезщетение), читателят
+           плаща всичко, актът се анулира, книгата се връща на гишето — и
+           loans:return начислява ПАК 28,60 € „Забава 286 дни“ за същите дни.
+           Салдото на читателя става 28,60 € дълг за нещо платено; същото число
+           искаха и „Просрочени“, и напомнителното писмо по чл. 43 още преди
+           връщането.
+
+           ЗАЩО Е ГРЕШНО. Обезщетението по чл. 43 е за дните закъснение — един
+           ден се плаща веднъж. Документ, който иска втори път платени пари, е
+           точно онова, което читателят оспорва с право, а библиотеката няма с
+           какво да се защити: касовата бележка е у него.
+
+           ЗАЩО ТОЧНО ТАКА. Цялата програма пази едно правило за заемането:
+           `loans.fine` е забавата, начислена ДО `date_due`, а от `date_due`
+           нататък тече нова. По него смятат връщането (loans:return и
+           loans:returnByCode — „fine = COALESCE(fine,0) + дни от падежа“),
+           „Просрочени“ и писмото (fineCharged + fineNew) и продължението
+           (loans:extend — начислява до днес и мести падежа). Актът е
+           начислил забавата до деня си; щом начислението остава в сметката,
+           анулирането прави точно каквото прави продължението: забавата остава
+           в loans.fine, а падежът, от който тече новата, става денят на акта.
+           Така и връщането, и „Просрочени“, и писмото искат само дните СЛЕД
+           акта — без промяна в handlers/loans.js и без нова колона.
+           Цената е една и се казва на глас (в следата и в прозореца): падежът в
+           картона вече е денят на акта, а ако категорията читатели има
+           наказание в дни (suspend_per_day), то при връщането се смята от
+           тази дата — за дните до акта не се налага, както не го налага и
+           самият акт (виж бележката при closeLoansAsNotReturned).
+           Когато начислението за забавата падне (неплатено), всичко е както
+           досега: забавата се маха и от заемането, падежът остава истинският и
+           връщането я смята наново за целия период. */
+        const reopenKeepFineStmt = db.prepare(`UPDATE loans SET date_in = NULL, deaccession_act_id = NULL,
+            lost = NULL, lost_date = NULL, lost_resolution = NULL, lost_amount = NULL,
+            lost_account_line_id = NULL, lost_note = NULL,
+            date_due = ?, deaccession_fine = NULL, deaccession_fine_line_id = NULL
+          WHERE id = ?`);
         let reopened = 0;
         const keptCharges = [];
+        const dueMoved = [];
         reopenRows.forEach(l => {
-          const back = Math.max(0, Math.round(((Number(l.fine) || 0) - (Number(l.deaccession_fine) || 0)) * 100) / 100);
-          reopenStmt.run(back, l.id);
-          reopened++;
-          // Виж дългата бележка при delLostEvent по-горе.
-          if (l.book_id && l.reader_id) {
-            droppedLostEvents += delLostEvent.run(EVENT_KIND_LOST, l.book_id, l.reader_id, act.date).changes;
-          }
           /* Начислената от акта ЗАБАВА се връща по същото правило като
              начислението за самия документ: махa се само ако по нея още не е
              платено нищо. Двата реда се разглеждат поотделно, защото читателят
              може да е платил единия и да не е платил другия — а платеното не се
-             пипа никога, парите са в касата. */
+             пипа никога, парите са в касата.
+             Решава се ПРЕДИ отварянето на заемането (v2.4.69): от него зависи
+             дали забавата остава в заемането (виж бележката при
+             reopenKeepFineStmt). Непрочетено покритие = редът остава в
+             сметката, значи и забавата остава в заемането. */
+          let fineKept = false;
           if (l.deaccession_fine_line_id) {
             let covFine = null;
             try { covFine = chargeCoverage(db, l.deaccession_fine_line_id); }
@@ -1373,10 +1416,27 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             }
             if (covFine && !covFine.covered) {
               db.prepare('DELETE FROM account_lines WHERE id = ?').run(l.deaccession_fine_line_id);
-            } else if (covFine) {
-              keptCharges.push({ reader_name: l.reader_name, inv_number: l.inv_number,
-                charged: covFine.charged, covered: covFine.covered, kind: 'забава' });
+            } else {
+              fineKept = true;
+              if (covFine) {
+                keptCharges.push({ reader_name: l.reader_name, inv_number: l.inv_number,
+                  charged: covFine.charged, covered: covFine.covered, kind: 'забава' });
+              }
             }
+          }
+          const actFine = toCents(Number(l.deaccession_fine) || 0);
+          if (fineKept && actFine > 0) {
+            reopenKeepFineStmt.run(act.date, l.id);
+            dueMoved.push({ reader_name: l.reader_name, inv_number: l.inv_number,
+              from: l.date_due, to: act.date, fine: actFine });
+          } else {
+            const back = Math.max(0, Math.round(((Number(l.fine) || 0) - (Number(l.deaccession_fine) || 0)) * 100) / 100);
+            reopenStmt.run(back, l.id);
+          }
+          reopened++;
+          // Виж дългата бележка при delLostEvent по-горе.
+          if (l.book_id && l.reader_id) {
+            droppedLostEvents += delLostEvent.run(EVENT_KIND_LOST, l.book_id, l.reader_id, act.date).changes;
           }
           if (l.lost_account_line_id) {
             let cov = null;
@@ -1400,6 +1460,8 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           charged: Number(l.lost_amount) || 0
         }));
         revokeInfo.keptCharges = keptCharges;
+        // Заеманията, чийто падеж е преместен на деня на акта (виж reopenKeepFineStmt).
+        revokeInfo.dueMoved = dueMoved;
         /* Резервациите, отказани от този акт, НЕ се възкресяват — виж дългата
            бележка при ensureLoanActColumn. Но се БРОЯТ и се вписват в следата:
            дотук те изчезваха безследно и анулирането твърдеше само „документите
@@ -1452,6 +1514,17 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
                 + ' — по '
                 + (keptCharges.length === 1 ? 'него' : 'тях') + ' вече е плащано; уредете '
                 + (keptCharges.length === 1 ? 'го' : 'ги') + ' от картона на читателя'
+              : '')
+          /* Преместеният падеж се вписва с ДВЕТЕ дати (v2.4.69, находка О1): в
+             картона вече стои денят на акта, а истинският падеж трябва да може
+             да се намери — тук е единственото място, където остава. */
+          + (dueMoved.length
+              ? '; забавата до деня на акта остава начислена (по нея е плащано), затова падежът на '
+                + (dueMoved.length === 1 ? 'заемането е преместен' : 'заеманията е преместен') + ' на деня на акта и '
+                + 'при връщането се начислява само забавата след него — '
+                + dueMoved.map(m => 'инв. № ' + (m.inv_number ?? '—') + ' (' + (m.reader_name || 'читател')
+                    + '): падеж ' + bgDate(m.from) + ' г. → ' + bgDate(m.to) + ' г., начислена забава '
+                    + m.fine.toFixed(2) + ' €').join('; ')
               : '')
           /* ЧЛ. 39: пипа се минала, вече отчетена година — това се вписва с числа,
              защото подписаният екземпляр на КДБФ остава при счетоводителя и някой

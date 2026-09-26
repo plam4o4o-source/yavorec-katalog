@@ -32,7 +32,11 @@ function overRowsHtml(rows) {
     return `<tr><td>${esc(l.reader_name)}</td><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
         <td class="num nowrap">${bg(l.date_due)}</td><td class="num warn">${days}</td>
         <td class="num">${mnyCell(Number(l.fine) || 0)}${paid > 0
-          ? `<div class="hint">начислено ${esc(mny(Number(l.fineAccrued) || 0))}, платено ${esc(mny(paid))}</div>` : ''}</td>
+          ? `<div class="hint">начислено ${esc(mny(Number(l.fineAccrued) || 0))}, платено ${esc(mny(paid))}${
+            /* v2.4.69 (Г6): авансът по сметката вече се приспада от още
+               неначислената забава и влиза в „платено“ — казва се, че е аванс,
+               за да се върже с квитанцията, по която е внесен. */
+            Number(l.fineCredit) > 0 ? ' (от тях ' + esc(mny(Number(l.fineCredit))) + ' — аванс по сметката)' : ''}</div>` : ''}</td>
         <td><button class="btn sm" onclick="returnBook(${l.id})">Приеми</button>
             <button class="btn sm" onclick="extendLoan(${l.id})">Продължи</button>
             ${/* v2.4.56: точно на този екран стоят заеманията, които никога няма да

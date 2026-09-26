@@ -295,11 +295,19 @@ test('4. Персоналии: формата, дати, търсене, кар�
     assert.equal(bad.ok, false, 'приета е смърт 1940 при раждане 1950');
   });
   if (bad.ok) ok(await h.api.persons.delete(bad.data), 'чистене');
+  /* v2.4.69 (Л9): полето за дата на персоналия е текстово и приема точна дата,
+     само година или „ок. 1890“ — „12.03.1890“ вече е ЗАКОНЕН вход и влиза в
+     базата като ISO. Находка 6а (сурова дата в базата) остава закована по новия
+     начин: в базата не стои нищо, което не е ISO или година. */
   const badDate = await h.api.persons.create({ name: 'Невалидна дата', birth_date: '12.03.1890' });
-  await soft('НАХОДКА 6а: persons:create приема дата на раждане „12.03.1890“ (не ISO) — форматът на датите не се проверява никъде в краезнанието', async () => {
-    assert.equal(badDate.ok, false);
+  await soft('НАХОДКА 6а: persons:create записва дата на раждане „12.03.1890“ сурова (не ISO) — форматът на датите не се проверява никъде в краезнанието', async () => {
+    assert.equal(badDate.ok, true);
+    assert.equal(q('SELECT birth_date FROM persons WHERE id = ?', badDate.data).birth_date, '1890-03-12');
   });
+  const reallyBad = await h.api.persons.create({ name: 'Невалидна дата', birth_date: '31.02.1890' });
+  await soft('НАХОДКА 6а: несъществуваща дата „31.02.1890“ се приема', async () => { assert.equal(reallyBad.ok, false); });
   if (badDate.ok) ok(await h.api.persons.delete(badDate.data), 'чистене');
+  if (reallyBad.ok) ok(await h.api.persons.delete(reallyBad.data), 'чистене');
 
   ids.p2 = ok(await h.api.persons.create({ name: "O'Neil, Джон", activity: 'краевед', bio: '100% местен; ул. „Първа“ 5' }), 'втора персоналия');
   ids.p3 = ok(await h.api.persons.create({ name: 'Стоянов, Иван', activity: 'секретар на читалището', birth_date: '1900-01-01' }), 'трета');
@@ -635,9 +643,16 @@ test('8. Връзки през картона на персоналията (е�
   const bl = ok(await h.api.links.backlinks({ toKind: 'персона', toId: ids.p1 }), 'backlinks');
   assert.equal(bl.length, 1);
   assert.equal(bl[0].label, '1922 — Основаване на читалището');
-  assert.equal(bl[0].to_label, 'Петров, Георги Иванов');
+  /* v2.4.69 (Л10): етикетът на персоналия носи годините и дейността — по тях се
+     различават съименниците при свързване. Тук стоеше голото име. */
+  assert.equal(bl[0].to_label, 'Петров, Георги Иванов (1890–1961, учител, читалищен деец)');
   const bl2 = ok(await h.api.links.backlinks({ toKind: 'книга', toId: ids.b1 }), 'backlinks книга');
-  assert.equal(bl2.length, 1); assert.equal(bl2[0].label, 'Петров, Георги Иванов');
+  /* v2.4.69 (Л6): към книгата сочат и статиите, чийто ИЗТОЧНИК е тя
+     (analytics.book_id) — връщат се със source: true. Тук се брояха само
+     редовете от `links`. */
+  const bl2links = bl2.filter(x => !x.source);
+  assert.equal(bl2links.length, 1); assert.equal(bl2links[0].label, 'Петров, Георги Иванов (1890–1961, учител, читалищен деец)');
+  assert.ok(bl2.filter(x => x.source).every(x => x.from_kind === 'статия'), 'останалите са статии с източник книгата');
   // Летописът показва брояча и картонът — връзките.
   await h.go('chronicle');
   assert.match(h.viewText(), /Основаване на читалището .*5 свързани материала/);
@@ -923,7 +938,11 @@ test('12. Снимки: файл, отказ, липсващ файл, греш�
   const r6 = ok(await h.api.localPhoto.choose({ table: 'chronicle', id: ids.c1 }), 'снимка към летописа');
   assert.match(r6, /^data:image\/png/);
   await h.go('chronicle');
-  assert.ok(h.$('#chrItems img.chrThumb'), 'миниатюрата е в списъка');
+  /* v2.4.69 (Л7): списъкът вече НЕ носи самата снимка (тя е до 1 МБ и пътуваше
+     при всяко натискане в търсачката) — само признака, че има. Тук стоеше
+     проверката за миниатюрата <img class="chrThumb">. */
+  assert.ok(!h.$('#chrItems img'), 'снимката не пътува със списъка');
+  assert.match(h.$('#chrItems').textContent, /снимка/, 'списъкът казва, че записът има снимка');
   await h.window.chronicleView(ids.c1);
   await h.waitFor(() => h.$('#modal img'), 'картон със снимка');
   await h.settle();

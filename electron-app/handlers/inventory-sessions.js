@@ -3,6 +3,16 @@
 // main.js, hoisted) и getDb/run/logAudit.
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
+  /* ОНЛАЙН КАТАЛОГЪТ СЛЕДВА ФОНДА И ОТТУК (v2.4.69, находка К2).
+     Инвентаризацията мени онова, което сайтът показва: приключената пълна
+     проверка прави несканираните „липсващ“, а сканирането връща „липсващ“ в
+     „наличен“. Дотук модулът не получаваше scheduleCatalogWrite и katalog.json
+     оставаше със старите състояния до следващата случайна промяна — читател
+     идваше за книга, която сайтът показва налична, а програмата — липсваща.
+     Зависимостта е незадължителна по същия образец като handlers/periodicals.js:
+     модулът се зарежда и самостоятелно (тестове). main.js трябва да я подаде —
+     описано е в доклада, защото main.js не е в този кръг на поправките. */
+  const scheduleCatalogWrite = deps.scheduleCatalogWrite || (() => {});
   const { parseRegisterNo, resolveScannedBook, isValidIsoDate } = require('../security-utils');
   /* Ключът „налично днес“ живее на едно място — db/fund-sql.js. Инвентаризацията
      е точно неговият случай: въпросът по чл. 40 е „какво да проверя ФИЗИЧЕСКИ“,
@@ -352,11 +362,14 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         }
         throw err;
       }
+      // „липсващ“ → „наличен“ е промяна, която сайтът показва (виж бележката за К2 горе).
+      if (b.status === 'липсващ') scheduleCatalogWrite();
       /* Бройката се връща на екрана (v2.4.61): броячът „Намерени“ се вдига на
          място, без пречертаване (иначе дневникът на сканиранията се трие), и
          трябва да върви с мярката на протокола — библиотечни документи. */
       const qty = db.prepare('SELECT COALESCE(quantity, 1) AS q FROM inventory WHERE book_id = ?').get(b.id);
-      return { inv_number: b.inv_number, title: b.title, quantity: qty ? qty.q : 1 };
+      return { inv_number: b.inv_number, title: b.title, quantity: qty ? qty.q : 1,
+        lost: b.status === BOOK_STATUS_LOST ? lostCaseOf(db, b) : null };
     })
   );
   /* Приключване на сесията. `mode` е задължителен избор на библиотекаря:
@@ -580,7 +593,26 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const poolDocs = docs(pool);
         const missingDocs = missing.reduce((n, b) => n + missingQty(b), 0);
         const excusedDocs = docs(excused) + restSum(partlyExcused);
-        const lostDocs = docs(lostBefore) + restSum(partlyLost);
+        /* ИЗГУБЕНИТЕ СЕ ОБЯВЯВАТ САМО ПРИ ПЪЛНА ПРОВЕРКА (v2.4.69, находка О4).
+           ЗАВАРЕНОТО: при представителна проверка прозорецът след приключването
+           казваше „40 документа от обхвата са изгубени от ползватели“, а
+           отпечатаният протокол за същата проверка не ги споменаваше никъде —
+           inventorySessions:get ги извежда от снимките само за пълна проверка,
+           защото при представителната остатъкът „обхват − проверени − заети −
+           за реставрация“ смесва изгубените с невлезлите в извадката.
+           ЗАЩО Е ГРЕШНО: прозорецът и подписаният протокол по чл. 40 са две
+           версии на един документ; число, което го има само на екрана, не може
+           да се покаже на проверяващ, а число, което го има само на хартия,
+           изненадва комисията след подписа.
+           ЗАЩО ТАКА, А НЕ ОБРАТНОТО: представителният протокол „важи само за
+           проверените“ (чл. 40, т. 2) — несканираните не са предмет на
+           проверката, каквото и да е състоянието им. Изгубените от ползватели
+           са несканирани по определение, значи в представителния протокол им
+           няма място; да се печатат, би трябвало ново поле в
+           inventory_sessions (снимка), а смисъл няма. Затова: при пълна
+           проверка — и в прозореца, и в протокола; при представителна — в
+           нито едно, и в следата също не (тя повтаря протокола). */
+        const lostDocs = mode === 'full' ? docs(lostBefore) + restSum(partlyLost) : 0;
         /* Процентът за норматива по чл. 41 се СНИМА тук (v2.4.67) — виж миграция 17. */
         const pctNow = (db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {}).free_access_pct;
         db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ?, free_access_pct = ? WHERE id = ?')
@@ -611,11 +643,72 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           /* Изгубените преди проверката се връщат със собствено число (v2.4.65),
              за да ги покаже прозорецът след приключването отделно от липсите —
              те не се отчисляват с един и същ акт и не се сравняват с чл. 41. */
-          lostBefore: lostDocs, lostBeforeRows: lostBefore.length + partlyLost.length,
+          lostBefore: lostDocs, lostBeforeRows: mode === 'full' ? lostBefore.length + partlyLost.length : 0,
           allowedLoss: naturalLoss(poolDocs, s2.free_access_pct)
         };
       });
-      return tx.immediate();
+      const out = tx.immediate();
+      /* Пълната проверка току-що е направила несканираните „липсващ“ — онлайн
+         каталогът трябва да спре да ги показва налични (находка К2, виж горе).
+         Извън транзакцията: пише файл, не база. Представителната не пипа
+         състояния и няма какво да публикува. */
+      if (out.mode === 'full' && out.missingRows > 0) scheduleCatalogWrite();
+      return out;
     })
   );
 };
+
+/* ИЗГУБЕН ДОКУМЕНТ, НАМЕРЕН НА РАФТА ПРИ ИНВЕНТАРИЗАЦИЯ (v2.4.69, находка О3).
+   =====================================================================
+   КАКВО СТАВАШЕ. Документ, приключен на гишето с „Документът е изгубен“
+   (books.status = „изгубен“, обезщетението — в сметката на читателя), се
+   сканираше при проверката като всеки друг: редът в дневника светваше зелено,
+   а състоянието оставаше „изгубен“ без дума. Същото — при вноса от телефона.
+   Последиците: читателят остава задължен за книга, която е на рафта;
+   гишето отказва да я заеме („отбелязан като изгубен“); а списъкът за акт по
+   чл. 30, т. 5 продължава да я предлага — тоест комисията може да отчисли
+   като „невърнат от ползвател“ документ, който току-що е държала в ръце.
+
+   ЗАЩО НЕ СЕ ВРЪЩА ТУК АВТОМАТИЧНО. Намереният изгубен документ не е само
+   състояние: има начисление в сметката на конкретен човек, може би вече
+   платено, и решение дали да се сторнира (виж loans:found в handlers/loans.js
+   — обезщетението се сторнира по отметка, платеното не се пипа, забавата
+   остава). Това е решение с пари на читател и място му е на гишето, с
+   прозореца, който казва всичко това — не в поток от стотици сканирания.
+
+   КАКВО ПРАВИ ПОПРАВКАТА. Сканирането се ЗАПИСВА (документът физически е
+   проверен — протоколът по чл. 40 трябва да го брои), но обработчикът връща
+   случая с името на читателя, а екранът показва предупреждение вместо зелен
+   ред и сочи точното действие: „Документът се намери“ в „Просрочени“ →
+   „Изгубени и невърнати документи“. Текстът се сглобява ТУК, в обработчика,
+   за да казват компютърът и вносът от телефона едно и също.
+   Функцията е обща за двата пътя: handlers/mobile.js я взима оттук. */
+function lostCaseOf(db, b) {
+  const bgD = (d) => (d ? String(d).slice(0, 10).split('-').reverse().join('.') : '');
+  const l = db.prepare(`SELECT l.id, l.lost_date, l.lost_amount, r.name AS reader_name, r.card_no
+      FROM loans l LEFT JOIN readers r ON r.id = l.reader_id
+     WHERE l.book_id = ? AND l.lost = 1 AND l.deaccession_act_id IS NULL
+     ORDER BY COALESCE(l.lost_date, l.date_in) DESC, l.id DESC LIMIT 1`).get(b.id);
+  const head = 'Инв. № ' + b.inv_number + (b.title ? ' („' + b.title + '“)' : '');
+  if (!l) {
+    return {
+      loan_id: null, reader_name: null, card_no: null, lost_date: null, lost_amount: null,
+      message: head + ' е със състояние „изгубен“, но няма заемане, по което да е приключен като изгубен. '
+        + 'Записан е като проверен. Документът е на рафта — върнете състоянието му на „наличен“ от картона '
+        + 'му в „Книги“, иначе остава в списъка за акт по чл. 30, т. 5.'
+    };
+  }
+  const amount = Number(l.lost_amount) || 0;
+  return {
+    loan_id: l.id, reader_name: l.reader_name || null, card_no: l.card_no || null,
+    lost_date: l.lost_date || null, lost_amount: amount || null,
+    message: head + ' е отбелязан като ИЗГУБЕН от читател ' + (l.reader_name || '—')
+      + (l.card_no ? ' (карта ' + l.card_no + ')' : '')
+      + (l.lost_date ? ' на ' + bgD(l.lost_date) + ' г.' : '')
+      + ', а е на рафта. Записан е като проверен, но състоянието му остава „изгубен“'
+      + (amount ? ' и обезщетението ' + amount.toFixed(2) + ' € стои в сметката на читателя' : '')
+      + '. Натиснете „Документът се намери“ в „Просрочени“ → „Изгубени и невърнати документи“ — '
+      + 'това връща документа във фонда и урежда начислението; иначе той остава в списъка за акт по чл. 30, т. 5.'
+  };
+}
+module.exports.lostCaseOf = lostCaseOf;

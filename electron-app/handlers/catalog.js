@@ -25,6 +25,15 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     getDb, run, logAudit, dialog, getMainWindow, fs, path, execFile,
     csvCell, flushCatalogWrite, buildCatalogPayload, catalogJsonText
   } = deps;
+  /* Последният опит за запис на katalog.json (v2.4.69, К3) — виж
+     CATALOG_LAST_WRITE в main.js. Изрична зависимост, ако е подадена; иначе
+     през самата flushCatalogWrite, която main.js снабдява с `.lastWrite()`.
+     Старите тестови обвръзки без нито едното получават null — „няма какво да
+     се каже“, а не грешка. */
+  const catalogWriteState = typeof deps.getCatalogWriteState === 'function'
+    ? deps.getCatalogWriteState
+    : (flushCatalogWrite && typeof flushCatalogWrite.lastWrite === 'function'
+      ? flushCatalogWrite.lastWrite : () => null);
 
   function gitRun(folder, args) {
     return new Promise((resolve) => {
@@ -152,10 +161,29 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     AUTO_PUSH_TIMER = setInterval(async () => {
       try {
         const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-        if (!s || !s.catalog_folder || !isGitRepo(s.catalog_folder)) {
+        if (!s || !s.catalog_folder) {
           // Папката вече не е свързана — няма какво да се публикува, значи няма и
           // за какво да предупреждаваме. Иначе червената лента оставаше завинаги
           // за каталог, който вече не се публикува изобщо.
+          noteAutoPush(null);
+          return;
+        }
+        /* СВЪРЗАНА, НО НЕДОСТЪПНА ПАПКА НЕ Е „ВСИЧКО Е НАРЕД“ (v2.4.69, кръг 44, К3).
+           (а) Дотук и този случай минаваше през noteAutoPush(null): изключен
+               мрежов диск прави папката „не git хранилище“ (няма .git, защото
+               няма нищо) и таймерът МАХАШЕ червената лента на всеки 5 минути.
+           (б) Точно тогава сайтът спира да се обновява — лентата трябва да
+               стои, а не да изчезва.
+           (в) Липсваща папка е грешка с ясен изход; съществуваща папка без .git
+               остава както досега (екранът вече казва „не е git хранилище“ в
+               картата на папката и дава точната команда). */
+        if (!fs.existsSync(s.catalog_folder)) {
+          noteAutoPush('Папката на онлайн каталога „' + s.catalog_folder + '“ е недостъпна (изключен мрежов диск, '
+            + 'преместена или изтрита папка) — каталогът нито се записва, нито се публикува. Свържете диска или '
+            + 'изберете папката наново от „Онлайн каталог“.');
+          return;
+        }
+        if (!isGitRepo(s.catalog_folder)) {
           noteAutoPush(null);
           return;
         }
@@ -181,7 +209,11 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   }
   // Изгледът „Онлайн каталог“ пита оттук и показва предупреждение, ако последният
   // опит е бил неуспешен.
-  ipcMain.handle('catalog:autoPushStatus', () => run(() => LAST_AUTO_PUSH));
+  /* `write` (v2.4.69, К3/К1): последният опит за запис на katalog.json —
+     { at, ok, blocked, error, published, now, message, folder } или null.
+     Публикуването и записът са две различни неща: успешен `git push` на стария
+     файл не значи, че сайтът е актуален, затова екранът ги показва поотделно. */
+  ipcMain.handle('catalog:autoPushStatus', () => run(() => Object.assign({}, LAST_AUTO_PUSH, { write: catalogWriteState() })));
   function stopAutoPushTimer() {
     if (AUTO_PUSH_TIMER) { clearInterval(AUTO_PUSH_TIMER); AUTO_PUSH_TIMER = null; }
   }
@@ -297,10 +329,23 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
          документ със статус „липсващ“ или „за реставрация“ няма отворено заемане,
          тоест излизаше „наличен“ на екрана, а в каталога — не. Екранът обещаваше
          повече зелени етикети, отколкото сайтът показва. */
+      /* v2.4.69 (кръг 44, К4 и К8): от бройките се изваждат и заделените
+         резервации, и нашите документи, изпратени по входяща МЗС заявка —
+         дословно както в buildCatalogPayload (main.js). Иначе екранът пак би
+         обещавал повече „налични“, отколкото сайтът показва. */
+      /* Със същите агрегатни LEFT JOIN-ове като товара, а не с три подзаявки на
+         ред: mzs_requests няма индекс по book_id, а 15 000 корелирани обхождания
+         на регистъра при всяко отваряне на екрана са излишни. */
       const avail = db.prepare(`
-        SELECT COUNT(*) AS n FROM books b WHERE b.status = 'наличен' AND COALESCE(b.department,'') != 'служебен'
-        AND COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id=b.id),0) >
-            (SELECT COUNT(*) FROM loans l WHERE l.book_id=b.id AND l.date_in IS NULL)
+        SELECT COUNT(*) AS n FROM books b
+        LEFT JOIN inventory i ON i.book_id = b.id
+        LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM loans WHERE date_in IS NULL GROUP BY book_id) o ON o.book_id = b.id
+        LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM holds WHERE status = 'заделена' GROUP BY book_id) hz ON hz.book_id = b.id
+        LEFT JOIN (SELECT book_id, COUNT(*) AS n FROM mzs_requests
+                   WHERE direction = 'входящо' AND book_id IS NOT NULL AND status IN ('изпратено', 'получено')
+                   GROUP BY book_id) mz ON mz.book_id = b.id
+        WHERE b.status = 'наличен' AND COALESCE(b.department,'') != 'служебен'
+          AND COALESCE(i.quantity, 0) - COALESCE(o.n, 0) - COALESCE(hz.n, 0) - COALESCE(mz.n, 0) > 0
       `).get().n;
       return {
         folder: s.catalog_folder || null, total: pub, available: avail,
@@ -376,9 +421,24 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         adopted = chk.slug;
       }
 
-      flushCatalogWrite();
-      logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + folder);
-      return { ok: true, data: folder, adopted, mismatch: chk.mismatch, remote: chk.slug };
+      /* РЕЗУЛТАТЪТ ОТ ПЪРВИЯ ЗАПИС СЕ ГЛЕДА (v2.4.69, кръг 44, К1).
+         (а) Дотук записът при свързване се пускаше и резултатът се изхвърляше:
+             празна (или пробна) база, свързана към папката на истинския
+             каталог, получаваше „Папката е свързана — katalog.json се обновява
+             автоматично“, докато предпазителят всъщност беше СПРЯЛ записа.
+         (б) Това е точно моментът, в който библиотекарката трябва да разбере,
+             че тази база не е онази, от която е публикуван каталогът — преди да
+             впише първата пробна книга.
+         (в) Резултатът пътува до екрана (`write`), а редът в следата казва и
+             дали записът е минал, спрян или неуспешен. */
+      const w = flushCatalogWrite() || {};
+      logAudit('Онлайн каталог', 'папка за автоматичен запис: ' + folder
+        + (w.blocked ? ' — първият запис е СПРЯН от предпазителя (публикувани ' + w.published + ', в тази база '
+          + w.now + '); публикуваният katalog.json е оставен непроменен'
+          : (w.error ? ' — първият запис НЕ успя: ' + w.error : '')));
+      return { ok: true, data: folder, adopted, mismatch: chk.mismatch, remote: chk.slug,
+        write: { written: !!w.written, blocked: !!w.blocked, error: w.error || null,
+          published: w.published ?? null, now: w.now ?? null, message: writeProblemText(w) } };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -407,13 +467,30 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   // `w.written` — реален провал на самия запис (напр. изключен мрежов диск:
   // ENOENT) минаваше за успех. `writeCatalogIfConfigured()` (main.js) вече
   // връща `error` с причината в такъв случай — тук се проверява и се показва.
+  /* СЪОБЩЕНИЕТО СОЧИ СЪЩЕСТВУВАЩ БУТОН (v2.4.69, кръг 44, К11).
+     (а) Дотук тук пишеше „използвайте „Ръчно извеждане““ — заглавие на карта,
+         не бутон, а съседните съобщения в books.js и deaccession-acts.js пращаха
+         към „Ръчен запис“, какъвто изобщо няма.
+     (б) Съобщение, което праща към несъществуващо място, оставя библиотекарката
+         без изход точно когато публикуването е спряно.
+     (в) Текстът идва готов от main.js (writeCatalogIfConfigured → `message`) и
+         назовава „Запиши въпреки това…“ в „Онлайн каталог“ — бутон, който
+         екранът показва до предупреждението, — и резервния път „Ръчно извеждане
+         → Каталог (JSON)…“. По-стар main.js без `message` получава същия текст
+         оттук. */
+  function writeProblemText(w) {
+    if (!w || (!w.blocked && !w.error)) return null;
+    const m = w.message || (w.blocked
+      ? 'записът на онлайн каталога е СПРЯН: фондът в тази база излиза много по-малък от публикувания. Ако това '
+        + 'наистина е фондът за публикуване, отворете „Онлайн каталог“ и натиснете „Запиши въпреки това…“ (или '
+        + '„Ръчно извеждане“ → „Каталог (JSON)…“ върху katalog.json в папката).'
+      : 'записът на каталога не успя: ' + w.error + '. Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
+    return m.charAt(0).toUpperCase() + m.slice(1);
+  }
   function assertCatalogWriteOk(w) {
-    if (w.blocked) {
-      throw new Error('Спряно: фондът в тази база данни излиза празен, а публикуваният каталог не е — за да публикувате наистина празен каталог, използвайте „Ръчно извеждане“.');
-    }
+    if (w.blocked || (!w.written && w.error)) throw new Error(writeProblemText(w));
     if (!w.written) {
-      throw new Error('Записът на каталога не успя' + (w.error ? ': ' + w.error : '.') +
-        ' Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
+      throw new Error('Записът на каталога не успя. Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
     }
   }
   ipcMain.handle('catalog:gitPublishNow', async () => {
@@ -431,12 +508,22 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     noteAutoPush(r.ok ? null : r.error);
     return r;
   });
-  ipcMain.handle('catalog:writeNow', () =>
+  /* `{ force: true }` (v2.4.69, К1) — изходът от предпазителя: екранът го праща
+     САМО след „Запиши въпреки това…“ и изричен въпрос с двете числа. Тук остава
+     редът в следата — кой брой е заменил кой, — защото това е съзнателно
+     свиване на публичния каталог и после се пита „кой и кога го направи“. */
+  ipcMain.handle('catalog:writeNow', (e, opts) =>
     run(() => {
       const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
       if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
-      const w = flushCatalogWrite();
+      const force = !!(opts && opts.force);
+      const w = force ? flushCatalogWrite({ force: true }) : flushCatalogWrite();
       assertCatalogWriteOk(w);
+      if (force && w.forced) {
+        logAudit('Онлайн каталог', 'katalog.json е записан ВЪПРЕКИ предпазителя, по изрично потвърждение: '
+          + 'публикуваните ' + w.published + ' записа са заменени с ' + w.now + '. Сайтът ще покаже новия брой след '
+          + 'следващото публикуване.');
+      }
       return true;
     })
   );

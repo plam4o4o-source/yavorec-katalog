@@ -11,11 +11,30 @@ const KRAE_FN_READY = new WeakSet();
 function ensureKraeFunctions(db) {
   if (KRAE_FN_READY.has(db)) return db;
   db.function('bglower', (s) => (s == null ? null : String(s).toLowerCase()));
+  db.function('personkey', (s) => (s == null ? null : personKey(s)));
   KRAE_FN_READY.add(db);
   return db;
 }
 function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
+}
+
+/* КЛЮЧЪТ НА ИМЕТО ЗА ПРОВЕРКАТА ЗА ДУБЛИКАТ (v2.4.69, Л12).
+   =====================================================================
+   ДОТУК „същото име“ значеше `bglower(trim(name))` — сравнение знак по знак
+   след малки букви. Измерено (тестер № 6, s2-letopis-personalii.js): „Вълчев,
+   Стефан“ вече е вписан, а „Вълчев,  Стефан“ (двоен интервал — най-честата
+   грешка при преписване), „Вълчев Стефан“ (без запетая) и „Стефан Вълчев“
+   минаваха като нов човек без дума; редакцията на заварен картон, с която той
+   се ПРЕИМЕНУВА в име, което вече го има, изобщо не се проверяваше.
+   Ключът е: малки букви, запетаи и точки → интервал, събрани интервали, думите
+   подредени. Така изписванията по-горе дават един и същ ключ, а „Вълчев, Стефан
+   Иванов“ (с бащино) остава различен — там наистина може да е друг човек и
+   програмата не бива да твърди обратното. Ключът е само за ПРЕДУПРЕЖДЕНИЕ
+   (съименниците в селото са правило — виж бележката при sameNameRows). */
+function personKey(name) {
+  return String(name == null ? '' : name).toLowerCase().replace(/[.,;]+/g, ' ')
+    .split(/\s+/).filter(Boolean).sort().join(' ');
 }
 
 module.exports = function registerPersonsHandlers(ipcMain, deps) {
@@ -45,21 +64,51 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
      е нормалното състояние (годината на раждане на местен деец често е
      неизвестна), а сведението „починал 1961 г.“ без дата на раждане е валидно
      сведение. */
+  /* САМО ГОДИНАТА Е СЪЩО СВЕДЕНИЕ (v2.4.69, Л9).
+     =====================================================================
+     ДОТУК датата на раждане и смърт приемаше САМО точна дата. За местния деец
+     отпреди век краеведът знае най-често само годината („1890“) или я знае
+     приблизително („ок. 1890“) — летописът и аналитичното описание приемат
+     точно това от v2.4.61, персоналиите го отказваха („не е валидна дата“), и
+     сведението или оставаше невписано, или се измисляше „01.01.1890“ —
+     неистина, която после се преписва в юбилейни издания.
+     Сега се приемат три вида, и нищо друго:
+       • точна дата — ISO от полето (1890-03-12) или българският изпис
+         „12.03.1890“, който се превежда в ISO (и се проверява, че е дата);
+       • само година — „1890“ (3 или 4 цифри, по желание с „г.“);
+       • приблизителна година — „ок. 1890“, „около 1890“, „след 1890“,
+         „преди 1890“, „към 1890“, „1890?“.
+     Проверката „смърт преди раждане“ сравнява по ГОДИНА, щом едната дата не е
+     точна, и по пълна дата, когато и двете са точни. */
+  const PERSON_YEAR_RE = /^(?:(?:ок|около|прибл|приблизително|след|преди|към|началото на|края на)(?:\.\s*|\s+))?(\d{3,4})(?:\s*г\.?)?\s*\??$/i;
+  function personDate(raw, label) {
+    const v = String(raw ?? '').trim();
+    if (!v) return null;
+    if (isValidIsoDate(v)) return v;
+    const bgm = /^(\d{1,2})\.(\d{1,2})\.(\d{3,4})(?:\s*г\.?)?$/.exec(v);
+    if (bgm) {
+      const iso = bgm[3].padStart(4, '0') + '-' + bgm[2].padStart(2, '0') + '-' + bgm[1].padStart(2, '0');
+      if (isValidIsoDate(iso)) return iso;
+    } else if (PERSON_YEAR_RE.test(v)) {
+      return v.replace(/\s+/g, ' ');
+    }
+    throw new Error('„' + v + '“ не е валидна дата на ' + label + '. Впишете точна дата (напр. 12.03.1890), '
+      + 'само година (1890) или приблизителна година („ок. 1890“) — или оставете полето празно, ако не е известна.');
+  }
+  const yearOfPersonDate = (v) => { const m = /\d{3,4}/.exec(String(v || '')); return m ? Number(m[0]) : null; };
   function preparePerson(d) {
     const o = {};
     for (const f of PERSON_FIELDS) o[f] = d[f] ?? null;
-    for (const [f, label] of [['birth_date', 'раждане'], ['death_date', 'смъртта']]) {
-      const v = String(o[f] ?? '').trim();
-      if (!v) { o[f] = null; continue; }
-      if (!isValidIsoDate(v)) {
-        throw new Error('„' + v + '“ не е валидна дата на ' + label + '. Въведете ден, месец и година '
-          + '(напр. 12.03.1890) или оставете полето празно, ако датата не е известна.');
+    o.birth_date = personDate(o.birth_date, 'раждане');
+    o.death_date = personDate(o.death_date, 'смъртта');
+    if (o.birth_date && o.death_date) {
+      const bothExact = isValidIsoDate(o.birth_date) && isValidIsoDate(o.death_date);
+      const before = bothExact ? o.death_date < o.birth_date
+        : yearOfPersonDate(o.death_date) < yearOfPersonDate(o.birth_date);
+      if (before) {
+        throw new Error('Датата на смъртта (' + o.death_date + ') е преди датата на раждане ('
+          + o.birth_date + '). Проверете дали двете дати не са разменени.');
       }
-      o[f] = v;
-    }
-    if (o.birth_date && o.death_date && o.death_date < o.birth_date) {
-      throw new Error('Датата на смъртта (' + o.death_date + ') е преди датата на раждане ('
-        + o.birth_date + '). Проверете дали двете дати не са разменени.');
     }
     if (!String(o.name ?? '').trim()) throw new Error('Името на персоналията е задължително.');
     return o;
@@ -92,13 +141,33 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
      за имена, които localeCompare смята за равни (различаващи се само по
      регистър), тоест резултатът не се разбърква между две четения. */
   const byBgName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'bg');
+  /* СНИМКАТА НЕ ПЪТУВА СЪС СПИСЪКА (v2.4.69, Л7).
+     =====================================================================
+     ДОТУК списъкът беше `SELECT p.*` — тоест всяка карта носеше СНИМКАТА си
+     като data URI (до 1 МБ, в base64 — с една трета повече). Измерено (тестер
+     № 6, s6c-snimki-merki.js): 40 персоналии със снимки по ~900 КБ → отговор от
+     десетки мегабайти при ВСЯКО натискане в търсачката (търсенето е с отлагане
+     300 ms, т.е. при всяка пауза в писането), и секунди до изчертаването.
+     Сега списъкът носи само признака `has_photo`; самата снимка се взима с
+     persons:get, когато картонът се отвори — там тя наистина се гледа.
+     Колоните са изброени поименно, за да не се върне снимката при бъдеща
+     колона, добавена със `*`. */
+  const LIST_COLS = ['id', 'name', 'alt_names', 'birth_date', 'birth_place', 'death_date', 'death_place',
+    'activity', 'bio', 'awards', 'sources', 'note', 'created_at'].map(c => 'p.' + c).join(', ');
   ipcMain.handle('persons:list', (e, q) =>
     run(() => {
       // Броят на свързаните материали се показва в списъка, за да личи кои
       // персоналии вече имат подкрепящи документи във фонда.
       const db = ensureKraeFunctions(getDb());
+      /* ПРОВЕРКА ЗА ВЕЧЕ ВПИСАНО ИМЕ ОТ ЕКРАНА (v2.4.69, Л12): { sameAs, exceptId }
+         връща картоните със същия КЛЮЧ на името (personKey) — екранът пита с тях,
+         преди да запише нов картон или преименуване. Нов канал не е нужен. */
+      if (q && typeof q === 'object') {
+        return sameNameRows(db, q.sameAs, q.exceptId == null ? null : q.exceptId);
+      }
       const sql = `
-        SELECT p.*, (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'персона' AND l.from_id = p.id) AS links
+        SELECT ${LIST_COLS}, (p.photo IS NOT NULL AND p.photo <> '') AS has_photo,
+               (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'персона' AND l.from_id = p.id) AS links
         FROM persons p ${q ? `WHERE bglower(p.name) LIKE @q ESCAPE '\\' OR bglower(p.alt_names) LIKE @q ESCAPE '\\'
           OR bglower(p.activity) LIKE @q ESCAPE '\\' OR bglower(p.bio) LIKE @q ESCAPE '\\'` : ''}
         ORDER BY p.name`;
@@ -124,11 +193,19 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
      по-рано и с думи, но само вписаното в дневника може да се провери после.
      Сравнява се през bglower() — заради същата кирилица, заради която е писана
      и самата функция: „ВЪЛЧЕВ, Стефан“ и „вълчев, стефан“ са един и същ човек. */
+  /* v2.4.69 (Л12): сравнява се КЛЮЧЪТ на името (personKey — двоен интервал, липсваща
+     запетая и разменен ред на думите са едно и също име), не буквалният текст.
+     Връщат се и годините и дейността — по тях екранът различава съименниците. */
   function sameNameRows(db, name, selfId) {
-    return db.prepare(`SELECT id, name FROM persons
-      WHERE id <> ? AND bglower(trim(name)) = ? ORDER BY id`).all(selfId == null ? -1 : selfId,
-      String(name == null ? '' : name).trim().toLowerCase());
+    const key = personKey(name);
+    if (!key) return [];
+    return ensureKraeFunctions(db).prepare(`SELECT id, name, birth_date, death_date, activity FROM persons
+      WHERE id <> ? AND personkey(name) = ? ORDER BY id`).all(selfId == null ? -1 : Number(selfId), key);
   }
+  const sameNameNote = (same) => '; ВНИМАНИЕ: със същото име вече '
+    + (same.length === 1 ? 'има картон' : 'има ' + same.length + ' картона')
+    + ' (№ ' + same.map(x => x.id).join(', № ') + ') — сведенията и връзките за този човек се водят '
+    + 'на повече от едно място и нито една справка не е пълна';
   ipcMain.handle('persons:get', (e, id) => run(() => getDb().prepare('SELECT * FROM persons WHERE id = ?').get(id)));
   ipcMain.handle('persons:create', (e, d) =>
     run(() => {
@@ -137,36 +214,50 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
       const same = sameNameRows(db, o.name, null);
       const info = db.prepare(`INSERT INTO persons (${PERSON_FIELDS.join(', ')})
         VALUES (${PERSON_FIELDS.map(f => '@' + f).join(', ')})`).run(o);
-      logAudit('Персоналии', 'нова персоналия: ' + (o.name || '')
-        + (same.length
-          ? '; ВНИМАНИЕ: със същото име вече ' + (same.length === 1 ? 'има картон' : 'имаше ' + same.length + ' картона')
-            + ' (№ ' + same.map(x => x.id).join(', № ') + ') — сведенията и връзките за този човек се водят '
-            + 'на повече от едно място и нито една справка не е пълна'
-          : ''));
+      logAudit('Персоналии', 'нова персоналия: ' + (o.name || '') + (same.length ? sameNameNote(same) : ''));
       return info.lastInsertRowid;
     })
   );
   ipcMain.handle('persons:update', (e, d) =>
     run(() => {
       const o = preparePerson(d);
+      const db = ensureKraeFunctions(getDb());
+      /* ПРЕИМЕНУВАНЕ В ВЕЧЕ ВПИСАНО ИМЕ (v2.4.69, Л12). Дотук проверката за
+         дублирано име стоеше само при НОВ картон — редакцията, с която заварен
+         картон става „Вълчев, Стефан“, минаваше без дума. Следата се пише само
+         когато името наистина е СМЕНЕНО (иначе всяка поправка на биографията на
+         заварен съименник би писала предупреждение). */
+      const prev = db.prepare('SELECT name FROM persons WHERE id = ?').get(d.id);
+      const renamed = prev && personKey(prev.name) !== personKey(o.name);
+      const same = renamed ? sameNameRows(db, o.name, d.id) : [];
       /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
          база записът може да е изтрит от другото работно място, а одитната
          следа не бива да твърди редакция, каквато не се е случвала. */
-      const info = getDb().prepare(`UPDATE persons SET ${PERSON_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
+      const info = db.prepare(`UPDATE persons SET ${PERSON_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
         .run({ ...o, id: d.id });
       if (!info.changes) throw new Error('Записът не е намерен — вероятно е изтрит от друго работно място.');
-      logAudit('Персоналии', 'редакция: ' + (o.name || ''));
+      logAudit('Персоналии', 'редакция: ' + (o.name || '')
+        + (renamed ? ' (преименувано от „' + prev.name + '“)' : '') + (same.length ? sameNameNote(same) : ''));
     })
   );
   ipcMain.handle('persons:delete', (e, id) =>
     run(() => {
       const db = getDb();
       const p = db.prepare('SELECT name FROM persons WHERE id = ?').get(id);
+      /* ИЗТРИВАНЕ НА НЕСЪЩЕСТВУВАЩ КАРТОН НЕ Е УСПЕХ (v2.4.69, Л13).
+         Дотук липсващият ред минаваше по тихия път: DELETE не пипаше нищо,
+         екранът казваше „Персоналията е изтрита.“, а в дневника оставаше
+         „изтрита персоналия: 99999“ — изтриване, което не се е случило. Точно
+         това е поправено за летописа във v2.4.61 (handlers/chronicle.js); тук
+         беше останало. При обща мрежова база това е „другото работно място вече
+         я изтри“ — отказ с обяснение, нищо не се пипа. */
+      if (!p) throw new Error('Персоналията не е намерена — вероятно вече е изтрита от друго работно място. '
+        + 'Нищо не е променено.');
       db.transaction(() => {
         db.prepare("DELETE FROM links WHERE (from_kind = 'персона' AND from_id = ?) OR (to_kind = 'персона' AND to_id = ?)").run(id, id);
         db.prepare('DELETE FROM persons WHERE id = ?').run(id);
       }).immediate();
-      logAudit('Персоналии', 'изтрита персоналия: ' + (p ? p.name : id));
+      logAudit('Персоналии', 'изтрита персоналия: ' + p.name);
     })
   );
 };

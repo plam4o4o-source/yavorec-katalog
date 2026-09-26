@@ -118,8 +118,9 @@ function reportBodyHtml(r) {
   if (r.id === 'fund_movement') {
     return `
       <div class="grid g2">
-        <div class="card"><h3 style="margin-top:0">Постъпили през ${r.year} г. — ${r.acquiredTotal} бр., ${mny(r.acquiredValue)}</h3>
-          ${reportPairTable(r.acquired, true)}</div>
+        <div class="card"><h3 style="margin-top:0">Постъпили през ${r.year} г. — ${r.acquiredTotal} бр., ${mny(r.acquiredValue)} по документите</h3>
+          ${fundMovementAcqTable(r, false)}
+          <div class="hint" style="margin-top:8px">${esc(fundMovementKdbfNote(r))}</div></div>
         <div class="card"><h3 style="margin-top:0">Отчислени през ${r.year} г. — ${r.deaccessionedTotal} бр., ${mny(r.deaccessionedValue)}</h3>
           ${reportPairTable(r.deaccessioned, true)}</div>
       </div>`;
@@ -144,6 +145,41 @@ function reportBodyHtml(r) {
   }
   return '<span class="hint">Няма данни.</span>';
 }
+/* „ДВИЖЕНИЕ НА ФОНДА“ СРЕЩУ КДБФ ЧАСТ № 1 — КОЕ С КОЕ (v2.4.69, Л4).
+   =====================================================================
+   ДОТУК справката показваше ЕДНА стойност на постъпленията — сумата по
+   първичния документ (фактурата) — а подсказката ѝ твърдеше „както Част № 1 на
+   КДБФ“. Част № 1 печата вписаната стойност на инвентираните документи.
+   Измерено: фактура 100 € с три книги по 40 € — справката 100,00 €, Част № 1 —
+   120,00 €; във фикстурата за 2025 г. — 3 028,16 € срещу 6 417,43 €. Двата
+   листа се прилагат към един отчет и проверяващият ги слага един до друг.
+   Сега таблицата има и двете колони с имената им, последната носи изрично
+   „= КДБФ Ч. 1“, а изречението отдолу казва разликата с думи и защо е законна.
+   Числата идват от обработчика (handlers/stats.js — същото изчисление като
+   kdbf:report), не се смятат тук. */
+function fundMovementAcqTable(r, paper) {
+  const reg = new Map((r.acquiredRegistered || []).map(([k, n, v]) => [k, [n, v]]));
+  const rows = r.acquired || [];
+  if (!rows.length) return paper ? '<table><tbody><tr><td>няма данни</td></tr></tbody></table>' : '<span class="hint">няма данни</span>';
+  const head = ['Начин', 'Бр. по документа', 'Стойност по документа', 'Инвентирани бр.', 'Вписана стойност (= КДБФ Ч. 1)'];
+  const td = paper ? (x) => `<td>${x}</td>` : (x, n) => `<td${n ? ' class="num"' : ''}>${x}</td>`;
+  const body = rows.map(([k, n, v]) => {
+    const [rn, rv] = reg.get(k) || [0, 0];
+    return `<tr>${td(esc(k))}${td(n, 1)}${td(mny(v || 0), 1)}${td(rn, 1)}${td(mny(rv || 0), 1)}</tr>`;
+  }).join('') + `<tr style="font-weight:700">${td('Общо')}${td(r.acquiredTotal, 1)}${td(mny(r.acquiredValue || 0), 1)}${
+    td(r.acquiredRegisteredCount || 0, 1)}${td(mny(r.acquiredRegisteredValue || 0), 1)}</tr>`;
+  return `<table${paper ? '' : ' class="ledger"'}><thead><tr>${head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function fundMovementKdbfNote(r) {
+  const doc = Number(r.acquiredValue) || 0, reg = Number(r.acquiredRegisteredValue) || 0;
+  const base = 'Колона „Вписана стойност“ е сборът от цените на инвентираните документи в инвентарната книга — '
+    + 'същото число като „ОБЩО“ в КДБФ Част № 1 за ' + r.year + ' г. (' + mny(reg) + ', '
+    + (r.acquiredRegisteredCount || 0) + ' бр.). „Стойност по документа“ е сумата от фактурите и актовете на партидите.';
+  if (Math.round(doc * 100) === Math.round(reg * 100) && (r.acquiredTotal || 0) === (r.acquiredRegisteredCount || 0)) return base;
+  return base + ' Тук двете се разминават (' + mny(doc) + ' срещу ' + mny(reg) + '; ' + (r.acquiredTotal || 0) + ' срещу '
+    + (r.acquiredRegisteredCount || 0) + ' бр.) — законно, когато фактурата е с отстъпка или общи разходи, или партида '
+    + 'още не е инвентирана докрай. При сверка с КДБФ Част № 1 гледайте последната колона.';
+}
 /* Отделен, по-опростен вариант за печат (плътни таблици вместо картички) — по същия
    принцип като другите официални разпечатки (printKdbfDoc, printDnevnikDoc и т.н.). */
 function prTable(headers, rows, valCol) {
@@ -167,16 +203,25 @@ function reportPrintHtml(r) {
          подсказката на прозореца „Подробно за деня“ и изчезваше с него, а тук
          проверяващият вижда три различни числа под един надпис „Всичко“. */
       const noteB = cols === DNEVNIK_B_COLS ? dnevnikTotalsNoteB(r.totals) : '';
+      /* ЕДИН РЕД НА ЛИСТ — НЕ (v2.4.69, Е10). Дотук всяка част на таблицата
+         започваше НОВ лист (.pbreak) — както в месечния Дневник, където частта
+         е 33 реда. Тук частта е ЕДИН ред („За 2026 г.“), и годишният отчет
+         излизаше на четири листа А4 с по един ред числа на всеки, а подписите
+         — на четвъртия, далеч от Раздел А, който заверяват. Четирите части се
+         събират на един-два листа; всяка е цяла (.dnvPart — не се цепи между
+         заглавието и реда си), а редът на частите е същият. `firstSection`
+         вече не решава нищо — остава в подписа, за да не се пипат извикванията. */
       return pages.map((page, i) => `
-        ${(firstSection && !i) ? '' : '<div class="pbreak"></div>'}
+        <div class="dnvPart" style="margin-bottom:3mm">
         <div class="pmeta"><b>${esc(title)}</b>${pages.length > 1
-          ? ` · лист ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
+          /* „част“, не „лист“: частите вече не са на отделни листове (Е10). */
+          ? ` · част ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
         <table class="dnvPrint"><colgroup><col style="width:11%">${
           page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
         ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
         <tr><th></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups,
-          [page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0) ? noteB : ''])}`).join('');
+          [page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0) ? noteB : ''])}</div>`).join('');
     };
     return `
       <div class="pmeta">${reportCoverageNote(r)}</div>
@@ -200,8 +245,10 @@ function reportPrintHtml(r) {
   }
   if (r.id === 'fund_movement') {
     return `
-      <div class="pmeta">Постъпили през ${r.year} г. — ${r.acquiredTotal} бр., ${mny(r.acquiredValue)}</div>
-      ${prTable(['Начин', 'Бр.', 'Стойност'], r.acquired, true)}
+      <div class="pmeta">Постъпили през ${r.year} г. — ${r.acquiredTotal} бр., ${mny(r.acquiredValue)} по документите;
+        инвентирани ${r.acquiredRegisteredCount || 0} бр., ${mny(r.acquiredRegisteredValue || 0)} (= КДБФ Част № 1)</div>
+      ${fundMovementAcqTable(r, true)}
+      <div class="pmeta" style="font-size:8.5pt">${esc(fundMovementKdbfNote(r))}</div>
       <div class="pmeta">Отчислени през ${r.year} г. — ${r.deaccessionedTotal} бр., ${mny(r.deaccessionedValue)}</div>
       ${prTable(['Причина', 'Бр.', 'Стойност'], r.deaccessioned, true)}`;
   }
@@ -232,8 +279,12 @@ function printReportDoc() {
     return toast('За тази справка още няма готова форма за печат. Използвайте изгледа на екрана '
       + '— празен подписан формуляр не се отпечатва.', 'err');
   }
-  setPrintPage({ name: (r.title || 'Справка') + ' — ' + r.year, landscape: r.id === 'annual_ab', margin: '10mm' });
-  doPrint(`<div class="pdoc">${shead()}
+  /* Годишният отчет А/Б ползва плътния печатен стил на Дневника (DNEVNIK_PRINT_CSS
+     в src/views/dnevnik.js, v2.4.69, Е10) — таблиците са същите. */
+  const ab = r.id === 'annual_ab';
+  setPrintPage({ name: (r.title || 'Справка') + ' — ' + r.year, landscape: ab, margin: '10mm',
+    extraCss: ab ? DNEVNIK_PRINT_CSS : '' });
+  doPrint(`<div class="pdoc${ab ? ' dnvDoc' : ''}">${shead()}
     <h2 style="font-size:14pt">${esc(r.title || 'Справка')}</h2>
     ${body}
     ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);

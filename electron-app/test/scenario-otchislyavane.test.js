@@ -215,7 +215,9 @@ test('2. акт № 1: два документа през формата → б�
   let n = h.toasts.length;
   h.hooks.confirmAnswer = true;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
-  assert.ok(h.toastsSince(n).some(t => t.type === 'ok' && t.msg === 'Акт № 1: отчислени са 2 документа.'), JSON.stringify(h.toastsSince(n)));
+  /* v2.4.69 (находка О6): съобщението носи номера И ГОДИНАТА на акта (чл. 35 — номерацията е
+     годишна) и съгласува глагола с броя („1 документ е отчислен“). Заменено нарочно. */
+  assert.ok(h.toastsSince(n).some(t => t.type === 'ok' && t.msg === 'Акт № 1/' + Y + ' е утвърден и 2 документа са отчислени.'), JSON.stringify(h.toastsSince(n)));
   await closeAnyModal();
   const act = q('SELECT * FROM deaccession_acts WHERE no = 1 AND year = ?', Y);
   assert.ok(act, 'актът не е записан');
@@ -280,7 +282,9 @@ test('2. акт № 1: два документа през формата → б�
   assert.match(p, /Начин на разпореждане по чл\. 36: предадени за вторични суровини/);
   assert.match(p, /Приложен документ: Протокол за предаване № 3/);
   assert.match(p, /съставен в два екземпляра/, 'чл. 35 — два екземпляра');
-  assert.match(p, /Комисия: 1\. …+ 2\. …+ 3\. …+/);
+  /* v2.4.69 (находка Е5 от пълния тест): комисията подписва на три линии, с имената
+     от СНИМКАТА в акта — не с точки на една линия. */
+  assert.match(p, /Комисия: 1\. Мария Иванова\s*2\. Петър Петров\s*3\. Ана Счетоводителка/);
   assert.match(p, /УТВЪРДИЛ, Председател/, 'утвърждаване от ръководителя');
   assert.ok(!/АНУЛИРАН/.test(p));
   noRendererErrors();
@@ -379,7 +383,9 @@ test('4. запис с 3 бройки: при сканиране се разде
   assert.match(h.text('#actList'), /5 Учебник по математика 1990 4\.00 €.*ОБЩО 1 документ 4\.00 €/, h.text('#actList'));
   n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
-  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 4: отчислен е 1 документ.'), JSON.stringify(h.toastsSince(n)));
+  /* v2.4.69 (находка О6): съобщението носи номера И ГОДИНАТА на акта (чл. 35 — номерацията е
+     годишна) и съгласува глагола с броя („1 документ е отчислен“). Заменено нарочно. */
+  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 4/' + Y + ' е утвърден и 1 документ е отчислен.'), JSON.stringify(h.toastsSince(n)));
   await closeAnyModal();
   const act = q('SELECT * FROM deaccession_acts WHERE no = 4 AND year = ?', Y);
   ids.act4 = act.id;
@@ -435,7 +441,9 @@ test('5. зает (просрочен) и резервиран документ:
   n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
   await h.waitFor(() => /остава да се уведомят читателите/.test(h.modal()), 'прозорецът „обадете се на…“');
-  assert.match(h.modal(), /Акт № 5: отчислен е 1 документ/);
+  /* v2.4.69 (находка О6): съобщението носи номера И ГОДИНАТА на акта (чл. 35 — номерацията е
+     годишна) и съгласува глагола с броя („1 документ е отчислен“). Заменено нарочно. */
+  assert.ok(h.modal().includes('Акт № 5/' + Y + ' е утвърден и 1 документ е отчислен.'), h.modal());
   assert.match(h.modal(), /Обадете се на този читател/);
   assert.match(h.modal(), /Георгиев, Иван · карта № 1002 · тел\. 0888 333 444/);
   assert.match(h.modal(), /чакала? — инв\. № 6/);
@@ -704,7 +712,9 @@ test('7. инвентаризация: липсващите стават про�
   n = h.toasts.length;
   await h.clickButton('Утвърди като акт и отчисли', '#modal footer');
   await closeAnyModal();
-  assert.ok(h.toastsSince(n).some(t => /Актът е утвърден и 1 документ са отчислени/.test(t.msg)), JSON.stringify(h.toastsSince(n)));
+  /* v2.4.69 (находка О6): съобщението носи номера И ГОДИНАТА на акта (чл. 35 — номерацията е
+     годишна) и съгласува глагола с броя („1 документ е отчислен“). Заменено нарочно. */
+  assert.ok(h.toastsSince(n).some(t => t.msg === 'Акт № 7/' + Y + ' е утвърден и 1 документ е отчислен.'), JSON.stringify(h.toastsSince(n)));
   const act = q('SELECT * FROM deaccession_acts WHERE no = 7 AND year = ?', Y);
   assert.ok(act, 'акт № 7 не е записан');
   ids.act7 = act.id;

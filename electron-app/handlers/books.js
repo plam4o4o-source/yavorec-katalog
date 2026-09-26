@@ -156,6 +156,40 @@ function parseBookPrice(x) {
   return require('../db/fund-sql').toCents(Number(norm)); // едно закръгляне (v2.4.67)
 }
 
+/* СИГНАТУРАТА — ЕДНО ПРАВИЛО ЗА ЦЯЛАТА ПРОГРАМА (v2.4.69, кръг 44, находка П4).
+   =====================================================================
+   (а) КАКВО СТАВАШЕ ДОТУК. „Сигнатура“ имаше четири различни отговора за една и
+       съща книга. Книга, описана с помощниците на самата програма — УДК от
+       „Избери…“ (638(497.2)) и авторски знак от „Предложи“ (Й 83) — няма нищо в
+       полето „Сигнатура“ (call_number). Етикетът сглобяваше „638(497.2) / Й 83“
+       сам; колоната „Сигнатура“ в инвентарната книга (реквизит по чл. 16, ал. 1)
+       оставаше ПРАЗНА на екрана и на прошнурования лист; онлайн каталогът
+       показваше празно (поле `g` в katalog.json); „Книги“ изобщо нямаше колона.
+       Обратно — внесена сигнатура, която вече съдържа УДК, печаташе УДК два
+       пъти на етикета (тестер № 1, сценарии 4 и 8).
+   (б) ЗАЩО Е ГРЕШНО. Сигнатурата е адресът на документа на рафта и реквизит на
+       инвентарната книга. Етикет с един адрес и регистър с празна клетка (или с
+       друг адрес) значат, че при проверка по чл. 40 книгата не може да се
+       намери по регистъра — а регистърът е меродавният документ.
+   (в) ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Правилото е едно и живее ТУК, изнесено, за
+       да го викат всички: ако е попълнено полето „Сигнатура“ — то е сигнатурата
+       (библиотекарката я е написала нарочно и тя печели); ако е празно — УДК и
+       авторският знак, в този ред, разделени с интервал („638(497.2) Й 83“),
+       както се пишат на гърба на книгата. Нищо не се ЗАПИСВА вместо човека:
+       полето call_number остава празно, а сигнатурата се извежда при показване —
+       иначе поправен по-късно УДК би оставил стара сигнатура в базата.
+       Екранният слой има огледало (effectiveCallNumber в src/views/books.js);
+       тестът test/fond-v2469.test.js ги сравнява на едни и същи случаи. */
+function effectiveCallNumber(book) {
+  const b = book || {};
+  const own = String(b.call_number == null ? '' : b.call_number).trim();
+  if (own) return own;
+  return [b.udk, b.author_mark].map(x => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
+}
+/* ISBN за СРАВНЕНИЕ: само цифрите и „X“ — четецът подава ISBN от корицата без
+   тиретата, а на ръка се пише с тях (978-954-09-1234-5 = 9789540912345). */
+function isbnKey(s) { return String(s == null ? '' : s).replace(/[^0-9Xx]/g, '').toUpperCase(); }
+
 module.exports = function registerBooksHandlers(ipcMain, deps) {
   /* `flushCatalogWrite` е новото (v2.4.57) и е НЕЗАДЪЛЖИТЕЛНО: подава се от
      main.js, а по-старите тестови обвръзки, които не го знаят, продължават с
@@ -445,7 +479,13 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         + 'въведете я като ден, месец и година, или я оставете празна.');
     }
     out.register_date = b.register_date || today();
-    out.cn_sort = out.call_number ? cnSortKey(out.call_number) : null;
+    /* Ключът за подредба „По сигнатура“ се смята от СЪЩАТА сигнатура, която
+       екранът показва (П4, v2.4.69): иначе книга, описана с УДК и авторски знак,
+       стои в колоната с „638(497.2) Й 83“, а при подредба по сигнатура отива най-
+       отдолу при документите без сигнатура. Заварените редове получават ключа при
+       следващия си запис (пълното преизчисляване е миграция — виж доклада). */
+    const cn = effectiveCallNumber(out);
+    out.cn_sort = cn ? cnSortKey(cn) : null;
     out.status_date = !prev ? today()
       : (prev.status !== out.status ? today() : (prev.status_date || null));
     return out;
@@ -462,14 +502,60 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      и по кирилица ("белият" вече намира "Белият"), без пълно сканиране на
      таблицата. Баркод/ISBN/инв. № остават на LIKE — ASCII цифри, за които
      потребителите очакват "съдържа навсякъде", а не само префикс. */
+  /* „КНИГИ“ ТЪРСИ И ПО ОПИСАНИЕТО ОТ КАТАЛОЖНАТА КАРТА (v2.4.69, кръг 44, П10).
+     (а) КАКВО СТАВАШЕ ДОТУК. Търсенето гледаше заглавие, подзаглавие и автор
+         (FTS) и ISBN/баркод/инв. № (LIKE). Измерено (тестер № 1, сценарий 4):
+         УДК „821.163.2“, авторски знак „В 15“, сигнатура „821.163.2-31 В 15“,
+         издателство „Захарий“, ключова дума „класика“, поредица „Събрани“, език
+         „български“, място „София“ — по 0 реда. А ISBN, подаден от четеца БЕЗ
+         тиретата („9789540912345“), не намираше „978-954-09-1234-5“.
+     (б) ЗАЩО Е ГРЕШНО. Библиотекарката търси книгата на рафта по сигнатурата
+         (тя е на гърба ѝ), а читателят пита „имате ли нещо от „Захарий
+         Стоянов““. Онлайн каталогът на същата библиотека намира по всички тези
+         полета — програмата вътре в библиотеката беше по-сляпа от сайта ѝ.
+     (в) ЗАЩО ТОЧНО ТАКА. FTS индексът (search-fts.js) НЕ се разширява: смяна на
+         колоните му изисква пресъздаване на индекса във всяка заварена база,
+         тоест миграция. Вместо това описателните полета се претърсват със
+         „съдържа“ (instr) върху един сглобен низ на ред. Сигнатурата се търси и
+         такава, каквато я показва екранът: УДК + авторски знак, ако полето
+         „Сигнатура“ е празно (effectiveCallNumber по-горе). ISBN се сравнява без
+         тирета и интервали в ДВЕТЕ посоки.
+         РЕГИСТЪРЪТ. SQLite сгъва регистъра само на латиница, а регистрирана JS
+         функция за сгъване струваше измерено ~75 ms на търсене при 15 000
+         документа (извикване на ред × трите заявки на прозореца: редове, брой,
+         отдели) — 12 → 87 ms. Затова търсеното се подава в трите вида, в които
+         реално стои в описанието: както е написано, с малки букви и с Главна
+         Първа Буква На Всяка Дума („захарий стоянов“ намира „Захарий Стоянов“). Всичко остава в C (измерено в доклада). */
+  /* Всяко поле поотделно (instr върху колоната), не един сглобен низ: сглобяването
+     на осем полета на ред струваше повече от самото търсене. Сигнатурата по
+     ЕДНОТО правило: попълнената „Сигнатура“ — или УДК + авторски знак. */
+  const DESC_COLS = ['b.call_number', 'b.udk', 'b.author_mark', 'b.publisher', 'b.keywords', 'b.series', 'b.language', 'b.city'];
+  const DESC_ONE = '(' + DESC_COLS.map(c => `instr(${c}, ?) > 0`).join(' OR ')
+    + ` OR (TRIM(COALESCE(b.call_number, '')) = '' AND instr(COALESCE(b.udk, '') || ' ' || COALESCE(b.author_mark, ''), ?) > 0))`;
+  function caseVariants(text) {
+    const t = String(text).trim().replace(/\s+/g, ' ');
+    const lower = t.toLowerCase();
+    const title = lower.replace(/(^|[\s(„"'-])(\S)/gu, (m, a, c) => a + c.toUpperCase());
+    return [...new Set([t, lower, title])];
+  }
   function booksSearchWhere(query) {
     if (!query || !query.trim()) return { where: '', params: [] };
     const q = `%${query.trim()}%`;
-    return {
-      where: `(b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
-             OR b.isbn LIKE ? OR b.barcode LIKE ? OR CAST(b.inv_number AS TEXT) LIKE ?)`,
-      params: [ftsQuery(query), q, q, q]
-    };
+    const variants = caseVariants(query);
+    const conds = [
+      'b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)',
+      'b.isbn LIKE ?', 'b.barcode LIKE ?', 'CAST(b.inv_number AS TEXT) LIKE ?',
+      '(' + variants.map(() => DESC_ONE).join(' OR ') + ')'
+    ];
+    const params = [ftsQuery(query), q, q, q];
+    for (const v of variants) for (let i = 0; i <= DESC_COLS.length; i++) params.push(v);
+    // ISBN без тиретата — само когато търсеното прилича на ISBN (цифри, тирета, X).
+    const digits = isbnKey(query);
+    if (/^[0-9Xx\s-]+$/.test(query.trim()) && digits.length >= 4) {
+      conds.push("instr(REPLACE(REPLACE(UPPER(COALESCE(b.isbn, '')), '-', ''), ' ', ''), ?) > 0");
+      params.push(digits);
+    }
+    return { where: '(' + conds.join(' OR ') + ')', params };
   }
   /* books:list(query, sort) — пълният резултат като масив (както досега:
      износите и старите изгледи; етикетите вече НЕ минават оттук).
@@ -693,6 +779,143 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       + 'Книгата за движение на фонда, нито в годишния отчет за тази година. Ако годината е сгрешена '
       + '(най-честата причина), поправете датата сега от картона на документа.';
   }
+  /* ДОКУМЕНТ БЕЗ ПАРТИДА И БЕЗ ВИД ВЕЧЕ НЕ СЕ ВПИСВА БЕЗ ДУМА (v2.4.69, кръг 44, П9).
+     (а) КАКВО СТАВАШЕ ДОТУК. Празна библиотека: „Книги“ водят към „+ Нова книга“,
+         а формата стои на „— без партида —“ и празен вид. Записът минаваше с
+         „Книгата е добавена.“ — и документът липсваше от КДБФ Част № 1
+         (постъпленията се броят по партиди), а в Част № 2 излизаше под
+         „— без вид —“ (тестер № 1, сценарий 5: 2 документа без партида, 7 без вид).
+     (б) ЗАЩО Е ГРЕШНО. По чл. 14 всяко постъпление се регистрира първо общо (ред
+         в Част № 1 с първичния документ), после индивидуално в инвентарната
+         книга. Документ без партида е вписан индивидуално, а общо — никъде; при
+         проверка Част № 1 и инвентарната книга се разминават с точно него. Видът
+         документ е разпределението по видове в Част № 2 (Приложение № 2).
+     (в) ЗАЩО ТОЧНО ТАКА. Записът НЕ се отказва: законен случай има (стар фонд без
+         документ, внесен ред, който ще бъде закачен после). Отказва се
+         МЪЛЧАНИЕТО — предупреждение обратно към прозореца, по модела на
+         invGap/dateWarning, с изхода: къде се завежда партида и как се закача.
+         Видът „книга“ по подразбиране се слага във ФОРМАТА (видимо, преди
+         записа), не тук — обработчикът не решава вместо човека какво е
+         документът. */
+  function noBatchWarning(payload) {
+    if (payload.acquisition_id != null) return null;
+    return 'Инв. № ' + (payload.inv_number ?? '—') + ' е вписан БЕЗ ПАРТИДА: в Книгата за движение на фонда, '
+      + 'Част № 1 (постъпления по чл. 14), няма ред за него, макар да се брои във фонда. Ако документът е постъпил '
+      + 'с фактура, акт или протокол, заведете партида от „Постъпления → + Нова партида“ и я изберете в картона му '
+      + '(„Инвентарна книга“ → „Редакция“ → „Партида в КДБФ“). Следващия път започвайте от партидата: „+ Инвентирай '
+      + 'документ“ в прозореца ѝ попълва партидата сама.';
+  }
+  function noKindWarning(db, payload) {
+    if (payload.category_id != null) return null;
+    return 'Инв. № ' + (payload.inv_number ?? '—') + ' е вписан без „Вид документ“: в Книгата за движение на фонда, '
+      + 'Част № 2 (разпределение по видове), ще излезе под „— без вид —“. Изберете вида от картона на документа '
+      + '(„Инвентарна книга“ → „Редакция“).';
+  }
+  /* ПОВТОРЕН ISBN (v2.4.69, кръг 44, П11). Вторият екземпляр от едно заглавие е
+     ВТОРИ ЗАПИС със свой инвентарен номер — правилно. Но писан наново на ръка, той
+     губи описанието на първия (сигнатура, УДК, поредица) и се разминава с него;
+     точно за това съществува „+ Още екземпляр“. Записът не се спира — само се
+     казва кой вече носи този ISBN и откъде е по-краткият път. */
+  function sameIsbn(db, isbn, selfId) {
+    const key = isbnKey(isbn);
+    if (key.length < 8) return null;
+    const rows = db.prepare(`SELECT id, inv_number, title FROM books
+      WHERE id <> ? AND REPLACE(REPLACE(UPPER(COALESCE(isbn, '')), '-', ''), ' ', '') = ?
+      ORDER BY inv_number LIMIT 5`).all(selfId == null ? -1 : selfId, key);
+    if (!rows.length) return null;
+    const first = rows[0];
+    return {
+      id: first.id, inv_number: first.inv_number, title: first.title, count: rows.length,
+      message: 'ISBN ' + String(isbn).trim() + ' вече е вписан на инв. № ' + (first.inv_number ?? '—')
+        + ' („' + (first.title || '') + '“)' + (rows.length > 1 ? ' и на още ' + (rows.length - 1) : '') + '. '
+        + 'Ако това е още един екземпляр — вписан е правилно, със свой инвентарен номер. Следващия път '
+        + 'отворете картона на инв. № ' + (first.inv_number ?? '—') + ' и натиснете „+ Още екземпляр“: '
+        + 'описанието (сигнатура, УДК, поредица) се копира и номерът се дава сам.'
+    };
+  }
+  ipcMain.handle('books:byIsbn', (e, isbn, selfId) =>
+    run(() => {
+      const r = sameIsbn(getDb(), isbn, selfId == null || selfId === '' ? null : Number(selfId));
+      return r ? [r] : [];
+    })
+  );
+  /* ПРАЗНИТЕ МЕСТА В ПОРЕДИЦАТА НА ИНВЕНТАРНАТА КНИГА (v2.4.69, кръг 44, П8).
+     (а) КАКВО СТАВАШЕ ДОТУК. Разпечатаната инвентарна книга просто прескачаше
+         номерата, които ги няма в базата: тестер № 1 (сценарий 5) — № 6–10
+         (прескочени при ръчно въведен № 11) и № 13 (изтрит) липсват на хартия,
+         макар одитната следа да ги пази.
+     (б) ЗАЩО Е ГРЕШНО. Листовете се прошнуроват и заверяват (чл. 26, ал. 2), а
+         при проверка по чл. 17, ал. 2 за ВСЕКИ номер от поредицата трябва да има
+         отговор. Лист, на който след № 5 идва № 11 без дума, изглежда като лист с
+         изрязани редове.
+     (в) ЗАЩО ТОЧНО ТАКА. Интервалите се смятат тук, по целия регистър (от най-
+         малкия до най-големия вписан номер — по-ниски номера може да са в стара
+         хартиена книга), и за всеки се търси обяснение в дневника: прескочени
+         при вписване (с датата) или изтрит документ (с датата и заглавието).
+         Ако дневникът мълчи (внос, стара база) — казва се и това. Печатът ги
+         вмъква на мястото им (src/views/inv-book.js). */
+  function invGapRanges(db) {
+    const nums = db.prepare('SELECT inv_number FROM books WHERE inv_number IS NOT NULL ORDER BY inv_number').pluck().all();
+    const gaps = [];
+    for (let i = 1; i < nums.length; i++) {
+      if (nums[i] > nums[i - 1] + 1) gaps.push({ from: nums[i - 1] + 1, to: nums[i] - 1 });
+    }
+    if (!gaps.length) return gaps;
+    /* ts в одитната следа е по UTC (datetime('now')), а датата на листа — по
+       часовника на компютъра (v2.4.67: „днес“ е местният ден). Без 'localtime'
+       номер, прескочен в 00:30 българско време, излизаше на хартия „прескочен
+       на“ ВЧЕРАШНАТА дата — хванато от теста на П8, пуснат малко след полунощ. */
+    const trail = db.prepare(`SELECT datetime(ts, 'localtime') AS ts, action, detail FROM audit_log
+      WHERE action IN ('Прескочени инвентарни номера', 'Изтрит документ', 'Изтрит документ с история')
+      ORDER BY id`).all();
+    const skipped = [];   // { from, to, ts }
+    const deleted = new Map(); // inv → { ts, title }
+    for (const t of trail) {
+      const d = String(t.detail || '');
+      if (t.action === 'Прескочени инвентарни номера') {
+        let m = /от (\d+) до (\d+)/.exec(d);
+        if (m) { skipped.push({ from: +m[1], to: +m[2], ts: t.ts }); continue; }
+        m = /неизползвани инв\. № (\d+)/.exec(d);
+        if (m) skipped.push({ from: +m[1], to: +m[1], ts: t.ts });
+      } else {
+        const m = /^инв\. № (\d+) — (.*?) · /.exec(d);
+        if (m) deleted.set(+m[1], { ts: t.ts, title: m[2] });
+      }
+    }
+    const day = (ts) => String(ts || '').slice(0, 10);
+    const out = [];
+    for (const g of gaps) {
+      /* Интервалът се разбива на парчета с еднакво обяснение: № 6–10 прескочени,
+         № 13 изтрит, № 41–500 без следа — всяко със своята дума. Работи се с
+         ГРАНИЦИ, не номер по номер: внос с отделна поредица оставя интервали от
+         стотици хиляди номера. Изтритият номер има предимство пред прескочения
+         (номерът може да е бил прескочен, после зает и после изтрит). */
+      const dels = [...deleted.keys()].filter(n => n >= g.from && n <= g.to).sort((a, b) => a - b);
+      const marks = dels.map(n => ({ from: n, to: n, why: 'изтрит', ts: day(deleted.get(n).ts), title: deleted.get(n).title }));
+      for (const s of skipped) {
+        let f = Math.max(s.from, g.from);
+        const t = Math.min(s.to, g.to);
+        // прескоченият интервал се реже около изтритите номера в него
+        for (const d of dels.filter(n => n >= f && n <= t)) {
+          if (d > f) marks.push({ from: f, to: d - 1, why: 'прескочен', ts: day(s.ts), title: null });
+          f = d + 1;
+        }
+        if (f <= t) marks.push({ from: f, to: t, why: 'прескочен', ts: day(s.ts), title: null });
+      }
+      marks.sort((a, b) => a.from - b.from || (a.why === 'изтрит' ? -1 : 1));
+      let cursor = g.from;
+      for (const m of marks) {
+        if (m.to < cursor) continue;
+        const f = Math.max(m.from, cursor);
+        if (f > cursor) out.push({ from: cursor, to: f - 1, why: 'без следа', ts: null, title: null });
+        out.push({ from: f, to: m.to, why: m.why, ts: m.ts || null, title: m.title });
+        cursor = m.to + 1;
+      }
+      if (cursor <= g.to) out.push({ from: cursor, to: g.to, why: 'без следа', ts: null, title: null });
+    }
+    return out;
+  }
+  ipcMain.handle('books:invGaps', () => run(() => invGapRanges(getDb())));
   /* ЗАПИСЪТ НА ПУБЛИЧНИЯ КАТАЛОГ ПРИ НОВО ПОСТЪПЛЕНИЕ (v2.4.57).
      Дотук books:create викаше scheduleCatalogWrite() — debounced запис след 4
      секунди, чийто резултат се изхвърля. Отчисляването отдавна прави обратното
@@ -809,8 +1032,15 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       ? (scheduleCatalogWrite(), probeCatalogFolder(folder))
       : (flushCatalogWrite ? flushCatalogWrite() : (scheduleCatalogWrite(), null));
     if (w && w.blocked) {
+      /* К11 (v2.4.69): съобщението сочеше бутон „Ръчен запис“, какъвто в програмата
+         няма. main.js вече връща готовото изречение в w.message (с верния изход —
+         „Онлайн каталог“ → „Запиши въпреки това…“); тук се ползва то, а резервният
+         текст казва същото, в случай че обектът идва без него. */
+      /* Този клон се стига само когато фондът в базата излиза ПРАЗЕН (виж условието
+         hasPublishableBooks по-горе) — затова изречението го казва така, както е. */
       const msg = 'ВНИМАНИЕ: записът на каталога след ' + what + ' е спрян — фондът в тази база излиза празен, '
-        + 'а публикуваният каталог не е. Използвайте „Ръчен запис“ в „Онлайн каталог“, ако наистина искате празен каталог.';
+        + 'а публикуваният каталог не е. Ако наистина искате празен каталог, в „Онлайн каталог“ натиснете '
+        + '„Запиши въпреки това…“.';
       logAudit('Онлайн каталог', msg);
       return msg;
     }
@@ -897,7 +1127,9 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
             + ' — въведени на ръка, без документ по тях');
         }
         logAudit('Нов документ', 'инв. № ' + (payload.inv_number ?? '—') + ' — ' + b.title);
-        return { id, invGap, dateWarning: registerDateWarning(payload.register_date) };
+        return { id, invGap, dateWarning: registerDateWarning(payload.register_date),
+          acqWarning: noBatchWarning(payload), kindWarning: noKindWarning(db, payload),
+          isbnDuplicate: b.copied_from != null && b.copied_from !== '' ? null : sameIsbn(db, payload.isbn, id) };
       });
       return tx.immediate(book);
     });
@@ -919,6 +1151,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         + '“ не можа да се направи: ' + err.message);
     }
     return { ok: true, data: res.data.id, invGap: res.data.invGap, dateWarning: res.data.dateWarning,
+      acqWarning: res.data.acqWarning, kindWarning: res.data.kindWarning, isbnDuplicate: res.data.isbnDuplicate,
       suggestions, catalogWarning };
   });
   ipcMain.handle('books:update', (e, book) =>
@@ -1580,3 +1813,7 @@ module.exports.assertUniqueBarcode = assertUniqueBarcode;
    документ трябва да е едно и също, откъдето и да идва стойността. */
 module.exports.parseBookPrice = parseBookPrice;
 
+/* П4 (v2.4.69): правилото за сигнатура е едно — вика се от етикета, от онлайн
+   каталога (main.js, полето `g`), от вноса и от тестовете; екранът има огледало. */
+module.exports.effectiveCallNumber = effectiveCallNumber;
+module.exports.isbnKey = isbnKey;
