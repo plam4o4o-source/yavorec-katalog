@@ -194,7 +194,7 @@ function addVisits() {
 window.addVisits = addVisits;
 async function visitsDayHint() {
   const el = $('#vsDayHint'); if (!el) return;
-  const date = (document.querySelector('#vsF [name=date]') || {}).value;
+  const date = (/** @type {HTMLInputElement} */ (document.querySelector('#vsF [name=date]')) || { value: undefined }).value;
   if (!date) { el.textContent = ''; return; }
   const n = await call(window.api.visits.get(date));
   if (n === null) return;

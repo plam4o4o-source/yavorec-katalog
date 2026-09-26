@@ -216,7 +216,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
         r.notice_via_guarantor = addr.viaGuarantor;
         r.reader_phone = r.phone;      // телефонът от картона на самия читател
         r.phone = addr.phone;
-        const overdueDays = Math.round((new Date(today()) - new Date(r.oldest_due)) / 864e5);
+        const overdueDays = Math.round((new Date(today()).getTime() - new Date(r.oldest_due).getTime()) / 864e5);
         r.level = overdueDays >= d3 ? 3 : overdueDays >= d2 ? 2 : 1;
         const last = lastNoticeQ.get(r.reader_id);
         // Показва се само напомняне, изпратено ПО ТЕКУЩОТО просрочие — старите не броят.

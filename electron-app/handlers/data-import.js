@@ -170,7 +170,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       /* Курсът е задължителен точно тук, а не при регистрацията: без него
          левовете не бива тихо да станат евро. main.js винаги го подава. */
       if (!Number.isFinite(deps.EUR_RATE) || deps.EUR_RATE <= 0) {
-        const e = new Error('курсът лев/евро не е подаден на вноса — цената в левове не може да бъде превърната');
+        const e = /** @type {Error & { noRate: boolean }} */ (new Error('курсът лев/евро не е подаден на вноса — цената в левове не може да бъде превърната'));
         e.noRate = true;
         throw e;
       }

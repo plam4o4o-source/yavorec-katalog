@@ -68,6 +68,7 @@ function bulgarianHolidays(year) {
   add(easter, 'Великден');
   add(easter + DAY, 'Великден — втори ден');
 
+  /** @type {Array<[number, string]>} */
   const fixed = FIXED_HOLIDAYS.map(([md, reason]) =>
     [Date.UTC(year, parseInt(md.slice(0, 2), 10) - 1, parseInt(md.slice(3), 10)), reason]);
   for (const [ms, reason] of fixed) if (!taken.has(iso(ms))) add(ms, reason);

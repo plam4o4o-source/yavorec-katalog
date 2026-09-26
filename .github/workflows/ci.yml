@@ -107,6 +107,17 @@ jobs:
           set -euo pipefail
           git ls-files '*.js' | grep -v 'node_modules/' | xargs -P "$(nproc)" -n 1 node --check
 
+      # ПРОВЕРКА НА ТИПОВЕТЕ (tsc --checkJs, v2.4.68). Програмата си остава на
+      # JavaScript — нищо не се компилира. TypeScript само чете кода и казва кога
+      # изглед вика метод на window.api, който preload.js не излага, чете поле,
+      # което елементът няма, или подава на функция грешен брой аргументи.
+      # Описанието на window.api се извежда от preload.js
+      # (scripts/gen-api-types.js) и тук се проверява и че е актуално.
+      # Веднъж е достатъчно — часовата зона не влияе на типовете.
+      - name: Проверка на типовете (tsc --checkJs — главен процес и изгледи)
+        if: matrix.primary
+        run: npm run typecheck
+
       - name: Тестове (node:test, ${{ matrix.tz }})
         shell: bash
         env:

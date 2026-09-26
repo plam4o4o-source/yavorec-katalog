@@ -706,7 +706,7 @@ window.udkTap = udkTap;
 
 function udkAuxTab(i) {
   const rows = (UDK_AUX[i] || ['', []])[1];
-  document.querySelectorAll('.udkTab').forEach(t => t.classList.toggle('on', Number(t.dataset.aux) === i));
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.udkTab')).forEach(t => t.classList.toggle('on', Number(t.dataset.aux) === i));
   const box = $('#udkAuxList');
   if (box) box.innerHTML = rows.map(([c, head, also]) =>
     `<div class="udkNode" data-code="${esc(c)}"><button type="button" class="udkRow"
@@ -752,7 +752,7 @@ window.udkTake = udkTake;
 
 function udkFilter() {
   const q = ($('#udkQ').value || '').trim().toLowerCase();
-  const all = document.querySelectorAll('#udkList .udkNode');
+  const all = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#udkList .udkNode'));
   const twist = (n, open) => {
     n.classList.toggle('on', open);
     const t = n.querySelector(':scope > .udkRow > .udkTw');

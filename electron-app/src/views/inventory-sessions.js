@@ -297,7 +297,7 @@ async function closeInvent() {
 }
 window.closeInvent = closeInvent;
 async function doCloseInvent() {
-  const sel = document.querySelector('[name=ivMode]:checked');
+  const sel = /** @type {HTMLInputElement} */ (document.querySelector('[name=ivMode]:checked'));
   const mode = sel ? sel.value : 'representative';
   const res = await window.api.inventorySessions.close({ sessionId: INVENT_SESSION.id, mode });
   if (!res.ok) return toast(res.error, 'err');

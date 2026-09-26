@@ -33,7 +33,7 @@ const tsLocal = (ts) => {
   const raw = String(ts || '');
   if (!/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d/.test(raw)) return null;
   const d = new Date(/[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z');
-  return isNaN(d) ? null : d;
+  return isNaN(d.getTime()) ? null : d;
 };
 const tsDay = (ts) => {
   const d = tsLocal(ts), p = (n) => String(n).padStart(2, '0');
@@ -679,7 +679,7 @@ function askConfirm(text, opts) {
   box.querySelector('.cfmTitle').textContent = p.title;
   box.querySelector('.cfmMsg').textContent = p.body;
   veil.classList.add('on');
-  const prev = document.activeElement;
+  const prev = /** @type {HTMLElement} */ (document.activeElement);
   return new Promise(resolve => {
     let done = false;
     const finish = (val) => {
@@ -746,17 +746,17 @@ window.mnyField = mnyField;
    прозорците се пресъздават при всяко отваряне и ръчното закачане се пропуска
    лесно (точно това се беше случило с двойното поле за цена в „Книги“). */
 document.addEventListener('input', (e) => {
-  const el = e.target;
+  const el = /** @type {HTMLInputElement} */ (e.target);
   if (!el || el.tagName !== 'INPUT') return;
   const заЛева = el.getAttribute && el.getAttribute('data-bgn-for');
   if (заЛева) {
     const цел = el.form ? el.form.querySelector(`[name="${заЛева}"]`)
       : document.querySelector(`[name="${заЛева}"]`);
-    if (цел) цел.value = el.value === '' ? '' : bgnToEur(el.value);
+    if (цел) /** @type {HTMLInputElement} */ (цел).value = el.value === '' ? '' : bgnToEur(el.value);
     return;
   }
   if (!el.name) return;
-  const огледало = document.querySelector(`[data-bgn-for="${el.name}"]`);
+  const огледало = /** @type {HTMLInputElement} */ (document.querySelector(`[data-bgn-for="${el.name}"]`));
   if (огледало) огледало.value = el.value === '' ? '' : bgn(el.value);
 });
 

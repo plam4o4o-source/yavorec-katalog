@@ -159,7 +159,7 @@ for (const name of ONCE_ACTIONS) {
     /* Натиснатият бутон е и фокусираният — Chromium фокусира бутона при
        щракване. Ако по някаква причина не е, пазачът пак държи: наборът
        ONCE_RUNNING сам по себе си спира второто повикване. */
-    const btn = document.activeElement;
+    const btn = /** @type {HTMLButtonElement} */ (document.activeElement);
     const lock = btn && btn.tagName === 'BUTTON' && !btn.disabled ? btn : null;
     if (lock) lock.disabled = true;
     let out;

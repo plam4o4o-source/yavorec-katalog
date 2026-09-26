@@ -78,7 +78,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
        от седмицата — за да не се броят два пъти. Резултатът е същият. */
     const start = new Date(a + 'T00:00:00Z'); start.setUTCDate(start.getUTCDate() + 1); // (a, b]
     const endD = new Date(b + 'T00:00:00Z');
-    const D = Math.round((endD - start) / 864e5) + 1; // брой дни в интервала
+    const D = Math.round((endD.getTime() - start.getTime()) / 864e5) + 1; // брой дни в интервала
     if (!(D > 0)) return 0; // и при невалидна дата (NaN)
     let n = 0;
     const dow0 = start.getUTCDay();

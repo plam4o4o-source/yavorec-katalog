@@ -123,7 +123,7 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
     return o;
   }
 
-  ipcMain.handle('chronicle:list', (e, { q, year } = {}) =>
+  ipcMain.handle('chronicle:list', /** @param {unknown} e @param {{ q?: string, year?: string | number }} [arg] */ (e, { q, year } = {}) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const where = [], args = {};

@@ -126,12 +126,29 @@ The first one takes about a minute and looks stuck: it is waiting out the page's
 real production timeouts (6 s for headers, 25 s for the body, per source). That
 wait *is* the check.
 
-All four checks — both time zones and both catalogue suites — run with one
-command:
+All checks — the type check, both time zones and both catalogue suites — run
+with one command:
 
 ```bash
 npm run test:all
 ```
+
+#### Type check (`npm run typecheck`)
+
+The program stays plain JavaScript — nothing is compiled. TypeScript only
+*reads* the code (`tsc --checkJs`, `tsconfig.json` for the main process,
+`tsconfig.renderer.json` for `src/views/`) and fails CI when a view calls a
+`window.api` method that `preload.js` does not expose, reads a property an
+element does not have, or passes a function the wrong number of arguments.
+
+- The description of `window.api` (`types/api.generated.d.ts`) is **generated
+  from `preload.js`** — after adding or renaming a channel run
+  `npm run gen:api-types`; CI fails while the file is stale.
+- A new value put on `window` for `onclick="…"` or printing needs a line in
+  `types/renderer-globals.d.ts`.
+- Where TypeScript cannot know the element type, say it with a JSDoc cast —
+  `/** @type {HTMLInputElement} */ (document.querySelector('[name=x]'))` —
+  rather than changing the code.
 
 **A new capability or a fix without a new or updated test is not accepted.**
 The convention is one test file per handler — `handlers/x.js` →

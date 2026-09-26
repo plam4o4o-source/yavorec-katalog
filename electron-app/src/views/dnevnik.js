@@ -517,7 +517,7 @@ async function saveDnevnikDay(date) {
      Празно поле остава 0, както досега (непопълнено = нула). Часовете са
      отделно (a_hours_hhmm/b_hours_hhmm) и минават през parseHhmm. */
   const bad = [];
-  for (const el of document.querySelectorAll('#dnvF input[type="text"][data-label]')) {
+  for (const el of /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('#dnvF input[type="text"][data-label]'))) {
     const raw = String(el.value == null ? '' : el.value).trim();
     if (raw !== '' && !/^\d+$/.test(raw)) bad.push('„' + el.dataset.label + '“ = „' + raw + '“');
   }

@@ -190,7 +190,7 @@ window.chronicleForm = chronicleForm;
    („ок. 1930“, „1878 – 1880“) не се пипа, когато вече съдържа годината на
    датата — само празното или сгрешеното поле се презаписва. */
 function chrYearMatches(year, date) {
-  return (String(year || '').match(/\d{3,4}/g) || []).includes(String(date).slice(0, 4));
+  return (String(year || '').match(/\d{3,4}/g) || /** @type {string[]} */ ([])).includes(String(date).slice(0, 4));
 }
 function chrYearFromDate(el) {
   const d = String((el && el.value) || '');

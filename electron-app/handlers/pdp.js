@@ -442,7 +442,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; badLogged = false; pii.clearSession(); }));
-  ipcMain.handle('pdp:changePassword', (e, { oldPassword, newPassword } = {}) =>
+  ipcMain.handle('pdp:changePassword', /** @param {unknown} e @param {{ oldPassword?: string, newPassword?: string }} [arg] */ (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
       const s = pdpSettingsRow();

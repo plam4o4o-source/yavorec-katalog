@@ -440,7 +440,7 @@ async function saveActDraft() {
   /* Проектът се записва и непълен — това му е работата. Затова тук НЯМА
      firstMissingRequired: проверките по чл. 30 и чл. 35 се правят при
      утвърждаването, не докато комисията още събира номерата. */
-  const draft = Object.assign({}, d, { reason_text: p ? p.t : null });
+  const draft = /** @type {any} */ (Object.assign({}, d, { reason_text: p ? p.t : null }));
   delete draft.no;
   const id = await call(window.api.deaccessionActs.saveDraft({
     id: ACT_DRAFT_ID, draft, bookIds: ACT_LIST.map(b => b.id)
@@ -475,7 +475,7 @@ async function approveActDraft() {
   if (actLegacyBlock()) return;
   const p = PRICHINI.find(x => x.k == d.reason_code);
   // Първо се записва това, което е на екрана — иначе утвърденото е старата снимка.
-  const draft = Object.assign({}, d, { reason_text: p ? p.t : null });
+  const draft = /** @type {any} */ (Object.assign({}, d, { reason_text: p ? p.t : null }));
   delete draft.no;
   const draftId = await call(window.api.deaccessionActs.saveDraft({
     id: ACT_DRAFT_ID, draft, bookIds: ACT_LIST.map(b => b.id)

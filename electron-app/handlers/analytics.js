@@ -148,7 +148,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     o.book_id = idOrNull(d.book_id);
     return checkAnalytic(o);
   }
-  ipcMain.handle('analytics:list', (e, { q, year, onlyLocal } = {}) =>
+  ipcMain.handle('analytics:list', /** @param {unknown} e @param {{ q?: string, year?: string | number, onlyLocal?: boolean }} [arg] */ (e, { q, year, onlyLocal } = {}) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const where = [], args = {};

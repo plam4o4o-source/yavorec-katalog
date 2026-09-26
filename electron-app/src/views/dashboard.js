@@ -108,8 +108,8 @@ async function renderDash() {
      част от годината, за да не се мени при разлика от няколко дни. */
   const nowD = new Date();
   const yStart = new Date(nowD.getFullYear(), 0, 1), yEnd = new Date(nowD.getFullYear(), 11, 31);
-  const daysLeft = Math.max(0, Math.ceil((yEnd - nowD) / 86400000));
-  const elapsedPct = (nowD - yStart) / (yEnd - yStart) * 100;
+  const daysLeft = Math.max(0, Math.ceil((yEnd.getTime() - nowD.getTime()) / 86400000));
+  const elapsedPct = (nowD.getTime() - yStart.getTime()) / (yEnd.getTime() - yStart.getTime()) * 100;
   const invDone = pct >= 100;
   const invBehind = !invDone && pct < elapsedPct - 10;
   const invLeft = Math.max(0, r.inventoryTarget - r.inventoryScannedYear);

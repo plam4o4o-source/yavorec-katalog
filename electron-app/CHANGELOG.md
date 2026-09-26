@@ -11,6 +11,69 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.68
+
+**BG:** **Проверка на типовете в CI — без промяна в работата на програмата.**
+Изданието не носи нищо ново за библиотекаря; то добавя още една автоматична
+проверка при всяка промяна в кода.
+
+**Какво се проверява.** Програмата си остава на JavaScript — нищо не се компилира.
+TypeScript (`tsc --checkJs`) само чете кода и спира промяната, когато изглед вика
+метод на `window.api`, който `preload.js` не излага (например `api.loans.chekout`),
+чете поле, което елементът на страницата няма, или подава на функция грешен брой
+аргументи. Проверката минава за секунди и е първа в `npm run test:all`.
+
+**Описанието на моста към главния процес се извежда от самия `preload.js`**
+(`scripts/gen-api-types.js` → `types/api.generated.d.ts`, 243 метода), а не се
+пише на ръка — затова не може да остарее незабелязано: CI пада, докато не се
+обнови с `npm run gen:api-types`.
+
+**Какво показа първото пускане.** 563 съобщения, от които **нито едно истинска
+грешка**: 349 бяха самият `window.api` (без описание), останалите — стойности на
+`window`, полета на HTML елементи, изваждане на дати, параметри по подразбиране.
+Всички са изчистени с описания и JSDoc указания; на шест места изваждането на дати
+и на две проверката за невалидна дата вече минават през `getTime()` — същият
+резултат, включително за невалидна дата.
+Единственото смислено попадение — излишен аргумент към `renderInventRun()` в
+`src/views/mobile.js` — беше безвредно и е махнато.
+
+**Проверено:** нов `test/typecheck-v2468.test.js` — описанието отговаря на
+`preload.js`, а грешно име на метод, на група или неописана стойност на `window`
+е грешка, вярното извикване — не. Три мутации (`api: any`; остаряло описание;
+`Window` с празен индекс) — всяка уловена. Пълна поредица: **2102 успешни, 0
+неуспешни**, в UTC и Europe/Sofia; сайтът — 8 сценария и мащаб 15 002 записа.
+
+**EN:** **Type checking in CI — no change in how the program works.** This release
+brings nothing new for the librarian; it adds one more automatic check on every code
+change.
+
+**What is checked.** The program stays JavaScript — nothing is compiled. TypeScript
+(`tsc --checkJs`) only reads the code and stops a change when a view calls a
+`window.api` method that `preload.js` does not expose (e.g. `api.loans.chekout`),
+reads a property the page element does not have, or passes a function the wrong
+number of arguments. The check takes seconds and runs first in `npm run test:all`.
+
+**The description of the bridge to the main process is derived from `preload.js`
+itself** (`scripts/gen-api-types.js` → `types/api.generated.d.ts`, 243 methods), not
+written by hand, so it cannot go stale unnoticed: CI fails until it is regenerated
+with `npm run gen:api-types`.
+
+**What the first run showed.** 563 messages, **none of them a real bug**: 349 were
+`window.api` itself (undescribed), the rest were `window` values, HTML element
+properties, date subtraction and default parameters. All are cleared with
+declarations and JSDoc hints; in six places date subtraction and in two the
+invalid-date check now go through `getTime()` — same result, including for an
+invalid date. The only meaningful hit —
+a superfluous argument to `renderInventRun()` in `src/views/mobile.js` — was harmless
+and has been removed.
+
+**Verified:** new `test/typecheck-v2468.test.js` — the description matches
+`preload.js`, and a wrong method name, a wrong group or an undeclared `window` value
+is an error while a correct call is not. Three mutations (`api: any`; stale
+description; `Window` with a catch-all index) — each caught. Full suite: **2102
+passed, 0 failed**, in UTC and Europe/Sofia; the site — 8 scenarios and a
+15,002-record scale test.
+
 ## v2.4.67
 
 **BG:** **Проверка за грешки: единадесет поправки в парите, отчетите, инвентаризацията

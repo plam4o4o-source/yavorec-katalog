@@ -38,7 +38,7 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
     if (!res.ok) {
       // 4xx/5xx е отговор на услугата, а не липса на връзка — двете се разграничават,
       // за да не се каже „няма интернет“, когато книгата просто я няма.
-      const err = new Error('HTTP ' + res.status); err.httpStatus = res.status; throw err;
+      const err = /** @type {HttpStatusError} */ (new Error('HTTP ' + res.status)); err.httpStatus = res.status; throw err;
     }
     return await res.json();
   }
@@ -182,7 +182,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
       headers: { 'User-Agent': 'Inventar-Library-System' },
       signal: AbortSignal.timeout(10000)
     });
-    if (!res.ok) { const err = new Error('HTTP ' + res.status); err.httpStatus = res.status; throw err; }
+    if (!res.ok) { const err = /** @type {HttpStatusError} */ (new Error('HTTP ' + res.status)); err.httpStatus = res.status; throw err; }
     const xml = await res.text();
     if (/<numberOfRecords>0<\/numberOfRecords>/i.test(xml)) return null;
     const records = parseMarcXml(xml);
