@@ -452,7 +452,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         if (typeof deps.activateHoldOnReturn === 'function') {
           for (const bookId of setAsideBooks) {
             const next = deps.activateHoldOnReturn(bookId);
-            if (next && next.status === 'заделена' && next.reader_id !== id) {
+            if (next && next.justActivated && next.reader_id !== id) {
               promoted.push({ name: next.reader_name, phone: next.phone || null, title: next.title || '',
                 inv_number: next.inv_number ?? null });
             }

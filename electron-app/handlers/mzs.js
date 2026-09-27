@@ -87,10 +87,18 @@ function mzsWhyNot(from, to) {
    Брои бройки, не „има/няма“: стар неразделен запис с 3 бройки, една от които
    е при партньора, все пак има свободни. Отворените заемания се броят, защото
    ако свободните бройки са 0 и без МЗС, отказът е работа на гишето, не на МЗС. */
-function mzsBlockForBook(db, bookId) {
-  const away = db.prepare(`SELECT no, year, partner, date_sent, due_date FROM mzs_requests
+const MZS_AWAY_SQL = `SELECT no, year, partner, date_sent, due_date FROM mzs_requests
       WHERE book_id = ? AND direction = 'входящо' AND status IN ('изпратено', 'получено')
-      ORDER BY id`).all(bookId);
+      ORDER BY id`;
+/* Колко НАШИ бройки на записа са при партньора по входяща заявка. Едно място за
+   гишето (mzsBlockForBook) и за резервациите (freeCopies в handlers/holds.js) —
+   иначе заемането отказва „изпратен по МЗС“, а резервацията отказва „свободен е,
+   заемете го“, и читателят не може нито едното (преглед на кръга v2.4.69). */
+function mzsAwayCount(db, bookId) {
+  return db.prepare(MZS_AWAY_SQL).all(bookId).length;
+}
+function mzsBlockForBook(db, bookId) {
+  const away = db.prepare(MZS_AWAY_SQL).all(bookId);
   if (!away.length) return null;
   const qty = db.prepare('SELECT COALESCE((SELECT quantity FROM inventory WHERE book_id = ?), 1) AS q').get(bookId).q;
   const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(bookId).n;
@@ -203,9 +211,18 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
     return undefined;
   }
   /* Нашият документ на входяща заявка — по инв. № или баркод (или id). */
-  function resolveBook(db, m) {
+  function resolveBook(db, m, cur) {
     if (m.book_code !== undefined) {
       const raw = String(m.book_code == null ? '' : m.book_code).trim();
+      /* Формата връща номера, който сама е показала (v2.4.69, преглед на кръга).
+         Тогава свързаният документ остава същият, без ново търсене: иначе номер,
+         който съвпада с баркода на друг документ, правеше заявката незаписваема
+         (дори само бележката), а документ без инв. № се показваше празен, връщаше
+         се празен и връзката тихо падаше. */
+      if (cur && cur.book_id != null) {
+        const was = db.prepare('SELECT inv_number FROM books WHERE id = ?').get(cur.book_id);
+        if (was && raw === (was.inv_number == null ? '' : String(was.inv_number))) return cur.book_id;
+      }
       if (!raw) return null;
       const b = resolveScannedBook(db, normalizeScanCode(raw) || raw, 'SELECT id, inv_number, title, status FROM books');
       if (!b) throw new Error('Документ с инв. № или баркод „' + raw + '“ няма във фонда.');
@@ -386,7 +403,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       const status = m.status || cur.status;
       const due_date = m.due_date !== undefined ? (m.due_date || null) : cur.due_date;
       const reader = resolveReader(db, m);
-      const book = resolveBook(db, m);
+      const book = resolveBook(db, m, cur);
       const reader_id = reader === undefined ? cur.reader_id : reader;
       const book_id = book === undefined ? cur.book_id : book;
       /* Нашият документ не се подменя, докато е при партньора: иначе единият би
@@ -450,5 +467,6 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
   );
 };
 module.exports.mzsBlockForBook = mzsBlockForBook;
+module.exports.mzsAwayCount = mzsAwayCount;
 module.exports.mzsOverdueRows = mzsOverdueRows;
 module.exports.MZS_FLOW = MZS_FLOW;

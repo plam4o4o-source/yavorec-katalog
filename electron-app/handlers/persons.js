@@ -261,3 +261,6 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
     })
   );
 };
+/* Ключът на името — и за съименниците в етикетите на връзките (handlers/links.js),
+   за да не живеят две копия на едно правило (v2.4.69, преглед на кръга). */
+module.exports.personKey = personKey;

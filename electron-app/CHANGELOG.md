@@ -23,6 +23,10 @@ for full detail.
 телефон, готов лист етикети), или където две правила се срещат. Всичките 67 са
 поправени и всяка поправка е закована с тест, който пада без нея.
 
+> **Споделена база на няколко компютъра:** това издание вдига версията на базата
+> (миграция 18). Обновете **всички** работни места — по-старата версия отказва да
+> отвори вече обновена база, за да не я повреди.
+
 **Пари.** Анулиран акт по чл. 30, т. 5, по който читателят е платил, караше
 гишето да начисли забавата **втори път** за същите дни — вече не. Ръчно
 „обезщетение“ за повредена корица „изяждаше“ плащането на вече платената забава и
@@ -93,9 +97,41 @@ Avery L7160 и 4×10 вече падат в клетките си. Баркод�
 персоналия приема само година, съименниците се различават, а указателят намира
 по онова, което показва.
 
-**Проверено:** `npm run test:all` — проверката на типовете и **2 241 теста, 0 неуспешни**, в UTC и в
+**Преглед на кода след кръга — още осем поправки.** Независимият преглед на
+промените намери места, където новите връзки между областите не бяха докрай:
+
+- **МЗС и резервациите.** Единствената бройка, изпратена на друга библиотека, не
+  се заемаше — но и резервацията отказваше с „свободна е, заемете я“. Читателят не
+  можеше нито едното. Резервациите вече броят бройките при партньора.
+- **Изтриване на читател с чужда книга по МЗС** вече се отказва — както
+  заличаването по чл. 17; иначе книгата на другата библиотека оставаше без човек.
+- **Повторен запис на МЗС заявка** пази свързания документ: номер, съвпадащ с
+  баркода на друг документ, правеше заявката незаписваема, а документ без инв. №
+  губеше връзката.
+- **Пробна база и онлайн каталогът.** Спирането на записа, който би свил
+  публикувания каталог (К1), вече се казва **веднага** при вписване на книга, а не
+  само в „Онлайн каталог“.
+- **Прескочени номера в инвентарната книга:** заглавие „Задачи от 1 до 100“ вече
+  не се чете като прескочени номера 1–100.
+- **Изтриване/заличаване на читател** казва „съобщете на …“ само за наистина
+  новоповикан читател, не за вече заделена резервация.
+- **Печат на партиди:** накрая пише „изпратени за печат“, не „отпечатани“ —
+  програмата не може да знае дали печатът на някоя е бил отказан в прозореца на
+  Windows.
+- **Съименниците в краезнанието** се броят веднъж и се пазят до промяна, вместо
+  по едно преброяване на цялата картотека за всеки ред; правилото за името е едно
+  за двата модула.
+
+Всяка е закована в `test/pregled-v2469.test.js` (8 теста, през истинския
+`main.js`) — и осемте падат върху кода преди поправката; четири мутации — уловени.
+
+**Проверено:** `npm run test:all` — проверката на типовете и **2 249 теста, 0 неуспешни**, в UTC и в
 Europe/Sofia; каталожната страница — 8 сценария и мащаб 15 002 записа; мутационна
-проверка — **367 мутации, всички уловени**, с минаваща контролна. Схемата е 18
+проверка — **367 мутации, всички уловени**, с минаваща контролна. Новите тестове на
+кръга (139) бяха пуснати и **върху кода отпреди него**: 129 падат, тоест находките са
+истински. Петте теста за печат в истински Chromium (размер на картата, листове
+Avery L7160 и 4×10, баркод и УДК на етикета, страници) са пуснати отделно с
+Chromium и pdftotext — минават тук, падат върху стария код. Схемата е 18
 (миграцията пази всичко вписано досега непроменено).
 
 **EN:** **A full test of the program and all 67 findings from it.** Six areas were
@@ -168,9 +204,42 @@ as visits. Any day can be filled in detail, and a month prints on two sheets.
 ways, photos no longer travel with every search (51 MB → a few KB), removing a
 photo asks, a person can have just a year, namesakes are told apart.
 
-**Verified:** `npm run test:all` — the type check and **2 241 tests, 0 failures**, in UTC and in
+**Code review after the round — eight more fixes.** An independent review found
+places where the new links between areas were not complete:
+
+- **Interlibrary loan and holds.** The only copy sent to another library could not
+  be borrowed — but a hold was refused too ("it is free, borrow it"). Holds now
+  count copies away at the partner.
+- **Deleting a reader holding another library's book** is refused, as GDPR
+  erasure already was.
+- **Re-saving an interlibrary request** keeps the linked document (a number equal
+  to another document's barcode made the request unsavable; a document without an
+  inventory number lost the link).
+- **Test database and the online catalogue.** The block on a write that would
+  shrink the published catalogue (K1) is now reported **when the book is saved**.
+- **Skipped numbers in the inventory book:** a title like "Задачи от 1 до 100" is
+  no longer read as skipped numbers 1–100.
+- **Deleting/erasing a reader** says "tell …" only for a newly called reader, not
+  for an already set-aside hold.
+- **Batch printing** ends with "sent to print", not "printed" — the program cannot
+  know whether a batch was cancelled in the Windows print dialog.
+- **Namesakes in local studies** are counted once and cached until a change,
+  instead of a full scan per row; the name rule is shared by both modules.
+
+Each is pinned in `test/pregled-v2469.test.js` (8 tests through the real `main.js`),
+all eight failing on the code before the fix; four mutations — caught.
+
+**Verified:** `npm run test:all` — the type check and **2,249 tests, 0 failures**, in UTC and in
 Europe/Sofia; catalogue page — 8 scenarios and a 15 002-record scale run;
-mutation testing — **367 mutations, all caught**, control passing. Schema 18.
+mutation testing — **367 mutations, all caught**, control passing. The round's new
+tests (139) were also run **on the code before it**: 129 fail, i.e. the findings are
+real. The five print tests in real Chromium (card size, Avery L7160 and 4×10 sheets,
+label barcode and UDC, pages) were run separately with Chromium and pdftotext —
+pass here, fail on the old code. Schema 18.
+
+> **Shared database on several computers:** this release raises the database version
+> (migration 18). Update **all** workstations — an older version refuses to open an
+> already upgraded database so as not to damage it.
 
 ## v2.4.68
 

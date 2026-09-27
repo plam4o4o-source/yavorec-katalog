@@ -1926,7 +1926,12 @@ async function printLabelSheet(cards, kind, opts) {
     ppSetNext({
       onDone: () => {
         if (k + 1 < nb) printBatch(k + 1);
-        else if (nb > 1) toast('Отпечатани са всички ' + nb + ' партиди — ' + n + ' ' + labelNoun(kind, n) + '.', 'ok');
+        /* „Изпратени за печат“, не „отпечатани“ (v2.4.69, преглед на кръга):
+           window.print() в Electron не казва дали диалогът на Windows е бил
+           отказан — програмата не може да знае, че всичко е излязло на хартия. */
+        else if (nb > 1) toast('Всички ' + nb + ' партиди са изпратени за печат — ' + n + ' ' + labelNoun(kind, n)
+          + '. Ако сте отказали някоя в прозореца за печат на Windows, отпечатайте я отново — номерата на всяка партида '
+          + 'стоят в заглавието ѝ.', 'ok');
       },
       onCancel: () => {
         if (nb <= 1 || k === 0) return;

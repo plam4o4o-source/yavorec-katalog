@@ -873,9 +873,13 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     for (const t of trail) {
       const d = String(t.detail || '');
       if (t.action === 'Прескочени инвентарни номера') {
-        let m = /от (\d+) до (\d+)/.exec(d);
+        /* Само опашката след „остават неизползвани“ (v2.4.69, преглед на кръга):
+           следата носи и ЗАГЛАВИЕТО, а „Задачи от 1 до 100“ се четеше като
+           прескочени номера 1–100, докато истинският прескочен изпадаше. */
+        const tail = d.slice(d.lastIndexOf('остават неизползвани'));
+        let m = /^остават неизползвани \d+ номера: от (\d+) до (\d+)/.exec(tail);
         if (m) { skipped.push({ from: +m[1], to: +m[2], ts: t.ts }); continue; }
-        m = /неизползвани инв\. № (\d+)/.exec(d);
+        m = /^остават неизползвани инв\. № (\d+)/.exec(tail);
         if (m) skipped.push({ from: +m[1], to: +m[1], ts: t.ts });
       } else {
         const m = /^инв\. № (\d+) — (.*?) · /.exec(d);
@@ -1028,9 +1032,19 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   }
   function afterBookWritten(what) {
     const folder = catalogFolderNow();
-    const w = (folder && hasPublishableBooks(getDb()))
+    const publishable = folder && hasPublishableBooks(getDb());
+    const w = publishable
       ? (scheduleCatalogWrite(), probeCatalogFolder(folder))
       : (flushCatalogWrite ? flushCatalogWrite() : (scheduleCatalogWrite(), null));
+    /* При непразен фонд записът е само насрочен — предпазителят срещу рязко
+       свиване (К1) се пита СЕГА, за да го види формата (v2.4.69, преглед). */
+    const guard = publishable && flushCatalogWrite && typeof flushCatalogWrite.wouldBlock === 'function'
+      ? flushCatalogWrite.wouldBlock() : null;
+    if (guard && guard.blocked) {
+      const msg = 'ВНИМАНИЕ: след ' + what + ' ' + guard.message;
+      logAudit('Онлайн каталог', msg);
+      return msg;
+    }
     if (w && w.blocked) {
       /* К11 (v2.4.69): съобщението сочеше бутон „Ръчен запис“, какъвто в програмата
          няма. main.js вече връща готовото изречение в w.message (с верния изход —

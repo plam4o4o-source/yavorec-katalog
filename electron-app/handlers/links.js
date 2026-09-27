@@ -11,11 +11,28 @@ const KRAE_FN_READY = new WeakSet();
 function ensureKraeFunctions(db) {
   if (KRAE_FN_READY.has(db)) return db;
   db.function('bglower', (s) => (s == null ? null : String(s).toLowerCase()));
-  // Ключът на името на персоналия — същият като personKey в handlers/persons.js (Л12, v2.4.69).
-  db.function('personkey', (s) => (s == null ? null : String(s).toLowerCase().replace(/[.,;]+/g, ' ')
-    .split(/\s+/).filter(Boolean).sort().join(' ')));
   KRAE_FN_READY.add(db);
   return db;
+}
+/* СЪИМЕННИЦИТЕ — ЕДНО ПРЕБРОЯВАНЕ, НЕ ПО ЕДНО НА ЕТИКЕТ (v2.4.69, преглед).
+   Етикетът на персоналия без години и дейност пита „има ли друг със същото
+   име“. Дотук това беше заявка с JS функция върху ВСЕКИ ред на persons за всеки
+   етикет — 50 реда в списък при 2 000 картона са 100 000 извиквания. Сега
+   ключовете се броят веднъж и броят се пази, докато базата не се промени
+   (същият отпечатък като товара на каталога в main.js). Ключът е personKey от
+   handlers/persons.js — едно правило за двата модула. */
+const { personKey } = require('./persons');
+let NAMESAKES = { db: null, stamp: null, counts: null };
+function personKeyCounts(db) {
+  const stamp = db.prepare('SELECT total_changes() AS n').get().n + '|' + db.pragma('data_version', { simple: true });
+  if (NAMESAKES.db === db && NAMESAKES.stamp === stamp) return NAMESAKES.counts;
+  const counts = new Map();
+  for (const r of db.prepare('SELECT name FROM persons').all()) {
+    const k = personKey(r.name);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  NAMESAKES = { db, stamp, counts };
+  return counts;
 }
 function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
@@ -149,8 +166,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
       const act = String(r.activity || '').trim();
       const extra = [years, act].filter(Boolean).join(', ');
       if (extra) return r.name + ' (' + extra + ')';
-      const namesake = ensureKraeFunctions(getDb())
-        .prepare('SELECT 1 FROM persons WHERE id <> ? AND personkey(name) = personkey(?) LIMIT 1').get(r.id, r.name);
+      const namesake = (personKeyCounts(getDb()).get(personKey(r.name)) || 0) > 1;
       return r.name + (namesake ? ' (картон № ' + r.id + ')' : '');
     }
     if (kind === 'периодика') return r.title;

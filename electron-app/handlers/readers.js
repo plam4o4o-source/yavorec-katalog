@@ -413,6 +413,19 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           (open === 1 ? '1 незавърнат документ' : open + ' незавърнати документа') +
           ' и не може да бъде изтрит. Първо приемете върнатите документи от „Заемане и връщане“.');
       }
+      /* Чужда книга, получена по изходяща МЗС заявка за този читател (v2.4.69,
+         преглед на кръга). Тя не минава през „Заемания“, тоест проверката горе не
+         я вижда, а mzs_requests.reader_id е ON DELETE SET NULL — изтриването
+         оставяше книгата на ДРУГА библиотека без човек, у когото е. Същото
+         правило като при заличаването по чл. 17 (handlers/gdpr.js). */
+      const mzsHeld = db.prepare(`SELECT no, year, title, partner FROM mzs_requests
+           WHERE reader_id = ? AND direction = 'изходящо' AND status = 'получено'`).all(id);
+      if (mzsHeld.length) {
+        throw new Error('Читателят държи ' + (mzsHeld.length === 1 ? 'чужда книга, получена' : mzsHeld.length + ' чужди книги, получени')
+          + ' по междубиблиотечно заемане (' + mzsHeld.map(x => '„' + x.title + '“ от ' + x.partner + ', МЗС № '
+            + x.no + '/' + x.year).join('; ') + ') и не може да бъде изтрит. Приемете книгата от читателя, '
+          + 'отбележете заявката „върнато“ в „МЗС“ и повторете изтриването.');
+      }
       /* Одит v2.4.14: проверката пазеше внимателно заеманията и мълчеше за
          всичко останало, което виси на този читател с ON DELETE CASCADE.
          account_lines е касовият дневник — включително плащания от ПРИКЛЮЧЕНИ
@@ -496,7 +509,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         if (typeof activate === 'function') {
           for (const bookId of setAside) {
             const next = activate(bookId);
-            if (next && next.status === 'заделена' && next.reader_id !== id) {
+            if (next && next.justActivated && next.reader_id !== id) {
               holdsActivated.push({ name: next.reader_name, card_no: next.card_no || null, phone: next.phone || null,
                 title: next.title, inv_number: next.inv_number });
             }

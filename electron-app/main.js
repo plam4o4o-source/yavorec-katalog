@@ -2677,6 +2677,25 @@ function noteCatalogWrite(res, folder) {
   }
   return res;
 }
+// Предпазна мярка: не презаписвай непразен публикуван каталог с празен ИЛИ с рязко
+// свит (под половината) — виж дългия коментар при CATALOG_SHRINK_RATIO по-горе.
+// Връща { published, now, message } или null. Отделено (v2.4.69, преглед на кръга),
+// за да може и вписването на книга да каже СЕГА, че отложеният запис ще бъде спрян —
+// виж catalogWriteWouldBlock по-долу.
+function catalogShrinkBlock(file, n) {
+  const published = publishedCatalogCount(file);
+  if (!(published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO))) return null;
+  const exit = 'Ако това наистина е фондът за публикуване, отворете „Онлайн каталог“ и натиснете „Запиши въпреки това…“ '
+    + '(или „Ръчно извеждане“ → „Каталог (JSON)…“ върху katalog.json в папката). Ако не е — не вписвайте нищо ново, '
+    + 'а възстановете правилната база от резервно копие; публикуваният каталог остава непроменен дотогава.';
+  const message = (n === 0
+    ? 'записът на онлайн каталога е СПРЯН: фондът в тази база излиза празен, а публикуваният katalog.json има '
+      + published + (published === 1 ? ' запис. ' : ' записа. ')
+    : 'записът на онлайн каталога е СПРЯН: публикуваният katalog.json има ' + published + ' записа, а тази база би го '
+      + 'свела до ' + n + ' — под половината. Така се пази публичният каталог от пробна или непълна база (нов компютър, '
+      + 'изтрити данни, възстановено старо копие). ') + exit;
+  return { published, now: n, message };
+}
 function writeCatalogIfConfigured(opts) {
   let folder = null;
   try {
@@ -2690,21 +2709,12 @@ function writeCatalogIfConfigured(opts) {
     const file = path.join(s.catalog_folder, 'katalog.json');
     const payload = catalogPayloadNow();
     const n = payload.items.length;
+    // Броят в публикувания файл ПРЕДИ записа — нужен и за отчета по-долу (forced).
     const published = publishedCatalogCount(file);
-    // Предпазна мярка: не презаписвай непразен публикуван каталог с празен ИЛИ с рязко
-    // свит (под половината) — виж дългия коментар при CATALOG_SHRINK_RATIO по-горе.
-    if (!(opts && opts.force) && published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO)) {
-      const exit = 'Ако това наистина е фондът за публикуване, отворете „Онлайн каталог“ и натиснете „Запиши въпреки това…“ '
-        + '(или „Ръчно извеждане“ → „Каталог (JSON)…“ върху katalog.json в папката). Ако не е — не вписвайте нищо ново, '
-        + 'а възстановете правилната база от резервно копие; публикуваният каталог остава непроменен дотогава.';
-      const message = (n === 0
-        ? 'записът на онлайн каталога е СПРЯН: фондът в тази база излиза празен, а публикуваният katalog.json има '
-          + published + (published === 1 ? ' запис. ' : ' записа. ')
-        : 'записът на онлайн каталога е СПРЯН: публикуваният katalog.json има ' + published + ' записа, а тази база би го '
-          + 'свела до ' + n + ' — под половината. Така се пази публичният каталог от пробна или непълна база (нов компютър, '
-          + 'изтрити данни, възстановено старо копие). ') + exit;
-      console.error('Пропуснат запис на каталога: ' + published + ' → ' + n + ' записа.');
-      return noteCatalogWrite({ written: false, blocked: true, published, now: n, message }, folder);
+    const shrink = !(opts && opts.force) ? catalogShrinkBlock(file, n) : null;
+    if (shrink) {
+      console.error('Пропуснат запис на каталога: ' + shrink.published + ' → ' + n + ' записа.');
+      return noteCatalogWrite(Object.assign({ written: false, blocked: true }, shrink), folder);
     }
     /* Записва се настрани и се преименува (одит v2.4.24) — точно както writeConfig
        по-горе, и по същата причина, само че тук залогът е по-голям: файлът е
@@ -2824,6 +2834,23 @@ function flushCatalogWrite(opts) {
    CATALOG_LAST_WRITE или null. Модулът предпочита изрична зависимост
    `getCatalogWriteState`, ако някой ден бъде подадена. */
 flushCatalogWrite.lastWrite = catalogWriteState;
+/* Ще бъде ли спрян отложеният запис от предпазителя (v2.4.69, преглед на кръга)?
+   Вписването на книга при непразен фонд само НАСРОЧВА записа — резултатът му не
+   стигаше до формата, тоест точно сценарият К1 (пробна база в папката на истинския
+   каталог) минаваше без дума. Товарът се сглобява през кеша по отпечатък на базата,
+   така че насроченият запис след малко го взима наготово — проверката не струва
+   второ сглобяване. Връща { blocked, message } или null. Подава се през самата
+   функция, както lastWrite, за да не се пипа регистрацията на модула. */
+flushCatalogWrite.wouldBlock = function catalogWriteWouldBlock() {
+  try {
+    const s = db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+    if (!s || !s.catalog_folder) return null;
+    const shrink = catalogShrinkBlock(path.join(s.catalog_folder, 'katalog.json'), catalogPayloadNow().items.length);
+    return shrink ? { blocked: true, message: shrink.message } : null;
+  } catch (err) {
+    return null; // недостъпната папка се казва от самия запис (probeCatalogFolder / noteCatalogWrite)
+  }
+};
 const catalogWriteDebouncer = { pending: () => CATALOG_WRITE_STATE.pending, schedule: scheduleCatalogWrite, flush: flushCatalogWrite };
 
 /* ---------------- Онлайн каталог (публикуване през GitHub) + Витрини +
