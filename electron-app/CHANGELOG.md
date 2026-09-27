@@ -11,6 +11,40 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.70
+
+**BG:** **Знакът на разработчика.** Монограмът „ПХ“ на Пламен Христов - Пачо стои
+до авторството — там, където програмата и документите казват кой я е направил:
+
+- в програмата — в дъното на лявата лента, над реда „Създадено от …“, и в
+  „Настройки → Програма“, до същия ред;
+- в наръчника — на заглавната страница, под реда „Автор на програмата“ (и в PDF);
+- в представянето на функциите (DOCX) — в реда „Разработчик“;
+- в README — в раздел „Автор“.
+
+Марката на самата програма (InvLib) остава, каквато е. Знакът е изрязан, с
+прозрачен фон и сведен до 256 цвята — 15 КБ в програмата, без видима разлика.
+Нищо друго в работата на програмата не е променено.
+
+**Проверено:** нов `test/logo-v2470.test.js` — файлът е PNG с прозрачност, стои в
+лентата, в „Настройки“, на корицата на наръчника и в README, и влиза в
+инсталатора; видът е проверен в Chromium при 1920×1080 и 1366×768. Пълна поредица:
+**2252 успешни, 0 неуспешни**, в UTC и Europe/Sofia.
+
+**EN:** **The developer's mark.** The "ПХ" monogram of Plamen Hristov - Pacho sits
+next to the authorship line — wherever the program and its documents say who made
+it: at the bottom of the left rail above "Създадено от …" and in Settings → Program;
+on the manual's title page (and in the PDF); in the "Developer" row of the feature
+overview (DOCX); and in the README "Author" section. The InvLib brand itself is
+unchanged. The mark is trimmed, transparent and reduced to 256 colours — 15 KB in
+the app with no visible difference. Nothing else about how the program works has
+changed.
+
+**Verified:** new `test/logo-v2470.test.js` — the file is a PNG with transparency,
+appears in the rail, in Settings, on the manual cover and in the README, and ships
+in the installer; the look was checked in Chromium at 1920×1080 and 1366×768. Full
+suite: **2252 passed, 0 failed**, in UTC and Europe/Sofia.
+
 ## v2.4.69
 
 **BG:** **Пълен тест на програмата и всичките 67 находки от него.** Шест области

@@ -209,4 +209,6 @@ GitHub Security Advisories (частен доклад), не публичен is
 
 ## Автор
 
+<img src="docs/assets/dev-logo.png" alt="Пламен Христов - Пачо" height="72">
+
 Пламен Христов - Пачо.
