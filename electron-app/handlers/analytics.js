@@ -13,6 +13,13 @@ function ensureKraeFunctions(db) {
   if (KRAE_FN_READY.has(db)) return db;
   db.function('bglower', (s) => (s == null ? null : String(s).toLowerCase()));
   db.function('yearkey', (s) => { const m = /\d{3,4}/.exec(String(s == null ? '' : s)); return m ? Number(m[0]) : null; });
+  /* „Има ли в броя (a.issue) точно този номер“ — като ЦЯЛ номер, не като част от
+     друг (v2.4.69, Л11): „2“ е в „2“, „2-3“, „2/3“, „2, 3“, но НЕ в „21“ и „12“. */
+  db.function('issuehas', (issue, n) => {
+    const want = String(n == null ? '' : n).trim().toLowerCase();
+    if (!want || issue == null) return 0;
+    return String(issue).toLowerCase().split(/[\s,;/+–—-]+/).filter(Boolean).includes(want) ? 1 : 0;
+  });
   KRAE_FN_READY.add(db);
   return db;
 }
@@ -185,19 +192,48 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
          „брат“ би се разчело като „бр“ + „ат“ и търсенето на дума, започваща с
          тези две букви, би се превърнало в търсене на брой. */
       const issueAsked = /^бр(?:\.\s*|\s+)№?\s*(.+)$/i.exec(raw);
-      if (issueAsked) {
+      /* ПОКАЗАНОТО СЕ НАМИРА — ОЩЕ ЧЕТИРИ НЕЩА (v2.4.69, Л11).
+         =====================================================================
+         Измерено (тестер № 6, s1-analitichno.js) — всичко по-долу стои на екрана
+         в указателя и даваше 0 или грешен отговор:
+           • „инв. № 900“ и „900“ — колона „Източник“ гласи „Колектив. Сборник
+             Яворец (инв. № 900)“, а инвентарният номер на книгата-носител не се
+             търсеше изобщо. Изрично „инв. № N“ търси САМО по номера (както
+             links:search — точно питане, точен отговор); голо число търси
+             номера И останалото (годината „1930“ е също голо число);
+           • „27.05.2025“ — датата на броя се показва по български, а в базата е
+             ISO: изписаното по български се превежда и се търси точно;
+           • „ок. 1930“ и „1930“ — колона „Год.“; годината не беше в търсенето;
+           • „бр. 2“ връщаше и бр. 21 (LIKE '%2%'). Сега номерът на броя се търси
+             като ЦЯЛ номер (issuehas: „2“, „2-3“, „2/3“ — да; „21“, „12“ — не);
+           • „стр. 45“ — колона „Стр.“ („45 – 61“) — по същия начин като „бр.“. */
+      const invAsked = /^инв\.?\s*№?\s*(\d+)\s*$/i.exec(raw);
+      const pagesAsked = /^стр(?:\.\s*|\s+)(.+)$/i.exec(raw);
+      const bgDate = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(raw);
+      if (invAsked) {
+        where.push('CAST(b.inv_number AS TEXT) = @inv');
+        args.inv = invAsked[1];
+      } else if (issueAsked) {
         const n = issueAsked[1].trim();
-        where.push(`(bglower(trim(a.issue)) = @issueNo OR bglower(a.issue) LIKE @issueLike ESCAPE '\\')`);
+        where.push(`(bglower(trim(a.issue)) = @issueNo OR issuehas(a.issue, @issueNo))`);
         args.issueNo = n.toLowerCase();
-        args.issueLike = bgLikeArg(n);
+      } else if (pagesAsked) {
+        where.push(`(bglower(trim(a.pages)) = @pagesNo OR issuehas(a.pages, @pagesNo))`);
+        args.pagesNo = pagesAsked[1].trim().toLowerCase();
+      } else if (bgDate) {
+        where.push('a.issue_date = @isoDate');
+        args.isoDate = bgDate[3] + '-' + bgDate[2].padStart(2, '0') + '-' + bgDate[1].padStart(2, '0');
       } else if (q) {
         where.push(`(bglower(a.title) LIKE @q ESCAPE '\\' OR bglower(a.subtitle) LIKE @q ESCAPE '\\'
                      OR bglower(a.author) LIKE @q ESCAPE '\\' OR bglower(a.keywords) LIKE @q ESCAPE '\\'
                      OR bglower(a.annotation) LIKE @q ESCAPE '\\' OR bglower(a.source_text) LIKE @q ESCAPE '\\'
                      OR bglower(a.udk) LIKE @q ESCAPE '\\' OR bglower(a.issue) LIKE @q ESCAPE '\\'
+                     OR bglower(a.year) LIKE @q ESCAPE '\\' OR a.issue_date LIKE @q ESCAPE '\\'
                      OR bglower(p.title) LIKE @q ESCAPE '\\'
-                     OR bglower(b.title) LIKE @q ESCAPE '\\' OR bglower(b.author) LIKE @q ESCAPE '\\')`);
+                     OR bglower(b.title) LIKE @q ESCAPE '\\' OR bglower(b.author) LIKE @q ESCAPE '\\'
+                     ${/^\d+$/.test(raw) ? 'OR CAST(b.inv_number AS TEXT) = @rawNum' : ''})`);
         args.q = bgLikeArg(q);
+        if (/^\d+$/.test(raw)) args.rawNum = raw;
       }
       if (year) { where.push('a.year = @year'); args.year = String(year); }
       if (onlyLocal) where.push('a.is_local = 1');
@@ -276,11 +312,17 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const a = db.prepare('SELECT title FROM analytics WHERE id = ?').get(id);
+      /* ИЗТРИВАНЕ НА НЕСЪЩЕСТВУВАЩО ОПИСАНИЕ НЕ Е УСПЕХ (v2.4.69, Л13) — по
+         образеца на chronicle:delete (v2.4.61). Дотук DELETE по липсващ id
+         минаваше, екранът казваше „изтрито“, а дневникът пишеше „изтрита статия:
+         41“ за нещо, което не се е случило. */
+      if (!a) throw new Error('Описанието не е намерено — вероятно вече е изтрито от друго работно място. '
+        + 'Нищо не е променено.');
       db.transaction(() => {
         db.prepare("DELETE FROM links WHERE to_kind = 'статия' AND to_id = ?").run(id);
         db.prepare('DELETE FROM analytics WHERE id = ?').run(id);
       }).immediate();
-      logAudit('Аналитично описание', 'изтрита статия: ' + (a ? a.title : id));
+      logAudit('Аналитично описание', 'изтрита статия: ' + a.title);
     })
   );
 };

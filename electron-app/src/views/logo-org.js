@@ -103,8 +103,10 @@ async function labelGapCheck(from, to, rows) {
   const missing = [];
   for (let n = from; n <= to && missing.length <= 40; n++) if (!have.has(n)) missing.push(n);
   const list = missing.length > 40 ? missing.slice(0, 40).join(', ') + ' и други' : missing.join(', ');
-  return await askConfirm('От ' + asked + ' поискани инвентарни номера (' + from + '–' + to + ') ще излязат '
-    + rows.length + ' етикета. Липсват ' + gap + ' номера: ' + list + '. '
+  // „Липсват 1 номера“ (кръг 44, Е10) — числото се съгласува.
+  return await askConfirm('От ' + asked + ' поискани инвентарни номера (' + from + '–' + to + ') ще '
+    + (rows.length === 1 ? 'излезе 1 етикет' : 'излязат ' + rows.length + ' етикета') + '. '
+    + (gap === 1 ? 'Липсва 1 номер: ' : 'Липсват ' + gap + ' номера: ') + list + '. '
     + 'Такъв номер или е отчислен от фонда (на отчислен документ не се лепи етикет), или изобщо не е заведен '
     + 'в инвентарната книга. Проверете ги от „Инвентарна книга“, ако очаквате да са налични.',
     { kind: 'warn', title: 'Част от номерата няма да получат етикет', okLabel: 'Печатай ' + rows.length });
@@ -123,13 +125,18 @@ async function printLabelsRange() {
   if (!rows.length) return toast('Няма документи в този диапазон от действащия фонд — '
     + 'номерата или са отчислени, или не са заведени в инвентарната книга.', 'err');
   if (!await labelGapCheck(f.value, t.value, rows)) return;
-  return printLabelSheet({ rows, card: lblCard }, 'fund');
+  // „Започни от позиция N“ (v2.4.69, Е2) — важи само за този печат.
+  const start = labelStartPos('lblStart', 'fund');
+  if (start == null) return;
+  return printLabelSheet({ rows, card: lblCard }, 'fund', { start });
 }
 window.printLabelsRange = printLabelsRange;
 async function printLabelsAll() {
+  const start = labelStartPos('lblStart', 'fund');
+  if (start == null) return;
   const rows = await labelRows(null, null);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  return printLabelSheet({ rows, card: lblCard }, 'fund');
+  return printLabelSheet({ rows, card: lblCard }, 'fund', { start });
 }
 window.printLabelsAll = printLabelsAll;
 // Сигнатурните етикети минават по същия път — виж бележката при printLabelsRange.
@@ -147,13 +154,17 @@ async function printSignatureLabelsRange() {
   if (!rows.length) return toast('Няма документи в този диапазон от действащия фонд — '
     + 'номерата или са отчислени, или не са заведени в инвентарната книга.', 'err');
   if (!await labelGapCheck(f.value, t.value, rows)) return;
-  return printLabelSheet({ rows, card: sigLblCard }, 'sig');
+  const start = labelStartPos('sigStart', 'sig');
+  if (start == null) return;
+  return printLabelSheet({ rows, card: sigLblCard }, 'sig', { start });
 }
 window.printSignatureLabelsRange = printSignatureLabelsRange;
 async function printSignatureLabelsAll() {
+  const start = labelStartPos('sigStart', 'sig');
+  if (start == null) return;
   const rows = await labelRows(null, null);
   if (!rows.length) return toast('Фондът е празен.', 'err');
-  return printLabelSheet({ rows, card: sigLblCard }, 'sig');
+  return printLabelSheet({ rows, card: sigLblCard }, 'sig', { start });
 }
 window.printSignatureLabelsAll = printSignatureLabelsAll;
 /* ЧИТАТЕЛСКИТЕ КАРТИ ОСТАВАТ НА ПЪЛНИЯ СПИСЪК — ЗАСЕГА (v2.4.64).
@@ -313,6 +324,13 @@ async function printReaderCard(id) {
           вместо да се остави празно място: празнотата се чете като пропуск на
           библиотекаря, а тук тя значи нещо друго — съгласието не е отбелязано в
           програмата и подписът с датата отдолу е това, което го установява. */''}
+    ${/* ДЕКЛАРАЦИЯТА И ПОДПИСЪТ — НА ЕДИН ЛИСТ (v2.4.69, кръг 44, Е5). При читател с
+          дълга история „Подпис на читателя“ излизаше на лист 2, а декларацията по
+          чл. 47, ал. 2 и съгласието за личните данни — на лист 1. Подпис на лист,
+          на който няма нищо за подписване, не доказва, че гражданинът е приел
+          правилата. .psigKeep (style.css) не позволява двете да се разделят:
+          ако не се събират, отиват заедно на следващия лист. */''}
+    <div class="psigKeep">
     <div class="pmeta" style="margin-top:4mm">
       <b>ДЕКЛАРАЦИЯ НА ЧИТАТЕЛЯ</b><br>
       С подписа си по-долу декларирам, че:<br>
@@ -335,7 +353,7 @@ async function printReaderCard(id) {
         (${esc(r.guarantor_name)}).` : ''}
     </div>
     ${ssig(['Дата: …………………', 'Подпис на читателя: …………………',
-      'Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………')])}</div>`);
+      'Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………')])}</div></div>`);
 }
 window.printReaderCard = printReaderCard;
 async function printOverdueNotices() {
@@ -408,7 +426,10 @@ async function printOverdueNotices() {
     : lv === 3
       ? '<div class="pmeta"><b>Това е ТРЕТО напомняне.</b> При ново неизпълнение достъпът до заемане ще бъде временно преустановен.</div>'
       : '';
-  setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm' });
+  /* Без „стр. N от M“ (v2.4.69, Е9): всяко писмо е отделен документ до отделен
+     читател — „стр. 37 от 173“ и заглавие „Напомнителни писма“ върху писмото до
+     него биха издали, че е едно от много, и биха го объркали. */
+  setPrintPage({ name: 'Напомнителни писма — ' + bg(today()), landscape: false, margin: '14mm 12mm', pageNumbers: false });
   /* ДАТА И АДРЕСАТ НА ПИСМОТО (одит на печатните документи, v2.4.61).
      =====================================================================
      ДАТАТА. Писмото искаше обезщетение „към днешна дата“, при трета степен

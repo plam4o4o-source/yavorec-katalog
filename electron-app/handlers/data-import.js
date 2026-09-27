@@ -10,7 +10,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
   /* `parseBookPrice` е изнесена от handlers/books.js точно за да може вносът да
      мине през СЪЩАТА проверка, която пази формата за книга — виж importPrice
      по-долу защо това не е козметика. */
-  const { assertUniqueBarcode, parseBookPrice } = require('./books');
+  const { assertUniqueBarcode, parseBookPrice, effectiveCallNumber } = require('./books');
   const { ENUM_COLUMNS } = require('../db/enum-triggers');
   /* Позволените стойности се четат от същия списък, който създава тригерите — така
      двата не могат да се разминат при бъдеща промяна. */
@@ -162,11 +162,16 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
   /* Какво пише във файла, решава importers.js (splitCurrency) — там е цялото
      разпознаване на формата на входа; тук се решава какво да се направи с него. */
   const { splitCurrency } = importers;
-  function importPrice(raw, lineNo, rowWarnings, rowCtx) {
+  /* colCurrency (v2.4.69, П2) — валутата от заглавието на колоната („Цена (лв.)“ →
+     'leva'); важи за клетките, които не означават валута сами. Изрично означена
+     клетка печели. rowCtx.euro / rowCtx.leva / rowCtx.empty — за отчета. */
+  function importPrice(raw, lineNo, rowWarnings, rowCtx, colCurrency) {
     const cur = splitCurrency(raw);
+    const leva = cur.currency ? cur.currency === 'leva' : colCurrency === 'leva';
     try {
       const value = parseBookPrice(cur.amount);
-      if (!cur.leva) return value;
+      if (String(cur.amount ?? '').trim() === '') { if (rowCtx) rowCtx.empty = true; return value; }
+      if (!leva) { if (rowCtx) rowCtx.euro = true; return value; }
       /* Курсът е задължителен точно тук, а не при регистрацията: без него
          левовете не бива тихо да станат евро. main.js винаги го подава. */
       if (!Number.isFinite(deps.EUR_RATE) || deps.EUR_RATE <= 0) {
@@ -181,6 +186,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const norm = String(cur.amount ?? '').trim().replace(/\s/g, '').replace(',', '.');
       // Отрицателна — редът отпада (хвърлената грешка се улавя от catch-а на реда).
       if (/^[-−]/.test(norm)) throw err;
+      if (rowCtx) rowCtx.bad = true;
       rowWarnings.push(`ред ${lineNo}: цената „${String(raw).trim()}“ не е число и документът е вписан `
         + 'със стойност 0,00 €. Ако документът е оценен от комисията (чл. 3, ал. 2), впишете оценката '
         + 'от „Инвентарна книга“ → „Редакция“; ако не е оценяван, 0,00 € е вярното.');
@@ -309,7 +315,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const existingTitles = new Set(db.prepare('SELECT title, author FROM books').all()
         .map(r => titleKey(r.title, r.author)));
 
-      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [], convertedLeva: 0 };
+      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [], convertedLeva: 0,
+        priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: null };
+      /* П2 (v2.4.69): валутата от заглавието на колоната с цените — виж
+         headerCurrency в importers.js. */
+      const priceHeader = cols.price != null ? String(IMPORT_CACHE.headers[cols.price] ?? '').trim() : '';
+      const priceColCurrency = importers.headerCurrency(priceHeader);
       /* КОЙ ТОЧНО Е ПРОПУСНАТ — А НЕ САМО КОЛКО (v2.4.65).
          =====================================================================
          КАКВО СТАВАШЕ ДОТУК. Всеки от четирите изхода „пропусни реда“ правеше
@@ -420,7 +431,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         IMPORT_CACHE.body.forEach((row, i) => {
           const lineNo = i + 2; // +1 за заглавния ред, +1 за човешко броене
           const rowWarnings = []; // събират се на реда, влизат в отчета само ако редът мине
-          const rowCtx = { leva: false }; // цена в левове, превърната — брои се само ако редът мине
+          const rowCtx = { leva: false, euro: false, empty: false, bad: false }; // брои се само ако редът мине
           try {
             const title = cell(row, 'title');
             if (!title) {
@@ -616,10 +627,15 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
               permanent_location: null,
               status: knownStatus ? rawStatus : 'наличен',
               status_date: today(),
-              price: importPrice(cell(row, 'price'), lineNo, rowWarnings, rowCtx),
+              price: importPrice(cell(row, 'price'), lineNo, rowWarnings, rowCtx, priceColCurrency),
               description: noteParts.length ? noteParts.join(' · ') : null,
               acquisition_id: null,
-              cn_sort: callNumber ? cnSortKey(callNumber) : null
+              /* П4 (v2.4.69): ключът за подредба — от сигнатурата по ЕДНОТО правило
+                 (effectiveCallNumber, handlers/books.js), както при картона. */
+              cn_sort: (() => {
+                const cn = effectiveCallNumber({ call_number: callNumber, udk: cell(row, 'udk'), author_mark: cell(row, 'author_mark') });
+                return cn ? cnSortKey(cn) : null;
+              })()
             };
             /* Същата проверка, която пази формата за книга. Вносът върви в
                транзакция и вече вкараните редове се виждат от заявката, затова
@@ -635,6 +651,9 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             // в отчета едва сега — след като редът наистина е в базата.
             for (const w of rowWarnings) report.warnings.push(w);
             if (rowCtx.leva) report.convertedLeva++;
+            else if (rowCtx.euro) report.priceEuro++;
+            else if (rowCtx.empty) report.priceEmpty++;
+            else if (rowCtx.bad) report.priceBad++;
             // Броят се само РЕАЛНО въведените редове — ред, паднал в catch-а
             // по-долу, не е в базата и не бива да утежнява числото в отчета.
             if (!regDate) report.registerDateDefaulted++;
@@ -663,7 +682,31 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         const n = report.convertedLeva;
         report.warnings.push(`${n} ${n === 1 ? 'цена беше' : 'цени бяха'} в левове и ${n === 1 ? 'е превърната' : 'са превърнати'} `
           + `в евро по фиксирания курс 1 € = ${String(deps.EUR_RATE).replace('.', ',')} лв., закръглено до евроцент `
-          + '(например 6,39 € за 12,50 лв.). Числата без валута във файла са приети за евро.');
+          + '(например 6,39 € за 12,50 лв.). '
+          + (priceColCurrency === 'leva'
+            ? 'Числата без валута са приети за левове, защото заглавието на колоната — „' + priceHeader + '“ — казва това.'
+            : 'Числата без валута във файла са приети за евро.'));
+      }
+      /* ОТЧЕТЪТ ЗА ЦЕНИТЕ Е ВИНАГИ, НЕ САМО КОГАТО ИМА ПРЕВЪРНАТИ (v2.4.69, кръг 44, П2).
+         Дотук изречението излизаше само ако поне една клетка съдържа „лв.“ — тоест
+         точно в случая, в който всичко влиза като евро без дума (числа под
+         „Цена“ от опис, воден в левове), отчетът мълчеше. Сега, щом има колона с
+         цени, отчетът казва колко реда са приети за евро и колко са превърнати, и
+         откъде е решено (от клетката или от заглавието на колоната). */
+      if (cols.price != null) {
+        const eu = report.priceEuro, lv = report.convertedLeva, em = report.priceEmpty, bad = report.priceBad;
+        const where = priceColCurrency === 'leva' ? 'Заглавието на колоната — „' + priceHeader + '“ — казва левове'
+          : priceColCurrency === 'euro' ? 'Заглавието на колоната — „' + priceHeader + '“ — казва евро'
+          : 'Заглавието на колоната — „' + priceHeader + '“ — не казва валута';
+        report.priceNote = where + ': ' + eu + (eu === 1 ? ' ред е приет' : ' реда са приети') + ' за евро'
+          + (lv ? ', ' + lv + (lv === 1 ? ' ред е превърнат' : ' реда са превърнати') + ' от левове по курса' : ', от левове — 0 реда')
+          + (em ? ', ' + em + (em === 1 ? ' ред е без цена' : ' реда са без цена') + ' (0,00 €)' : '')
+          + (bad ? ', ' + bad + (bad === 1 ? ' ред е с цена, която не се разчита' : ' реда са с цена, която не се разчита')
+            + ' (вписани с 0,00 € — виж предупрежденията)' : '') + '.'
+          + (!lv && !priceColCurrency && eu
+            ? ' Ако описът е воден в левове, върнете резервното копие отпреди вноса и повторете го, като '
+              + 'преименувате колоната на „Цена (лв)“ — тогава всички числа в нея се четат като левове.'
+            : '');
       }
       if (report.registerDateDefaulted && !defaultRegDate) {
         const n = report.registerDateDefaulted;
@@ -695,6 +738,16 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
            единственият ред, от който може да се разбере защо. */
         (report.fileWarning ? '; файлът беше разпознат като възможно повреден (незатворена кавичка '
           + 'или несъответстващ брой колони) — възможно е част от редовете да не са прочетени' : ''));
+      /* К2 (v2.4.69, кръг 44): вносът променя фонда, а онлайн каталогът не
+         научаваше до следващата случайна промяна — вписаните от стария опис
+         документи ги нямаше на сайта. Същото като при другите обработчици на
+         фонда: отложен запис на katalog.json. Подава се от main.js; ако липсва
+         (стара обвръзка), се казва в отчета, не се мълчи. */
+      if (report.added) {
+        if (typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite();
+        else report.catalogNote = 'Онлайн каталогът не е обновен автоматично след вноса — обновете го от '
+          + '„Онлайн каталог“ → „Генерирай katalog.json“.';
+      }
       return { ok: true, data: report };
     } catch (err) { return { ok: false, error: err.message }; }
   });

@@ -602,7 +602,9 @@ test('обезщетението се начислява в читателска
   assert.ok(line, 'в сметката на читателя има ред');
   assert.equal(line.type, 'обезщетение за изгубен документ',
     'отделен вид от „обезщетение“ (забавата) — иначе ревизията не може да отговори кое колко е');
-  const lateLine = t.db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'обезщетение'").get(readerId);
+  /* v2.4.69 (кръг 44, Г2): забавата е със собствен вид „забава“ — вече не се
+     смесва с ръчното „обезщетение“ (повреда) в писмото по чл. 43. */
+  const lateLine = t.db.prepare("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'забава'").get(readerId);
   assert.ok(lateLine, 'забавата до деня на приключването също влиза в сметката (v2.4.61)');
   assert.ok(lateLine.id > line.id, 'обезщетението за документа е ПЪРВО — плащанията покриват него преди забавата');
   assert.equal(line.amount, 36);

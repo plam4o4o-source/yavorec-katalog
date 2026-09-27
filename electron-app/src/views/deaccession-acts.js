@@ -52,7 +52,9 @@ async function renderActs() {
     ${rows.length ? rows.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${a.no} / ${a.year}</td>
       <td class="num">${bg(a.date)}</td>
       <td>т. ${a.reason_code}. ${esc(a.reason_text)}${a.revoked_at
-        ? `<br><span class="badge warn">АНУЛИРАН</span> ${esc(tsDay(a.revoked_at))}${
+        ? `<br><span class="badge warn">АНУЛИРАН</span> ${/* Датата — по български (v2.4.69, находка О6):
+            в регистъра стоеше „2026-09-26“ до „26.09.2026“ в колоната „Дата“ на същия ред. */''
+          }на ${esc(bg(tsDay(a.revoked_at)))} г.${
             a.revoke_reason ? ' — ' + esc(a.revoke_reason) : ''}` : ''}</td>
       <td class="num">${a.revoked_at ? '—' : a.item_count}</td>
       <td class="num">${a.revoked_at ? '—' : mny(a.item_value)}</td><td style="font-size:12px">${esc(a.disposal || '')}</td>
@@ -367,8 +369,23 @@ function actLoanLine(l) {
     — заемането е закрито като НЕвърнато${l.deaccession_fine ? ', забава ' + mny(l.deaccession_fine) : ''}${
       l.lost_amount ? ', начислено обезщетение ' + mny(l.lost_amount) : ''}</div></li>`;
 }
+/* СЪОБЩЕНИЕТО ЗА УТВЪРДЕН АКТ (v2.4.69, находка О6).
+   Дотук утвърждаването на проект казваше „Актът е утвърден и 1 документ са
+   отчислени.“ — без номера на акта (единственото, което библиотекарката трябва
+   да впише в инвентарната книга) и с глагол в множествено число при един
+   документ. Прекият акт казваше номера, но без годината — а по чл. 35
+   номерацията е годишна и „акт № 4“ без година не значи нищо. Сега и двата
+   пътя казват едно и също изречение, с номера и годината ОТ БАЗАТА (актът вече
+   е записан) и със съгласуван глагол. */
+function actDoneMsg(a, n, titles) {
+  return 'Акт № ' + a.no + '/' + a.year + ' е утвърден и ' + actDocs(n)
+    + (n === 1 ? ' е отчислен' : ' са отчислени')
+    + (titles != null && titles !== n ? ' (' + actTitles(titles) + ')' : '') + '.';
+}
 async function actAftermath(actId, okMessage) {
   const a = await call(window.api.deaccessionActs.get(actId));
+  // Съобщението може да зависи от записания акт (номер/година) — виж actDoneMsg.
+  if (typeof okMessage === 'function') okMessage = a ? okMessage(a) : 'Актът е утвърден.';
   const holds = (a && a.holds) || [];
   const loans = (a && a.loans) || [];
   const shelved = ((a && a.items) || []).filter(i => i.shelves_before);
@@ -427,9 +444,8 @@ async function saveAct() {
     closeModal(); renderActs(); markSaved();
     // Съобщението за успех се показва САМО ако няма какво да се съобщи освен него
     // (виж actAftermath по-горе) — иначе се отваря списъкът „обадете се на…“.
-    await actAftermath(id, 'Акт № ' + d.no + ': ' + (actCount(ACT_LIST) === 1 ? 'отчислен е ' : 'отчислени са ')
-      + actDocs(actCount(ACT_LIST))
-      + (actHasMultiples(ACT_LIST) ? ' (' + actTitles(ACT_LIST.length) + ')' : '') + '.');
+    const n = actCount(ACT_LIST), titles = actHasMultiples(ACT_LIST) ? ACT_LIST.length : null;
+    await actAftermath(id, (a) => actDoneMsg(a, n, titles));
   }
 }
 window.saveAct = saveAct;
@@ -491,7 +507,8 @@ async function approveActDraft() {
     closeModal(); renderActs(); markSaved();
     // Същият път като при прекия акт — утвърждаването на проект отчислява по
     // абсолютно същия начин и затова трябва да казва абсолютно същото.
-    await actAftermath(actId, 'Актът е утвърден и ' + actDocs(actCount(ACT_LIST)) + ' са отчислени.');
+    const n = actCount(ACT_LIST), titles = actHasMultiples(ACT_LIST) ? ACT_LIST.length : null;
+    await actAftermath(actId, (a) => actDoneMsg(a, n, titles));
   }
 }
 window.approveActDraft = approveActDraft;
@@ -598,7 +615,9 @@ async function printActDoc(id) {
       (a.created_by || a.created_at)
         ? '<br>Съставил: ' + esc(a.created_by || '…………………')
           + (a.created_at ? ' · ' + bg(tsDay(a.created_at)) + ' г.' : '') : ''}</div>
-    ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${/* Комисията — всеки член на своя линия, с имената от акта (v2.4.69, Е5). */''}
+    ${commissionSig([a.committee1, a.committee2, a.committee3])}
+    ${ssig(['УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printActDoc = printActDoc;
 /* Анулирането вече иска ОСНОВАНИЕ и го казва ясно (v2.4.56): актът не изчезва.
@@ -683,6 +702,12 @@ async function revokeActGo(id) {
      библиотекарката я търси на рафта. */
   const kept = (res.data && res.data.keptCharges) || [];
   const reo = (res.data && res.data.reopenedLoans) || [];
+  /* ПРЕМЕСТЕНИЯТ ПАДЕЖ (v2.4.69, находка О1). Когато забавата от акта е платена,
+     тя остава и в сметката, и в заемането, а падежът става денят на акта — за да
+     не я начисли връщането втори път (виж reopenKeepFineStmt в
+     handlers/deaccession-acts.js). Библиотекарката вижда новата дата в картона и
+     в „Просрочени“; трябва да знае откъде идва. */
+  const moved = (res.data && res.data.dueMoved) || [];
   const keptTotal = kept.reduce((sum, c) =>
     sum + Math.max(0, (Number(c.charged) || 0) - (Number(c.covered) || 0)), 0);
   toast((n
@@ -696,6 +721,10 @@ async function revokeActGo(id) {
     + (reo.length ? ' ' + (reo.length === 1
         ? '1 заемане е отворено обратно — документът е пак у читателя и се води просрочен'
         : reo.length + ' заемания са отворени обратно — документите са пак у читателите и се водят просрочени') + '.' : '')
+    + (moved.length ? ' Забавата до деня на акта вече е начислена и платена, затова не се начислява втори път: '
+        + moved.map(m => 'инв. № ' + (m.inv_number ?? '—') + ' (' + (m.reader_name || 'читател') + ') — забава '
+            + mny(m.fine || 0) + ' до ' + bg(m.to) + ' г.; падежът е преместен от ' + bg(m.from) + ' г. на '
+            + bg(m.to) + ' г. и при връщането се начислява само забавата след него').join('; ') + '.' : '')
     + (kept.length ? ' Внимание: ' + (kept.length === 1 ? 'начислението ОСТАВА' : 'начисленията ОСТАВАТ')
         + ' в сметката на читателя, защото по ' + (kept.length === 1 ? 'него' : 'тях') + ' вече е плащано — '
         + kept.map(c => (c.reader_name || 'читател') + ' (инв. № ' + (c.inv_number ?? '—') + ', '

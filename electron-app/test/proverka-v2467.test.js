@@ -203,7 +203,11 @@ test('миграция 17: заварените приключени прото�
   try {
     await app.ready();
     const db = new Database(path.join(app.userData, 'library.db'));
-    assert.equal(db.pragma('user_version', { simple: true }), 17);
+    /* >= 17, не === 17: v2.4.69 добави миграция 18 (вид „забава“ в сметката,
+       година на комплекта, МЗС, отделни полета на етикетите). Този тест пази, че
+       миграция 17 е минала върху база от версия 16 — а това личи от стойността
+       на free_access_pct по-долу, не от точния номер на последната миграция. */
+    assert.ok(db.pragma('user_version', { simple: true }) >= 17);
     assert.equal(db.prepare('SELECT free_access_pct FROM inventory_sessions WHERE id = 1').get().free_access_pct, 40,
       'заварената приключена сесия получава процента от момента на обновяването');
     const before = (await app.invoke('inventorySessions:get', 1)).data.allowedLoss;

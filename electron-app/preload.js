@@ -127,7 +127,10 @@ contextBridge.exposeInMainWorld('api', {
     splitCopiesBatch: invoke('books:splitCopiesBatch'),
     setLendable: invoke('books:setLendable'),
     deaccessionedWithoutAct: invoke('books:deaccessionedWithoutAct'),
-    clearOrphanDeaccession: invoke('books:clearOrphanDeaccession')
+    clearOrphanDeaccession: invoke('books:clearOrphanDeaccession'),
+    // v2.4.69 (кръг 44): П11 — кой вече носи този ISBN; П8 — празните места в поредицата
+    byIsbn: invoke('books:byIsbn'),
+    invGaps: invoke('books:invGaps')
   },
   isbn: {
     lookup: invoke('isbn:lookup')
@@ -338,7 +341,9 @@ contextBridge.exposeInMainWorld('api', {
     nextNo: invoke('mzs:nextNo'),
     create: invoke('mzs:create'),
     update: invoke('mzs:update'),
-    delete: invoke('mzs:delete')
+    delete: invoke('mzs:delete'),
+    // К6 (v2.4.69): просрочените по МЗС — за регистъра и таблото.
+    overdue: invoke('mzs:overdue')
   },
   analytics: {
     list: invoke('analytics:list'),

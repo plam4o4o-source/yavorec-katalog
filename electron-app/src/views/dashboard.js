@@ -98,7 +98,17 @@ function dashUpcomingHtml(rows, byDay, total, max) {
 async function renderDash() {
   const r = await call(window.api.dashboard.full());
   if (!r) return;
-  const pct = r.inventoryTarget ? Math.min(100, Math.round(r.inventoryScannedYear / r.inventoryTarget * 100)) : 0;
+  /* ПРАЗНАТА БИБЛИОТЕКА НЕ „ИЗОСТАВА“ (v2.4.69, находка П12).
+     (а) При 0 документа във фонда изискването по чл. 40, т. 2 е 0 от 0, а
+         таблото казваше „Инвентаризация 2026 — изостава“ в червено (пръстенът
+         0 %, защото делението на нула се пазеше с `: 0`), докато екранът
+         „Инвентаризация“ за същото казва „изпълнено“.
+     (б) Червено на първия екран в първия ден на нова инсталация е тревога за
+         нищо — и учи библиотекарката да не вярва на червеното.
+     (в) Изискване 0 е изпълнено изискване: 100 %, „изпълнена“, и изречение,
+         което казва защо, вместо темпо „по 0 документа на месец“. */
+  const invNoTarget = !(Number(r.inventoryTarget) > 0);
+  const pct = invNoTarget ? 100 : Math.min(100, Math.round(r.inventoryScannedYear / r.inventoryTarget * 100));
   /* Общият брой идва ОТДЕЛНО от показаните редове — списъкът вече е прозорец (виж
      handlers/dashboard.js). Отговор без брояч пада обратно към дължината, за да не
      се счупи екранът, ако някога се разминат версиите на двете страни. */
@@ -129,6 +139,7 @@ async function renderDash() {
          се откриваше чак когато две подписани разпечатки в една папка не се
          връзват — тоест месеци по-късно и пред проверяващ. */''}
     <div id="dashFundCheck"></div>
+    <div id="dashMzs"></div>
 
     <div class="kpis">
       ${kpi(DASH_ICONS.fund, r.fundCount.toLocaleString('bg-BG'), 'Библиотечен фонд', mny(r.fundValue))}
@@ -165,7 +176,9 @@ async function renderDash() {
         <div class="normNum"><b>${r.inventoryScannedYear.toLocaleString('bg-BG')}</b> от
           <b>${r.inventoryTarget.toLocaleString('bg-BG')}</b> ${r.inventoryTarget === 1 ? 'документ' : 'документа'}
           <div class="hint">чл. 40, т. 2 — не по-малко от ${r.inventoryPct}% от фонда годишно</div></div>
-        <div class="normPace">${invDone
+        <div class="normPace">${invNoTarget
+          ? 'Във фонда още няма документи — за тази година няма какво да се проверява.'
+          : invDone
           ? 'Изискването за тази година е изпълнено.'
           : `Остават <b>${daysLeft}</b> ${daysLeft === 1 ? 'ден' : 'дни'} до 31 декември — по
              <b>${perMonth.toLocaleString('bg-BG')}</b> ${perMonth === 1 ? 'документ' : 'документа'} на месец, за да бъде изпълнено.`}</div>
@@ -224,7 +237,10 @@ async function renderDash() {
           <div><span>Читатели без изпратено напомняне за просрочие</span>
             <b>${r.today.dueReminders ? `<a href="#over">${r.today.dueReminders}</a>` : '0'}</b></div>
           <div><span>Дължими пререгистрации (до 14 дни)</span>
-            <b>${r.today.reregDue ? `<a href="#readers">${r.today.reregDue}</a>` : '0'}</b></div>
+            ${/* Числото води в „Читатели“ с ВКЛЮЧЕН филтър „дължима
+                  пререгистрация“ (v2.4.69, находка Г10) — дотук водеше в целия
+                  списък, където кои са тези N не личеше по нищо. */''}
+            <b>${r.today.reregDue ? `<a href="#readers" onclick="event.preventDefault();dashOpenRereg()">${r.today.reregDue}</a>` : '0'}</b></div>
           <div><span>Просрочие над 60 дни — преценете „липсваща“</span>
             <b>${r.today.longOverdue ? `<a href="#over">${r.today.longOverdue}</a>` : '0'}</b></div>
           ${r.today.suspendedNow ? `<div><span>Читатели с наказание в момента</span><b>${r.today.suspendedNow}</b></div>` : ''}
@@ -259,6 +275,7 @@ async function renderDash() {
      не бави таблото: тя минава през пет заявки, а екранът трябва да се появи
      веднага. Мълчи, когато числата се връзват. */
   dashFundCheck();
+  dashMzsOverdue();
 }
 /* Съгласуването на фондовите числа (v2.4.57). Показва се на таблото — екранът,
    който се гледа всеки ден — само когато има какво да се каже. Дотук нямаше
@@ -280,6 +297,52 @@ async function dashFundCheck() {
     </div>`;
 }
 window.dashFundCheck = dashFundCheck;
+/* ПРОСРОЧЕНО ПО МЗС НА ТАБЛОТО (v2.4.69, находка К6 от пълния тест).
+   Получена от друга библиотека книга със срок, изтекъл преди 10 дни, не се
+   виждаше никъде — нито тук, нито в „Просрочени“, нито в самия регистър на МЗС.
+   А чуждата книга е точно онази, която библиотеката НЯМА КАК да обезщети по
+   собствените си правила: тя е на друго читалище. Затова стои на таблото —
+   екранът, който се гледа всеки ден — и само когато има какво да се каже.
+   Данните и изречението идват готови от handlers/mzs.js (mzs:overdue), за да
+   казва таблото дословно същото, което казва и регистърът на МЗС. Пуска се след
+   изчертаването и без await, като проверката на фонда. */
+async function dashMzsOverdue() {
+  if (!window.api.mzs || !window.api.mzs.overdue) return;   // по-стар main процес
+  const res = await window.api.mzs.overdue();
+  const box = $('#dashMzs');
+  if (!box) return;
+  if (!res || !res.ok) {
+    box.innerHTML = res && res.error ? `<div class="note d">МЗС: ${esc(res.error)}</div>` : '';
+    return;
+  }
+  const rows = res.data || [];
+  if (!rows.length) { box.innerHTML = ''; return; }
+  const shown = rows.slice(0, 5);
+  box.innerHTML = `
+    <div class="note w" style="margin-top:12px">
+      <b>МЗС — изтекъл срок за връщане: ${rows.length}</b>
+      ${shown.map(r => '<br>· ' + esc(r.text || ((r.title || '') + ' — ' + (r.partner || '')))).join('')}
+      ${rows.length > shown.length ? '<br>· … и още ' + (rows.length - shown.length) : ''}
+      <br><button class="btn sm" style="margin-top:8px" onclick="go('mzs')">Отвори „МЗС“</button>
+    </div>`;
+}
+window.dashMzsOverdue = dashMzsOverdue;
+/* „Дължими пререгистрации“ → „Читатели“ с филтъра (Г10). Филтрите по
+   съгласие и категория се нулират, за да съвпадне броят с този на таблото. */
+function dashOpenRereg() {
+  if (typeof READERS_FILTER_REREG !== 'undefined') {
+    READERS_FILTER_REREG = 'due';
+    READERS_FILTER_CONSENT = ''; READERS_FILTER_CAT = ''; READERS_FILTER_STATUS = ''; READERS_QUERY = '';
+  }
+  go('readers');
+}
+window.dashOpenRereg = dashOpenRereg;
+/* Какво значи състоянието на документ, който не е „наличен“ (Г9, v2.4.69). */
+const DASH_STATUS_HINT = {
+  'липсващ': 'не е намерен при инвентаризация — ако е в ръцете ви, заемането на гишето пита „Документът е намерен?“',
+  'за реставрация': 'отделен за реставрация — не се дава, освен по решение на библиотекаря',
+  'изгубен': 'невърнат от читател — ако се е намерил: „Просрочени“ → „Изгубени и невърнати документи“ → „Документът се намери“'
+};
 /* Разпознава сканираното само по това дали съвпада с документ или с читателска карта —
    не се налага потребителят предварително да избира какво сканира. */
 async function dashLookup(code) {
@@ -324,9 +387,18 @@ async function dashLookup(code) {
       <div class="scanHit-title">${esc(b.title)}</div>
       <div class="hint">${esc([b.author, b.publisher, b.year].filter(Boolean).join(' · '))}</div>
       <div style="margin-top:8px">
+        ${/* „НАЛИЧНА“ САМО ЗА НАЛИЧЕН ДОКУМЕНТ (v2.4.69, находка Г9).
+              Дотук се проверяваше само „отчислен“: документ „за реставрация“,
+              „липсващ“ (не е намерен при инвентаризация) или „изгубен“ (невърнат
+              от читател) излизаше със зелено „налична“ — а на гишето
+              библиотекарката би го търсила на рафта напразно или би дала
+              документ, заделен за реставрация. Сега се показва състоянието му,
+              с думи какво значи. */''}
         ${b.status === 'отчислен' ? '<span class="badge warn">отчислен</span>'
           : open.length ? `<span class="badge warn">заета от ${esc(open[0].reader_name || '')} до ${bg(open[0].date_due)}</span>
               <button class="btn sm" onclick="returnBook(${open[0].id})" title="Приема връщането на този документ">Приеми връщането</button>`
+          : (b.status && b.status !== 'наличен')
+            ? `<span class="badge warn">${esc(b.status)}</span> <span class="hint">${esc(DASH_STATUS_HINT[b.status] || 'не е на разположение за заемане')}</span>`
           : '<span class="badge ok">налична</span>'}
         <span class="hint" style="margin-left:8px">${esc(b.department || '')}${b.call_number ? ' · ' + esc(b.call_number) : ''}</span>
       </div></div>`;

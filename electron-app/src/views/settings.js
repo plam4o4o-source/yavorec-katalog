@@ -158,9 +158,11 @@ async function renderSetup() {
           ${/* Обезщетението за изгубен документ (v2.4.56). Стои тук, до тарифите,
                 а не в прозореца „Документът е изгубен“, където се роди: това е
                 правило на библиотеката, а не решение по конкретен случай. */''}
-          ${fld('Обезщетение за изгубен документ — кратност', 'lost_price_multiplier',
-            { val: s.lost_price_multiplier, type: 'number', min: 0, step: '0.5',
-              hint: 'умножава цената по инвентарната книга · празно = 3' })}
+          ${/* П1 (v2.4.69): decField, не type="number" — Chromium с език bg-BG
+                изпуска запетаята и „2,5“ се записваше като 25 (виж decField в core.js). */''}
+          ${decField('Обезщетение за изгубен документ — кратност', 'lost_price_multiplier',
+            { val: s.lost_price_multiplier, min: 0,
+              hint: 'умножава цената по инвентарната книга · празно = 3 · дробно със запетая, напр. 2,5' })}
           ${mnyField('… когато документът е без вписана цена', 'lost_fallback_amount',
             { val: s.lost_fallback_amount, min: 0, hint: 'празно = 10 €' })}
           <div class="note" style="grid-column:1/-1">
@@ -178,8 +180,9 @@ async function renderSetup() {
           </div>
         </div>
         <div class="grid g2">
-          ${fld('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
-            { val: s.suspend_per_day ?? 0, type: 'number', step: '0.5', min: 0, hint: '0 = изключено. По-приложимо от глоба в стотинки.' })}
+          ${/* П1 (v2.4.69): „0,5“ дни на ден забава ставаше 5 — виж decField в core.js. */''}
+          ${decField('Наказание при забава (дни без заемане за всеки ден)', 'suspend_per_day',
+            { val: s.suspend_per_day ?? 0, min: 0, hint: '0 = изключено. По-приложимо от глоба в стотинки. Половин ден — 0,5.' })}
           ${fld('Таван на наказанието (дни)', 'suspend_max', { val: s.suspend_max ?? 90, type: 'number', min: 0,
             hint: 'общо за читателя, не за всяко връщане. Празно или 0 = 90 дни по подразбиране.' })}
         </div>
@@ -929,7 +932,12 @@ function addCircRule(category) {
           ? `<input type="hidden" name="category" value="${esc(category)}"><div class="hint" style="margin-bottom:8px">Категория: <b>${esc(category)}</b></div>`
           : fld('Категория', 'category', { type: 'select', opts: KATEG, allowEmpty: false })}
         <div class="grid g2">
-          ${CIRC_RULE_FIELDS.map(([k, l, h]) => fld(l, k, { type: 'number', val: r && r[k] != null ? r[k] : '', hint: h || 'празно = общото' })).join('')}
+          ${/* П1 (v2.4.69): единственото дробно число в правилото — наказанието в дни
+                на ден забава — е decField; останалите са цели и остават числови. */''}
+          ${CIRC_RULE_FIELDS.map(([k, l, h]) => (k === 'suspend_per_day' ? decField : fld)(l, k,
+            k === 'suspend_per_day'
+              ? { val: r && r[k] != null ? r[k] : '', min: 0, hint: h || 'празно = общото' }
+              : { type: 'number', val: r && r[k] != null ? r[k] : '', hint: h || 'празно = общото' })).join('')}
         </div>
       </form>`,
       `<button class="btn" onclick="closeModal2()">Отказ</button>
@@ -941,6 +949,11 @@ window.addCircRule = addCircRule;
 async function saveCircRule() {
   const d = formData('#crF');
   if (!d.category || !d.category.trim()) return toast('Изберете категория.', 'err');
+  const лошо = badDecimalField('#crF'); // П1 (v2.4.69) — същото като в saveSetup
+  if (лошо) {
+    return toast('„' + лошо.label + '“: „' + лошо.value + '“ не е число (или е отрицателно). Правилото НЕ е '
+      + 'записано. Напишете числото с цифри, дробната част със запетая — напр. 0,5.', 'err');
+  }
   const ok = await call(window.api.circRules.save(d), 'Правилото е записано.');
   if (ok !== null) { closeModal2(); markSaved(); loadCircRulesBox(); }
 }
@@ -1297,6 +1310,14 @@ async function saveSetup() {
   const d = setupFormData(); d.id = 1;
   if (!String(d.org || '').trim() && !String(d.lib_name || '').trim()) {
     return toast('Въведете организацията или наименованието на библиотеката — те излизат върху всеки документ.', 'err');
+  }
+  /* П1 (v2.4.69): десетично поле с текст, който не е число („2,5 пъти“), не стига
+     до обработчика — settings:update чете с parseFloat и би взел „2“ без дума, а
+     „пет“ би станало „по подразбиране“. Отказва се тук, с името на полето. */
+  const лошо = badDecimalField(document.querySelector('#view'));
+  if (лошо) {
+    return toast('„' + лошо.label + '“: „' + лошо.value + '“ не е число (или е отрицателно). Настройките НЕ са '
+      + 'записани. Напишете числото с цифри, дробната част със запетая — напр. 2,5.', 'err');
   }
   /* Позицията на превъртане се пази (v2.4.27): страницата се пречертава след
      запис, а библиотекарят е в раздел по средата ѝ. */

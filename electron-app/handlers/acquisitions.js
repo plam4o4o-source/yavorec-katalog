@@ -186,6 +186,52 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
     }
     return Math.round(Number(norm) * 100) / 100;
   }
+  /* ПАРТИДА БЕЗ ДОКУМЕНТ — ПРАВИЛОТО Е ТУК, НЕ САМО В ЕКРАНА (v2.4.69, кръг 44, П7).
+     (а) КАКВО СТАВАШЕ ДОТУК. От v2.4.61 номерът и датата на документа се чистеха
+         при вид „без документ — протокол на комисия“ — но САМО в екрана на
+         „Постъпления“ (saveAcq). „Периодика → годишен комплект → нова партида“
+         вика същия канал със свои полета и заобикаляше правилото: тестер № 1
+         (сценарий 3) получи партида № 5 с doc_date = днешната дата, а КДБФ
+         Част № 1 печаташе „без документ — протокол на комисия / 26.09.2026“ —
+         дата на документ, който не съществува. Комисията също не се запомняше
+         (committee1..3 = NULL), тоест протоколът по чл. 3, ал. 2 излизаше с
+         празни редове за подпис.
+     (б) ЗАЩО Е ГРЕШНО. Смисълът на тази партида е, че първичен документ ЛИПСВА
+         (чл. 3, ал. 2); дата до него се чете от проверяващия като „има документ,
+         реквизитите му са непълни“. Протоколът се подписва от комисията към
+         завеждането — Настройките се презаписват от следващия акт за
+         отчисляване, затова снимката трябва да е в партидата.
+     (в) ЗАЩО ТОЧНО ТАКА. Нормализирането е в обработчика и се вика от ДВАТА пътя
+         (завеждане и поправка), така че никой екран не може да го заобиколи.
+         Не е мълчаливо: ако е било подадено нещо, одитната следа казва, че е
+         махнато и защо. Комисията се снима от Настройки САМО при завеждане, само
+         за партида без документ и само ако не е подадена изобщо — екран, който я
+         показва (Постъпления), я праща и тя печели. */
+  function acqWithoutDoc(a) { return String((a && a.doc_type) || '').indexOf('без документ') > -1; }
+  function normalizeNoDoc(a) {
+    if (!acqWithoutDoc(a)) return { a, dropped: '' };
+    const had = [a.doc_no ? 'номер „' + a.doc_no + '“' : '', a.doc_date ? 'дата ' + bgDate(a.doc_date) : ''].filter(Boolean);
+    return {
+      a: Object.assign({}, a, { doc_no: null, doc_date: null }),
+      dropped: had.length ? '; подадените ' + had.join(' и ') + ' на документа не са вписани — партидата е без '
+        + 'първичен документ (чл. 3, ал. 2)' : ''
+    };
+  }
+  function committeeSnapshot(db, a) {
+    /* Само при партида БЕЗ документ: там подписът на комисията е единственото
+       основание за вписването (протоколът по чл. 3, ал. 2 замества първичния
+       документ). При партида с документ празната комисия си остава празна —
+       както досега, актът излиза с празни редове за подпис. */
+    if (!acqWithoutDoc(a)) return { a, note: '' };
+    if (a.committee1 || a.committee2 || a.committee3) return { a, note: '' };
+    const s = db.prepare('SELECT committee1, committee2, committee3 FROM settings WHERE id = 1').get() || {};
+    if (!s.committee1 && !s.committee2 && !s.committee3) return { a, note: '' };
+    return {
+      a: Object.assign({}, a, { committee1: s.committee1 || null, committee2: s.committee2 || null, committee3: s.committee3 || null }),
+      note: '; комисията е взета от Настройки към завеждането: '
+        + [s.committee1, s.committee2, s.committee3].filter(Boolean).join(', ')
+    };
+  }
   ipcMain.handle('acquisitions:nextNo', (e, year) =>
     run(() => {
       const y = year || yearOf();
@@ -193,9 +239,12 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
       return (row.m || 0) + 1;
     })
   );
-  ipcMain.handle('acquisitions:create', (e, a) =>
+  ipcMain.handle('acquisitions:create', (e, a0) =>
     run(() => {
       const db = getDb();
+      const nd = normalizeNoDoc(a0 || {});
+      const cs = committeeSnapshot(db, nd.a);
+      const a = cs.a;
       const no = parseRegisterNo(a.no, '№ на вписване');
       /* Проверките са ПРЕДИ транзакцията и са същите, които прави и поправката —
          виж assertAcqDate / assertDonorAddress / parseAcqCount / parseAcqSum
@@ -245,7 +294,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
            № 7/2026 с 12 бр., а дневникът твърдеше „партида № 007 — 12бр бр.“ —
            номер, който Част № 1 на КДБФ не съдържа. */
         logAudit('Постъпление', 'партида № ' + no + '/' + year + ' — ' + totalCount
-          + ' бр. от ' + (a.from_source || '—'));
+          + ' бр. от ' + (a.from_source || '—') + nd.dropped + cs.note);
         return info.lastInsertRowid;
       });
       return tx.immediate();
@@ -272,7 +321,8 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
   ipcMain.handle('acquisitions:update', (e, { id, acq }) =>
     run(() => {
       const db = getDb();
-      const a = acq || {};
+      const nd = normalizeNoDoc(acq || {}); // П7 (v2.4.69) — същото правило като при завеждането
+      const a = nd.a;
       /* Същите проверки като при завеждането — вече на едно място (v2.4.61). */
       assertAcqDate(a);
       assertAcqHow(a);
@@ -327,7 +377,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
         /* Следа се пише ВИНАГИ, дори когато нищо не се е променило: отварянето и
            записването на ред от официален регистър е събитие само по себе си. */
         logAudit('Поправена партида', 'партида № ' + prev.no + '/' + prev.year
-          + (changed.length ? ' — ' + changed.join('; ') : ' — записана без промяна'));
+          + (changed.length ? ' — ' + changed.join('; ') : ' — записана без промяна') + nd.dropped);
         return changed.length;
       });
       return tx.immediate();

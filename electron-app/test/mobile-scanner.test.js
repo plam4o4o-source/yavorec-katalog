@@ -106,7 +106,9 @@ test('„Снимай баркод“ разчита номера от сним�
   inp.dispatchEvent(new w.Event('change'));
   await new Promise(r => setTimeout(r, 30));
 
-  assert.equal(d.getElementById('out').value, '1024\n1025', 'номерата от снимката влизат в списъка');
+  /* v2.4.69 (находка О5): списъкът за пренасяне започва със заглавен ред „# …“ с датата на
+     започване; номерата са по един на ред след него. Заменено нарочно. */
+  assert.deepEqual(d.getElementById('out').value.split('\n').slice(1), ['1024', '1025'], 'номерата от снимката влизат в списъка');
   assert.equal(d.getElementById('cnt').textContent, '2');
   assert.equal(state.bitmaps, 1, 'снимката се чете веднъж');
   assert.equal(d.getElementById('nocam').style.display, 'none', 'предупреждението се маха при успех');
@@ -143,18 +145,24 @@ test('отказът на камерата се обяснява с думи, а
   assert.match(fromWeb({ name: 'КакваЛиЕ', message: 'нещо си' }), /нещо си/);
 });
 
-test('копираният списък съдържа САМО номера — програмата чете всяка дума като номер', async () => {
-  /* importScansRun() дели по интервали и запетаи: заглавен ред с името на
-     библиотеката би влязъл като няколко несъществуващи номера. Затова името е
-     в ИМЕТО на файла, а не в съдържанието му. */
+test('копираният списък: един заглавен ред „# …“ с датата, после САМО номера, по един на ред', async () => {
+  /* ПРОМЕНЕНО НАРОЧНО в v2.4.69 (находки О2 и О5). Дотук importScansRun() делеше по
+     интервали и запетаи и затова в списъка не биваше да има нито дума — заглавен ред
+     би влязъл като няколко несъществуващи номера. Сега вносът е „един ред = един
+     код“ и подминава редовете, започващи с „#“ (и в екрана, и в обработчика —
+     test/otchislyavane-v2469.test.js), затова списъкът носи заглавен ред с деня на
+     започване, по който програмата познава стар списък. Името на библиотеката
+     остава само в ИМЕТО на файла. */
   const { w, d } = openPage({ url: 'file:///x/skener.html' });
   const man = d.getElementById('manual');
   man.value = '1024';
   man.dispatchEvent(Object.assign(new w.Event('keydown'), { key: 'Enter' }));
   man.value = '1025';
   man.dispatchEvent(Object.assign(new w.Event('keydown'), { key: 'Enter' }));
-  assert.equal(d.getElementById('out').value, '1024\n1025');
-  assert.equal(/[А-Яа-я]/.test(d.getElementById('out').value), false, 'нито дума кирилица в списъка');
+  const lines = d.getElementById('out').value.split('\n');
+  assert.match(lines[0], /^# Инвентаризация — списък започнат на \d{2}\.\d{2}\.\d{4} г\., 2 номера$/);
+  assert.deepEqual(lines.slice(1), ['1024', '1025']);
+  assert.equal(lines.slice(1).some(l => /[А-Яа-я\s]/.test(l)), false, 'след заглавния ред — само номера');
 });
 
 test('името на библиотеката не се изписва никъде в страницата', () => {

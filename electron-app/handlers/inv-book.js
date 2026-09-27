@@ -33,6 +33,9 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
       const rows = db.prepare(`
         SELECT b.id, b.inv_number, b.register_date, b.title, b.author, b.volume,
                b.year, b.price, b.call_number, b.status, b.description,
+               -- УДК и авторски знак (v2.4.69, П4): колоната „Сигнатура“ (чл. 16, ал. 1)
+               -- се сглобява от effectiveCallNumber() в екрана, когато call_number е празно
+               b.udk, b.author_mark,
                -- бройки екземпляри: „Налични: N · стойност" под таблицата брои
                -- документи, както навсякъде другаде (виж handlers/kdbf.js)
                COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1) AS quantity,
@@ -56,6 +59,7 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
   const INV_BOOK_SELECT = `
     SELECT b.id, b.inv_number, b.register_date, b.title, b.author, b.volume,
            b.year, b.price, b.call_number, b.status, b.description,
+           b.udk, b.author_mark,
            COALESCE((SELECT i.quantity FROM inventory i WHERE i.book_id = b.id), 1) AS quantity,
            c.name AS category_name,
            a.no AS acq_no, a.date AS acq_date,
@@ -73,9 +77,13 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
          (unicode61, както в books:list), а LIKE остава за инв. №, сигнатура и
          „съдържа навсякъде“ по автор/заглавие. */
       const like = `%${q}%`;
+      /* v2.4.69 (П4): сигнатурата на екрана вече се сглобява и от УДК + авторски
+         знак (effectiveCallNumber), затова търсенето по „сигнатура“ гледа и тях —
+         иначе показаното „638(497.2) / Й 83“ не се намира. */
       where = `WHERE (b.id IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)
-        OR CAST(b.inv_number AS TEXT) LIKE ? OR b.author LIKE ? OR b.title LIKE ? OR b.call_number LIKE ?)`;
-      params = [ftsQuery(q), like, like, like, like];
+        OR CAST(b.inv_number AS TEXT) LIKE ? OR b.author LIKE ? OR b.title LIKE ? OR b.call_number LIKE ?
+        OR b.udk LIKE ? OR b.author_mark LIKE ?)`;
+      params = [ftsQuery(q), like, like, like, like, like, like];
     }
     const limit = Math.min(Math.max(parseInt(page.limit, 10) || 300, 1), 2000);
     const offset = Math.max(parseInt(page.offset, 10) || 0, 0);

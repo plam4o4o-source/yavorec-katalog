@@ -248,6 +248,15 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
             + 'Формулярът брои хора и документи, не части от тях: поправете клетката и запишете отново.');
         }
         payload[f] = parseInt(str, 10);
+        /* Часовете на обслужване са в МИНУТИ и не могат да надхвърлят денонощието
+           (v2.4.69, Л1). Екранът вече разпознава „8“, „7,5“ и „7.30“ и отказва
+           всичко друго, но границата е тук: число над 1440 минути, дошло от
+           стара версия или от друг път, влизаше в годишния отчет като часове,
+           каквито няма в един ден. */
+        if ((f === 'a_hours' || f === 'b_hours') && payload[f] > 24 * 60) {
+          throw new Error('„' + label + '“ — ' + payload[f] + ' мин. е повече от 24 часа за един ден. '
+            + 'Поправете часовете на деня и запишете отново.');
+        }
       });
       if (hasNote) payload.note = d.note || null;
       const names = cols.concat(hasNote ? ['note'] : []);
@@ -469,9 +478,43 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
       let periodicalsByType = 0;     // заети периодични издания — броят се по ВИД, не по съдържание
       const fallbackByName = new Map(); // вид без ред във формуляра → бройка (виж Б15 по-горе)
       let noTypeAtAll = 0;              // документ, записан изобщо без вид
+      /* „В ЗАЕМНА ЗА ДОМА“ = ЧИТАТЕЛИТЕ, ДОШЛИ НА ГИШЕТО (v2.4.69, Л3).
+         =====================================================================
+         ДОТУК колоната се пълнеше САМО от посещенията по домовете (kind='дома'),
+         а „Деца до 14 г.“ — от заеманията. Измерено (тестер № 6, s4-dnevnik.js):
+         трима читатели заемат на гишето, едно посещение по домовете — ⚡ предлага
+         „В заемна за дома“ = 1 и „Деца до 14 г.“ = 1, а при две деца на гишето
+         и без посещение по домовете — 0 и 2. По формуляра „Деца до 14 г.“ е ЧАСТ
+         от „В заемна за дома“; предложението само нарушаваше правилото, за което
+         dnevnik:saveDay после предупреждава („децата надхвърлят…“).
+         Посещение в заемната е ЧОВЕК, дошъл да заеме или да върне — затова
+         множеството е: различните читатели със заемане ИЛИ връщане за деня
+         (всеки веднъж, както възрастта), плюс посещенията по домовете — те
+         също са обслужване „за дома“ (виж бележката при DNEVNIK_LABELS), но се
+         връщат ОТДЕЛНО (sectionA.visitHomeDesk / visitHomeHousebound), за да ги
+         назове екранът поименно. Читател, обслужен у дома, чието заемане е
+         вписано същия ден, се брои веднъж — като посещение по домовете.
+         „Деца до 14 г.“ се брои от СЪЩОТО множество, затова никога не го
+         надхвърля. Възрастта (Раздел А „по възраст“) също се брои от него —
+         читателят, дошъл само да върне, е читател на деня. */
+      const houseboundReaders = new Set(events.filter(ev => ev.kind === 'дома' && ev.reader_id).map(ev => ev.reader_id));
+      let visitHomeDesk = 0, visitHomeHousebound = 0;
+      const countVisitor = (ev) => {
+        const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
+        if (seenReaders.has(rk)) return;
+        seenReaders.add(rk);
+        add(DNEVNIK_AGE_MAP[ev.reader_category] || 'a_age_o28');
+        if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
+        if (!(ev.reader_id && houseboundReaders.has(ev.reader_id))) visitHomeDesk++;
+      };
       for (const ev of events) {
         if (ev.kind === 'читалня') { add('a_visit_reading'); continue; }
-        if (ev.kind === 'дома') { add('a_visit_home'); continue; }
+        if (ev.kind === 'дома') { visitHomeHousebound++; continue; }
+        /* Връщането на НАМЕРЕН документ (loans:found) не е посещение — читателят
+           не е идвал. loans:found пише събитието с бележка „намерен документ“
+           (v2.4.69), и по нея то се прескача тук. */
+        if (ev.kind === 'връщане' && /намер/i.test(String(ev.note || ''))) continue;
+        if (ev.kind === 'връщане') { countVisitor(ev); continue; }
         if (ev.kind !== 'заемане') continue;
         // Раздел Б — по вид, език и съдържание, само за реално заетите този ден.
         const code = ev.book_category_code;
@@ -523,13 +566,9 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         else if (typeKey === 'b_type_period') periodicalsByType++;
         else unclassified++;
         // Раздел А — всеки читател се брои веднъж на ден, по категорията му към момента.
-        const rk = ev.reader_id || ('cat:' + ev.reader_category + ':' + ev.id);
-        if (!seenReaders.has(rk)) {
-          seenReaders.add(rk);
-          add(DNEVNIK_AGE_MAP[ev.reader_category] || 'a_age_o28');
-          if (ev.reader_category === 'дете до 14 г.') add('a_visit_child');
-        }
+        countVisitor(ev);
       }
+      if (visitHomeDesk + visitHomeHousebound) add('a_visit_home', visitHomeDesk + visitHomeHousebound);
       /* ЧЕТИРИТЕ „ВСИЧКО“ НА РАЗДЕЛ А — ВРЪЩАТ СЕ, ЗА ДА СЕ ВИДЯТ (одит v2.4.65,
          находка А от доклада).
          =====================================================================
@@ -549,7 +588,8 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         sectionA: {
           age: aTotals.a_total_age, sex: aTotals.a_total_sex,
           edu: aTotals.a_total_edu, prof: aTotals.a_total_prof,
-          visitHome: out.a_visit_home || 0, visitChild: out.a_visit_child || 0
+          visitHome: out.a_visit_home || 0, visitChild: out.a_visit_child || 0,
+          visitHomeDesk, visitHomeHousebound
         } };
     })
   );

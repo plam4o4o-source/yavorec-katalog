@@ -16,7 +16,9 @@ const { isValidIsoDate, resolveScannedBook } = require('../security-utils');
    applyEnumTriggers се изисква по същата причина, поради която го прави и
    миграция 9 в main.js: списъкът с позволени стойности живее в кода, а тригерите
    в базата са снимка от деня, в който са създадени. */
-const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST } = require('../db/enum-triggers');
+const { applyEnumTriggers, BOOK_STATUS_LOST, EVENT_KIND_LOST, LATE_FEE_CHARGE_TYPE } = require('../db/enum-triggers');
+/* МЗС — виж checkoutStatusGate по-долу (v2.4.69, находка К8). */
+const { mzsBlockForBook } = require('./mzs');
 /* Начислението в читателската сметка минава през handlers/account.js — сметката
    има едно място, което пише в нея. Виж chargeLost/chargeCoverage там. */
 const { chargeLost, chargeCoverage, chargeOverdueFine, LOST_CHARGE_TYPE } = require('./account');
@@ -27,7 +29,11 @@ const { toCents } = require('../db/fund-sql');
    защото по него се решава кои начисления вече са платени (виж
    unpaidOverdueFines по-долу), а разминаване в един низ би дало мълчаливо
    „нищо не е платено“, тоест точно сумата, която този кръг поправя. */
-const OVERDUE_CHARGE_TYPE = 'обезщетение';
+/* От v2.4.69 забавата има СОБСТВЕН вид („забава“), отделен от ръчните
+   обезщетения — виж LATE_FEE_CHARGE_TYPE в db/enum-triggers.js (находка Г2 от
+   пълния тест: ръчно „обезщетение“ за повредена корица „изяждаше“ плащането на
+   вече платената забава и писмото пак я искаше). */
+const OVERDUE_CHARGE_TYPE = LATE_FEE_CHARGE_TYPE;
 
 /* КОЛКО ОТ ВЕЧЕ НАЧИСЛЕНАТА ЗАБАВА ЧИТАТЕЛЯТ ОЩЕ НЕ Е ПЛАТИЛ (v2.4.65).
    =====================================================================
@@ -62,6 +68,32 @@ const OVERDUE_CHARGE_TYPE = 'обезщетение';
    Обхожда се веднъж на читател (а не chargeCoverage за всеки ред поотделно,
    което е квадратично при читател с дълга сметка). */
 function unpaidOverdueFines(db, readerId, legacy) {
+  return overdueLedger(db, readerId, legacy).rest;
+}
+/* СМЕТКАТА НА ЧИТАТЕЛЯ, ОБХОДЕНА ВЕДНЪЖ: НЕПЛАТЕНАТА ЗАБАВА И АВАНСЪТ (v2.4.69).
+   =====================================================================
+   (а) КАКВО СТАВАШЕ ДОТУК. unpaidOverdueFines() връщаше само неплатената ВЕЧЕ
+       НАЧИСЛЕНА забава. Кредитът (надплатеното — „аванс“, v2.4.67) се смяташе
+       тук, покриваше следващото начисление и… изчезваше: на въпроса „колко да
+       поискам в писмото“ той не участваше. Възпроизведено (тестер № 2, сценарий
+       8г): читател плаща 1,00 € аванс вчера, днешната забава 1,20 € още не е
+       начислена (тя се начислява при връщане/продължение) — „Просрочени“,
+       писмото по чл. 43 и SMS-ът искат 1,20 €, а сметката му в същия момент
+       показва −1,00 € (надплатено).
+   (б) ЗАЩО Е ГРЕШНО. Писмото по чл. 43 е подписан документ с искане за пари;
+       то не може да иска сума, която читателят вече е дал на същото гише. В
+       деня на връщането авансът ще покрие начислената забава (правилото
+       „авансът покрива следващото начисление“ е вече в сметката), тоест
+       реално дължимото е 0,20 €.
+   (в) ЗАЩО ТОЧНО ТАКА. Кредитът се връща заедно с остатъка, от СЪЩОТО
+       обхождане (едно правило, едно число), и spreadUnpaidFine() го приспада
+       от още неначислената забава на реда. Приспаднатото се води като
+       „платено“ (finePaid) — така и екранът „Просрочени“, и печатното писмо
+       (src/views/logo-org.js), и напомнянето по пощата/SMS казват
+       „начислено X, платено Y, остава Z“ без нито един нов текст: авансът Е
+       платено по читателската сметка. Кредит и неплатена забава едновременно
+       няма: кредит остава само когато всички по-стари задължения са покрити. */
+function overdueLedger(db, readerId, legacy) {
   const lines = db.prepare(`
     SELECT kind, type, amount FROM account_lines WHERE reader_id = ?
     ORDER BY date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
@@ -96,7 +128,7 @@ function unpaidOverdueFines(db, readerId, legacy) {
     if (money > 0.0001) credit += money;
   }
   const rest = queue.reduce((s, q) => s + (q.type === OVERDUE_CHARGE_TYPE ? q.left : 0), 0);
-  return toCents(rest);
+  return { rest: toCents(rest), credit: toCents(credit) };
 }
 
 /* ЗАВАРЕНАТА ЗАБАВА, КОЯТО НИКОГА НЕ Е ВЛИЗАЛА В СМЕТКАТА (v2.4.65).
@@ -122,11 +154,18 @@ function unpaidOverdueFines(db, readerId, legacy) {
    получава обратно изцяло. Трите места, които пресмятат (Просрочени,
    напомнителното писмо, SMS), минават през тази една функция. */
 function unpaidForRows(db, readerId, rows) {
+  return overdueForRows(db, readerId, rows).unpaid;
+}
+/* Същото, плюс аванса (кредита) по сметката — виж overdueLedger() горе.
+   Трите места, които пресмятат (Просрочени, печатното писмо, напомнянето по
+   пощата/SMS), минават оттук и подават кредита на spreadUnpaidFine(). */
+function overdueForRows(db, readerId, rows) {
   const onRows = rows.reduce((s, r) => s + (Number(r.fineCharged) || 0), 0);
   const inAccount = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM account_lines
       WHERE reader_id = ? AND kind = 'начисление' AND type = ?`).get(readerId, OVERDUE_CHARGE_TYPE).s;
   const legacy = Math.max(0, Math.round((onRows - Math.abs(Number(inAccount) || 0)) * 100) / 100);
-  return unpaidOverdueFines(db, readerId, legacy);
+  const led = overdueLedger(db, readerId, legacy);
+  return { unpaid: led.rest, credit: led.credit };
 }
 
 /* РАЗНАСЯ НЕПЛАТЕНАТА ЗАБАВА ПО ПРОСРОЧЕНИТЕ ЗАЕМАНИЯ НА ЕДИН ЧИТАТЕЛ.
@@ -140,7 +179,7 @@ function unpaidForRows(db, readerId, rows) {
    Таванът `Math.min(charged, …)` пази от обратното разминаване: неплатена забава
    по ВЕЧЕ ВЪРНАТО заемане е също дължима, но не по този ред и не в това писмо —
    тя си стои в сметката на читателя. */
-function spreadUnpaidFine(rows, unpaid) {
+function spreadUnpaidFine(rows, unpaid, credit) {
   let pool = unpaid;
   const order = rows.slice().sort((a, b) =>
     String(b.date_due || '').localeCompare(String(a.date_due || '')) || ((b.id || 0) - (a.id || 0)));
@@ -151,6 +190,25 @@ function spreadUnpaidFine(rows, unpaid) {
     r.finePaid = Math.round((charged - still) * 100) / 100;
     r.fineAccrued = Math.round((charged + (Number(r.fineNew) || 0)) * 100) / 100;
     r.fine = Math.round((still + (Number(r.fineNew) || 0)) * 100) / 100;
+  }
+  /* АВАНСЪТ ПОКРИВА ОЩЕ НЕНАЧИСЛЕНАТА ЗАБАВА (v2.4.69) — виж overdueLedger().
+     Разнася се от НАЙ-СТАРИЯ падеж напред: тя ще бъде начислена първа (при
+     връщане или продължение), а авансът покрива следващото начисление.
+     Приспаднатото минава в finePaid, за да казват всички три канала
+     „начислено, платено, остава“ с числата, които вече показват. */
+  let cr = Math.round((Number(credit) || 0) * 100) / 100;
+  if (cr > 0) {
+    const oldest = rows.slice().sort((a, b) =>
+      String(a.date_due || '').localeCompare(String(b.date_due || '')) || ((a.id || 0) - (b.id || 0)));
+    for (const r of oldest) {
+      if (cr <= 0) break;
+      const use = Math.min(cr, Math.round((Number(r.fineNew) || 0) * 100) / 100);
+      if (use <= 0) continue;
+      cr = Math.round((cr - use) * 100) / 100;
+      r.fine = Math.round((r.fine - use) * 100) / 100;
+      r.finePaid = Math.round((r.finePaid + use) * 100) / 100;
+      r.fineCredit = use;
+    }
   }
   return rows;
 }
@@ -373,6 +431,75 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     }
   }
 
+  /* „ЛИПСВАЩ“ И „ЗА РЕСТАВРАЦИЯ“ НА ГИШЕТО (v2.4.69, находка Г4).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ ДОТУК. И двете врати за заемане отказваха само
+         „отчислен“ и „изгубен“. Документ „липсващ“ (не е намерен при
+         инвентаризация) и документ „за реставрация“ се заемаха мълчаливо — със
+         зелено „ok“ — а състоянието им оставаше. Възпроизведено (тестер № 2,
+         сценарий 4): „липсващ“ инв. № 17 се заема и връща и продължава да е
+         „липсващ“: онлайн каталогът го показва неналичен, протоколът от
+         инвентаризацията и проектът за акт по чл. 30, т. 6 го броят за липса —
+         а той е в ръцете на библиотекарката.
+     (б) ЗАЩО Е ГРЕШНО. Документ, сканиран на гишето, очевидно е намерен.
+         Оставен „липсващ“, той стига до акт за отчисляване по т. 6 (липса при
+         инвентаризация) — невярно съдържание в документ, подписан от комисия.
+         А „за реставрация“ е решение на библиотекаря документът да не се дава;
+         заемането му без дума отменя това решение, без никой да разбере.
+     (в) ЗАЩО ТОЧНО ТАКА. „Липсващ“ се заема САМО с изрично потвърждение, че
+         документът е намерен (`found: true` — екранът пита „Документът е
+         намерен?“); тогава състоянието става „наличен“ в СЪЩАТА транзакция и
+         остава следа — както прави и сканирането при инвентаризация
+         (handlers/inventory-sessions.js). Без потвърждение — отказ, който казва
+         изхода. „За реставрация“ НЕ се отказва (понякога книгата е годна да се
+         даде, а решението е на библиотекаря), но програмата не мълчи: връща
+         предупреждение, екранът пита преди това, а състоянието не се пипа —
+         дали документът е поправен, решава човек, не гишето.
+     Вика се последна преди записа: при отказ по друга причина (лимит,
+     наказание) състоянието не бива да се е сменило. */
+  const BOOK_STATUS_MISSING = 'липсващ';
+  const BOOK_STATUS_RESTORE = 'за реставрация';
+  function checkoutStatusGate(db, b, found) {
+    /* ИЗПРАТЕН ПО МЗС (v2.4.69, находка К8 от пълния тест). Наш документ, изпратен
+       на друга библиотека по входяща заявка, дотук оставаше „наличен“: гишето го
+       заемаше, а сайтът го показваше на рафта, докато той е в друго село. Правилото
+       е едно и живее в handlers/mzs.js (mzsBlockForBook): там се брои и дали
+       заварен запис с няколко бройки има още бройка на рафта. Проверката стои
+       ПЪРВА, защото изпратеният документ не е нито „намерен“, нито „за
+       реставрация“ — той просто не е тук. Вика се и от двете врати за заемане
+       (по id и по код), защото и двете минават през тази функция. */
+    const mzsWhy = mzsBlockForBook(db, b.id);
+    if (mzsWhy) throw new Error(mzsWhy);
+    if (b.status === BOOK_STATUS_MISSING) {
+      if (!found) {
+        throw new Error('Инв. № ' + b.inv_number + ' е отбелязан „липсващ“ — не е намерен при инвентаризация'
+          + (b.status_date ? ' (' + bgDate(b.status_date) + ')' : '') + '. Ако документът е в ръцете ви, '
+          + 'сканирайте го отново на гишето и потвърдете „Документът е намерен“: състоянието му става „наличен“ '
+          + 'и заемането се записва. Заемането НЕ е записано.');
+      }
+      db.prepare("UPDATE books SET status = 'наличен', status_date = ?, datelastseen = datetime('now') WHERE id = ?")
+        .run(today(), b.id);
+      logAudit('Намерен документ', 'инв. № ' + b.inv_number + ' — ' + (b.title || '')
+        + '; беше „липсващ“' + (b.status_date ? ' от ' + bgDate(b.status_date) : '')
+        + ', намерен на гишето при заемане; състоянието е върнато на „наличен“');
+      return { foundBack: true, warning: null };
+    }
+    if (b.status === BOOK_STATUS_RESTORE) {
+      return {
+        foundBack: false,
+        warning: 'Инв. № ' + b.inv_number + ' е отбелязан „за реставрация“ — заемането е записано, '
+          + 'състоянието остава. Ако документът вече е поправен, сменете състоянието му на „наличен“ от „Книги“.'
+      };
+    }
+    return { foundBack: false, warning: null };
+  }
+
+  /* Функцията, която повиква следващия в опашката за резервация, идва от
+     main.js (handlers/holds.js) само тук. Закача се за експорта, за да я ползва
+     и изтриването на читател (handlers/readers.js, находка Г5), което main.js
+     регистрира по-рано и без нея — виж бележката при readers:delete. */
+  module.exports.activateHoldOnReturn = activateHoldOnReturn;
+
   ipcMain.handle('loans:list', /** @param {unknown} e @param {{ onlyOpen?: boolean }} [arg] */ (e, { onlyOpen } = {}) =>
     run(() => {
       const db = getDb();
@@ -418,7 +545,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         if (!byReader.has(r.reader_id)) byReader.set(r.reader_id, []);
         byReader.get(r.reader_id).push(r);
       });
-      for (const [readerId, list] of byReader) spreadUnpaidFine(list, unpaidForRows(db, readerId, list));
+      /* С аванса (v2.4.69) — виж overdueLedger() в началото на файла. */
+      for (const [readerId, list] of byReader) {
+        const o = overdueForRows(db, readerId, list);
+        spreadUnpaidFine(list, o.unpaid, o.credit);
+      }
       return rows;
     })
   );
@@ -472,7 +603,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         /* И тук платеното се приспада (v2.4.65) — виж unpaidOverdueFines в
            началото на файла. Това е каналът на ПЕЧАТНОТО писмо по чл. 43: точно
            тук се раждаше искането към читател, платил всичко на гишето. */
-        spreadUnpaidFine(r.loans, unpaidForRows(db, r.reader_id, r.loans));
+        const o = overdueForRows(db, r.reader_id, r.loans);   // с аванса (v2.4.69)
+        spreadUnpaidFine(r.loans, o.unpaid, o.credit);
         // toCents и на сбора (v2.4.61): това е числото в реда „Общо дължимо
         // обезщетение“ на напомнителното писмо.
         r.fine = toCents(r.loans.reduce((sum, d) => sum + d.fine, 0));
@@ -490,7 +622,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       return rows;
     })
   );
-  ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due }) =>
+  ipcMain.handle('loans:checkout', (e, { reader_id, book_id, date_out, date_due, found }) =>
     run(() => {
       if (!isValidIsoDate(date_out)) throw new Error('Датата на заемане липсва или е невалидна.');
       if (date_due != null && date_due !== '' && !isValidIsoDate(date_due)) {
@@ -547,7 +679,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            всяка справка за просрочие пита `date_due IS NOT NULL` — такова заемане
            никога не става просрочено, никога не носи обезщетение и никога не
            попада в напомнянията. Книгата просто изчезва от погледа. */
-        const b0 = db.prepare('SELECT inv_number, status FROM books WHERE id = ?').get(book_id);
+        const b0 = db.prepare('SELECT id, inv_number, title, status, status_date FROM books WHERE id = ?').get(book_id);
         if (!b0) throw new Error('Документът не е намерен.');
         if (b0.status === 'отчислен') throw new Error('Инв. № ' + b0.inv_number + ' е отчислен от фонда.');
         /* v2.4.56: документ, приключен като изгубен, не се заема. Без тази
@@ -573,6 +705,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
         if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
         checkSuspended(reader_id);
+        // „липсващ“ / „за реставрация“ — виж checkoutStatusGate (v2.4.69, Г4).
+        const gate = checkoutStatusGate(db, b0, found);
         consumeHoldOnCheckout(book_id, reader_id);
         const dueStr = date_due || nextWorkDay(addDays(date_out, s.loan_days || 30));
         const info = db.prepare(`
@@ -581,7 +715,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const b = db.prepare('SELECT title, inv_number FROM books WHERE id = ?').get(book_id);
         // Следата назовава и ЧИТАТЕЛЯ (v2.4.61) — виж readerTrace по-горе.
         logAudit('Заемане', 'инв. № ' + (b ? b.inv_number : '') + ' — ' + (b ? b.title : '')
-          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr));
+          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr)
+          + (gate.warning ? '; ВНИМАНИЕ: документът е „за реставрация“' : ''));
         logEvent('заемане', { bookId: book_id, readerId: reader_id, date: date_out });
         return info.lastInsertRowid;
       });
@@ -816,7 +951,10 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            записите от един и същи ред. */
         logAudit('Продължение на заемане', 'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
           + '; ' + readerTrace({ name: l.reader_name, card_no: l.card_no })
-          + '; заемане № ' + id + ' до ' + newDue + ' (' + (used + 1) + (max ? '/' + max : '') + ')'
+          /* Срокът — както го пише библиотекарят (v2.4.69, Г11): следата на
+             заемането казва „срок 09.11.2026“, а тази — „до 2026-11-09“; два
+             вида за една и съща дата в един и същи списък. */
+          + '; заемане № ' + id + ' до ' + bgDate(newDue) + ' (' + (used + 1) + (max ? '/' + max : '') + ')'
           + (lateNow ? ' — начислена забава ' + lateNow + ' дни' + (addedFine ? ', ' + addedFine.toFixed(2) + ' €' : '') : ''));
         logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
         return { date_due: newDue, renewals: used + 1, max, daysLate: lateNow, fine: addedFine, suspendedUntil };
@@ -947,6 +1085,38 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     return { amount: toCents(policy.fallback), basis: 'без цена', price: 0 };
   }
 
+  /* „ИЗГУБЕНА“ НА ЗАВАРЕН ЗАПИС С НЯКОЛКО БРОЙКИ (v2.4.69, находка Г8).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ ДОТУК. Стар запис от внесена база носи няколко
+         екземпляра под ЕДИН инвентарен номер (inventory.quantity > 1).
+         „Изгубена“ на едно от заеманията му слагаше състояние „изгубен“ на
+         ЦЕЛИЯ запис. Възпроизведено (тестер № 2, mnogobroen): 3 бройки, 2
+         заети, едната изгубена — третата бройка, която си стои на рафта, вече
+         не може да се заеме („отбелязан като изгубен/невърнат“), онлайн
+         каталогът я показва неналична, а актът по т. 5 после отказва записа.
+     (б) ЗАЩО Е ГРЕШНО. Състоянието е на ЗАПИСА, не на бройката: един
+         изгубен екземпляр не може да бъде отбелязан, без да се отбележат и
+         здравите. По чл. 16 всеки документ има свой инвентарен номер — и
+         отчисляването по т. 5 после става за екземпляра с номера в акта.
+     (в) ЗАЩО ТОЧНО ТАКА. Същият отказ и същият изход като при акта по т. 5
+         (handlers/deaccession-acts.js): първо записът се разделя, така че
+         изгубеният екземпляр да има свой номер, и тогава се приключва.
+         Отказва се още в прозореца (lostQuote), за да не се попълва напразно,
+         и пак при записа (markLost) — през него минават и други пътища. */
+  function assertSingleCopyForLost(db, bookId, invNumber, title) {
+    const row = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(bookId);
+    const q = row && row.quantity != null ? Number(row.quantity) : 1;
+    if (q > 1) {
+      throw new Error('Под инв. № ' + (invNumber ?? '—') + ' („' + (title || '') + '“) са вписани ' + q
+        + ' екземпляра — стар запис от времето преди правилото „един инвентарен номер = един екземпляр“. '
+        + '„Изгубена“ отбелязва като изгубен целия запис, тоест и бройките, които са на рафта. '
+        + 'Разделете първо записа („Настройки“ → „Проверка на данните“ → „Раздели на отделни записи“), '
+        + 'така че изгубеният екземпляр да има свой номер, и тогава го приключете като изгубен. '
+        + 'Разделянето става, когато по записа е останало само това заемане — първо приемете върнатите '
+        + 'екземпляри. Нищо не е записано.');
+    }
+  }
+
   ipcMain.handle('loans:lostPolicy', () => run(() => { const db = getDb(); ensureLostSchema(db); return lostPolicy(db); }));
   /* Правилото живее на ДВЕ места и това е нарочно. „Настройки“ → „Заемане“ го
      задава веднъж, за библиотеката (settings:update от v2.4.56 знае и двете
@@ -958,8 +1128,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       ensureLostSchema(db);
-      const m = Number(multiplier), f = Number(fallback);
-      if (!Number.isFinite(m) || m <= 0) throw new Error('Кратността трябва да е положително число (например 3 за троен размер).');
+      /* Десетичната запетая се приема и тук (v2.4.69, П1): екранът вече праща
+         „1.5“ (decField в src/views/core.js), но каналът се вика и отвън, а
+         Number('1,5') е NaN — по-добре прочетено, отколкото отказано. Празен
+         низ НЕ е нула: `Number('')` би дал 0 и отказ с неверния текст. */
+      const num = (v) => (typeof v === 'string' ? (v.trim() === '' ? NaN : Number(v.trim().replace(',', '.'))) : Number(v));
+      const m = num(multiplier), f = num(fallback);
+      if (!Number.isFinite(m) || m <= 0) throw new Error('Кратността трябва да е положително число (например 3 за троен размер, 1,5 за размер и половина).');
       if (!Number.isFinite(f) || f <= 0) throw new Error('Сумата за документ без вписана цена трябва да е положителна.');
       db.prepare('UPDATE settings SET lost_price_multiplier = ?, lost_fallback_amount = ? WHERE id = 1')
         .run(m, toCents(f));
@@ -980,6 +1155,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
       if (!l) throw new Error('Заемането не е намерено.');
       if (l.date_in) throw new Error('Това заемане вече е приключено на ' + l.date_in.split('-').reverse().join('.') + '.');
+      assertSingleCopyForLost(db, l.book_id, l.inv_number, l.title);   // Г8 (v2.4.69)
       const when = date && isValidIsoDate(date) ? date : today();
       const policy = lostPolicy(db);
       const b = db.prepare('SELECT price FROM books WHERE id = ?').get(l.book_id) || {};
@@ -1024,6 +1200,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           throw new Error('Това заемане вече е приключено на ' + l.date_in.split('-').reverse().join('.')
             + (l.lost ? ' като изгубен документ' : ' с връщане') + ' — не се приключва втори път.');
         }
+        assertSingleCopyForLost(db, l.book_id, l.inv_number, l.title);   // Г8 (v2.4.69)
         /* ЗАМЯНАТА ТРЯБВА ДА СОЧИ КЪМ НЕЩО. „Читателят донесе друга книга“ без
            никакво указание коя е тя не става следа — след година никой не може да
            каже дали фондът наистина е възстановен. Затова се иска или инвентарен
@@ -1233,7 +1410,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       const tx = db.transaction(() => {
         const l = db.prepare(`
           SELECT l.id, l.book_id, l.reader_id, l.lost, l.lost_date, l.lost_amount, l.lost_account_line_id,
-                 l.lost_resolution, l.lost_note, l.fine,
+                 l.lost_resolution, l.lost_note, l.fine, l.date_due,
                  b.inv_number, b.title, b.status, b.deaccession_act_id, b.deaccession_date,
                  r.name AS reader_name, r.card_no
           FROM loans l
@@ -1243,6 +1420,10 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         if (!l) throw new Error('Заемането не е намерено — вероятно е изтрито от друго работно място.');
         if (!l.lost) {
           throw new Error('Това заемане не е приключено като изгубен документ и няма какво да се връща.');
+        }
+        if (l.lost_date && when < l.lost_date) {
+          throw new Error('Датата на намирането (' + bgDate(when) + ' г.) е преди датата, на която документът е '
+            + 'отбелязан като невърнат (' + bgDate(l.lost_date) + ' г.). Проверете датата.');
         }
         if (l.deaccession_act_id != null || l.deaccession_date != null || l.status === 'отчислен') {
           const act = l.deaccession_act_id != null
@@ -1300,12 +1481,26 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         }
         /* При непрочетено покритие връзката към начислението ОСТАВА (виж
            keepChargeLink горе) — CASE, а не второ UPDATE, за да е едно изявление. */
-        db.prepare(`UPDATE loans SET lost = NULL, lost_date = NULL, lost_resolution = NULL,
+        /* ДАТАТА НА ВРЪЩАНЕТО Е ДЕНЯТ, В КОЙТО ДОКУМЕНТЪТ СЕ НАМЕРИ (v2.4.69, Г11).
+           (а) Дотук date_in оставаше датата на „изгубен“, а белегът lost се
+               сваляше — годишният отчет (handlers/stats.js, по loans.date_in)
+               броеше заемането за „върнато със забава“ в годината на
+               ИЗГУБВАНЕТО, при това без нито едно събитие „връщане“ в регистъра
+               (тестер № 2, сценарий 7: отчет 1, събития 0).
+           (б) На датата на изгубването документът НЕ се е върнал — точно
+               обратното. Върнал се е днес, когато е намерен: тогава излиза от
+               ръцете на читателя (или от незнайно къде) и отново е във фонда.
+           (в) Затова date_in = денят на намирането и се вписва събитие
+               „връщане“ със същата дата: отчетът и регистърът на събитията
+               казват едно и също — едно връщане, в деня и годината, в които е
+               станало. Забавата не се преизчислява: тя е начислена до деня на
+               „изгубен“ и остава, както казва прозорецът. */
+        db.prepare(`UPDATE loans SET date_in = ?, lost = NULL, lost_date = NULL, lost_resolution = NULL,
             lost_amount = NULL,
             lost_account_line_id = CASE WHEN ? THEN lost_account_line_id ELSE NULL END,
             lost_replacement_book_id = NULL, lost_replacement_note = NULL,
             lost_note = ? WHERE id = ?`)
-          .run(keepChargeLink ? 1 : 0, String(note || '').trim() || l.lost_note || null, l.id);
+          .run(when, keepChargeLink ? 1 : 0, String(note || '').trim() || l.lost_note || null, l.id);
         /* Състоянието на документа. Ако библиотекарката вече го е върнала на
            „наличен“ по съвета на програмата, не се пипа; ако стои „изгубен“ —
            връща се. Друго състояние („за реставрация“, „бракуван“) също не се
@@ -1318,6 +1513,15 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         // Виж дългата бележка по-горе: събитието „изгубен“ описва факт, който не се е случил.
         const droppedEvents = db.prepare('DELETE FROM events WHERE kind = ? AND book_id = ? AND reader_id = ? AND date = ?')
           .run(EVENT_KIND_LOST, l.book_id, l.reader_id, l.lost_date).changes;
+        /* Връщането — в деня на намирането (v2.4.69, виж бележката при UPDATE-а горе).
+           Бележката „намерен документ“ не е украса: по нея „⚡ Предложи“ в Дневника
+           (handlers/dnevnik.js) познава, че това връщане не е посещение — читателят
+           не е идвал на гишето, книгата е намерена на рафта или донесена от друг. */
+        logEvent('връщане', { bookId: l.book_id, readerId: l.reader_id, date: when, note: 'намерен документ' });
+        /* Документът е пак на рафта — чакащият в опашката се повиква, точно
+           както при всяко връщане. Дотук резервацията за намерения документ
+           оставаше „чака“, а книгата — на отворения рафт. */
+        const hold = statusBack || l.status === 'наличен' ? activateHoldOnReturn(l.book_id) : null;
         const fineLeft = toCents(Number(l.fine) || 0);
         logAudit('Документът се намери',
           'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
@@ -1327,6 +1531,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           + (fineLeft ? '; начислената забава ' + fineLeft.toFixed(2) + ' € ОСТАВА дължима' : '')
           + (statusBack ? '; състоянието на документа е върнато на „наличен“' : '')
           + (droppedEvents ? '; премахнато събитие „изгубен“' : '')
+          + '; вписано връщане на ' + bgDate(when)
+          + (hold && hold.status === 'заделена' ? '; заделена за ' + hold.reader_name : '')
           + (String(note || '').trim() ? '; бележка: ' + String(note).trim() : ''));
         return {
           inv_number: l.inv_number, title: l.title, reader_name: l.reader_name,
@@ -1334,7 +1540,8 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           reversed: charge && chargeAction.startsWith('сторнирано') ? charge.charged : 0,
           keptCharge: charge && chargeAction.startsWith('начислението ОСТАВА')
             ? { charged: charge.charged, covered: charge.covered, outstanding: charge.outstanding } : null,
-          fineLeft
+          fineLeft,
+          hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null
         };
       });
       const r = tx.immediate();
@@ -1347,7 +1554,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
      както при физическа клавиатура, затова тук се приема inv. номер или баркод. */
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
   // обяснението на кирилско/латинско разминаване при баркод четец.
-  ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out }) =>
+  ipcMain.handle('loans:checkoutByCode', (e, { reader_id, code, date_out, found }) =>
     run(() => {
       if (date_out != null && date_out !== '' && !isValidIsoDate(date_out)) {
         throw new Error('Датата на заемане (' + date_out + ') е невалидна.');
@@ -1408,15 +1615,21 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         const current = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(reader_id).n;
         if (s.max_books && current >= s.max_books) throw new Error('Достигнат е лимитът от ' + s.max_books + ' документа за читател.');
         checkSuspended(reader_id);
+        // „липсващ“ / „за реставрация“ — виж checkoutStatusGate (v2.4.69, Г4).
+        const gate = checkoutStatusGate(db, b, found);
         consumeHoldOnCheckout(b.id, reader_id);
         const out = date_out || today();
         const dueStr = nextWorkDay(addDays(out, s.loan_days || 30));
         const info = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?, ?, ?, ?)').run(reader_id, b.id, out, dueStr);
         // Следата назовава и ЧИТАТЕЛЯ (v2.4.61) — виж readerTrace по-горе.
         logAudit('Заемане', 'инв. № ' + b.inv_number + ' — ' + b.title
-          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr));
+          + '; ' + readerTrace(rdr) + '; срок ' + bgDate(dueStr)
+          + (gate.warning ? '; ВНИМАНИЕ: документът е „за реставрация“' : ''));
         logEvent('заемане', { bookId: b.id, readerId: reader_id, date: out });
-        return { id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr };
+        return {
+          id: info.lastInsertRowid, title: b.title, inv_number: b.inv_number, date_due: dueStr,
+          foundBack: gate.foundBack, warning: gate.warning
+        };
       });
       const result = tx.immediate();
       scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
@@ -1551,3 +1764,4 @@ module.exports.OVERDUE_CHARGE_TYPE = OVERDUE_CHARGE_TYPE;
 module.exports.unpaidOverdueFines = unpaidOverdueFines;
 module.exports.spreadUnpaidFine = spreadUnpaidFine;
 module.exports.unpaidForRows = unpaidForRows;
+module.exports.overdueForRows = overdueForRows;

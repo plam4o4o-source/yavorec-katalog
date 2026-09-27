@@ -368,6 +368,20 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
           + 'заличени, докато задължението стои. Отчетете плащането или отпишете задължението от „Сметка“ в '
           + 'картона на читателя и повторете заличаването.');
       }
+      /* ТРЕТАТА СПИРАЧКА — ЧУЖДА КНИГА ПО МЗС (v2.4.69, кръг 44, К8).
+         От v2.4.69 получена по изходяща МЗС заявка книга се дава на читателя по
+         самата заявка (reader_id), без да минава през „Заемания“. Тя е
+         задължение на читалището към ДРУГА библиотека — заличен читател значи
+         библиотека, която не знае на кого да се обади за нея. Същото правило
+         като при незавърнатите документи, със същия вид изход. */
+      const mzsHeld = db.prepare(`SELECT no, year, title, partner FROM mzs_requests
+           WHERE reader_id = ? AND direction = 'изходящо' AND status = 'получено'`).all(id);
+      if (mzsHeld.length) {
+        throw new Error('Читателят държи ' + (mzsHeld.length === 1 ? 'чужда книга, получена' : mzsHeld.length + ' чужди книги, получени')
+          + ' по междубиблиотечно заемане (' + mzsHeld.map(x => '„' + x.title + '“ от ' + x.partner + ', МЗС № '
+            + x.no + '/' + x.year).join('; ') + '), и данните му не могат да бъдат заличени, докато книгата не '
+          + 'се върне. Приемете я от читателя, отбележете заявката „върнато“ в „МЗС“ и повторете заличаването.');
+      }
       const name = r.name || '';
       const anonId = anonReaderId();
       /* Съименници: следата пази СВОБОДЕН ТЕКСТ с име, не номер на читател —
@@ -424,11 +438,24 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            Точно така прави и обикновеният отказ (holds:cancel) и изтичането на
            заделена резервация. Незадължителна зависимост: main.js я подава;
            отделните тестове на този модул могат да я пропуснат. */
+        /* КОЙ Е ПОВИКАН — ПО ИМЕ И ТЕЛЕФОН (v2.4.69, кръг 44, Г7 — обработчикът).
+           (а) Дотук тук се събираха само имената, а към екрана отиваше единствено
+               броят (`promoted`) — известието казваше „Личните данни са
+               заличени“, без да спомене, че за заделената книга е повикан друг.
+           (б) Повиканият не знае, че книгата го чака; тридневният срок тече и
+               книгата отива на следващия, без той да е разбрал.
+           (в) Връща се `holdsActivated: [{ name, phone, title, inv_number }]` —
+               точно формата, която „Читатели“ (toastHoldsActivated) вече чака и
+               която readers:delete връща при изтриване. Повикан е ДРУГ читател,
+               тоест името му не е лична информация на заличавания. */
         const promoted = [];
         if (typeof deps.activateHoldOnReturn === 'function') {
           for (const bookId of setAsideBooks) {
             const next = deps.activateHoldOnReturn(bookId);
-            if (next && next.status === 'заделена') promoted.push(next.reader_name);
+            if (next && next.justActivated && next.reader_id !== id) {
+              promoted.push({ name: next.reader_name, phone: next.phone || null, title: next.title || '',
+                inv_number: next.inv_number ?? null });
+            }
           }
         }
         const visitsMoved = db.prepare('UPDATE housebound_visits SET reader_id = ? WHERE reader_id = ?')
@@ -440,8 +467,39 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
            WHERE reader_id = ?`).run(id).changes;
         const suggByName = name ? db.prepare(`UPDATE suggestions SET reader_name = '${ANON_MARK}'
            WHERE reader_id IS NULL AND reader_name = ?`).run(name).changes : 0;
-        const mzsCleared = name ? db.prepare(`UPDATE mzs_requests SET requester = '${ANON_MARK}'
-           WHERE requester = ?`).run(name).changes : 0;
+        /* ЗАЯВИТЕЛЯТ В МЗС — ПО КАРТАТА, А НЕ ПО ДОСЛОВНО ИМЕ (v2.4.69, кръг 44, К7).
+           (а) Дотук се обезличаваше само `requester = име` — дословно. Тестер № 5:
+               „Здравка Междубиблиотечна (карта 8001)“ остана непокътната, защото
+               библиотекарката е дописала картата, а отговорът не каза, че нещо
+               е останало.
+           (б) Чл. 17 ОРЗД иска заличаване на данните на човека, не на един
+               правопис на името му. Останал заявител в регистъра е точно
+               личните данни, които библиотеката е обещала да заличи.
+           (в) Три стъпки:
+               1) заявките, свързани с читателя (reader_id — от v2.4.69), се
+                  обезличават и връзката се маха — сигурно, без гадаене;
+               2) старите записи без reader_id — по същото правило като
+                  одитната следа (mentionsReader): цялото име като цяло, а ако
+                  след него стои „(карта N)“, N трябва да е неговата карта;
+               3) каквото все пак прилича (фамилията или името, но не цялото
+                  име; или същото име с ДРУГА карта) НЕ се пипа — може да е
+                  друг човек, — но се връща на екрана (`mzsSimilar`) и се
+                  казва с изречение (`mzsNote`), за да реши библиотекарката. */
+        const mzsById = db.prepare(`UPDATE mzs_requests SET requester = CASE WHEN requester IS NULL THEN NULL
+             ELSE '${ANON_MARK}' END, reader_id = NULL WHERE reader_id = ?`).run(id).changes;
+        let mzsByName = 0;
+        const mzsSimilar = [];
+        if (name) {
+          const setReq = db.prepare(`UPDATE mzs_requests SET requester = '${ANON_MARK}' WHERE id = ?`);
+          const parts = name.split(/[\s,]+/).filter(w => w.length >= 3).map(w => w.toLocaleLowerCase('bg'));
+          for (const q of db.prepare(`SELECT id, no, year, requester FROM mzs_requests
+               WHERE reader_id IS NULL AND requester IS NOT NULL AND requester <> '${ANON_MARK}'`).all()) {
+            if (mentionsReader(q.requester, name, r.card_no)) { mzsByName += setReq.run(q.id).changes; continue; }
+            const low = String(q.requester).toLocaleLowerCase('bg');
+            if (parts.some(w => low.includes(w))) mzsSimilar.push({ id: q.id, no: q.no, year: q.year, requester: q.requester });
+          }
+        }
+        const mzsCleared = mzsById + mzsByName;
         /* 3) САМИЯТ КАРТОН. Изтрива се, а не се обезличава: профилът за надомно
               обслужване виси на него с ON DELETE CASCADE и неговата „Забележка“
               е свободно поле, в което реално пише адрес („живее при дъщеря си
@@ -491,7 +549,8 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
 
         const readerCleared = readerGone + loansMoved + accountMoved + eventsCleared + holdsMoved
           + visitsMoved + noticesGone + suggCleared + suggByName + mzsCleared;
-        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled, promoted: promoted.length };
+        return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled,
+          promoted: promoted.length, holdsActivated: promoted, mzsCleared, mzsSimilar };
       });
       const res = tx.immediate();
 
@@ -512,6 +571,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
             + (res.promoted ? '; повикан е следващият в опашката за ' + res.promoted
               + (res.promoted === 1 ? ' документ' : ' документа') : '') + '. '
           : '')
+        + (res.mzsSimilar.length
+          ? 'В регистъра на МЗС остават ' + res.mzsSimilar.length + (res.mzsSimilar.length === 1 ? ' заявка' : ' заявки')
+            + ' с подобно име на заявителя, които НЕ са пипани (може да е друг човек) — прегледайте ги ръчно. '
+          : '')
         + 'Самоличността на читателя нарочно НЕ се вписва тук. '
         + 'ВНИМАНИЕ: резервните копия НЕ са пипани — данните на този читател остават в тях, '
         + 'докато копията не изтекат по правилото за пазене или не бъдат изтрити ръчно.');
@@ -522,6 +585,17 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         name,
         searchCleared: res.searchCleared,
         holdsCancelled: res.holdsCancelled,
+        /* Г7: кой е повикан за заделената книга — вж. коментара при `promoted`. */
+        holdsActivated: res.holdsActivated,
+        /* К7: колко заявки в МЗС са обезличени и кои подобни са оставени. */
+        mzsCleared: res.mzsCleared,
+        mzsSimilar: res.mzsSimilar,
+        mzsNote: res.mzsSimilar.length
+          ? 'В регистъра на МЗС ' + (res.mzsSimilar.length === 1 ? 'остава 1 заявка' : 'остават ' + res.mzsSimilar.length + ' заявки')
+            + ' с подобно име на заявителя — ' + res.mzsSimilar.map(q => '№ ' + q.no + '/' + q.year + ' („' + q.requester + '“)').join(', ')
+            + '. Не са пипани, защото може да е друг човек. Ако са на същия читател, отворете ги в „МЗС“ и изтрийте '
+            + 'името от „Заявител“.'
+          : null,
         namesakes,
         /* Изречението пътува до екрана готово: това, което библиотекарката ще
            препише в отговора си до читателя, не бива да се съчинява на две

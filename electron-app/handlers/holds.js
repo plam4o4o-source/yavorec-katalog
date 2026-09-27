@@ -7,6 +7,17 @@ const { resolveScannedBook } = require('../security-utils');
 
 module.exports = function registerHoldsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, normalizeScanCode } = deps;
+  /* ОНЛАЙН КАТАЛОГЪТ СЛЕД ОТКАЗАНА ИЛИ ИЗТЕКЛА РЕЗЕРВАЦИЯ (v2.4.69, към находка К4).
+     От v2.4.69 заделената книга излиза „заета“ на сайта (main.js,
+     buildCatalogPayload). Отказът и изтичането я освобождават — ако никой не
+     чака, тя пак е на рафта, — а дотук нищо не насрочваше запис, тоест сайтът
+     показваше „заета“ до следващото случайно заемане. Насрочва се като
+     циркулация (дългото изчакване от v2.4.64), защото е промяна на гишето, не
+     на фонда. Зависимостта е незадължителна: по-стар main.js просто не я подава. */
+  const CIRCULATION = 'circulation';   // същото като CATALOG_WRITE_CIRCULATION в main.js
+  const catalogChanged = () => {
+    if (typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite(CIRCULATION);
+  };
 
   const HOLD_ACTIVE = "('чака','заделена')";
   const HOLD_SELECT = `
@@ -34,7 +45,9 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
     const db = getDb();
     const inv = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(bookId);
     const out = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(bookId).n;
-    return (inv ? inv.quantity : 0) - out;
+    /* Бройката при партньора по МЗС не е на рафта (v2.4.69, преглед на кръга) —
+       същото броене като при заемането, виж mzsAwayCount в handlers/mzs.js. */
+    return (inv ? inv.quantity : 0) - out - require('./mzs').mzsAwayCount(db, bookId);
   }
   /* При заемане резервацията важи срещу СВОБОДНИТЕ бройки, а не срещу цялото
      заглавие. Отказва се само когато свободните бройки не стигат за резервациите
@@ -93,6 +106,10 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
     }
     db.prepare("UPDATE holds SET status = 'заделена', ready_at = datetime('now') WHERE id = ?").run(next.id);
     next.status = 'заделена';
+    /* Отличава НОВО повикания от вече заделената резервация, която горният клон
+       връща (v2.4.69, преглед на кръга): изтриването и заличаването съобщават
+       „съобщете му“ само за току-що повиканите. */
+    next.justActivated = true;
     logAudit('Заделена книга', 'инв. № ' + next.inv_number + ' — ' + next.title + ' за ' + next.reader_name);
     return next;
   }
@@ -148,7 +165,10 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
            опашката, за да е книгата наистина за директно заемане. */
         const queued = db.prepare(`SELECT COUNT(*) AS n FROM holds WHERE book_id = ? AND status IN ${HOLD_ACTIVE}`).get(b.id).n;
         const free = freeCopies(b.id) - queued;
-        if (free > 0 || (!out && !queued)) {
+        /* Бройка при партньора по МЗС (v2.4.69, преглед на кръга) не е „свободна“:
+           гишето я отказва като изпратена, значи резервацията е единственият път. */
+        const away = require('./mzs').mzsAwayCount(db, b.id);
+        if (free > 0 || (!out && !queued && !away)) {
           throw new Error('Инв. № ' + b.inv_number + ' е свободен' + (free > 1 ? ' (' + free + ' свободни бройки)' : '') +
             ' — заемете го направо, без резервация.');
         }
@@ -190,6 +210,7 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
         return h.status === 'заделена' ? activateHoldOnReturn(h.book_id) : null;
       });
       const next = tx.immediate();
+      catalogChanged();
       return next ? { next: { reader_name: next.reader_name, card_no: next.card_no, phone: next.phone,
         title: next.title, inv_number: next.inv_number } } : null;
     })
@@ -262,7 +283,9 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
       }
       return n;
     });
-    return tx.immediate();
+    const expired = tx.immediate();
+    if (expired) catalogChanged();
+    return expired;
   }
   /* НЯМА ipcMain.handle('holds:expireStale', ...) тук — нарочно. Нов канал би
      означавал и нов мост в preload.js (test/preload-ipc-channels.test.js

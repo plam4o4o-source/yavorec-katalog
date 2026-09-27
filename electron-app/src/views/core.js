@@ -82,6 +82,30 @@ const moneyNum = (v) => {
   const n = Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
+/* ЧИСЛО, НАПИСАНО ОТ ЧОВЕК — ИЛИ NaN, НИКОГА ТИХА НУЛА (v2.4.69, кръг 44, П1 и П3).
+   (а) КАКВО СТАВАШЕ ДОТУК. moneyNum() връща 0 за всичко, което не разпознава —
+       удобно за ПОКАЗВАНЕ на вече записано число, гибелно за ВЪВЕЖДАНЕ: „2,40 лв.“
+       в полето „лв.“ ставаше 0.00 € в полето „€“ и цена 0 влизаше в инвентарната
+       книга и в КДБФ без дума (тестер № 1, сценарий 3).
+   (б) ЗАЩО Е ГРЕШНО. Цената е реквизит по чл. 16, ал. 1; нулата изглежда като
+       истинска оценка („безплатно“), а не като неразчетен текст — никой не я търси.
+   (в) ЗАТОВА входът има свое четене: едно и също правило за парите (MONEY_RE —
+       същото, по което fieldValue решава какво да прати на обработчика) и за
+       десетичните числа, които НЕ са пари (кратност, дни наказание — decField).
+       Неразпознатото връща NaN, а извикващият решава какво да каже. */
+const MONEY_RE = /^[+-]?\d+(?:[.,]\d+)?$/;
+const decimalParse = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  const c = String(v == null ? '' : v).replace(/\s/g, '');
+  return MONEY_RE.test(c) ? Number(c.replace(',', '.')) : NaN;
+};
+/* Полето „лв.“ е ЛЕВОВО по самия си надпис, затова означението на валутата в него
+   („2,40 лв.“, „лв 2,40“, „2,40 лева“, „BGN 2,40“ — точно както е на старата
+   фактура) е излишно, но не е грешка и не бива да обезценява документа. Същото
+   разпознаване като при вноса (importers.js, splitCurrency); всичко друго е NaN. */
+const bgnInputParse = (v) => decimalParse(String(v == null ? '' : v).trim()
+  .replace(/^(?:лв\.?|лева|bgn)\s*|\s*(?:лв\.?|лева|bgn)$/iu, ''));
+window.decimalParse = decimalParse;
 const bgn = (n) => (moneyNum(n) * EUR_RATE).toFixed(2);
 /* Съгласуване по число (одит v2.4.25): „1 документ“, „2 документа“. Връща числото
    и формата; за наречията/глаголите (остана/останаха) се подава цял израз. */
@@ -189,12 +213,21 @@ function toast(msg, type) {
   el.querySelector('.tmsg').textContent = msg;
   const rec = { el, total, remaining: total, started: 0, timer: null, count: 1 };
   el.querySelector('.tx').addEventListener('click', () => toastClose(key, rec));
-  el.addEventListener('mouseenter', () => {
+  /* ТАЙМЕРЪТ СПИРА САМО ВЪРХУ ×, НЕ ВЪРХУ ЦЯЛОТО ИЗВЕСТИЕ (v2.4.69, кръг 44, Х1).
+     Дотук посочването на известието го задържаше на екрана — а известието долу
+     вдясно стоеше точно върху „Запази PDF…“/„Печат…“ на прегледа и върху
+     „Отказ“/„Запиши“ на прозорците. Библиотекарката, която се цели в бутона,
+     неволно държеше известието вечно отгоре (raznoe.js: след 7 s с мишката над
+     „Запази PDF…“ известието още стои). Сега тялото на известието не хваща мишката
+     (style.css, .toast{pointer-events:none}) — щракването стига до бутона отдолу, а
+     задържането за четене остава за онзи, който нарочно посочи ×. */
+  const tx = el.querySelector('.tx');
+  tx.addEventListener('mouseenter', () => {
     if (!rec.timer) return;
     clearTimeout(rec.timer); rec.timer = null;
     rec.remaining -= Date.now() - rec.started;
   });
-  el.addEventListener('mouseleave', () => { if (!rec.timer && el.isConnected) toastStartTimer(key, rec); });
+  tx.addEventListener('mouseleave', () => { if (!rec.timer && el.isConnected) toastStartTimer(key, rec); });
   // Най-старото се маха без анимация, ако се натрупат повече от 4 в един контейнер.
   while (box.children.length >= 4) { box.firstChild.remove(); }
   box.appendChild(el);
@@ -742,9 +775,111 @@ function mnyField(label, name, opts) {
   </div>`;
 }
 window.mnyField = mnyField;
+/* ПОЛЕ ЗА ДЕСЕТИЧНО ЧИСЛО, КОЕТО НЕ Е ПАРИ (v2.4.69, кръг 44, находка П1).
+   (а) КАКВО СТАВАШЕ ДОТУК. Поправката на запетаята от v2.4.67 обхвана само
+       полетата за пари. „Кратност на обезщетението“ и „Наказание (дни без
+       заемане за всеки ден забава)“ останаха <input type="number"> — а Chromium с
+       език bg-BG просто изпуска запетаята: написано „2,5“ → записано 25, „1,5“ →
+       15, „0,5“ → 5. Измерено (тестер № 1, сценарий 3): предложението за изгубена
+       книга с цена 5,00 € ставаше 125,00 € вместо 12,50 €, а половин ден
+       наказание на ден забава — пет дни.
+   (б) ЗАЩО Е ГРЕШНО. Двете числа са решение на настоятелството (чл. 43, ал. 2 —
+       обезщетението; вътрешните правила — наказанието). Десеткратно по-голямо
+       обезщетение, предложено на читател, е точно „изискване на програмата“,
+       каквото тя няма право да поставя, а читателят с половин ден наказание на
+       ден получава десетократно по-дълго спиране.
+   (в) ЗАЩО ПОПРАВКАТА Е ТОЧНО ТАЗИ. Същото лечение като при парите, но без
+       второто поле в лева: текстово поле с inputmode="decimal" (цифровата
+       клавиатура остава) и маркер data-decimal, по който fieldValue() превръща
+       „2,5“ в „2.5“ — обработчиците получават точно видът, който им даваше
+       числовото поле при вярно въвеждане. Невалиден текст НЕ се подменя: екранът
+       го хваща с badDecimalField() преди записа и казва кое поле, а ако все пак
+       стигне до обработчика, той го вижда както е написан.
+   КАК СЕ ПОЛЗВА: decField(етикет, име, { val, req, min, hint }) на мястото на
+   fld(…, { type: 'number', step: '0.1' }) — само за числата с дробна част.
+   Цели числа (дни, брой) си остават type="number": там запетая няма какво да
+   изгуби. */
+function decField(label, name, opts) {
+  opts = opts || {};
+  const val = opts.val === '' || opts.val == null ? '' : String(opts.val);
+  return `<div class="field"><label for="df_${name}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
+    <input id="df_${name}" name="${name}" type="text" inputmode="decimal" data-decimal ${opts.req ? 'required' : ''}
+      ${opts.min != null ? 'data-min="' + esc(String(opts.min)) + '"' : ''} value="${esc(val)}"></div>`;
+}
+window.decField = decField;
+/* Етикетът на първото десетично поле в `root` с текст, който не е число (или е
+   под data-min) — за отказ ПРЕДИ записа, с името на полето. null = всичко е наред.
+   Празното поле е позволено: при тези настройки то значи „по подразбиране“. */
+function badDecimalField(root) {
+  const scope = typeof root === 'string' ? $(root) : root;
+  if (!scope) return null;
+  for (const el of scope.querySelectorAll('input[data-decimal]')) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    if (!raw) continue;
+    const n = decimalParse(raw);
+    const min = el.getAttribute('data-min');
+    if (!Number.isFinite(n) || (min != null && n < Number(min))) {
+      const lbl = el.closest('.field') && el.closest('.field').querySelector('label');
+      const name = lbl ? (lbl.firstChild ? lbl.firstChild.textContent : lbl.textContent) : el.name;
+      return { label: name.replace(/\*/g, '').trim(), value: raw };
+    }
+  }
+  return null;
+}
+window.badDecimalField = badDecimalField;
+/* Отбелязва (или разчиства) поле за пари, чийто текст не е сума — рамка и
+   изречение на мястото на бележката под двойката полета. Текстът казва какво
+   НЕ е станало (полето в другата валута не е попълнено) и какво да се направи. */
+function mnyMark(input, msg) {
+  if (!input) return;
+  const box = input.closest('.field');
+  const note = box && box.querySelector('.mnyNote');
+  if (msg) {
+    input.setAttribute('aria-invalid', 'true');
+    input.style.borderColor = 'var(--red)';
+    if (note) {
+      if (!note.dataset.orig) note.dataset.orig = note.textContent;
+      note.textContent = msg;
+      note.style.color = 'var(--red)';
+    }
+  } else {
+    input.removeAttribute('aria-invalid');
+    input.style.borderColor = '';
+    if (note && note.dataset.orig) { note.textContent = note.dataset.orig; note.style.color = ''; }
+  }
+}
+/* Първото поле за пари в `root`, отбелязано като неразчетено (П3, v2.4.69) —
+   { label, value } или null. Викат го saveBook/saveAcq ПРЕДИ проверката за
+   задължителни полета: иначе празното поле „€“ би дало „Цена е задължително
+   поле.“ — вярно, но подвеждащо, защото човекът е написал сума, само в лева. */
+function badMoneyField(root) {
+  const scope = typeof root === 'string' ? $(root) : root;
+  if (!scope) return null;
+  const el = scope.querySelector('input[data-bgn-for][data-bad], input[data-money][aria-invalid="true"]');
+  if (!el) return null;
+  const lbl = el.closest('.field') && el.closest('.field').querySelector('label');
+  // Първият текстов възел на етикета — без звездичката и без подсказката до него.
+  const name = lbl ? (lbl.firstChild ? lbl.firstChild.textContent : lbl.textContent) : '';
+  return { label: name.replace(/\*/g, '').trim(), value: String(el.value || '').trim(),
+    leva: el.hasAttribute('data-bgn-for') };
+}
+window.badMoneyField = badMoneyField;
 /* Един делегиран слушател за цялата програма, вместо закачане във всяка форма:
    прозорците се пресъздават при всяко отваряне и ръчното закачане се пропуска
-   лесно (точно това се беше случило с двойното поле за цена в „Книги“). */
+   лесно (точно това се беше случило с двойното поле за цена в „Книги“).
+
+   НЕРАЗЧЕТЕН ТЕКСТ ВЕЧЕ НЕ СТАВА 0,00 (v2.4.69, кръг 44, находка П3).
+   (а) Дотук и двете посоки минаваха през moneyNum(), която връща 0 за всичко
+       непознато: „2,40 лв.“ в полето „лв.“ → „0.00“ в полето „€“, записът минаваше
+       и цена 0 влизаше в инвентарната книга и в КДБФ (тестер № 1, сценарий 3);
+       „1.234,50“ в полето „€“ → „0.00“ в полето „лв.“.
+   (б) Нулата е правдоподобна оценка („безплатно“) и по нищо не личи, че е грешка.
+   (в) Сега: означението „лв.“ в левовото поле се приема (виж bgnInputParse);
+       всичко друго, което не е сума, НЕ попълва другото поле — то се изпразва,
+       полето се отбелязва с червено и бележката под него казва защо. При запис
+       fieldValue() праща към обработчика САМИЯ написан текст, а не празното поле,
+       тоест обработчикът го отказва поименно („Цената „2,4х лв.“ не е число…“),
+       вместо празното поле да мине за „0“ или за „няма обявена стойност“. */
 document.addEventListener('input', (e) => {
   const el = /** @type {HTMLInputElement} */ (e.target);
   if (!el || el.tagName !== 'INPUT') return;
@@ -752,12 +887,36 @@ document.addEventListener('input', (e) => {
   if (заЛева) {
     const цел = el.form ? el.form.querySelector(`[name="${заЛева}"]`)
       : document.querySelector(`[name="${заЛева}"]`);
-    if (цел) /** @type {HTMLInputElement} */ (цел).value = el.value === '' ? '' : bgnToEur(el.value);
+    if (!цел) return;
+    const raw = String(el.value == null ? '' : el.value).trim();
+    const n = raw === '' ? NaN : bgnInputParse(raw);
+    if (raw === '' || Number.isFinite(n)) {
+      /** @type {HTMLInputElement} */ (цел).value = raw === '' ? '' : (n / EUR_RATE).toFixed(2);
+      el.removeAttribute('data-bad');
+      mnyMark(el, null); mnyMark(цел, null);
+    } else {
+      /** @type {HTMLInputElement} */ (цел).value = '';
+      el.setAttribute('data-bad', '1');
+      mnyMark(el, '„' + raw + '“ не е сума в лева — полето „€“ НЕ е попълнено и записът ще бъде '
+        + 'отказан. Напишете сумата с цифри, напр. 2,40.');
+    }
     return;
   }
   if (!el.name) return;
   const огледало = /** @type {HTMLInputElement} */ (document.querySelector(`[data-bgn-for="${el.name}"]`));
-  if (огледало) огледало.value = el.value === '' ? '' : bgn(el.value);
+  if (!огледало) return;
+  const raw = String(el.value == null ? '' : el.value).trim();
+  const n = raw === '' ? NaN : decimalParse(raw);
+  огледало.removeAttribute('data-bad');
+  mnyMark(огледало, null);
+  if (raw === '' || Number.isFinite(n)) {
+    огледало.value = raw === '' ? '' : bgn(n);
+    mnyMark(el, null);
+  } else {
+    огледало.value = '';
+    mnyMark(el, '„' + raw + '“ не е сума — полето „лв.“ НЕ е попълнено и записът ще бъде отказан. '
+      + 'Напишете сумата с цифри, десетичната част със запетая: 1234,50 (без точка за хилядите).');
+  }
 });
 
 /* СТОЙНОСТТА НА ЕДНО ПОЛЕ ЗА ОБРАБОТЧИКА — на едно място (v2.4.67).
@@ -770,9 +929,25 @@ document.addEventListener('input', (e) => {
 function fieldValue(el) {
   if (el.type === 'checkbox') return el.checked;
   if (el.hasAttribute && el.hasAttribute('data-money')) {
+    /* П3 (v2.4.69): ако сумата е написана в полето „лв.“ и не се разчита, полето
+       „€“ е празно — но празно тук значи „0“ или „няма обявена стойност“. Затова
+       към обработчика отива написаното в „лв.“, с думата за валутата, и той го
+       отказва поименно. Виж слушателя за 'input' по-горе. */
+    const лв = el.name && (el.form ? el.form.querySelector(`[data-bgn-for="${el.name}"]`)
+      : document.querySelector(`[data-bgn-for="${el.name}"]`));
+    if (лв && лв.hasAttribute('data-bad')) {
+      const t = String(лв.value == null ? '' : лв.value).trim();
+      return /лв|лева|bgn/i.test(t) ? t : t + ' лв.';
+    }
     const raw = String(el.value == null ? '' : el.value).trim();
     const compact = raw.replace(/\s/g, '');
-    return /^[+-]?\d+(?:[.,]\d+)?$/.test(compact) ? compact.replace(',', '.') : raw;
+    return MONEY_RE.test(compact) ? compact.replace(',', '.') : raw;
+  }
+  /* Десетично число, което не е пари (decField, П1 — v2.4.69): същото правило. */
+  if (el.hasAttribute && el.hasAttribute('data-decimal')) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    const compact = raw.replace(/\s/g, '');
+    return MONEY_RE.test(compact) ? compact.replace(',', '.') : raw;
   }
   return el.value;
 }
@@ -1175,6 +1350,23 @@ function shead() {
   return s.logo ? `<div class="pheadRow"><img class="plogo" src="${esc(s.logo)}" alt="">${text}</div>` : text;
 }
 function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
+/* ПОДПИСИТЕ НА КОМИСИЯТА — ВСЕКИ НА СВОЯ ЛИНИЯ (v2.4.69, находка Е5 от пълния тест).
+   Дотук тримата членове подписваха на ЕДНА линия: „Комисия: 1. Мария Иванова
+   2. Петър … 3. …“ стоеше в една клетка на .psig, тоест над един ред за подпис —
+   в акта за отчисляване, в протокола от инвентаризация, в акта за дарение и в
+   протокола по чл. 3, ал. 2. Три подписа не се побират на една линия, а подписан
+   документ, на който не личи кой къде се е подписал, е слаб документ пред
+   проверката. Сега комисията е собствен ред от три линии, всяка с името отдолу,
+   а ръководителят (и дарителят) — следващ ред. Два последователни .psig остават
+   заедно на листа по правилата в style.css (break-before:avoid). Имената идват
+   от СНИМКАТА в партидата/акта/проверката, не от живите Настройки. */
+function commissionSig(names) {
+  const list = (names || []).slice(0, 3);
+  while (list.length < 3) list.push('');
+  /* Празно име (стара партида без снимка на комисията) остава „…………“ за ръчно
+     попълване — по-добре празно, отколкото чуждо име под чужд документ. */
+  return ssig(list.map((n, i) => (i === 0 ? 'Комисия: ' : '') + (i + 1) + '. ' + (n ? esc(n) : '…………')));
+}
 // Името на документа се задава тук, защото всяка разпечатка минава през
 // setPrintPage непосредствено преди doPrint. Така не се променят дванайсетте
 // извиквания на doPrint, всяко от които е дълъг вложен шаблон.
@@ -1187,8 +1379,40 @@ function setPrintPage(opts) {
   let st = document.getElementById('dynPrintStyle');
   if (!st) { st = document.createElement('style'); st.id = 'dynPrintStyle'; document.head.appendChild(st); }
   const size = opts.widthMm ? opts.widthMm + 'mm ' + opts.heightMm + 'mm' : 'A4' + (opts.landscape ? ' landscape' : '');
-  st.textContent = `@media print{ @page{size:${size};margin:${opts.margin || '14mm 12mm'}} ${opts.extraCss || ''} }`;
+  st.textContent = `@media print{ @page{size:${size};margin:${opts.margin || '14mm 12mm'}${printPageBoxes(opts)}} `
+    + `${opts.labels ? '' : printFirstPageCss(opts)}${opts.extraCss || ''} }`;
 }
+/* НОМЕРАЦИЯ НА СТРАНИЦИТЕ И № НА ДОКУМЕНТА НА ВСЕКИ СЛЕДВАЩ ЛИСТ (v2.4.69, кръг 44, Е9).
+   (а) Нито един многостраничен документ нямаше номер на страницата: акт и протокол
+       на по няколко листа, КДБФ, инвентарната книга (50 листа), летописът (60),
+       указателят (130). Лист 2 и нататък не казваше и на кой документ принадлежи.
+   (б) Актът, протоколът и инвентарната книга се прошнуроват, подписват и заверяват
+       (чл. 26, ал. 2 и чл. 30 от Наредба № 3): без „стр. N от M“ не личи липсващ или
+       подменен лист, а разпилян лист без № на документа не може да бъде върнат на
+       мястото си.
+   (в) Chromium (от версия 131; Electron 43 е на 146) рисува полетата на @page —
+       @bottom-right с counter(page)/counter(pages) и @top-right с името — в
+       САМИЯ печатен рендер, тоест и window.print(), и printToPDF ги дават еднакво,
+       без да се пипа нито един от двайсетте шаблона на документи и без
+       displayHeaderFooter (което би добавило датата и адреса на страницата).
+       Проверено в PDF: „стр. 1 от 2“, „стр. 2 от 2“, а името стои от лист 2 нататък
+       (@page:first го маха — на лист 1 заглавието вече е в самия документ).
+       Етикетите и картите (opts.labels / размер на ролка) нямат номерация: там
+       полето на листа е мястото на първия ред етикети. */
+function cssStr(s) {
+  return '"' + String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ') + '"';
+}
+function printPageBoxes(opts) {
+  if (opts.labels || opts.widthMm || opts.pageNumbers === false) return '';
+  const name = String(opts.name || '').slice(0, 110);
+  return `; @bottom-right{content:"стр. " counter(page) " от " counter(pages); font:8pt serif; color:#333; vertical-align:middle}`
+    + (name ? ` @top-right{content:${cssStr(name)}; font:8pt serif; color:#333; vertical-align:bottom}` : '');
+}
+function printFirstPageCss(opts) {
+  if (opts.widthMm || opts.pageNumbers === false || !opts.name) return '';
+  return '@page:first{@top-right{content:none}} ';
+}
+window.setPrintPage = setPrintPage;
 /* Windows предлага заглавието на страницата като име на PDF файла в „Microsoft
    Print to PDF“. Затова преди печат заглавието се сменя с името на конкретния
    документ и се връща обратно веднага след това — иначе всяка разпечатка щеше да
@@ -1274,8 +1498,17 @@ function ppFreeDom() {
   const area = $('#printArea'); if (area) area.innerHTML = '';
   const sheet = $('#ppSheet'); if (sheet) sheet.innerHTML = '';
 }
+/* ПОРЦИИ ОТ ЕДИН ГОЛЯМ ПЕЧАТ (v2.4.69, кръг 44, Е4). printLabelSheet() разделя
+   хиляди етикети/карти на отделни последователни документи; PRINT_NEXT носи какво
+   става след ТОЗИ документ: onDone — след „Печат…“ (когато системният диалог се
+   затвори) или след записан PDF, тоест отваря следващата порция; onCancel — при
+   „Отказ“/Esc/×, тоест казва докъде е стигнал печатът. doPrint() го нулира, за да не
+   наследи обикновен документ продължението на предишния печат на етикети. */
+let PRINT_NEXT = null;
+function ppSetNext(next) { PRINT_NEXT = next || null; }
 function doPrint(html, docName, onConfirmed) {
   PRINT_DONE_CB = typeof onConfirmed === 'function' ? onConfirmed : null;
+  PRINT_NEXT = null;
   PRINT_HTML = html;
   PRINT_JOB_NAME = safeFileName(docName || PRINT_DOC_NAME);
   const o = PRINT_PAGE_OPTS || {};
@@ -1307,6 +1540,12 @@ function ppClose() {
   PRINT_HTML = '';
   $('#printPreview').classList.remove('on');
   ppFreeDom();
+  // ppPrint()/ppSavePdf() вземат PRINT_NEXT ПРЕДИ да извикат ppClose(); ако тук
+  // още има нещо, прегледът е затворен без печат — това е отказ от порцията.
+  const next = PRINT_NEXT; PRINT_NEXT = null;
+  if (next && typeof next.onCancel === 'function') {
+    try { next.onCancel(); } catch (e) { console.error(e); toast('Печатът на порциите е спрян, но съобщението докъде е стигнал не можа да се покаже: ' + (e && e.message || e), 'err'); }
+  }
 }
 window.ppClose = ppClose;
 /* Мащаб на прегледа (v1.72.0). Ползва се CSS свойството zoom (Chromium-only,
@@ -1340,6 +1579,7 @@ window.ppZoom = ppZoom;
 function ppPrint() {
   ppConfirmed(); // преди ppClose(), който изхвърля отложеното действие
   const html = PRINT_HTML; // ppClose() изчиства и низа, и двата DOM контейнера
+  const next = PRINT_NEXT; PRINT_NEXT = null; // печатът тръгва — не е отказ
   ppClose();
   // Едва тук документът влиза в DOM — и то само веднъж, вече без листа на
   // прегледа, който ppClose() изпразни. Пикът в паметта е ЕДНО копие вместо две.
@@ -1353,6 +1593,9 @@ function ppPrint() {
     // Отпечатаното вече не е нужно на никого — освобождава се веднага.
     PRINT_HTML = '';
     ppFreeDom();
+    // Следващата порция (Е4) — едва СЛЕД като диалогът за печат е затворен и
+    // паметта на тази порция е освободена.
+    if (next && typeof next.onDone === 'function') next.onDone();
   }, 150)));
 }
 window.ppPrint = ppPrint;
@@ -1368,6 +1611,7 @@ async function ppSavePdf() {
   const btn = $('#ppPdfBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Запазване…'; }
   ppFillPrintArea();
+  let next = null;
   try {
     const res = await window.api.print.savePdf({ fileName: PRINT_JOB_NAME || 'Документ' });
     if (!res.ok) {
@@ -1376,6 +1620,7 @@ async function ppSavePdf() {
     }
     toast('PDF файлът е записан и отворен: ' + (res.data && res.data.path || ''), 'ok');
     ppConfirmed(); // записаният PDF е равностоен на отпечатан документ
+    next = PRINT_NEXT; PRINT_NEXT = null; // записан е — не е отказ
     ppClose();
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Запази PDF…'; }
@@ -1383,6 +1628,8 @@ async function ppSavePdf() {
     // отворен, но скритото копие в #printArea няма за какво да стои.
     const area = $('#printArea'); if (area) area.innerHTML = '';
   }
+  // Следващата порция (Е4) — след като паметта на тази е освободена.
+  if (next && typeof next.onDone === 'function') next.onDone();
 }
 window.ppSavePdf = ppSavePdf;
 /* Размерите на трите вида етикети се задават в „Баркод етикети“ → „Формат на печат“.
@@ -1396,8 +1643,13 @@ function labelSize(kind) {
 }
 const LABEL_DOC_NAME = { fund: 'Баркод етикети за фонда', sig: 'Етикети за сигнатура',
   card: 'Читателски карти' };
+/* Как се казва ЕДИН и МНОГО от всеки вид (v2.4.69, Е10): въпросът преди 2 828
+   читателски карти казваше „Печат на 2828 етикета“. */
+const LABEL_NOUN = { fund: ['етикет', 'етикета'], sig: ['етикет за сигнатура', 'етикета за сигнатура'],
+  card: ['читателска карта', 'читателски карти'] };
+const labelNoun = (kind, n) => (LABEL_NOUN[kind] || LABEL_NOUN.fund)[Number(n) === 1 ? 0 : 1];
 /* ---------- Побиране на колоните в A4 листа (v2.3.0) ----------
-   „Колони на листа“ (lbl_cols) е ЕДНА обща настройка за трите вида етикети, а
+   „Колони на листа“ (lbl_cols) беше ЕДНА обща настройка за трите вида етикети, а
    те са с много различна ширина: етикет за фонда 40 мм, за сигнатура 25 мм,
    читателска карта 90 мм. С фабричните стойности (lbl_cols=3, lbl_gap=3,
    lbl_margin=8) три читателски карти искат 3×90 + 2×3 = 276 мм при налични
@@ -1405,136 +1657,317 @@ const LABEL_DOC_NAME = { fund: 'Баркод етикети за фонда', si
    вертикално и библиотекарят го открива чак върху отпечатания лист.
    Затова колоните се СМАЛЯВАТ до колкото наистина се събират. */
 const A4_W_MM = 210, A4_H_MM = 297;
+/* Допуск при сравняване на милиметри: 4 × 48,5 = 194 и 210 − 2 × 8 = 194 трябва да
+   се „събират“, а плаващата запетая дава 194.00000000000003. */
+const MM_EPS = 0.01;
 function fitLabelCols(want, w, gap, marg) {
   const avail = A4_W_MM - 2 * marg;
   // cols×w + (cols−1)×gap ≤ avail  ⇔  cols ≤ (avail + gap) / (w + gap)
-  const fit = Math.floor((avail + gap) / (w + gap));
+  const fit = Math.floor((avail + gap + MM_EPS) / (w + gap));
   return Math.max(1, Math.min(want, fit));
 }
 /* Броят етикети в подадения HTML. И трите генератора (lblCard, sigLblCard,
    readerCardHtml) започват всеки етикет с <div class="lbl…>, затова броенето не
    изисква callers-ите да подават число — така таванът важи за ВСИЧКИ печатни
-   пътища за етикети, включително „Печат на диапазон“ с огромен диапазон. */
+   пътища за етикети, включително „Печат на диапазон“ с огромен диапазон.
+   Празното място „започни от позиция N“ е <div class="lbl-skip"> и НЕ се брои. */
 function labelCount(html) {
   return (String(html || '').match(/<div class="lbl[ "]/g) || []).length;
 }
-/* Праг, над който се иска изрично потвърждение (v2.3.0).
-   Избран е 500, защото: (1) с фабричните настройки на A4 се събират 3×8 = 24
-   етикета за фонда на лист, т.е. 500 етикета са ~21 листа — толкова един
-   библиотекар реално обработва (реже и лепи) в една сесия; (2) измерено, един
-   етикет е ~4,3 КБ HTML, значи 500 етикета са ~2,2 МБ и се изчертават под
-   секунда, докато „Всички“ при 14 750 етикета са 63,81 МБ и 37 044 ms
-   замръзнал прозорец. Прагът не е забрана — цялата библиотека понякога
-   наистина трябва да се преетикетира — а информирано решение с точни числа. */
+/* Праг, над който се иска изрично потвърждение (v2.3.0). Остава за съвместимост на
+   обясненията по-долу; от v2.4.69 големият печат се дели на партиди по
+   LABEL_BATCH_MAX и въпросът се задава, щом партидите са повече от една. */
 const LABEL_CONFIRM_OVER = 500;
+/* ГОЛЕМИЯТ ПЕЧАТ — НА ПАРТИДИ, ВСЯКА ОТДЕЛЕН ДОКУМЕНТ (v2.4.69, кръг 44, Е4).
+   (а) Какво ставаше дотук. „Карти за всички“ (2 828 читатели) и „Всички“ за фонда
+       строяха ЕДИН документ. Измерено с истинския PDF (karti-mashtab.js,
+       etiketi-mashtab.js): 200 карти — 1,5 s и 564 МБ; 500 — 11 s и 1,7 ГБ;
+       1 000 — 67 s и 4,7 ГБ; 3 000 етикета — 56 s и 4 ГБ; 2 828 карти не
+       завършиха за 15 минути. А въпросът преди печат обещаваше „десетки секунди“.
+   (б) На обикновения компютър в читалището (4–8 ГБ) това значи замръзнала програма
+       и принтер, който не получава нищо — точно при годишното преиздаване на
+       картите или при преетикетиране на фонда.
+   (в) Защо точно така. Кръг 41 показа, че нарязването на ЕДИН документ на
+       части не помага (печатът пак е един и пак държи всичко). Тук партидите са
+       ОТДЕЛНИ документи: прегледът на следващата се отваря сам, след като
+       предишната е отпечатана или записана като PDF (PRINT_NEXT в doPrint/ppPrint/
+       ppSavePdf), и в паметта стои само една партида. Партидата е цял брой листове
+       (никога половин лист — иначе следващата би започнала от средата на нов
+       лист), до 300 етикета: 12 листа по 24, 7 по 40, 37 листа карти по 8. „Отказ“
+       спира и казва докъде е стигнал печатът. */
+const LABEL_BATCH_MAX = 300;
 /* Колко етикета се събират на един A4 лист при текущите настройки — за да е
-   съобщението с истински брой листове, а не с кръгло предположение. */
+   съобщението с истински брой листове, а не с кръгло предположение. Старият вид
+   (едно поле за четирите страни, едно разстояние) остава за извикващите отвън. */
 function labelsPerSheet(w, h, gap, marg, cols) {
-  const rows = Math.max(1, Math.floor((A4_H_MM - 2 * marg + gap) / (h + gap)));
+  const rows = Math.max(1, Math.floor((A4_H_MM - 2 * marg + gap + MM_EPS) / (h + gap)));
   return Math.max(1, cols * rows);
 }
-async function confirmManyLabels(n, kind, perSheet) {
-  const what = (LABEL_DOC_NAME[kind] || 'Етикети').toLowerCase();
+/* ФОРМАТЪТ НА ЛИСТА — ПОЛЕ ОТГОРЕ/ОТЛЯВО И РАЗСТОЯНИЕ ПО ДВЕТЕ ПОСОКИ ПООТДЕЛНО
+   (v2.4.69, кръг 44, Е2).
+   (а) Дотук формата имаше ЕДНО поле за четирите страни и ЕДНО разстояние за двете
+       посоки, а редовете на лист се смятаха неявно — Chromium просто пренасяше
+       мрежата. Готовите листове не са симетрични: Avery L7160 (3×7, 63,5×38,1) има
+       горе 15,1 мм, ляво 7,2, хоризонтално 2,5 и вертикално 0. Измерено в PDF
+       (mreja.py): първият ред излизаше 8 мм по-високо, последният 7 мм по-ниско;
+       4×10 48,5×25,4 (горе 21,5) — 0 от 37 етикета в клетката си и 11 реда вместо 10.
+   (б) Етикет извън клетката си на готов лист е разхабен лист: половината баркод
+       остава на съседния етикет и не се чете.
+   (в) Сега четирите числа са отделни (settings.lbl_mt/lbl_ml/lbl_gx/lbl_gy, от
+       миграция 18; когато ги няма — от старите lbl_margin/lbl_gap, за да не мръдне
+       нищо), а листовете се строят ИЗРИЧНО: всяка страница е своя мрежа с точно
+       cols × rows етикета и нов лист след нея. Долното и дясното поле се приемат
+       равни на горното и лявото (готовите листове са центрирани) — само за
+       сметката колко се събират; @page е с долно поле 0, за да не може закръгляне
+       на пиксел да избута последния ред на следващата страница. */
+function labelSheetLayout(kind) {
+  const s = SETTINGS_CACHE || {};
+  const { w, h } = labelSize(kind);
+  const num = (v, d) => (v === '' || v == null || !Number.isFinite(+v)) ? d : +v;
+  const margin = num(s.lbl_margin, 8), gap = num(s.lbl_gap, 3);
+  const mt = num(s.lbl_mt, margin), ml = num(s.lbl_ml, margin);
+  const gx = num(s.lbl_gx, gap), gy = num(s.lbl_gy, gap);
+  const roll = s.lbl_mode === 'roll';
+  const fitCols = Math.max(1, Math.floor((A4_W_MM - 2 * ml + gx + MM_EPS) / (w + gx)));
+  const rows = Math.max(1, Math.floor((A4_H_MM - 2 * mt + gy + MM_EPS) / (h + gy)));
+  /* СОБСТВЕН БРОЙ КОЛОНИ ЗА ВСЕКИ ВИД (v2.4.69, Е10 и Х1). „Колони на листа“ е
+     настройката на ГОТОВИЯ ЛИСТ за етикетите за фонда. Сигнатурните етикети и
+     картите се режат от обикновен лист — за тях колоните са толкова, колкото се
+     събират: 25×35 дава 7 × 7 = 49 на лист (дотук — общите 3, тоест 21), а картите
+     90×60 — 2 × 4, без съобщението за намалени колони („от 3 на 2…“), което
+     излизаше при ВСЯКА отпечатана карта с фабричните настройки. */
+  const want = kind === 'fund' ? Math.max(1, Math.min(8, +s.lbl_cols || 3)) : fitCols;
+  const cols = Math.max(1, Math.min(want, fitCols));
+  const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
+  return { w, h, mt, ml, gx, gy, roll, want, cols, rows, perSheet: roll ? 1 : cols * rows, border };
+}
+async function confirmManyLabels(n, kind, perSheet, nb, per) {
+  const what = labelNoun(kind, n);
   // При ролка perSheet е 1 — тогава „листа A4" е безсмислица и числото подвежда.
   const roll = perSheet <= 1;
   const sheets = Math.ceil(n / perSheet);
+  nb = nb || 1; per = per || n;
   return askConfirm(
-    'ПЕЧАТ НА ' + n + ' ЕТИКЕТА (' + what + ')\n\n'
-    + (roll ? 'Печатът е на ролка — това са ' + n + ' етикета един след друг.\n\n'
-            : 'Това са около ' + sheets + ' листа A4 при сегашния формат.\n\n')
-    + 'Подготовката на толкова етикети наведнъж запълва паметта и прозорецът остава '
-    + 'без отговор, докато свърши — при целия фонд това са десетки секунди.\n\n'
+    'ПЕЧАТ НА ' + n + ' ' + what.toUpperCase() + '\n\n'
+    + (roll ? 'Печатът е на ролка — това са ' + n + ' ' + what + ' един след друг.\n\n'
+            : 'Това са ' + sheets + ' листа A4 при сегашния формат (' + perSheet + ' на лист).\n\n')
+    + 'Един документ с толкова ' + (kind === 'card' ? 'карти' : 'етикети') + ' не може да се подготви на обикновен '
+    + 'компютър: измерено, 1 000 читателски карти искат над минута и 4,7 ГБ памет, 3 000 етикета — '
+    + 'почти минута и 4 ГБ, а през това време програмата не отговаря.\n\n'
+    + 'Затова печатът върви на партиди: ' + nb + ' отделни документа по до ' + per + ' '
+    + (roll ? '' : '(цели листове) ') + '— прегледът на всяка следваща партида се отваря сам, щом '
+    + 'предишната е отпечатана („Печат…“) или записана („Запази PDF…“). „Отказ“ спира печата и '
+    + 'програмата казва докъде е стигнал.\n\n'
     + (kind === 'card'
-      ? 'По-добре е картите да се печатат на партиди — напр. само новозаписаните читатели.\n\n'
-      : 'По-добре е етикетите да се печатат на партиди през полетата „От инвентарен №“ и '
-        + '„До инвентарен №“ — по няколкостотин наведнъж.\n\n')
-    + 'Да продължа ли въпреки това?', { kind: 'warn', title: 'Печат на ' + n + ' етикета', okLabel: 'Печатай въпреки това' });
+      ? 'Ако картите трябват само на новозаписаните читатели, по-бързо е да ги отпечатате от „Читатели“ поединично.\n\n'
+      : 'Ако трябват етикети само за част от фонда, ползвайте „От инвентарен №“ и „До инвентарен №“.\n\n')
+    + 'Да започна ли печата на партиди?',
+    { kind: 'warn', title: 'Печат на ' + n + ' ' + what, okLabel: 'Започни (партида 1 от ' + nb + ')' });
+}
+/* Елемент извън екрана, в който се мери дали текстът се побира в етикета (Е3, Е6).
+   Стои в <body>, затова при печат е скрит (style.css: body > :not(#printArea)).
+   Без истинско оформление (тестовете с jsdom) всичко „се побира“ — мащаб 1. */
+function lblProbe() {
+  let p = document.getElementById('lblProbe');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'lblProbe';
+    p.setAttribute('aria-hidden', 'true');
+    p.style.cssText = 'position:absolute;left:-10000px;top:0;visibility:hidden;pointer-events:none;contain:layout';
+    document.body.appendChild(p);
+  }
+  return p;
+}
+const LBL_SCALES = [1, 0.92, 0.85, 0.78, 0.72, 0.66, 0.6];
+/* Най-големият мащаб на шрифта (--lfs за етикета за фонда, --sfs за сигнатурния), при
+   който съдържанието влиза в етикета. fits:false — дори най-дребният не стига. */
+function lblFitScale(labelHtml, w, h, border, varName, overflows) {
+  const p = lblProbe();
+  p.innerHTML = labelHtml;
+  const el = /** @type {HTMLElement} */ (p.firstElementChild);
+  if (!el || !el.getBoundingClientRect().width) { p.innerHTML = ''; return { scale: 1, fits: true }; }
+  el.style.width = w + 'mm'; el.style.height = h + 'mm'; el.style.border = border;
+  let res = { scale: LBL_SCALES[LBL_SCALES.length - 1], fits: false };
+  for (const sc of LBL_SCALES) {
+    el.style.setProperty(varName, String(sc));
+    if (!overflows(el)) { res = { scale: sc, fits: true }; break; }
+  }
+  p.innerHTML = '';
+  return res;
+}
+const overBox = (el) => el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1;
+/* Височината на лентите на етикета за фонда: 11 мм, докато етикетът позволява, но
+   никога под 6,5 мм (Code 39 иска поне 6,35 мм). */
+function lblBarMm(h) {
+  return Math.round(Math.max(6.5, Math.min(11, (h - 5) * 0.45)) * 10) / 10;
 }
 /* Първият параметър приема ДВА вида (v2.3.1):
-     • готов HTML низ — както досега (диапазони, единична карта, всички
-       извиквания извън logo-org.js);
+     • готов HTML низ — както досега (единична карта, всички извиквания извън
+       logo-org.js); от v2.4.69 се разделя на отделните етикети (<template>);
      • { rows, card } — самите редове и функцията за ЕДИН етикет; тогава низът
-       се сглобява ЧАК след като библиотекарят е потвърдил.
+       се сглобява ЧАК след като библиотекарят е потвърдил — и то само за
+       текущата партида.
+   opts.start (v2.4.69, Е2) — позицията на листа, от която да започне първият
+   етикет (1 = горе вляво), за допечатване на полуизползван лист.
 
-   ЗАЩО. Въпросът за много етикети (confirmManyLabels, v2.3.0) стоеше тук, но
-   извикващият вече беше построил целия низ с rows.map(card).join('') — при
-   14 750 етикета това е ~63 МБ низ и 1–2 s работа, извършени ПРЕДИ да е ясно
-   дали изобщо ще се печата. При отказ времето и паметта отиват на вятъра, и то
-   точно в мига, в който библиотекарят е казал „не“ — тоест програмата изглежда
-   заспала като наказание за отказа.
-
-   ЗАЩО ПРОМЯНАТА Е ТУК, а не в logo-org.js. Всичко, от което зависи въпросът —
-   прагът LABEL_CONFIRM_OVER, размерът на етикета, режимът „ролка“, колоните,
-   които реално се събират на A4 — живее в този файл. Ако въпросът се вдигне
-   при извикващия, всеки от петте печатни бутона трябва да преповтори тази
-   сметка и следващият праг ще се промени на пет места вместо на едно. Тук
-   промяната е една: броят идва от rows.length, вместо да се брои в готовия низ. */
-async function printLabelSheet(cards, kind) {
+   ЗАЩО ВЪПРОСЪТ Е ТУК, а не в logo-org.js. Всичко, от което зависи въпросът —
+   размерът на етикета, режимът „ролка“, колоните и редовете, които реално се
+   събират на A4, партидите — живее в този файл. Ако въпросът се вдигне при
+   извикващия, всеки от петте печатни бутона трябва да преповтори тази сметка. */
+async function printLabelSheet(cards, kind, opts) {
+  opts = opts || {};
   const s = SETTINGS_CACHE || {};
-  const { w, h } = labelSize(kind);
+  const L = labelSheetLayout(kind);
+  const { w, h } = L;
   const docName = (LABEL_DOC_NAME[kind] || 'Етикети') + ' — ' + bg(today());
-  const gap = (s.lbl_gap != null ? +s.lbl_gap : 3);
-  const marg = (s.lbl_margin != null ? +s.lbl_margin : 8);
-  const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
   const lazy = !!(cards && typeof cards === 'object' && Array.isArray(cards.rows) && typeof cards.card === 'function');
-  const n = lazy ? cards.rows.length : labelCount(cards);
-  if (n > LABEL_CONFIRM_OVER) {
-    const perSheet = s.lbl_mode === 'roll'
-      ? 1 // ролка: един етикет на страница
-      : labelsPerSheet(w, h, gap, marg, fitLabelCols(Math.max(1, Math.min(8, +s.lbl_cols || 3)), w, gap, marg));
-    if (!await confirmManyLabels(n, kind, perSheet)) return false;
+  let items = null; // при готов низ — отделните етикети
+  if (!lazy) {
+    const t = document.createElement('template');
+    t.innerHTML = String(cards || '');
+    items = Array.from(t.content.children).map(e => e.outerHTML);
   }
-  if (s.lbl_mode === 'roll') {
+  const n = lazy ? cards.rows.length : items.length;
+  const startPos = L.roll ? 1 : Math.max(1, Math.min(L.perSheet, parseInt(opts.start, 10) || 1));
+  const skip = startPos - 1;
+  // Партиди: цели листове, до LABEL_BATCH_MAX етикета; първата — без празните места.
+  const cap = L.roll ? LABEL_BATCH_MAX : Math.max(1, Math.floor(LABEL_BATCH_MAX / L.perSheet)) * L.perSheet;
+  const batches = [];
+  for (let i = 0, first = true; i < n; first = false) {
+    const take = Math.max(1, first ? cap - skip : cap);
+    batches.push([i, Math.min(n, i + take)]);
+    i += take;
+  }
+  if (!batches.length) batches.push([0, 0]);
+  if (batches.length > 1 && !await confirmManyLabels(n, kind, L.perSheet, batches.length, cap)) return false;
+
+  const warns = [];
+  if (L.roll) {
     // Един етикет на страница с точния размер на ролката. „Поле на листа“ важи
-    // само за A4 (виж else по-долу) — тук НЕ се изважда от размера на етикета:
-    // ролковите принтери сами калибрират собствения си печатаем участък, а
-    // изваждане на полето от малък етикет (напр. 20×10 мм при поле 8 мм) даваше
-    // отрицателна височина — невалидна CSS стойност, която браузърът тихо
-    // пренебрегва, вместо да покаже грешка, и етикетът излизаше празен/раздут
-    // при печат (открито при преглед на „Раздел баркодове — визуален печат“).
-    // @page margin:0 — етикетът запълва цялата зададена площ на ролката.
+    // само за A4 — тук НЕ се изважда от размера на етикета: ролковите принтери
+    // сами калибрират собствения си печатаем участък, а изваждане на полето от
+    // малък етикет (напр. 20×10 мм при поле 8 мм) даваше отрицателна височина —
+    // невалидна CSS стойност, която браузърът тихо пренебрегва.
+    // ПРАЗНИЯТ ПОСЛЕДЕН ЕТИКЕТ (v2.4.69, Е7): дотук всеки етикет носеше
+    // page-break-after:always — и последният, тоест ролката винаги изхвърляше
+    // един празен етикет повече (3 етикета → 4 страници в PDF). Сега новата
+    // страница е ПРЕДИ всеки следващ етикет (.lbl + .lbl), не след всеки.
     setPrintPage({
-      name: docName, widthMm: w, heightMm: h, margin: '0mm',
+      name: docName, widthMm: w, heightMm: h, margin: '0mm', labels: true,
       extraCss: `.lblsheet{display:block}` +
-        `.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:none;` +
-        `page-break-after:always;display:flex;flex-direction:column;align-items:center;justify-content:center}`
+        `.lbl{width:${w}mm;height:${h}mm;border:none}` +
+        `.lbl + .lbl{break-before:page;page-break-before:always}` + lblFundCss(kind, w, h, 'none', warns)
     });
   } else {
-    // A4 лист: колоните и разстоянията се задават от настройките, а всеки етикет
-    // получава точната си височина, за да съвпадне с готовите листове с етикети.
-    const want = Math.max(1, Math.min(8, +s.lbl_cols || 3));
-    const cols = fitLabelCols(want, w, gap, marg);
     /* Редът на двете съобщения има значение. Самият етикет, по-широк от
        печатаемата площ, е ИСТИНСКИЯТ проблем и се проверява ПРЪВ: при него
-       fitLabelCols връща 1, тоест `cols < want` също е вярно, и ако намаляването
+       колоните стават 1, тоест `cols < want` също е вярно, и ако намаляването
        се обяви първо, библиотекарят получава успокоителното „колоните са намалени,
        готово", а етикетът пак ще излезе отрязан. */
-    if (w > A4_W_MM - 2 * marg) {
-      toast('Етикетът е широк ' + w + ' мм, а на A4 при поле ' + marg + ' мм остават '
-        + (A4_W_MM - 2 * marg) + ' мм — ще се отреже при печат. Намалете ширината или полето.', 'err');
-    } else if (cols < want) {
-      // Мълчаливото рязане е по-лошо от намаляването на колоните: отпечатаният
-      // лист изглежда наред до момента, в който се види, че всяка N-та карта е
-      // без десен край. Затова библиотекарят научава защо е станало и как да го
-      // промени (по-малко поле, по-тесен етикет или изрично по-малко колони).
-      toast('Колоните са намалени от ' + want + ' на ' + cols + ' — при ширина ' + w
-        + ' мм, разстояние ' + gap + ' мм и поле ' + marg + ' мм на A4 се събират '
-        + cols + '. Иначе последната колона щеше да се отреже при печат.');
+    if (w > A4_W_MM - 2 * L.ml + MM_EPS) {
+      toast('Етикетът е широк ' + w + ' мм, а на A4 при поле отляво ' + L.ml + ' мм остават '
+        + (A4_W_MM - 2 * L.ml) + ' мм — ще се отреже при печат. Намалете ширината или полето.', 'err');
+    } else if (L.cols < L.want) {
+      // Мълчаливото рязане е по-лошо от намаляването на колоните. Съобщението е
+      // само за етикета за фонда — там колоните са настройка на готовия лист.
+      toast('Колоните са намалени от ' + L.want + ' на ' + L.cols + ' — при ширина ' + w
+        + ' мм, разстояние ' + L.gx + ' мм и поле ' + L.ml + ' мм на A4 се събират '
+        + L.cols + '. Иначе последната колона щеше да се отреже при печат.');
     }
     setPrintPage({
-      name: docName, landscape: false, margin: marg + 'mm',
-      extraCss: `.lblsheet{display:grid;grid-template-columns:repeat(${cols},${w}mm);gap:${gap}mm;justify-content:start}` +
-        `.lbl{width:${w}mm;height:${h}mm;box-sizing:border-box;border:${border};` +
-        `display:flex;flex-direction:column;align-items:center;justify-content:center}`
+      name: docName, landscape: false, labels: true,
+      // Горе и вляво — полетата на листа; долу и вдясно 0 (виж labelSheetLayout).
+      margin: `${L.mt}mm 0mm 0mm ${L.ml}mm`,
+      extraCss: `.lblsheet{display:block}` +
+        `.lblpage{display:grid;grid-template-columns:repeat(${L.cols},${w}mm);grid-auto-rows:${h}mm;` +
+        `column-gap:${L.gx}mm;row-gap:${L.gy}mm;justify-content:start;align-content:start}` +
+        `.lbl{width:${w}mm;height:${h}mm;border:${L.border}}` + lblFundCss(kind, w, h, L.border, warns)
     });
   }
-  // Сглобяването е последното нещо преди печата — след потвърждението и след
-  // всички предупреждения за размера. При отказ дотук изобщо не се стига.
-  const cardsHtml = lazy ? cards.rows.map(r => cards.card(r)).join('') : cards;
-  doPrint(`<div class="pdoc"><div class="lblsheet">${cardsHtml}</div></div>`);
+  /* ПРАЗНА БИБЛИОТЕКА (v2.4.69, Е10): новото читалище, което още не е попълнило
+     „Настройки“, печаташе етикети и карти без никакво име — без дума. */
+  if ((kind === 'fund' || kind === 'card') && needsSetup(s)) {
+    warns.push('В „Настройки“ не е попълнено наименованието на библиотеката — '
+      + (kind === 'card' ? 'картите излизат' : 'етикетите излизат') + ' без име. Попълнете „Организация“ '
+      + 'или „Наименование на библиотеката“ и отпечатайте наново, ако трябва да личи чии са.');
+  }
+  if (kind === 'sig') LBL_SIG_UNFIT.length = 0;
+
+  const htmlOf = (a, b) => (lazy ? cards.rows.slice(a, b).map(r => cards.card(r)) : items.slice(a, b));
+  const printBatch = (k) => {
+    const [a, b] = batches[k];
+    const labels = htmlOf(a, b);
+    let body;
+    if (L.roll) body = labels.join('');
+    else {
+      const cells = (k === 0 ? Array(skip).fill('<div class="lbl-skip"></div>') : []).concat(labels);
+      const pages = [];
+      for (let i = 0; i < cells.length; i += L.perSheet) pages.push(`<div class="lblpage">${cells.slice(i, i + L.perSheet).join('')}</div>`);
+      body = pages.join('<div class="pbreak"></div>');
+    }
+    if (kind === 'sig' && LBL_SIG_UNFIT.length && k === 0) {
+      warns.push(pl(LBL_SIG_UNFIT.length, 'сигнатура не се събира', 'сигнатури не се събират')
+        + ' в етикета ' + w + '×' + h + ' мм дори с най-дребния шрифт и ще излезе отрязана: '
+        + LBL_SIG_UNFIT.slice(0, 5).map(x => '„' + x + '“').join(', ')
+        + (LBL_SIG_UNFIT.length > 5 ? ' и други' : '') + '. Увеличете размера на сигнатурния етикет.');
+    }
+    const nb = batches.length;
+    doPrint(`<div class="pdoc lbldoc"><div class="lblsheet">${body}</div></div>`,
+      nb > 1 ? docName + ' — партида ' + (k + 1) + ' от ' + nb : docName);
+    const hint = [];
+    if (nb > 1) {
+      hint.push('Партида ' + (k + 1) + ' от ' + nb + ' (' + labelNoun(kind, 2) + ' ' + (a + 1) + '–' + b + ' от ' + n + '). '
+        + (k + 1 < nb ? 'След „Печат…“ или „Запази PDF…“ се отваря следващата; „Отказ“ спира печата.' : 'Това е последната партида.'));
+    }
+    if (skip && k === 0) hint.push('Първият етикет е на позиция ' + startPos + ' от листа (първите ' + skip + ' клетки остават празни).');
+    for (const x of warns) hint.push(x);
+    if (hint.length) $('#ppHint').textContent = hint.join(' ');
+    if (k === 0) for (const x of warns) toast(x, 'warn');
+    ppSetNext({
+      onDone: () => {
+        if (k + 1 < nb) printBatch(k + 1);
+        /* „Изпратени за печат“, не „отпечатани“ (v2.4.69, преглед на кръга):
+           window.print() в Electron не казва дали диалогът на Windows е бил
+           отказан — програмата не може да знае, че всичко е излязло на хартия. */
+        else if (nb > 1) toast('Всички ' + nb + ' партиди са изпратени за печат — ' + n + ' ' + labelNoun(kind, n)
+          + '. Ако сте отказали някоя в прозореца за печат на Windows, отпечатайте я отново — номерата на всяка партида '
+          + 'стоят в заглавието ѝ.', 'ok');
+      },
+      onCancel: () => {
+        if (nb <= 1 || k === 0) return;
+        const row = lazy ? cards.rows[a] : null;
+        const nextName = row && row.inv_number != null ? ' Първият неотпечатан е инв. № ' + row.inv_number + '.'
+          : (row && row.name ? ' Първата неотпечатана е на „' + row.name + '“.' : '');
+        toast('Печатът е спрян: отпечатани са партиди 1–' + k + ' от ' + nb + ' (' + a + ' от ' + n + ' '
+          + labelNoun(kind, n) + '). Останалите ' + (n - a) + ' не са отпечатани.' + nextName, 'warn');
+      }
+    });
+  };
+  printBatch(0);
   return true;
 }
 window.printLabelSheet = printLabelSheet;
+/* Мащабът на заглавната част и височината на лентите на етикета за фонда (Е3) —
+   смятат се ВЕДНЪЖ за целия печат (името на библиотеката е едно и също върху
+   всички етикети) и влизат в extraCss като --lfs и --lbh. */
+function lblFundCss(kind, w, h, border, warns) {
+  if (kind !== 'fund') return '';
+  const bar = lblBarMm(h);
+  // Пробата е с най-дългия обичаен номер (7 цифри); сглобява се от същите части
+  // като lblCard(), без да я вика — броят извикани етикети е броят отпечатани.
+  const probeHtml = lblFundHtml(lblHeadHtml(), '1234567').replace('class="lbl lbl-fund"',
+    `class="lbl lbl-fund" style="--lbh:${bar}mm"`);
+  const fit = lblFitScale(probeHtml, w, h, border, '--lfs', (el) => {
+    const head = el.querySelector('.lhead');
+    return overBox(el) || (head && head.scrollHeight > head.clientHeight + 1);
+  });
+  if (!fit.fits) {
+    warns.push('Името на библиотеката не се побира в етикет ' + w + '×' + h + ' мм дори с по-дребен шрифт — '
+      + 'заглавната част ще излезе отрязана. Баркодът и номерът не са засегнати. Съкратете „Организация“ '
+      + 'и „Населено място“ в „Настройки“ или изберете по-голям етикет.');
+  }
+  return `.lbl-fund{--lfs:${fit.scale};--lbh:${bar}mm}`;
+}
 /* Етикет за фонда: наименование на библиотеката, населено място, баркод (Code 39)
    и инвентарният номер под баркода.
    Заглавната част (v1.71.1, по изрична заявка): когато „Организация“ е
@@ -1545,7 +1978,8 @@ window.printLabelSheet = printLabelSheet;
    остава верен за всяка библиотека, не само за тази, за която е поръчан.
    Ако „Организация“ не е попълнена (самостоятелна библиотека извън
    читалищна структура), пада се към старото едноредово наименование от
-   „Наименование на библиотеката“. */
+   „Наименование на библиотеката“.
+   От v2.4.69 (Е3) трите реда са в .lhead — единствената част, която се свива. */
 /* Кодът върху етикета — ЕДИН източник за лентите и за цифрите под тях.
 
    Одит на документите v2.4.17: баркодът се чертаеше от `barcode || inv_number`, а
@@ -1563,16 +1997,34 @@ function lblCode(b) {
   if (b && b.inv_number != null && String(b.inv_number) !== '') return String(b.inv_number);
   return (b && b.barcode) ? String(b.barcode) : '';
 }
-function lblCard(b) {
+function lblHeadHtml() {
   const s = SETTINGS_CACHE || {};
   const head = s.org
     ? `<div class="lh1">Библиотека при</div><div class="lh2">${esc(s.org)}</div>`
     : (s.lib_name ? `<div class="lh2">${esc(s.lib_name)}</div>` : '');
-  return `<div class="lbl">
-    ${head}
-    ${s.place ? `<div class="lh3">${esc(s.place)}</div>` : ''}
-    ${code39svg(lblCode(b), 150, 40)}
-    <div class="l3">${esc(lblCode(b))}</div></div>`;
+  const place = s.place ? `<div class="lh3">${esc(s.place)}</div>` : '';
+  return head || place ? `<div class="lhead">${head}${place}</div>` : '';
+}
+function lblFundHtml(headHtml, code) {
+  return `<div class="lbl lbl-fund">
+    ${headHtml}
+    ${code39svg(code, 150, 40)}
+    <div class="l3">${esc(code)}</div></div>`;
+}
+function lblCard(b) {
+  return lblFundHtml(lblHeadHtml(), lblCode(b));
+}
+/* Ширина на лентите за Code 39 с тиха зона от поне 10 модула от двете страни
+   (v2.4.69, кръг 44, Е10). Модулите се броят както в code39svg(): тясна лента 1,
+   широка 2,6, междусимволен интервал 1. */
+function code39Units(text) {
+  let units = 0;
+  for (const ch of '*' + String(text == null ? '' : text).toUpperCase() + '*') {
+    const p = C39[ch]; if (!p) continue;
+    for (const c of p) units += c === 'w' ? 2.6 : 1;
+    units += 1;
+  }
+  return units;
 }
 /* Читателска карта, стандартен размер 90 x 60 мм. Оформена е като истинска карта:
    заглавна лента с логото и името на библиотеката, име на читателя и данни от
@@ -1581,6 +2033,17 @@ function readerCardHtml(r) {
   const s = SETTINGS_CACHE || {};
   const name = s.lib_name || s.org || '';
   const valid = r.re_registered_at || r.registered_at || '';
+  /* ТИХАТА ЗОНА (v2.4.69, кръг 44, Е10). Лентите заемаха цялата ширина между
+     отстъпите от 3 мм: при кратък номер („100001“ — 8 знака със звездичките) един
+     модул е ~0,7 мм, а нормата за Code 39 иска празно поле от поне 10 модула, тоест
+     ~7 мм от всяка страна — имаше 3. Ръчните скенери тогава „хващат“ ръба на
+     картата като лента. Сега ширината на лентите е units × модул, а модулът е
+     толкова, че от двете страни да остават поне 10 модула (и не повече от 0,5 мм —
+     по-широк баркод не се чете по-добре, само по-трудно се хваща с четеца). */
+  const avail = labelSize('card').w - 6;
+  const units = r.card_no ? code39Units(r.card_no) : 0;
+  const mod = units ? Math.min(0.5, avail / (units + 20)) : 0;
+  const bw = units ? Math.round(units * mod * 100) / 100 : 0;
   return `<div class="lbl rcard">
     <div class="rc-top">
       ${s.logo ? `<img class="rc-logo" src="${esc(s.logo)}" alt="">` : ''}
@@ -1597,7 +2060,7 @@ function readerCardHtml(r) {
         <span>Рег. ${esc(bg(valid) || '—')}</span>
       </div>
     </div>
-    <div class="rc-bar">
+    <div class="rc-bar"${bw ? ` style="--bw:${bw}mm"` : ''}>
       ${/* Одит на документите v2.4.17: при празен номер на карта тук се падаше към
             вътрешния номер на реда (readers.id) — и в лентите, и в текста. Но
             readers:byCard сравнява САМО с card_no, тоест такава карта не се
@@ -1611,19 +2074,63 @@ function readerCardHtml(r) {
     </div>
   </div>`;
 }
+/* Сигнатурите, които и с най-дребния шрифт не влизат — за предупреждението в
+   прегледа (printLabelSheet ги изрежда). */
+const LBL_SIG_UNFIT = [];
+const LBL_SIG_FIT = new Map();
+/* УДК на смислени неделими части: нов ред може да започне само на интервал или ПРЕД
+   „(“, „-“, „:“, „+“, „/“, „=“ и пред отварящата кавичка — никога вътре в число,
+   никога СЛЕД тире („821.163.2-“ / „31“ откъсваше допълнителния определител от
+   основното число) и никога между кавичките на определителя за време
+   („"1878/1944"“ е едно цяло). Интервалите се пазят („-37 Яворец“, „-31 В12“). */
+function sigSegs(text) {
+  return String(text).trim().split(/\s+/).filter(Boolean).map(word => {
+    const segs = word.match(/"[^"]*"?|\([^)"]*\)?|[-:+/=]?[^-:+/=("]+|[-:+/=("]/g) || [word];
+    // Част, по-дълга от 14 знака (напр. „+929Хемингуей,Ърнест1899“), сама не се
+    // събира на гръбче 25 мм — тя единствена може да се пренесе и по средата.
+    return segs.map(p => `<span class="ls-seg${p.length > 14 ? ' ls-long' : ''}">${esc(p)}</span>`).join('<wbr>');
+  }).join(' ');
+}
 function sigLblCard(b) {
   /* Книга без УДК и без авторски знак даваше празен ограден правоъгълник, разпръснат
      из листа без нито дума — за разлика от всяко друго отрязване в програмата, което
      се съобщава. Сега етикетът казва защо е празен, за да не бъде залепен така. */
-  const udk = b.udk || '';
-  const avt = b.author_mark || b.call_number || '';
-  if (!udk && !avt) {
+  /* ЕДНО ПРАВИЛО ЗА СИГНАТУРАТА (v2.4.69, кръг 44, П4 — етикетната част).
+     (а) Дотук етикетът печаташе УДК на първия ред и `author_mark || call_number` на
+         втория. Внесена сигнатура „821.163.2-31 В12“ (в полето „Сигнатура“, без
+         авторски знак) излизаше „821.163.2-31“ / „821.163.2-31 В12“ — УДК два пъти;
+         а книга, описана с помощниците (УДК + „Предложи“ за знака), имаше на
+         етикета едно, в инвентарната книга — празна колона.
+     (б) Сигнатурата е адресът на книгата на рафта и реквизит по чл. 16, ал. 1:
+         гръбчето, инвентарната книга и каталогът трябва да казват едно и също.
+     (в) Правилото е едно — effectiveCallNumber (handlers/books.js, огледало в
+         src/views/books.js): попълнената „Сигнатура“ се печата САМА (тя вече съдържа
+         всичко, което библиотеката е решила да пише); иначе — УДК и авторски знак,
+         на два реда. */
+  const own = String(b.call_number == null ? '' : b.call_number).trim();
+  const udk = String(b.udk == null ? '' : b.udk).trim();
+  const avt = String(b.author_mark == null ? '' : b.author_mark).trim();
+  if (!own && !udk && !avt) {
     return `<div class="lbl lbl-sig" style="color:#b00;font-size:8px;line-height:1.15;
       display:flex;align-items:center;justify-content:center;text-align:center;padding:2px">
       инв. № ${esc(String(b.inv_number ?? '—'))}: няма УДК и авторски знак</div>`;
   }
-  return `<div class="lbl lbl-sig">
-    <div class="ls-udk">${esc(udk)}</div>
-    <div class="ls-avt">${esc(avt)}</div>
-  </div>`;
+  const whole = own ? (typeof effectiveCallNumber === 'function' ? effectiveCallNumber(b) : own) : '';
+  const inner = own
+    ? `<div class="ls-sig">${sigSegs(whole)}</div>`
+    : `${udk ? `<div class="ls-udk">${sigSegs(udk)}</div>` : ''}${avt ? `<div class="ls-avt">${sigSegs(avt)}</div>` : ''}`;
+  /* Шрифтът се смалява, докато всичко влезе (Е6) — мери се в истинския шрифт, един
+     път за всяка различна сигнатура и размер. */
+  const { w, h } = labelSize('sig');
+  const s = SETTINGS_CACHE || {};
+  const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
+  const key = w + '×' + h + '|' + border + '|' + inner;
+  let fit = LBL_SIG_FIT.get(key);
+  if (!fit) {
+    if (LBL_SIG_FIT.size > 5000) LBL_SIG_FIT.clear();
+    fit = lblFitScale(`<div class="lbl lbl-sig">${inner}</div>`, w, h, border, '--sfs', overBox);
+    LBL_SIG_FIT.set(key, fit);
+  }
+  if (!fit.fits) LBL_SIG_UNFIT.push(own || [udk, avt].filter(Boolean).join(' '));
+  return `<div class="lbl lbl-sig"${fit.scale < 1 ? ` style="--sfs:${fit.scale}"` : ''}>${inner}</div>`;
 }

@@ -7,6 +7,18 @@
    ред без записана бройка е ПОНЕ един документ, не нула. Изричната нула се
    уважава — тя е разминаване в данните и трябва да си личи, а не да се
    „поправя“ мълчаливо на екрана. */
+/* ДОКУМЕНТИ, НЕ „135.0 документа“ (v2.4.69, находка Е10 от пълния тест). Нормативът
+   по чл. 41 е процент от фонда и може да е дробен (0,5 % от 2 501 = 12,5), затова
+   дотук се печаташе с toFixed(1) — и на подписания протокол излизаше „135.0
+   документа“: с английска точка и с нула, която никой не пише. Цяло число се
+   показва цяло, дробното — с една цифра и българска десетична запетая. Закръгля
+   се ПРЕДИ проверката за цяло: 3,95 става „4“, а не „4,0“. */
+function lossFmt(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  const r = Math.round(v * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1).replace('.', ',');
+}
 function invQty(x) {
   const q = Number(x && x.quantity);
   return Number.isFinite(q) && q >= 0 ? q : 1;
@@ -69,7 +81,7 @@ async function renderInvent() {
             ? `<div><span title="Броят библиотечни документи (екземпляри) — мярката на чл. 13, чл. 16 и чл. 40 – 41. Различава се от инвентарните номера при заварен запис с няколко екземпляра под един номер.">Библиотечни документи във фонда</span><b>${Number(req.activeDocs).toLocaleString('bg-BG')}</b></div>`
             : ''}
           <div><span>Изискван процент</span><b>${req.pct}%</b></div>
-          <div><span>Допустими загуби</span><b>${req.naturalLoss.toFixed(1)}</b></div>
+          <div><span>Допустими загуби</span><b>${lossFmt(req.naturalLoss)}</b></div>
         </div>
         <div class="hint" style="margin-top:10px">Допустимите загуби по чл. 41 се изчисляват спрямо фонда
         (в библиотечни документи) и дела на свободния достъп.</div>
@@ -172,6 +184,19 @@ async function resumeInvent(id) {
 }
 window.resumeInvent = resumeInvent;
 
+/* Един ред в дневника на сканиранията — и в екрана, и в INVENT_SESSION.log, от
+   който екранът се пречертава (виж бележката при #ivLog). Пазят се последните
+   500 реда: дневникът е за окото на комисията, протоколът е в базата. */
+function ivLogAdd(html) {
+  if (INVENT_SESSION) {
+    if (!Array.isArray(INVENT_SESSION.log)) INVENT_SESSION.log = [];
+    INVENT_SESSION.log.unshift(html);
+    if (INVENT_SESSION.log.length > 500) INVENT_SESSION.log.length = 500;
+  }
+  const log = $('#ivLog');
+  if (log) log.insertAdjacentHTML('afterbegin', html);
+}
+window.ivLogAdd = ivLogAdd;
 async function renderInventRun() {
   const s = await call(window.api.inventorySessions.get(INVENT_SESSION.id));
   /* `s` може да е null по два отделни пътя: call() връща null при {ok:false} —
@@ -215,7 +240,13 @@ async function renderInventRun() {
     <div class="card" style="margin-bottom:14px">
       <h3 style="margin-top:0">Сканиране</h3>
       <input id="ivScan" class="scan" placeholder="Инвентарен №/баркод…" autocomplete="off">
-      <div id="ivLog" style="margin-top:10px;max-height:230px;overflow:auto"></div>
+      ${/* ДНЕВНИКЪТ ОЦЕЛЯВА ПРИ ПРЕЧЕРТАВАНЕ (v2.4.69, находка О6). Дотук редовете
+            живееха само в DOM-а: вносът от телефона пречертава екрана (за да вдигне
+            броячите) и изтриваше всичко сканирано на компютъра до момента, заедно с
+            червените редове „непознат“/„вече сканиран“, които комисията още не е
+            прегледала. Сега дневникът стои в INVENT_SESSION.log и се рисува оттам. */''}
+      <div id="ivLog" style="margin-top:10px;max-height:230px;overflow:auto">${
+        ((INVENT_SESSION && INVENT_SESSION.log) || []).join('')}</div>
     </div>
     <div class="toolbar">
       <button class="btn" onclick="importScansModal(${s.id})">📱 Въведи сканирания от телефон</button>
@@ -229,17 +260,26 @@ async function renderInventRun() {
     e.preventDefault();
     const code = el.value.trim(); el.value = ''; if (!code) return;
     const res = await window.api.inventorySessions.scan({ sessionId: INVENT_SESSION.id, code });
-    const log = $('#ivLog');
     if (!res.ok) {
-      log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`);
+      ivLogAdd(`<div class="scanlog err">${esc(res.error)}</div>`);
       return;
     }
     const qty = invQty(res.data);
-    log.insertAdjacentHTML('afterbegin',
-      `<div class="scanlog ok"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}${
+    /* ИЗГУБЕН ОТ ЧИТАТЕЛ, А Е НА РАФТА (v2.4.69, находка О3). Дотук редът светваше
+       зелено като всеки друг и състоянието „изгубен“ оставаше без дума —
+       обезщетението висеше по сметката на читателя, а документът можеше да влезе в
+       акт по чл. 30, т. 5, докато е на рафта. Сканирането пак се брои (документът е
+       проверен), но редът е предупреждение с името на читателя и с действието,
+       което урежда случая. Текстът идва от обработчика (lostCaseOf), за да казва
+       същото и вносът от телефона. */
+    const lost = res.data.lost;
+    ivLogAdd(
+      `<div class="scanlog ${lost ? 'warn' : 'ok'}"><b>${res.data.inv_number}</b> — ${esc(res.data.title)}${
         /* Неразделен стар запис се казва на глас още при сканирането: комисията
            трябва да провери ТРИ документа под този номер, не един. */
-        qty !== 1 ? ` <span class="badge warn">${qty} екз. под един инв. №</span>` : ''}</div>`);
+        qty !== 1 ? ` <span class="badge warn">${qty} екз. под един инв. №</span>` : ''}${
+        lost ? `<br><span class="badge warn">ИЗГУБЕН</span> ${esc(lost.message)}` : ''}</div>`);
+    if (lost) toast(lost.message, 'warn');
     markSaved();
     // Броячите се обновяват на място. Пълно пречертаване тук би изтрило дневника
     // на сканиранията, който току-що беше допълнен.
@@ -312,7 +352,7 @@ async function doCloseInvent() {
     <div class="cards" style="margin-bottom:14px">
       <div class="card"><div class="num">${r.scanned}</div><div class="lbl">Проверени</div></div>
       <div class="card"><div class="num">${r.missing}</div><div class="lbl">Липсващи</div></div>
-      <div class="card"><div class="num">${r.allowedLoss.toFixed(1)}</div><div class="lbl">Допустими</div></div>
+      <div class="card"><div class="num">${lossFmt(r.allowedLoss)}</div><div class="lbl">Допустими</div></div>
     </div>
     ${/* Числата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ (v2.4.61) — мярката на чл. 40 – 41 и
          на акта, който ще се състави от тези липси. Когато инвентарните номера
@@ -348,7 +388,7 @@ async function doCloseInvent() {
       : ''}
     ${r.mode === 'full'
       ? (over > 0
-        ? `<div class="note d">Липсите надвишават нормативите за естествени загуби с ${over.toFixed(1)} документа (чл. 51 – 53).</div>`
+        ? `<div class="note d">Липсите надвишават нормативите за естествени загуби с ${lossFmt(over)} документа (чл. 51 – 53).</div>`
         : `<div class="note">Липсите са в рамките на допустимите естествени загуби (чл. 41, ал. 1).</div>`)
       : `<div class="note">Протоколът важи за проверените ${r.scanned} документа.
          Непроверените ${r.unchecked.toLocaleString('bg-BG')} остават с непроменен статус —
@@ -625,13 +665,20 @@ async function printInventProtocol(id) {
     </tbody></table>`
     : '<div class="pmeta">При проверката не са установени липсващи документи.</div>'}
     ${Number.isFinite(allowed) ? `<div class="pmeta">
-      <b>Допустими естествени загуби (чл. 41):</b> ${allowed.toFixed(1)} документа за проверен фонд от ${pool}.<br>
+      ${/* „за проверен фонд от 13 798“ при проверени 502 (v2.4.69, находка О4): числото
+            е обхватът (pool_final — от него handler-ът смята норматива по чл. 41), а
+            думата „проверен“ го приписваше на проверените. На подписан лист двете
+            числа стояха едно до друго и си противоречаха. Думите вече казват какво е. */''}
+      <b>Допустими естествени загуби (чл. 41):</b> ${lossFmt(allowed)} документа за фонда в обхвата на проверката
+      (${pool} ${pool === 1 ? 'документ' : 'документа'}).<br>
       ${missing === 0 ? 'Липси не са установени.'
         : over > 0
-          ? `Установените липси надвишават норматива с <b>${over.toFixed(1)}</b> документа — прилага се редът по чл. 51 – 53.`
+          ? `Установените липси надвишават норматива с <b>${lossFmt(over)}</b> документа — прилага се редът по чл. 51 – 53.`
           : 'Установените липси са в рамките на допустимите естествени загуби.'}</div>` : ''}
     <div class="pmeta">${zakl}<br>
     Протоколът се съставя в два екземпляра — по един за счетоводството и за библиотеката.</div>
-    ${ssig(['Комисия: 1. ………… 2. ………… 3. …………', 'УТВЪРДИЛ, ' + esc(st.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${/* Комисията — всеки член на своя линия, с имената от проверката (v2.4.69, Е5). */''}
+    ${commissionSig([s.committee1, s.committee2, s.committee3])}
+    ${ssig(['УТВЪРДИЛ, ' + esc(st.director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printInventProtocol = printInventProtocol;

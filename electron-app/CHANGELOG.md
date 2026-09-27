@@ -11,6 +11,236 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.69
+
+**BG:** **Пълен тест на програмата и всичките 67 находки от него.** Шест области
+минаха като истински работен ден — от празна библиотека до фонд от 15 000
+документа: вписване и придобиване, гише, отчисляване и инвентаризация (и с
+телефон), печат на етикети, карти и документи, онлайн каталог и МЗС, краезнание и
+Дневник. Разпечатките бяха наистина отпечатани в PDF и баркодовете — прочетени с
+два декодера; телефонът — с видео на истински етикет вместо камера. Всичко основно
+работеше; проблемите бяха по краищата — там, където нещо идва отвън (стар опис,
+телефон, готов лист етикети), или където две правила се срещат. Всичките 67 са
+поправени и всяка поправка е закована с тест, който пада без нея.
+
+> **Споделена база на няколко компютъра:** това издание вдига версията на базата
+> (миграция 18). Обновете **всички** работни места — по-старата версия отказва да
+> отвори вече обновена база, за да не я повреди.
+
+**Пари.** Анулиран акт по чл. 30, т. 5, по който читателят е платил, караше
+гишето да начисли забавата **втори път** за същите дни — вече не. Ръчно
+„обезщетение“ за повредена корица „изяждаше“ плащането на вече платената забава и
+напомнителното писмо по чл. 43 пак я искаше: забавата вече има **собствен вид в
+сметката** („забава“), заварените редове се преименуват сами. Авансово платеното
+намалява „Общо дължимо“ в писмото. „2,5“ в полетата за кратност на обезщетението
+и за наказание ставаше 25 (изгубена книга за 5 € — обезщетение 125 €); сега
+запетаята се приема и там. Стар опис с колона „Цена (лв.)“ вече се внася **в
+левове**, а отчетът на вноса винаги казва колко реда са приети за евро и колко са
+превърнати. „2,40 лв.“ в полето „лв.“ вече не става мълчаливо 0,00 €. Разлика от
+стотинка между фактурата в лева и сбора на книгите се обяснява с превръщането.
+
+**Гишето.** Картата на следващия читател, сканирана в полето за книги, вече
+**сменя читателя** — дотук, при карти, номерирани 1, 2, 3…, тя заемаше книгата със
+същия инвентарен номер на предишния. „Липсващ“ документ на гишето пита
+„Документът е намерен?“ и се връща в „наличен“; „за реставрация“ предупреждава.
+Редакцията на читател вече не измисля дата на съгласието по чл. 47, ал. 2.
+Изтриването на читател със заделена книга повиква следващия в опашката, а
+заличаването по чл. 17 казва кого е повикало. „Изгубена“ на стар запис с няколко
+бройки се отказва (първо се разделя), таблото казва истинското състояние на
+документа, пререгистрациите имат филтър в „Читатели“, а гишето казва при изтекла
+регистрация.
+
+**Отчисляване и инвентаризация — и с телефон.** Номер, въведен на телефона с
+интервал („6 102“), ставаше два **други** документа, а истинският излизаше
+„липсващ“ в подписания протокол — сега един ред е един код, а телефонът маха
+интервалите и го казва. Изгубен документ, намерен при инвентаризация, вече
+предупреждава с името на читателя. Представителният протокол и прозорецът казват
+едно и също. Страницата за телефон: бутон „Добави“ (цифровата клавиатура на iPhone
+няма Enter), броячът и „Спри камерата“ се виждат, докато камерата чете, бутоните
+са за пръст, списъкът носи датата си и предупреждава, ако е от друг ден, а
+програмата приема и файла, не само поставен текст.
+
+**Печат.** Разпечатка, пусната от търсене в „Читатели“, се **смаляваше** според
+екрана зад прегледа — карта 83×55 мм вместо 90×60, квитанция на 78 %; вече всяка
+разпечатка е 1:1. Етикетите имат **отделно поле отгоре и отляво и отделно
+разстояние по двете посоки**, и „започни от позиция N“ за полуизползван лист:
+Avery L7160 и 4×10 вече падат в клетките си. Баркодът на етикета **не се свива** от
+дълго име на читалището (беше 2,8 мм при „Братя Миладинови – 1869“, сега 11 мм).
+Голям печат на етикети или карти върви на партиди (1 000 карти: от 4,7 ГБ на 0,7 ГБ
+памет). Подписите не остават сами на празен лист, **всеки член на комисията
+подписва на своя линия**, с името си, а многостраничните документи носят „стр. N
+от M“. Дълга УДК не излиза извън сигнатурния етикет, празните листове в края
+изчезнаха, а известията вече не закриват бутоните „Запиши“ и „Печат“.
+
+**Сигнатурата** е една и съща навсякъде: книга, описана с УДК и авторски знак, я
+има в колоната „Сигнатура“ на инвентарната книга (реквизит по чл. 16, ал. 1), в
+„Книги“, на етикета (без повторена УДК) и в онлайн каталога.
+
+**Онлайн каталог и МЗС.** Една пробна книга в нова база заменяше целия
+публикуван каталог (10 записа → 1); сега рязкото свиване се спира и програмата
+пита. Инвентаризация, внос, сливане на автори и отказана резервация вече
+обновяват сайта; недостъпна папка се казва на екрана; заделена книга е „заета“
+онлайн; филтрите на сайта гледат всеки екземпляр; търсенето намира „vazov“ и
+„толкин“. МЗС вече е свързано: наш документ, изпратен на друга библиотека, **не се
+заема** и е „зает“ онлайн; получената чужда книга се дава на читателя по самата
+заявка, без да влиза във фонда; датите по състояния се пишат сами, прескачането
+се отказва, а изтеклият срок е на таблото.
+
+**Краезнание, периодика и Дневник.** Броят на ежедневника от 31 декември, получен
+на 3 януари, вече влиза в **комплекта на своята година** (и с цената си).
+Часовете в Дневника приемат „8“ и „7,5“ — дотук ставаха мълчаливо нула. „⚡
+Предложи“ брои читателите на гишето за посещения, така че децата вече не
+надхвърлят всички. Дневникът се попълва подробно за всеки ден, не само за днес, и
+се печата на два листа. „Движение на фонда“ и КДБФ Част № 1 казват едно и също
+число. Връзките в краезнанието се виждат и в двете посоки (и в картона на книга),
+снимките не пътуват при търсене (51 МБ → няколко КБ), махането на снимка пита,
+персоналия приема само година, съименниците се различават, а указателят намира
+по онова, което показва.
+
+**Преглед на кода след кръга — още осем поправки.** Независимият преглед на
+промените намери места, където новите връзки между областите не бяха докрай:
+
+- **МЗС и резервациите.** Единствената бройка, изпратена на друга библиотека, не
+  се заемаше — но и резервацията отказваше с „свободна е, заемете я“. Читателят не
+  можеше нито едното. Резервациите вече броят бройките при партньора.
+- **Изтриване на читател с чужда книга по МЗС** вече се отказва — както
+  заличаването по чл. 17; иначе книгата на другата библиотека оставаше без човек.
+- **Повторен запис на МЗС заявка** пази свързания документ: номер, съвпадащ с
+  баркода на друг документ, правеше заявката незаписваема, а документ без инв. №
+  губеше връзката.
+- **Пробна база и онлайн каталогът.** Спирането на записа, който би свил
+  публикувания каталог (К1), вече се казва **веднага** при вписване на книга, а не
+  само в „Онлайн каталог“.
+- **Прескочени номера в инвентарната книга:** заглавие „Задачи от 1 до 100“ вече
+  не се чете като прескочени номера 1–100.
+- **Изтриване/заличаване на читател** казва „съобщете на …“ само за наистина
+  новоповикан читател, не за вече заделена резервация.
+- **Печат на партиди:** накрая пише „изпратени за печат“, не „отпечатани“ —
+  програмата не може да знае дали печатът на някоя е бил отказан в прозореца на
+  Windows.
+- **Съименниците в краезнанието** се броят веднъж и се пазят до промяна, вместо
+  по едно преброяване на цялата картотека за всеки ред; правилото за името е едно
+  за двата модула.
+
+Всяка е закована в `test/pregled-v2469.test.js` (8 теста, през истинския
+`main.js`) — и осемте падат върху кода преди поправката; четири мутации — уловени.
+
+**Проверено:** `npm run test:all` — проверката на типовете и **2 249 теста, 0 неуспешни**, в UTC и в
+Europe/Sofia; каталожната страница — 8 сценария и мащаб 15 002 записа; мутационна
+проверка — **367 мутации, всички уловени**, с минаваща контролна. Новите тестове на
+кръга (139) бяха пуснати и **върху кода отпреди него**: 129 падат, тоест находките са
+истински. Петте теста за печат в истински Chromium (размер на картата, листове
+Avery L7160 и 4×10, баркод и УДК на етикета, страници) са пуснати отделно с
+Chromium и pdftotext — минават тук, падат върху стария код. Схемата е 18
+(миграцията пази всичко вписано досега непроменено).
+
+**EN:** **A full test of the program and all 67 findings from it.** Six areas were
+run as a real working day — from an empty library to a 15 000-document
+collection: cataloguing and acquisition, the circulation desk, deaccession and
+stocktaking (including by phone), printing of labels, cards and documents, the
+online catalogue and interlibrary loan, local studies and the daily register.
+Printouts were really printed to PDF and their barcodes read by two decoders; the
+phone was fed video of a real label in place of a camera. The core worked; the
+problems were at the edges — where something comes from outside (an old
+inventory file, a phone, a ready-made label sheet) or where two rules meet. All
+67 are fixed, each pinned by a test that fails without it.
+
+**Money.** A revoked art. 30 (5) act that the reader had paid made the desk
+charge the late fee **a second time** for the same days — no longer. A manual
+"compensation" for a damaged cover swallowed the payment of an already-paid late
+fee, so the art. 43 letter demanded it again: late fees now have **their own
+charge type**, and existing rows are migrated. Credit on the account reduces
+"Total due". "2,5" in the compensation-multiplier and suspension fields became
+25 (a lost €5 book → €125); the decimal comma is accepted there too. An old
+inventory file with a "Price (BGN)" column is now imported **as leva**, and the
+report always says how many rows were taken as euro and how many were
+converted. "2,40 лв." in the leva field no longer silently becomes €0.00.
+
+**The desk.** The next reader's card scanned into the book field now **switches
+the reader** — until now, with cards numbered 1, 2, 3…, it lent that
+inventory number to the previous reader. A "missing" document asks "Has it been
+found?" and returns to "available"; "for repair" warns. Editing a reader no
+longer invents a date for the art. 47 (2) consent. Deleting a reader holding a
+reserved book calls the next in the queue, and erasure under GDPR art. 17 says
+whom it called. The dashboard shows a document's real status; re-registrations
+have a filter.
+
+**Deaccession and stocktaking, including by phone.** A number typed on the
+phone with a space ("6 102") became two **other** documents while the real one
+went "missing" on the signed protocol — one line is now one code. A lost
+document found during stocktaking now warns with the reader's name. The phone
+page has an "Add" button (the iPhone numeric keypad has no Enter), keeps its
+counter visible while the camera reads, dates its list, and the program accepts
+the file itself.
+
+**Printing.** A printout started from a search in "Readers" was **shrunk** to
+the screen behind the preview — a card at 83×55 mm instead of 90×60, a receipt
+at 78 %; every printout is now 1:1. Labels have **separate top/left margins and
+separate horizontal/vertical gaps**, plus "start at position N": Avery L7160 and
+4×10 sheets now land in their cells. The label barcode **no longer shrinks**
+under a long library name (2.8 mm → 11 mm). Large label/card runs print in
+batches (1 000 cards: 4.7 GB → 0.7 GB). Signatures no longer sit alone on a
+blank page, **each committee member signs on their own line**, and multi-page
+documents carry "page N of M".
+
+**Call number** is the same everywhere — inventory book, Books, spine label,
+online catalogue — including books described only by UDC and author mark.
+
+**Online catalogue and ILL.** One test book in a new database replaced the whole
+published catalogue (10 → 1); a sharp drop is now held and the program asks.
+Stocktaking, import, author merges and cancelled holds now update the site; an
+unreachable folder is shown; reserved books show as on loan; site filters look
+at every copy; search finds "vazov" and "tolkien". ILL is now linked: our book
+sent to another library **cannot be lent** and shows as on loan online, a
+borrowed book is lent to the reader on the request itself without entering the
+collection, state dates are recorded, skipping states is refused, and overdue
+ILL items appear on the dashboard.
+
+**Local studies, periodicals and the daily register.** A daily's 31 December
+issue received on 3 January now joins **its own year's volume**. Register hours
+accept "8" and "7,5" (they silently became zero). "⚡ Suggest" counts desk readers
+as visits. Any day can be filled in detail, and a month prints on two sheets.
+"Collection movement" and register part 1 agree. Local-studies links show both
+ways, photos no longer travel with every search (51 MB → a few KB), removing a
+photo asks, a person can have just a year, namesakes are told apart.
+
+**Code review after the round — eight more fixes.** An independent review found
+places where the new links between areas were not complete:
+
+- **Interlibrary loan and holds.** The only copy sent to another library could not
+  be borrowed — but a hold was refused too ("it is free, borrow it"). Holds now
+  count copies away at the partner.
+- **Deleting a reader holding another library's book** is refused, as GDPR
+  erasure already was.
+- **Re-saving an interlibrary request** keeps the linked document (a number equal
+  to another document's barcode made the request unsavable; a document without an
+  inventory number lost the link).
+- **Test database and the online catalogue.** The block on a write that would
+  shrink the published catalogue (K1) is now reported **when the book is saved**.
+- **Skipped numbers in the inventory book:** a title like "Задачи от 1 до 100" is
+  no longer read as skipped numbers 1–100.
+- **Deleting/erasing a reader** says "tell …" only for a newly called reader, not
+  for an already set-aside hold.
+- **Batch printing** ends with "sent to print", not "printed" — the program cannot
+  know whether a batch was cancelled in the Windows print dialog.
+- **Namesakes in local studies** are counted once and cached until a change,
+  instead of a full scan per row; the name rule is shared by both modules.
+
+Each is pinned in `test/pregled-v2469.test.js` (8 tests through the real `main.js`),
+all eight failing on the code before the fix; four mutations — caught.
+
+**Verified:** `npm run test:all` — the type check and **2,249 tests, 0 failures**, in UTC and in
+Europe/Sofia; catalogue page — 8 scenarios and a 15 002-record scale run;
+mutation testing — **367 mutations, all caught**, control passing. The round's new
+tests (139) were also run **on the code before it**: 129 fail, i.e. the findings are
+real. The five print tests in real Chromium (card size, Avery L7160 and 4×10 sheets,
+label barcode and UDC, pages) were run separately with Chromium and pdftotext —
+pass here, fail on the old code. Schema 18.
+
+> **Shared database on several computers:** this release raises the database version
+> (migration 18). Update **all** workstations — an older version refuses to open an
+> already upgraded database so as not to damage it.
+
 ## v2.4.68
 
 **BG:** **Проверка на типовете в CI — без промяна в работата на програмата.**

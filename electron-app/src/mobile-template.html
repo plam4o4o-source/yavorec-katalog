@@ -12,7 +12,16 @@
   h1{margin:0;font-size:17px;color:#C9A84C}
   .sub{font-size:12px;color:#B8AF95;margin-top:2px}
   main{padding:14px 16px 90px}
-  #cam{width:100%;border-radius:8px;background:#000;display:none;aspect-ratio:4/3;object-fit:cover}
+  #cam{width:100%;border-radius:8px;background:#000;display:none;aspect-ratio:4/3;object-fit:cover;
+    max-height:40vh}
+  /* ДОКАТО КАМЕРАТА ЧЕТЕ (v2.4.69, находка О5). На Pixel 5 броячът и „Спри
+     камерата“ падаха под сгъвката: над видеото стояха подсказката и червената
+     бележка „отворена като файл“, а видеото заемаше цялата ширина 4:3. Човекът
+     държи телефона към рафта и не вижда дали номерът е прочетен. Сега, докато
+     камерата върви, двете бележки се скриват (подсказката е излишна — човекът
+     вече е натиснал бутона; червената е невярна — камерата тръгна), а видеото е
+     най-много 40% от височината. Броячът стои веднага под бутоните. */
+  body.live #hint, body.live #nocam, body.live #oldList{display:none !important}
   .btn{display:inline-block;padding:13px 18px;border:none;border-radius:7px;background:#96731F;
     color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin:6px 6px 0 0}
   .btn.sec{background:#3A2A12;color:#EFE9D8}
@@ -22,12 +31,21 @@
   .box{flex:1;background:#241809;border:1px solid #3A2A12;border-radius:7px;padding:11px;text-align:center}
   .box b{display:block;font-size:26px;color:#C9A84C}
   .box span{font-size:11px;color:#B8AF95}
-  #manual{width:100%;padding:13px;font-size:17px;border-radius:7px;border:1px solid #3A2A12;
-    background:#120C05;color:#EFE9D8;margin-top:4px}
+  .addRow{display:flex;gap:8px;margin-top:4px}
+  #manual{flex:1;min-width:0;width:100%;padding:13px;font-size:17px;border-radius:7px;border:1px solid #3A2A12;
+    background:#120C05;color:#EFE9D8;min-height:48px}
+  .addRow .btn{margin:0;min-height:48px}
+  #manualMsg{font-size:13px;margin-top:6px;color:#DCD4BB}
+  #manualMsg.bad{color:#F0A89F}
+  .since{font-size:12px;color:#B8AF95;margin:-6px 0 10px}
   ul{list-style:none;padding:0;margin:12px 0 0}
   li{padding:9px 11px;background:#241809;border-radius:6px;margin-bottom:5px;display:flex;
     justify-content:space-between;align-items:center;font-size:15px}
-  li .x{color:#A32B22;font-size:20px;padding:0 6px;cursor:pointer}
+  /* Цел за пръст ≥ 44 px (v2.4.69, находка О5): „×“ беше 29×24 px и на телефон
+     се триеше съседният ред вместо грешния. */
+  li .x{color:#A32B22;font-size:22px;cursor:pointer;min-width:44px;min-height:44px;
+    display:inline-flex;align-items:center;justify-content:center;margin:-6px -6px -6px 6px}
+  .btn{min-height:44px}
   .dup{border-left:3px solid #C98A2E}
   #out{width:100%;height:150px;background:#120C05;color:#EFE9D8;border:1px solid #3A2A12;
     border-radius:7px;padding:10px;font-family:monospace;font-size:13px;margin-top:8px}
@@ -71,8 +89,18 @@
     <div class="box"><b id="cnt">0</b><span>сканирани</span></div>
     <div class="box"><b id="dupCnt">0</b><span>повторни</span></div>
   </div>
+  <!-- Кога е започнат списъкът (v2.4.69, находка О5) — виж бележката при STARTED. -->
+  <div class="since" id="since"></div>
+  <div class="note err" id="oldList" style="display:none"></div>
 
-  <input id="manual" inputmode="numeric" placeholder="Или въведете номер и натиснете Enter">
+  <!-- Бутон „Добави“ (v2.4.69, находка О5): цифровата клавиатура на iPhone НЯМА
+       клавиш Enter, а номерът се добавяше само с Enter — на iPhone ръчното
+       въвеждане изобщо не работеше. Enter си остава за Android и за четец. -->
+  <div class="addRow">
+    <input id="manual" inputmode="numeric" autocomplete="off" placeholder="Или въведете номер">
+    <button class="btn" id="addBtn" type="button">Добави</button>
+  </div>
+  <div id="manualMsg"></div>
 
   <ul id="list"></ul>
 
@@ -91,9 +119,43 @@ var KEY = 'inventar-scan-v1';
 var SLUG = '__SLUG__';                    // името на библиотеката за името на файла
 var codes = [];
 var dups = 0;
-try { var saved = JSON.parse(localStorage.getItem(KEY) || '{}'); codes = saved.codes || []; dups = saved.dups || 0; } catch (e) {}
+/* ДАТАТА НА ЗАПОЧВАНЕ НА СПИСЪКА (v2.4.69, находка О5).
+   Списъкът стои в паметта на телефона, докато някой не натисне „Изчисти“ — и
+   дотук нищо не казваше от кога е. Списък от пролетната проверка, забравен в
+   телефона, влизаше в есенната като „проверени“ документи, които никой не е
+   виждал на рафта от месеци. Сега списъкът помни деня, в който е добавен първият
+   номер (по МЕСТНО време — виж localDay), показва го, предупреждава, ако не е
+   днешният, и го носи в заглавния ред на изнесения текст, за да го провери и
+   програмата при вноса. Заварен списък без дата (от по-стара страница) се
+   обявява като такъв, вместо да му се измисля дата. */
+var STARTED = null;
+try {
+  var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  codes = saved.codes || []; dups = saved.dups || 0; STARTED = saved.started || null;
+} catch (e) { /* повредена памет на браузъра — започва се с празен списък */ codes = []; dups = 0; STARTED = null; }
 
-function persist() { try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups })); } catch (e) {} }
+/* Денят по МЕСТНОТО време на телефона. new Date().toISOString() е по UTC: в
+   България между 00:00 и 03:00 (лятно време) даваше вчерашната дата — в името на
+   файла и оттам в списъка на проверката. */
+function localDay(d) {
+  d = d || new Date();
+  var p = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function bgDay(iso) { return iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' + iso.slice(0, 4) : ''; }
+/* Текстът за пренасяне: заглавен ред с датата, после по един номер на ред.
+   Програмата подминава редовете, започващи с „#“ (виж importScansRun), и сверява
+   датата с датата на проверката. */
+function exportText() {
+  var head = '# Инвентаризация — списък ' + (STARTED ? 'започнат на ' + bgDay(STARTED) + ' г.' : 'без дата на започване')
+    + ', ' + codes.length + (codes.length === 1 ? ' номер' : ' номера');
+  return codes.length ? head + '\n' + codes.join('\n') : '';
+}
+
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups, started: STARTED })); }
+  catch (e) { /* пълна или забранена памет — списъкът остава на екрана, но не оцелява при презареждане */ }
+}
 function escHtml(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, function (ch) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
@@ -109,9 +171,22 @@ function render() {
      изпълняваше в страницата. */
   ul.innerHTML = codes.slice().reverse().map(function (c, i) {
     var idx = codes.length - 1 - i;
-    return '<li><span>' + escHtml(c) + '</span><span class="x" data-i="' + idx + '">&times;</span></li>';
+    return '<li><span>' + escHtml(c) + '</span><span class="x" role="button" aria-label="Махни ' + escHtml(c)
+      + '" data-i="' + idx + '">&times;</span></li>';
   }).join('');
-  document.getElementById('out').value = codes.join('\n');
+  document.getElementById('out').value = exportText();
+  var since = document.getElementById('since'), old = document.getElementById('oldList');
+  since.textContent = codes.length
+    ? (STARTED ? 'Списъкът е започнат на ' + bgDay(STARTED) + ' г.' : 'Списъкът е записан от по-стара версия на страницата — датата му не е известна.')
+    : '';
+  if (codes.length && STARTED !== localDay()) {
+    old.innerHTML = '<b>Този списък не е от днес</b>' + (STARTED ? ' — започнат е на ' + bgDay(STARTED) + ' г.' : '')
+      + '. Ако е от предишна проверка, изпратете го на компютъра и натиснете <b>„Изчисти“</b>, преди да сканирате за новата — '
+      + 'иначе старите номера ще влязат в новия протокол като проверени.';
+    old.style.display = 'block';
+  } else {
+    old.style.display = 'none';
+  }
   persist();
 }
 document.getElementById('list').addEventListener('click', function (e) {
@@ -134,33 +209,76 @@ function addCode(raw) {
   var c = String(raw || '').trim();
   if (!c) return;
   if (codes.indexOf(c) >= 0) { dups++; beep(false); render(); return; }
+  if (!codes.length) STARTED = localDay();
   codes.push(c); beep(true); render();
 }
 
-document.getElementById('manual').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter') { addCode(this.value); this.value = ''; }
+/* РЪЧНОТО ПОЛЕ: ЕДИН НОМЕР НАВЕДНЪЖ (v2.4.69, находка О2).
+   „6 102“ се пазеше като един запис с интервала, а програмата при вноса го
+   делеше на „6“ и „102“ — два чужди документа влизаха като проверени, а 6102
+   излизаше липсващ. Сега полето решава на място и КАЗВА какво е решило:
+   • интервалите се махат — инвентарният номер е едно число, а интервалът е
+     разделител за хилядите („6 102“ → 6102); казва се с кой номер е добавен;
+   • запетая или точка и запетая значат, че са набрани няколко номера или
+     дробно число — не се гадае, номерът НЕ се добавя, остава в полето и под
+     него пише защо.
+   Програмата пази същото правило и от своя страна (handlers/mobile.js). */
+var manual = document.getElementById('manual');
+var manualMsg = document.getElementById('manualMsg');
+function manualSay(text, bad) { manualMsg.textContent = text || ''; manualMsg.className = bad ? 'bad' : ''; }
+function addManual() {
+  var raw = String(manual.value || '').trim();
+  if (!raw) return false;
+  if (/[,;]/.test(raw)) {
+    manualSay('„' + raw + '“ съдържа запетая — въведете по един номер наведнъж. Номерът не е добавен.', true);
+    beep(false);
+    return false;
+  }
+  var c = raw.replace(/\s+/g, '');
+  addCode(c);
+  manualSay(c !== raw ? 'Добавен е ' + c + ' (без интервалите).' : '');
+  manual.value = '';
+  return true;
+}
+manual.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { e.preventDefault(); addManual(); }
 });
+document.getElementById('addBtn').addEventListener('click', function () { addManual(); manual.focus(); });
+/* Набран, но непотвърден номер не бива да остане извън изпратения списък
+   (v2.4.69, находка О5): на iPhone без Enter човекът набира последния номер и
+   натиска направо „Копирай списъка“ — номерът се губеше. Сега се добавя преди
+   копирането и се казва. */
+function takePending() {
+  if (!String(manual.value || '').trim()) return;
+  if (addManual()) manualSay('Номерът ' + codes[codes.length - 1] + ' от полето е добавен в списъка, преди да се изнесе.');
+}
 document.getElementById('copyBtn').addEventListener('click', function () {
+  takePending();
   var t = document.getElementById('out');
   t.select(); t.setSelectionRange(0, 999999);
-  if (navigator.clipboard) navigator.clipboard.writeText(codes.join('\n'));
+  if (navigator.clipboard) navigator.clipboard.writeText(exportText());
   else document.execCommand('copy');
   this.textContent = 'Копирано!';
   var b = this; setTimeout(function () { b.textContent = 'Копирай списъка'; }, 1500);
 });
 document.getElementById('fileBtn').addEventListener('click', function () {
-  var blob = new Blob([codes.join('\n')], { type: 'text/plain;charset=utf-8' });
+  takePending();
+  var blob = new Blob([exportText()], { type: 'text/plain;charset=utf-8' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   /* Името на библиотеката влиза и в името на файла: в един разговор във Вайбър
      се събират списъци от повече от една проверка. В САМИЯ файл не влиза нищо
      освен номерата — програмата чете всяка дума като номер (importScansRun). */
-  a.download = 'inventarizaciya-' + (SLUG ? SLUG + '-' : '') + new Date().toISOString().slice(0, 10) + '.txt';
+  /* Във файла (v2.4.69): заглавен ред с датата на започване („# …“ — програмата
+     го подминава като номер и сверява датата), после по един номер на ред.
+     Датата в името е по МЕСТНО време (находка О5 — дотук беше по UTC и между
+     полунощ и 03:00 ч. излизаше вчерашната) и е денят на ЗАПОЧВАНЕ на списъка. */
+  a.download = 'inventarizaciya-' + (SLUG ? SLUG + '-' : '') + (STARTED || localDay()) + '.txt';
   a.click();
 });
 document.getElementById('clearBtn').addEventListener('click', function () {
   if (!confirm('Изчистване на целия списък?')) return;
-  codes = []; dups = 0; render();
+  codes = []; dups = 0; STARTED = null; manualSay(''); render();
 });
 
 /* ---- Камерата като баркод четец ----
@@ -230,7 +348,7 @@ function camErrText(e) {
     /* Подсказката отгоре сочи двата бутона за камера; тук ги няма нито един, а
        текст, който сочи несъществуващо копче, губи повече време от липсата му. */
     document.getElementById('hint').innerHTML =
-      'Въведете инвентарния номер в полето по-долу и натиснете Enter — по един номер наведнъж. ' +
+      'Въведете инвентарния номер в полето по-долу и натиснете „Добави“ — по един номер наведнъж. ' +
       'Когато свършите, натиснете <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, ' +
       'имейл или както Ви е удобно) — там се въвежда в „Инвентаризация“.';
     return;
@@ -287,6 +405,11 @@ startBtn.addEventListener('click', async function () {
     video.style.display = 'block';
     this.style.display = 'none';
     document.getElementById('stopBtn').style.display = 'inline-block';
+    /* Камерата тръгна (v2.4.69, находка О5): червената бележка („отворена като
+       файл — няма да тръгне“) вече не е вярна и се маха, а подсказката се
+       скрива, за да останат броячът и „Спри камерата“ на екрана (body.live). */
+    noCam.style.display = 'none';
+    document.body.classList.add('live');
     var last = '', misses = 0;
     timer = setInterval(async function () {
       try {
@@ -317,6 +440,7 @@ document.getElementById('stopBtn').addEventListener('click', function () {
   video.style.display = 'none';
   this.style.display = 'none';
   document.getElementById('startBtn').style.display = 'inline-block';
+  document.body.classList.remove('live');
 });
 
 render();

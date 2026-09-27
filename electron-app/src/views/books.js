@@ -106,6 +106,40 @@ function logSearchHistory(kind, q) {
   if (!q || !q.trim()) return;
   window.api.searchHistory.log({ kind, query: q });
 }
+/* СИГНАТУРАТА — ОГЛЕДАЛО НА ПРАВИЛОТО ОТ handlers/books.js (v2.4.69, кръг 44, П4).
+   Попълнено поле „Сигнатура“ печели; ако е празно — УДК и авторският знак,
+   разделени с интервал. Дългото обяснение защо стои при effectiveCallNumber в
+   handlers/books.js; тук е копие, защото екранният слой не може да вика модул на
+   главния процес. test/fond-v2469.test.js сравнява двете на едни и същи случаи —
+   ако някой смени едното, тестът пада. Ползва се от „Книги“ и „Инвентарна книга“
+   (екран и печат), а етикетът за сигнатура (core.js) трябва да вика СЪЩАТА. */
+function effectiveCallNumber(book) {
+  const b = book || {};
+  const own = String(b.call_number == null ? '' : b.call_number).trim();
+  if (own) return own;
+  return [b.udk, b.author_mark].map(x => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
+}
+window.effectiveCallNumber = effectiveCallNumber;
+/* ПРАЗНИЯТ ФОНД КАЗВА ОТКЪДЕ СЕ ЗАПОЧВА (v2.4.69, кръг 44, находка П14).
+   (а) Дотук празната библиотека виждаше „Няма намерени книги.“ — като при
+       неуспешно търсене — и най-видното копче на екрана беше „+ Нова книга“.
+       Тестер № 1 (сценарий 1): първият документ влиза без партида и без вид.
+   (б) Редът по Наредба № 3 е обратният: всяко постъпление се регистрира първо
+       ОБЩО (партида в КДБФ Част № 1, чл. 14, с първичния документ) и едва после
+       индивидуално в инвентарната книга. Документ, вписан отзад напред, липсва
+       от Част № 1.
+   (в) Затова празният фонд (без търсене и без филтър) казва реда с думи и дава
+       копче право към „Постъпления“. Същото изречение стои в „Инвентарна книга“
+       и в КДБФ (FUND_START_HTML — един текст на трите места). */
+const FUND_START_HTML = `<b>Фондът още е празен.</b> Започнете от <b>„Постъпления“ → „+ Нова партида“</b>:
+  всяко постъпление се регистрира първо общо — с фактурата, акта за дарение или протокола (КДБФ Част № 1,
+  чл. 14), — а после документите се вписват един по един с <b>„+ Инвентирай документ“</b> от прозореца на
+  партидата. Така всеки документ получава и ред в Книгата за движение на фонда.
+  <div style="margin-top:8px"><button class="btn pri" onclick="location.hash='#acq'">Към „Постъпления“</button></div>`;
+window.FUND_START_HTML = FUND_START_HTML;
+function booksFundEmpty() {
+  return !String(BOOKS_QUERY || '').trim() && !BOOKS_FILTER_DEPT && !BOOKS_FILTER_CAT;
+}
 function booksRowsHtml(shown) {
   return shown.length ? shown.map(b => `
     <tr data-id="${b.id}">
@@ -113,6 +147,7 @@ function booksRowsHtml(shown) {
       <td class="num">${b.inv_number ?? ''}</td>
       <td>${esc(b.title)}${b.series ? ` <span class="hint">— ${esc(b.series)}${b.series_no ? ', ' + esc(b.series_no) : ''}</span>` : ''}</td>
       <td>${esc(b.author || '')}</td>
+      <td class="nowrap">${esc(effectiveCallNumber(b))}</td>
       <td>${esc(b.category_name || '')}</td>
       <td>${esc(b.department || '')}</td>
       <td class="num">${esc(b.year || '')}</td>
@@ -148,7 +183,9 @@ function booksRowsHtml(shown) {
         <div class="rowMoreItems">
           <button class="btn dgr" onclick="deleteBook(${b.id})">Изтрий</button>
         </div></div></td>
-    </tr>`).join('') : `<tr><td colspan="10" class="empty">Няма намерени книги.</td></tr>`;
+    </tr>`).join('') : (booksFundEmpty()
+      ? `<tr><td colspan="11" class="empty" style="text-align:left">${FUND_START_HTML}</td></tr>`
+      : `<tr><td colspan="11" class="empty">Няма намерени книги.</td></tr>`);
 }
 function booksMoreHtml(more, total) {
   // append=true → renderBooksBody ДОБАВЯ следващата порция, вместо да презаписва
@@ -287,7 +324,7 @@ async function renderBooks() {
     с изрично потвърждение, защото тя е официалният регистър на фонда (v1.71.0). Тук остават
     търсенето, филтрите, груповата редакция и добавянето на нови документи.</div>
     <div class="toolbar">
-      <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
+      <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, сигнатура, УДК, издателство, ключова дума, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
       ${/* Веднага след търсенето — на същото място, както в „Читатели“ (v2.4.50). */''}
       <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
       <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
@@ -311,7 +348,7 @@ async function renderBooks() {
     <div class="wrap"><table class="ledger">
       <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
         ${!BOOKS_WINDOWED && filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
-        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th>
+        <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th title="Сигнатурата; ако полето е празно — УДК и авторски знак">Сигнатура</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th>
         ${/* class="actsCell" (v2.4.56): клетката с действията се залепва за десния
              ръб при хоризонтално превъртане (виж table.ledger td.actsCell в
              style.css). Без същия клас върху ЗАГЛАВНАТА клетка горният ред се
@@ -447,6 +484,16 @@ async function bookForm(id, presetAcqId, prefill) {
     department: 'за възрастни', acquisition_id: presetAcqId || '' };
   const AV = av || {};
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
+  /* ВИД „КНИГА“ ПО ПОДРАЗБИРАНЕ ЗА НОВ ЗАПИС (v2.4.69, кръг 44, П9). Дотук новият
+     картон стоеше на празен вид и документът излизаше в КДБФ Част № 2 под
+     „— без вид —“ (тестер № 1: 7 от 34 документа). Изборът се вижда в полето и се
+     сменя с едно щракване — не се решава скрито; редакцията на стар запис не се
+     пипа (там празният вид е заварено състояние, което човекът трябва да види). */
+  let catDefault = null;
+  if (!id && (v.category_id == null || v.category_id === '')) {
+    const k = (cats || []).find(c => String(c.name || '').trim().toLowerCase() === 'книга');
+    if (k) catDefault = k.id;
+  }
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
   const isCopy = !!(prefill && !prefill._carry);
   modal(id ? 'Инв. № ' + v.inv_number + ' — редакция'
@@ -458,6 +505,10 @@ async function bookForm(id, presetAcqId, prefill) {
       отговаря на един екземпляр. Описанието е копирано от инв. № ${esc(String(prefill.copied_from ?? ''))};
       баркодът остава празен (етикетът се лепи на конкретния екземпляр) и се попълва от „Баркод етикети“.</div>` : ''}
     <form id="bookF" onsubmit="return false">
+    ${/* П11 (v2.4.69): копието от „+ Още екземпляр“ носи отбелязано откъде е —
+          обработчикът не предупреждава за повторен ISBN точно там, където човекът
+          е минал по правилния път. */''}
+    ${isCopy ? `<input type="hidden" name="copied_from" value="${esc(String(prefill.copied_from ?? ''))}">` : ''}
     <fieldset><legend>Инвентиране</legend>
       <div class="grid g3">
         ${/* min="1" (v2.4.61): полето беше свободно числово и стрелките надолу
@@ -471,7 +522,8 @@ async function bookForm(id, presetAcqId, prefill) {
         ${fld('Баркод', 'barcode', { val: v.barcode || '', hint: 'празно = инв. номер' })}
       </div>
       <div class="grid g3">
-        ${fld('Вид документ (категория)', 'category_id', { type: 'select', opts: catOpts, val: v.category_id || '' })}
+        ${fld('Вид документ (категория)', 'category_id', { type: 'select', opts: catOpts, val: v.category_id || catDefault || '',
+          hint: catDefault ? 'по подразбиране — „книга“' : '' })}
         ${fld('Партида в КДБФ', 'acquisition_id', { type: 'select', opts: acqOpts, val: v.acquisition_id || '', emptyLabel: '— без партида —' })}
         ${fld('Сигнатура', 'call_number', { val: v.call_number || '' })}
       </div>
@@ -530,7 +582,7 @@ async function bookForm(id, presetAcqId, prefill) {
         ${fld('Том / част', 'volume', { val: v.volume || '' })}
         <div class="field"><label>ISBN / ISSN</label>
           <div class="isbnRow">
-            <input name="isbn" value="${esc(v.isbn || '')}">
+            <input name="isbn" value="${esc(v.isbn || '')}" onchange="bookIsbnCheck(this)">
             <button type="button" class="btn" id="isbnBtn" onclick="isbnLookup()"
               title="Изтегля данните за книгата от Google Books и Open Library">Търси</button>
             <button type="button" class="btn" id="sruBtn" onclick="sruLookup()"
@@ -593,6 +645,19 @@ async function bookForm(id, presetAcqId, prefill) {
   if (id) $('#bookF').dataset.id = id;
   // Отпечатъкът на реда към момента на отварянето — виж saveBook по-долу.
   if (id && b && b._rev) $('#bookF').dataset.rev = b._rev;
+  /* КОЙ СОЧИ КЪМ ТАЗИ КНИГА (v2.4.69, находка Л6 от пълния тест). Връзките в
+     краезнанието се виждаха само в едната посока: запис в летописа или персоналия
+     сочи към книгата, а картонът на книгата мълчеше — краеведът нямаше как да
+     разбере, че книгата вече е цитирана някъде. Панелът идва от src/views/links.js
+     (backlinksHtmlFor) — същият, който показват картоните на персоналия и на
+     летописен запис. Пуска се след отварянето и без await, за да не бави формата;
+     ако няма връзки, не се показва нищо. */
+  if (id && typeof backlinksHtmlFor === 'function') {
+    backlinksHtmlFor('книга', id).then(h => {
+      const f = $('#bookF');
+      if (f && h) f.insertAdjacentHTML('afterend', h);
+    }).catch(err => console.error('Връзките към книгата не се заредиха:', err));
+  }
 }
 window.bookForm = bookForm;
 /* „+ Още екземпляр“ — вторият екземпляр от едно заглавие е ВТОРИ ЗАПИС със свой
@@ -620,6 +685,34 @@ async function bookCopyForm(id) {
   bookForm(null, null, v);
 }
 window.bookCopyForm = bookCopyForm;
+/* ПОВТОРЕН ISBN — ПОДСКАЗКА ОЩЕ ДОКАТО ФОРМАТА Е ОТВОРЕНА (v2.4.69, кръг 44, П11).
+   (а) Дотук втори екземпляр, описан наново на ръка, се записваше без дума, а
+       описанието му (сигнатура, УДК, поредица) се разминаваше с първия
+       (тестер № 1, сценарий 2: „Под игото“ под инв. № 1 и № 6).
+   (б) Един инвентарен номер = един екземпляр, затова вторият запис е правилен;
+       грешно е само, че описанието се пише наново и излиза различно, а на рафта
+       двата екземпляра получават различни сигнатури.
+   (в) При напускане на полето ISBN се пита кой вече го носи (books:byIsbn, без
+       тиретата) и под полето излиза изречение с копче „+ Още екземпляр“, което
+       отваря копието от НАМЕРЕНИЯ запис. Записът не се спира — обработчикът
+       повтаря същото предупреждение след записа (isbnDuplicate), за пътищата
+       без този екран. */
+async function bookIsbnCheck(input) {
+  const hint = $('#isbnHint');
+  const val = String((input && input.value) || '').trim();
+  if (!hint || !val) return;
+  const form = $('#bookF');
+  const selfId = form && form.dataset.id ? Number(form.dataset.id) : null;
+  const res = await window.api.books.byIsbn(val, selfId);
+  if (!res || !res.ok) { if (res && res.error) toast(res.error, 'err'); return; }
+  const m = (res.data || [])[0];
+  if (!m) return;
+  hint.innerHTML = `<span style="color:var(--amber, #a15c00)"><b>Този ISBN вече е вписан</b> на инв. № ${esc(String(m.inv_number ?? '—'))}
+    („${esc(m.title || '')}“)${m.count > 1 ? ' и на още ' + (m.count - 1) : ''}. Ако това е още един екземпляр,
+    „+ Още екземпляр“ копира описанието (сигнатура, УДК, поредица) и дава следващия номер.</span>
+    <button type="button" class="btn sm" onclick="bookCopyForm(${Number(m.id)})">+ Още екземпляр от инв. № ${esc(String(m.inv_number ?? '—'))}</button>`;
+}
+window.bookIsbnCheck = bookIsbnCheck;
 /* ---------------- Избор на УДК от таблицата ----------------
    Прозорецът се отваря върху формата за книга и работи на две части:
 
@@ -940,7 +1033,68 @@ async function sruLookup() {
 }
 window.sruLookup = sruLookup;
 
+/* ЗАПИС ПРИ РАЗГЪРНАТ СПИСЪК НЕ ПРЕЧЕРТАВА 3 000 РЕДА (v2.4.69, кръг 44, П13).
+   (а) КАКВО СТАВАШЕ ДОТУК. След всеки запис saveBook викаше целия renderBooks():
+       наново books:list за целия разгърнат прозорец (до 3 000 реда по IPC),
+       categories:list, searchHistory:suggest и innerHTML на целия #view.
+       Измерено от тестер № 1 (сценарий 7, 15 000 документа, 3 000 разгърнати
+       реда): 0,85 s без забавяне и 8,5 s при процесор ×4 — толкова стои
+       замръзнал прозорецът след всяко „Запиши“; тук, при ×4 на тази машина:
+       3 377 / 2 188 / 2 009 ms за три поредни записа (виж доклада).
+   (б) ЗАЩО Е ГРЕШНО. Партида от 40 книги е 40 такива замръзвания, точно в
+       работата, която се прави най-често; старият компютър в читалището е
+       именно „процесор ×4“.
+   (в) ЗАЩО ТОЧНО ТАКА. Когато в „Книги“ стоят повече от една порция редове,
+       се пипа САМО засегнатият ред: при нов запис — редът се взима от базата
+       (books:get, един ред) и се вмъква НАЙ-ОТГОРЕ, при редакция — редът се
+       подменя на място. Под таблицата се казва, че новият ред е най-горе и
+       къде ще застане (по подредбата — при следващото търсене или отваряне),
+       вместо да се пренарежда мълчаливо. При малък списък (една порция) пълното
+       пречертаване е евтино и остава, защото дава и вярната подредба. */
+async function booksPatchSaved(savedId, isNew) {
+  if (VIEW !== 'books' || !savedId || !$('#bBody')) return false;
+  if (BOOKS_PAINTED <= BOOKS_PAGE_SIZE) return false;
+  const row = await call(window.api.books.get(savedId));
+  if (!row) return false;
+  const html = booksRowsHtml([row]);
+  const old = $(`#bBody tr[data-id="${savedId}"]`);
+  const list = window._BOOKS_LIST || [];
+  if (old) {
+    old.outerHTML = html;
+    const i = list.findIndex(x => x.id === savedId);
+    if (i > -1) list[i] = row;
+    return true;
+  }
+  if (!isNew) return false;
+  $('#bBody').insertAdjacentHTML('afterbegin', html);
+  list.unshift(row);
+  BOOKS_PAINTED++;
+  if (BOOKS_WINDOWED) BOOKS_TOTAL++;
+  const bar = $('#bMore');
+  if (bar) {
+    const note = bar.querySelector('.bNewNote') || document.createElement('div');
+    note.className = 'hint bNewNote';
+    note.style.width = '100%';
+    const n = (Number(note.dataset.n) || 0) + 1;
+    note.dataset.n = String(n);
+    note.textContent = (n === 1 ? 'Новият запис е показан' : 'Новите ' + n + ' записа са показани')
+      + ' най-отгоре, за да не се пречертават наново ' + BOOKS_PAINTED.toLocaleString('bg-BG')
+      + ' реда. На мястото си по подредбата ' + (n === 1 ? 'ще застане' : 'ще застанат')
+      + ' при следващото търсене, филтър или отваряне на „Книги“.';
+    if (!note.parentNode) bar.prepend(note);
+  }
+  return true;
+}
+window.booksPatchSaved = booksPatchSaved;
 async function saveBook(id, andNew) {
+  /* П3 (v2.4.69): неразчетена сума се казва ПРЕДИ „задължително поле“ — виж
+     badMoneyField в core.js. Обработчикът я отказва и сам (fieldValue праща
+     написаното), това е само по-ранното и по-точното изречение. */
+  const лоша = badMoneyField('#bookF');
+  if (лоша) {
+    return toast(лоша.label + ': „' + лоша.value + '“ не е число' + (лоша.leva ? ' (сума в лева)' : '')
+      + ' — документът НЕ е записан. Напишете сумата с цифри, десетичната част със запетая (напр. 2,40).', 'err');
+  }
   // v1.70.0: обща проверка на ВСИЧКИ полета с req:1 (преди се проверяваха ръчно
   // само заглавие/инв. номер — датата на вписване и цената носеха req:1, но
   // никога не се проверяваха, ако останеха празни).
@@ -986,7 +1140,8 @@ async function saveBook(id, andNew) {
     toast('Книгата е добавена.', 'ok'); markSaved();
   }
   forgetAuthSuggest();          // авторът/издателството от този запис вече се предлагат
-  closeModal(); await RENDERERS[VIEW]();
+  closeModal();
+  if (!(await booksPatchSaved(savedId, !id))) await RENDERERS[VIEW]();
   if (savedId) flashRow(`#view tr[data-id="${savedId}"]`);
   if (after) await bookAftermath(after, savedId);
   /* „Запиши и нов“ (v2.4.27, A2): каталогизирането на партида от 40 книги беше
@@ -1015,6 +1170,11 @@ async function bookAftermath(res, bookId) {
      е вписан, но до тази дата не влиза в КДБФ и в годишния отчет; вижда се само
      ако някой го каже сега, докато човекът е още пред формата. */
   if (res.dateWarning) toast(res.dateWarning, 'warn');
+  /* П9 и П11 (v2.4.69): без партида, без вид, повторен ISBN — изреченията идват
+     от обработчика (books:create), за да важат и за пътищата без този екран. */
+  if (res.acqWarning) toast(res.acqWarning, 'warn');
+  if (res.kindWarning) toast(res.kindWarning, 'warn');
+  if (res.isbnDuplicate && res.isbnDuplicate.message) toast(res.isbnDuplicate.message, 'warn');
   const sug = res.suggestions || [];
   if (!sug.length) return;
   /* Читателят, поискал книгата, е единственият човек, за когото със сигурност

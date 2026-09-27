@@ -211,6 +211,18 @@ test('гишето (и само то) минава по дългия срок �
      отчисляване, периодика и витрини се публикуват веднага. */
   for (const f of fs.readdirSync(path.join(APP_DIR, 'handlers'))) {
     if (!f.endsWith('.js') || f === 'loans.js') continue;
+    /* v2.4.69: резервациите (holds.js) също са гише — отказът и изтичането на
+       заделена резервация освобождават книгата онлайн (находка К4 от пълния тест)
+       и минават по същия дълъг срок като заемането и връщането, по същата причина:
+       промяна от гишето, не по фонда. */
+    if (f === 'holds.js') {
+      const hs = fs.readFileSync(path.join(APP_DIR, 'handlers', f), 'utf8');
+      for (const c of hs.match(/scheduleCatalogWrite\([^)]*\)/g) || []) {
+        assert.equal(c, 'scheduleCatalogWrite(CIRCULATION)', 'holds.js: ' + c);
+      }
+      assert.match(hs, /const CIRCULATION = 'circulation';/);
+      continue;
+    }
     const src = fs.readFileSync(path.join(APP_DIR, 'handlers', f), 'utf8');
     for (const c of src.match(/scheduleCatalogWrite\([^)]*\)/g) || []) {
       assert.equal(c, 'scheduleCatalogWrite()', f + ': промяна по фонда се публикува по бързия срок — ' + c);

@@ -52,6 +52,15 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
       db.prepare('UPDATE categories SET name = ? WHERE id = ?').run(next, id);
       if (next !== cur.name) {
         const n = db.prepare('SELECT COUNT(*) AS n FROM books WHERE category_id = ?').get(id).n;
+        /* ПРЕИМЕНУВАНИЯТ ВИД СТИГА ДО ОНЛАЙН КАТАЛОГА (v2.4.69, кръг 44, К2).
+           (а) Полето `v` в katalog.json е името на вида. Дотук преименуването не
+               пускаше запис — тестер № 5: „книга“ → „книга (печатна)“, файлът не
+               се промени, а на сайта остана старото име.
+           (б) Филтърът „вид“ и плочката за аудио/видео на сайта работят по
+               това име; разминаването го показва като два различни вида.
+           (в) Отложеният запис се насрочва само ако видът има документи.
+               Зависимостта е незадължителна (подава я main.js). */
+        if (n > 0 && typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite();
         logAudit('Преименуван вид документ', '„' + cur.name + '“ → „' + next + '“'
           + (n ? ' (' + n + (n === 1 ? ' документ' : ' документа') + ')' : '')
           + (code ? ' — това е един от началните видове (вътрешен код „' + code + '“); програмата го намира по '
@@ -97,6 +106,8 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
           + 'са от друг вид, сменете вида им във „Фонд“ и чак тогава изтрийте този.');
       }
       db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+      // К2 (v2.4.69): документите остават без вид — и в онлайн каталога (поле `v`).
+      if (n > 0 && typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite();
       logAudit('Категория', 'изтрита „' + (c ? c.name : id) + '“'
         + (n ? ' — ' + (n === 1 ? '1 документ остана' : n + ' документа останаха') + ' без вид' : ''));
       return n;

@@ -493,7 +493,9 @@ test('6. продължения — броят, лимитът, просроче
   assert.equal(l.date_due, due2); assert.equal(l.renewals, 1);
   assert.equal(q("SELECT COUNT(*) AS n FROM events WHERE kind = 'подновяване' AND book_id = ?", ids.b2).n, 1);
   const ea = lastAudit('Продължение на заемане');
-  assert.match(ea.detail, rx('заемане № ' + loan.id + ' до ' + due2 + ' (1/2)'));
+  /* v2.4.69 (кръг 44, Г11): срокът в следата е във вида, в който го пише
+     библиотекарят (дд.мм.гггг) — както в следата на заемането. Дотук беше ISO. */
+  assert.match(ea.detail, rx('заемане № ' + loan.id + ' до ' + E.bgDate(due2) + ' (1/2)'));
   await soft('НАХОДКА: следата „Продължение на заемане“ не назовава нито документа, нито читателя', async () => {
     assert.match(ea.detail, /Тютюн|инв\. № 2/);
   });
@@ -760,7 +762,8 @@ test('10. изгубен документ: прозорецът, начисле�
   assert.match((await h.api.loans.markLost({ id: lid, resolution: 'обезщетение', amount: 5 })).error, /вече е приключено .* като изгубен документ/);
   assert.equal(q('SELECT COUNT(*) AS n FROM account_lines WHERE reader_id = ?', ids.r5).n, 2,
     'обезщетението за документа + обезщетението за забавата (v2.4.61)');
-  assert.equal(q("SELECT amount FROM account_lines WHERE reader_id = ? AND type = 'обезщетение'", ids.r5).amount, lateFine5);
+  // v2.4.69 (кръг 44, Г2): забавата е със собствен вид „забава“, отделен от ръчното „обезщетение“.
+  assert.equal(q("SELECT amount FROM account_lines WHERE reader_id = ? AND type = 'забава'", ids.r5).amount, lateFine5);
   await selectReader('1001');
   const r = await scanOut('5');
   assert.match(r.log, /Инв\. № 5 е отбелязан като изгубен\/невърнат/);
@@ -949,12 +952,18 @@ test('14. дневникът предлага Раздел А/Б от събит
   assert.equal(sug.b_cat_5 || 0, outEv.filter(e => e.book_udk === '51').length);
   assert.equal(sug.b_cat_child_f || 0, outEv.filter(e => e.book_udk === '82-93').length);
   assert.equal(sug.a_visit_reading, evs.filter(e => e.kind === 'читалня').length);
-  const byCat = (c) => new Set(outEv.filter(e => e.reader_category === c).map(e => e.reader_id)).size;
+  /* v2.4.69 (Л3): читателите на деня са ВСИЧКИ, дошли на гишето — със заемане
+     ИЛИ с връщане (всеки веднъж). Дотук тук се брояха само заелите, а бележката
+     по-долу казваше „върналият, без да е заемал, не е посещение — подобрение“:
+     подобрението е направено, „В заемна за дома“ и възрастта се броят от едно
+     и също множество и „деца до 14 г.“ не може да го надхвърли. */
+  const visitEv = evs.filter(e => e.kind === 'заемане' || e.kind === 'връщане');
+  const byCat = (c) => new Set(visitEv.filter(e => e.reader_category === c).map(e => e.reader_id)).size;
   assert.equal(sug.a_age_15_18 || 0, byCat('ученик'));
   assert.equal(sug.a_age_19_28 || 0, byCat('студент'));
-  assert.equal(sug.a_age_o28 || 0, new Set(outEv.filter(e => !['дете до 14 г.', 'ученик', 'студент'].includes(e.reader_category)).map(e => e.reader_id)).size);
+  assert.equal(sug.a_age_o28 || 0, new Set(visitEv.filter(e => !['дете до 14 г.', 'ученик', 'студент'].includes(e.reader_category)).map(e => e.reader_id)).size);
   assert.equal(sug.a_age_u14 || 0, byCat('дете до 14 г.'));
-  // Върналият, без да е заемал, не е „посещение“ в предложенията — казва се като подобрение.
+  assert.ok((sug.a_visit_child || 0) <= (sug.a_visit_home || 0), 'децата са част от „В заемна за дома“');
   // През екрана: „Предложи от регистрите“ пълни само празните полета.
   await h.go('dnevnik');
   await h.window.dnevnikDayForm(T);

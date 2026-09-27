@@ -14,6 +14,26 @@ function ensureKraeFunctions(db) {
   KRAE_FN_READY.add(db);
   return db;
 }
+/* СЪИМЕННИЦИТЕ — ЕДНО ПРЕБРОЯВАНЕ, НЕ ПО ЕДНО НА ЕТИКЕТ (v2.4.69, преглед).
+   Етикетът на персоналия без години и дейност пита „има ли друг със същото
+   име“. Дотук това беше заявка с JS функция върху ВСЕКИ ред на persons за всеки
+   етикет — 50 реда в списък при 2 000 картона са 100 000 извиквания. Сега
+   ключовете се броят веднъж и броят се пази, докато базата не се промени
+   (същият отпечатък като товара на каталога в main.js). Ключът е personKey от
+   handlers/persons.js — едно правило за двата модула. */
+const { personKey } = require('./persons');
+let NAMESAKES = { db: null, stamp: null, counts: null };
+function personKeyCounts(db) {
+  const stamp = db.prepare('SELECT total_changes() AS n').get().n + '|' + db.pragma('data_version', { simple: true });
+  if (NAMESAKES.db === db && NAMESAKES.stamp === stamp) return NAMESAKES.counts;
+  const counts = new Map();
+  for (const r of db.prepare('SELECT name FROM persons').all()) {
+    const k = personKey(r.name);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  NAMESAKES = { db, stamp, counts };
+  return counts;
+}
 function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
 }
@@ -112,7 +132,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
               FROM books b ${DEACC_JOIN}`,
     'статия': 'SELECT a.id, a.author, a.title, a.year FROM analytics a',
     'летопис': 'SELECT c.id, c.year, c.title FROM chronicle c',
-    'персона': 'SELECT p.id, p.name FROM persons p',
+    'персона': 'SELECT p.id, p.name, p.birth_date, p.death_date, p.activity FROM persons p',
     'периодика': 'SELECT p.id, p.title FROM periodicals p'
   };
   const ROW_ID = { 'книга': 'b.id', 'статия': 'a.id', 'летопис': 'c.id', 'персона': 'p.id', 'периодика': 'p.id' };
@@ -130,7 +150,25 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
       return `${[r.author, r.title].filter(Boolean).join('. ')}${r.year ? ' (' + r.year + ')' : ''}`;
     }
     if (kind === 'летопис') return `${r.year} — ${r.title}`;
-    if (kind === 'персона') return r.name;
+    /* СЪИМЕННИЦИТЕ СЕ РАЗЛИЧАВАТ (v2.4.69, Л10).
+       Дотук етикетът беше само името: двата картона „Вълчев, Стефан“ (дядото и
+       внукът — съименниците в селото са правило, виж handlers/persons.js)
+       излизаха в „Намерени“ като два еднакви реда, и връзката отиваше при
+       случайния от тях. Сега след името стоят годините и дейността — точно
+       каквото различава двама души с едно име в краеведската картотека, — а
+       когато картонът няма нито едното И има съименник, номерът му („картон
+       № 12“), за да не останат два реда неразличими. Номерът не се лепи на
+       всяко име: без съименник той е само шум в картона и на хартия. */
+    if (kind === 'персона') {
+      const yr = (v) => { const m = /\d{3,4}/.exec(String(v || '')); return m ? m[0] : ''; };
+      const b = yr(r.birth_date), d = yr(r.death_date);
+      const years = b && d ? b + '–' + d : b ? 'р. ' + b : d ? 'п. ' + d : '';
+      const act = String(r.activity || '').trim();
+      const extra = [years, act].filter(Boolean).join(', ');
+      if (extra) return r.name + ' (' + extra + ')';
+      const namesake = (personKeyCounts(getDb()).get(personKey(r.name)) || 0) > 1;
+      return r.name + (namesake ? ' (картон № ' + r.id + ')' : '');
+    }
     if (kind === 'периодика') return r.title;
     return String(r.id);
   }
@@ -172,6 +210,20 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         r.label = linkLabel(r.from_kind, r.from_id);
         r.to_label = linkLabel(r.to_kind, r.to_id);
       });
+      /* СТАТИИТЕ, ЧИЙТО ИЗТОЧНИК Е ТОЗИ ДОКУМЕНТ (v2.4.69, Л6).
+         Към книга и към периодично издание сочат не само връзките (персоналия →
+         книга, летопис → книга), а и аналитичните описания — статия „в“ сборника
+         (analytics.book_id) или „в“ броя на вестника (analytics.periodical_id).
+         Находката е дословно: „картонът на книга не показва кои персоналии и
+         СТАТИИ сочат към нея“. Те се връщат в същия списък с from_kind 'статия'
+         и `source: true` — не са ред в `links` и нямат „Махни“ (махат се, като
+         се смени източникът в самото описание). */
+      if (toKind === 'книга' || toKind === 'периодика') {
+        const col = toKind === 'книга' ? 'book_id' : 'periodical_id';
+        getDb().prepare(`SELECT id FROM analytics WHERE ${col} = ? ORDER BY year DESC, title`).all(toId)
+          .forEach(a => rows.push({ id: null, source: true, from_kind: 'статия', from_id: a.id, to_kind: toKind, to_id: toId,
+            label: linkLabel('статия', a.id), to_label: linkLabel(toKind, toId) }));
+      }
       return rows;
     })
   );

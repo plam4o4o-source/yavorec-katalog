@@ -32,6 +32,13 @@ const ANON_NAME_SQL = String(ANON_READER_NAME).replace(/'/g, "''");
 const NO_CONSENT_SQL = `(r.name IS NOT '${ANON_NAME_SQL}' AND (COALESCE(r.gdpr_consent, 0) = 0
   OR (COALESCE(r.category, '') = '${CHILD_CATEGORY}' AND COALESCE(r.parent_consent, 0) = 0)))`;
 
+/* ДЪЛЖИМА ПРЕРЕГИСТРАЦИЯ — същото условие като „Дължими пререгистрации (до
+   14 дни)“ на таблото (handlers/dashboard.js): активен читател, чиято последна
+   регистрация (пререгистрация или записване) навършва година до 14 дни напред
+   или вече е навършила. Служебният запис на анонимизацията не е читател. */
+const REREG_DUE_SQL = `(r.status = 'активен' AND r.name != '${ANON_NAME_SQL}'
+  AND date(COALESCE(r.re_registered_at, r.registered_at), '+1 year') <= date('now', 'localtime', '+14 days'))`;
+
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, ftsQuery,
@@ -99,13 +106,31 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
        и второто работно място минават право оттук. Датата се проверява и се
        ОТКАЗВА, ако е невалидна или в бъдещето — подпис с утрешна дата не
        съществува, а тиха подмяна с днешната би върнала същия дефект. */
+    /* ДНЕШНА ДАТА САМО ЗА СЪГЛАСИЕ, ОТБЕЛЯЗАНО ДНЕС (v2.4.69, находка Г3).
+       (а) КАКВО СТАВАШЕ ДОТУК. `|| today()` важеше и при РЕДАКЦИЯ: заварен
+           читател със съгласие БЕЗ дата (отбелязано преди v2.4.65, когато
+           датата не се пазеше) получаваше днешна дата при всяко записване на
+           картона — възпроизведено: смяна САМО на телефона → съгласието
+           „отбелязано на 26.09.2026“, а подписът на картона е от 2018 г.
+           Същото и за съгласието на родител/настойник.
+       (б) ЗАЩО Е ГРЕШНО. Датата на съгласието се сверява при проверка по
+           ЗЗЛД/ОРЗД с подписания картон; програмата не бива да измисля дата,
+           която никой не е вписал — празната дата е честно „не е известна“, а
+           измислената е невярно доказателство.
+       (в) ЗАЩО ТОЧНО ТАКА. Днешната дата остава за съгласие, отметнато СЕГА
+           (нов читател или отметка, която досега я е нямало) — тогава човекът
+           се подписва пред библиотекарката, както казва и подсказката „празно
+           = днес“. Вече отбелязаното съгласие пази датата си, КАКВАТО Е —
+           включително празна. Същото правило, по което registered_at не се
+           измисля при редакция (виж по-долу). */
+    const keepOrToday = (field, flag) => (prev && prev[flag] ? (prev[field] || null) : today());
     out.gdpr_consent_date = out.gdpr_consent
       ? (consentDate(r.gdpr_consent_date, 'съгласието по чл. 47, ал. 2')
-        || (prev && prev.gdpr_consent_date) || today())
+        || keepOrToday('gdpr_consent_date', 'gdpr_consent'))
       : null;
     out.parent_consent_date = out.parent_consent
       ? (consentDate(r.parent_consent_date, 'съгласието на родител/настойник')
-        || (prev && prev.parent_consent_date) || today())
+        || keepOrToday('parent_consent_date', 'parent_consent'))
       : null;
     /* При РЕДАКЦИЯ празното поле пази досегашната стойност (одит v2.4.25). Дотук
        `|| today()` важеше и за редакция: читател от внесена стара база без дата на
@@ -182,6 +207,12 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          той е числото в предупреждението над списъка. */
       if (page.consent === 'no') conds.push(NO_CONSENT_SQL);
       else if (page.consent === 'yes') conds.push('NOT ' + NO_CONSENT_SQL);
+      /* ФИЛТЪР „ДЪЛЖИМА ПРЕРЕГИСТРАЦИЯ“ (v2.4.69, находка Г10).
+         Таблото казва „Дължими пререгистрации (до 14 дни): N“ и числото води
+         тук — а тук такъв филтър нямаше: библиотекарката виждаше целия списък
+         и нямаше как да разбере кои са тези N. Условието е ДОСЛОВНО това на
+         таблото (REREG_DUE_SQL горе), за да съвпадат числата. */
+      if (page.rereg === 'due') conds.push(REREG_DUE_SQL);
       const W = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
       const lim = Math.min(Math.max(parseInt(page.limit, 10) || 300, 1), 2000);
       const offset = Math.max(parseInt(page.offset, 10) || 0, 0);
@@ -192,7 +223,8 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          заемат, а не колко от намерените в момента. Един COUNT по таблица от
          3 000 реда е под милисекунда. */
       const noConsent = db.prepare(`SELECT COUNT(*) AS n FROM readers r WHERE ${NO_CONSENT_SQL}`).get().n;
-      return { rows, total, offset, limit: lim, noConsent };
+      const reregDue = db.prepare(`SELECT COUNT(*) AS n FROM readers r WHERE ${REREG_DUE_SQL}`).get().n;
+      return { rows, total, offset, limit: lim, noConsent, reregDue };
     })
   );
   /* `_rev` — отпечатък на реда към момента на отварянето (v2.4.56); формата го
@@ -381,6 +413,19 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           (open === 1 ? '1 незавърнат документ' : open + ' незавърнати документа') +
           ' и не може да бъде изтрит. Първо приемете върнатите документи от „Заемане и връщане“.');
       }
+      /* Чужда книга, получена по изходяща МЗС заявка за този читател (v2.4.69,
+         преглед на кръга). Тя не минава през „Заемания“, тоест проверката горе не
+         я вижда, а mzs_requests.reader_id е ON DELETE SET NULL — изтриването
+         оставяше книгата на ДРУГА библиотека без човек, у когото е. Същото
+         правило като при заличаването по чл. 17 (handlers/gdpr.js). */
+      const mzsHeld = db.prepare(`SELECT no, year, title, partner FROM mzs_requests
+           WHERE reader_id = ? AND direction = 'изходящо' AND status = 'получено'`).all(id);
+      if (mzsHeld.length) {
+        throw new Error('Читателят държи ' + (mzsHeld.length === 1 ? 'чужда книга, получена' : mzsHeld.length + ' чужди книги, получени')
+          + ' по междубиблиотечно заемане (' + mzsHeld.map(x => '„' + x.title + '“ от ' + x.partner + ', МЗС № '
+            + x.no + '/' + x.year).join('; ') + ') и не може да бъде изтрит. Приемете книгата от читателя, '
+          + 'отбележете заявката „върнато“ в „МЗС“ и повторете изтриването.');
+      }
       /* Одит v2.4.14: проверката пазеше внимателно заеманията и мълчеше за
          всичко останало, което виси на този читател с ON DELETE CASCADE.
          account_lines е касовият дневник — включително плащания от ПРИКЛЮЧЕНИ
@@ -435,7 +480,42 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           + 'да съществува, натиснете „Изтрий“ още веднъж до 2 минути.');
       }
       const r = r0;
-      db.prepare('DELETE FROM readers WHERE id = ?').run(id);
+      /* ЗАДЕЛЕНАТА КНИГА ОТИВА ПРИ СЛЕДВАЩИЯ В ОПАШКАТА (v2.4.69, находка Г5).
+         (а) КАКВО СТАВАШЕ ДОТУК. Резервациите на читателя падаха заедно с него
+             (holds.reader_id е ON DELETE CASCADE), но никой не повикваше
+             следващия: документ, ЗАДЕЛЕН за изтрития читател, стоеше на рафта
+             за заделени, чакащият зад него оставаше „чака“ завинаги, а всеки
+             друг читател на гишето чуваше „Книгата е резервирана за …“
+             (тестер № 2, сценарий 9). v2.4.67 го поправи само за заличаването
+             по чл. 17 (handlers/gdpr.js).
+         (б) ЗАЩО Е ГРЕШНО. Документът е свободен, а програмата го пази за човек,
+             когото вече няма, и не казва на библиотекарката кого да извика.
+         (в) ЗАЩО ТОЧНО ТАКА. Същото, което прави заличаването по чл. 17 и
+             всяко връщане: activateHoldOnReturn() от handlers/holds.js е
+             единственият път, по който „чака“ става „заделена“. Изтриването и
+             повикването са в ЕДНА транзакция — или минават двете, или нито
+             едно. Повиканите се връщат на екрана, за да каже кого да извика.
+             Функцията идва през deps, ако main.js я подава; иначе — от
+             handlers/loans.js, на който main.js я подава (readers.js се
+             регистрира по-рано, а deps тук още не я носи — виж доклада). */
+      const setAside = db.prepare(`SELECT DISTINCT book_id FROM holds
+           WHERE reader_id = ? AND status = 'заделена'`).all(id).map(h => h.book_id);
+      const activate = typeof deps.activateHoldOnReturn === 'function'
+        ? deps.activateHoldOnReturn
+        : require('./loans').activateHoldOnReturn;
+      const holdsActivated = [];
+      db.transaction(() => {
+        db.prepare('DELETE FROM readers WHERE id = ?').run(id);
+        if (typeof activate === 'function') {
+          for (const bookId of setAside) {
+            const next = activate(bookId);
+            if (next && next.justActivated && next.reader_id !== id) {
+              holdsActivated.push({ name: next.reader_name, card_no: next.card_no || null, phone: next.phone || null,
+                title: next.title, inv_number: next.inv_number });
+            }
+          }
+        }
+      }).immediate();
       /* ВПИСВАНЕТО Е БЕЗУСЛОВНО (v2.4.65).
          =================================================================
          КАКВО СТАВАШЕ ДОТУК. Този logAudit стоеше ВЪТРЕ в `if (attached.length)`,
@@ -458,7 +538,10 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
       logAudit(attached.length ? 'Изтрит читател с история' : 'Изтрит читател',
         ((r && r.name) || ('читател № ' + id)) +
         ((r && r.card_no) ? ' (карта ' + r.card_no + ')' : '') +
-        (attached.length ? ' — заедно с ' + attached.join(', ') : ' — без история на заемания и движения по сметката'));
+        (attached.length ? ' — заедно с ' + attached.join(', ') : ' — без история на заемания и движения по сметката')
+        + (holdsActivated.length ? '; заделената книга е повикана за: '
+          + holdsActivated.map(h => h.name + ' (инв. № ' + (h.inv_number ?? '—') + ')').join(', ') : ''));
+      return { holdsActivated };
     })
   );
 

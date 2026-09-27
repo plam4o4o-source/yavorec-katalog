@@ -130,15 +130,36 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
       /* Търсенето обхваща и ИЗТОЧНИЦИТЕ и ЗАБЕЛЕЖКАТА (v2.4.61): краеведът
          най-често търси „по кой протокол сме го записали това“ — а именно
          протоколът, вестникът и споменът стоят в „Източници“. */
+      /* ГОДИНАТА И ДАТАТА — ТОВА, КОЕТО ЛЕТОПИСЪТ ПОКАЗВА (v2.4.69, Л11).
+         =====================================================================
+         ДОТУК търсенето гледаше само текстовите полета. Измерено (тестер № 6,
+         s2-letopis-personalii.js): „1972“ — годината, под която стоят три
+         записа, изписана с едри букви като заглавие на групата, — даваше 0;
+         „ок. 1930“ също 0, макар да стои дословно на екрана. Датата се показва
+         по български („24.05.1972“), а в базата е ISO — и тя не се намираше.
+         Сега се търси и в годината (свободен текст — „ок. 1930“, „1878 – 1880“),
+         и в датата: изписаното по български се превежда в ISO, а ISO се търси
+         направо. */
       if (q) {
+        const bgDate = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(q).trim());
         where.push(`(bglower(c.title) LIKE @q ESCAPE '\\' OR bglower(c.body) LIKE @q ESCAPE '\\'
                      OR bglower(c.participants) LIKE @q ESCAPE '\\' OR bglower(c.sources) LIKE @q ESCAPE '\\'
-                     OR bglower(c.note) LIKE @q ESCAPE '\\')`);
+                     OR bglower(c.note) LIKE @q ESCAPE '\\' OR bglower(c.year) LIKE @q ESCAPE '\\'
+                     OR c.date LIKE @q ESCAPE '\\'${bgDate ? ' OR c.date = @isoDate' : ''})`);
         args.q = bgLikeArg(q);
+        if (bgDate) args.isoDate = bgDate[3] + '-' + bgDate[2].padStart(2, '0') + '-' + bgDate[1].padStart(2, '0');
       }
       if (year) { where.push('c.year = @year'); args.year = String(year); }
+      /* СНИМКАТА НЕ ПЪТУВА СЪС СПИСЪКА (v2.4.69, Л7). Дотук `SELECT c.*` носеше
+         снимката на всеки запис като data URI (до 1 МБ) при всяко изчертаване и
+         всяка пауза в търсачката: 40 записа със снимки → десетки мегабайти и
+         секунди на натискане (тестер № 6, s6c-snimki-merki.js). Сега списъкът
+         носи само признака `has_photo`; снимката идва с chronicle:get, когато
+         записът се отвори. Колоните са поименно, за да не я върне бъдещо `*`. */
       return db.prepare(`
-        SELECT c.*, (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'летопис' AND l.from_id = c.id) AS links
+        SELECT c.id, c.year, c.date, c.title, c.body, c.category, c.participants, c.sources, c.note, c.created_at,
+               (c.photo IS NOT NULL AND c.photo <> '') AS has_photo,
+               (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'летопис' AND l.from_id = c.id) AS links
         FROM chronicle c ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
         ORDER BY yearkey(c.year) DESC, c.year DESC, c.date DESC, c.id DESC`).all(args);
     })

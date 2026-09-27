@@ -351,10 +351,15 @@ test('mzs:update отказва номер, зает от друга заявк�
 test('mzs:update без подадени № и дата запазва старите (частична редакция)', async () => {
   const { db, ipcMain } = setupMzs();
   const id = (await ipcMain.invoke('mzs:create', { no: 4, date: '2026-03-03', partner: 'X', title: 'Заявка' })).data;
-  const res = await ipcMain.invoke('mzs:update', { id, partner: 'Нов партньор', status: 'получено' });
-  assert.equal(res.ok, true);
+  /* v2.4.69 (кръг 44, К8): състоянието вече не може да скочи от „заявено“
+     направо на „получено“ — прескачането се отказва с обяснение (вж.
+     test/katalog-mzs-v2469.test.js). Частичната редакция се проверява със
+     следващата позволена стъпка, „изпратено“; смисълът на теста — непратените
+     № и дата се пазят — е същият. */
+  const res = await ipcMain.invoke('mzs:update', { id, partner: 'Нов партньор', status: 'изпратено' });
+  assert.equal(res.ok, true, res.error);
   const row = db.prepare('SELECT no, date, partner, status FROM mzs_requests WHERE id = ?').get(id);
-  assert.deepEqual([row.no, row.date, row.partner, row.status], [4, '2026-03-03', 'Нов партньор', 'получено']);
+  assert.deepEqual([row.no, row.date, row.partner, row.status], [4, '2026-03-03', 'Нов партньор', 'изпратено']);
 });
 
 /* ===========================================================================

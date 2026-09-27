@@ -214,8 +214,12 @@ async function invBookMore() {
 }
 window.invBookMore = invBookMore;
 let INVBOOK_QUERY = '';
+/* П14 (v2.4.69): празната книга казва откъде се започва — същият текст като в
+   „Книги“ (FUND_START_HTML, src/views/books.js). */
+const INVBOOK_EMPTY_HTML = () => `<tr><td colspan="11" class="empty" style="text-align:left">Инвентарната книга е празна.
+  ${typeof FUND_START_HTML === 'string' ? '<div style="margin-top:6px">' + FUND_START_HTML + '</div>' : ''}</td></tr>`;
 function invBookRowsHtml(rows) {
-  if (!rows.length) return `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`;
+  if (!rows.length) return INVBOOK_EMPTY_HTML();
   return rows.map(r => {
     const off = r.status === 'отчислен';
     return `<tr class="${off ? 'ibOff' : ''}" data-id="${r.id}">
@@ -230,7 +234,11 @@ function invBookRowsHtml(rows) {
       <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
       <td class="num">${esc(r.year || '')}</td><td class="num">${mnyCell(r.price)}</td>
       <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
-      <td class="num">${esc(r.call_number || '')}</td>
+      ${/* П4 (v2.4.69): сигнатурата по ЕДНОТО правило — полето „Сигнатура“, а ако
+            е празно, УДК + авторски знак (effectiveCallNumber, src/views/books.js).
+            Дотук клетката беше празна за всяка книга, описана с помощниците
+            „Избери…“ и „Предложи“, а етикетът на същата книга печаташе адрес. */''}
+      <td class="num">${esc(effectiveCallNumber(r))}</td>
       <td class="num" style="font-size:11px">${r.act_no ? '№ ' + r.act_no + '<br>' + bg(r.act_date) : ''}</td>
       ${/* Одит v2.4.25: значката различаваше само „отчислен“ и всичко останало —
             липсващ от инвентаризация стоеше в регистъра със зелено „наличен“.
@@ -280,7 +288,7 @@ function invBookMatches() {
     String(r.inv_number ?? '').includes(t) ||
     (r.author || '').toLowerCase().includes(t) ||
     (r.title || '').toLowerCase().includes(t) ||
-    (r.call_number || '').toLowerCase().includes(t));
+    effectiveCallNumber(r).toLowerCase().includes(t));
 }
 /* Изчертава само таблицата и лентата под нея — полето за търсене не се пипа. */
 /* v2.3.0: append=true (само от бутона „Покажи още“) добавя САМО новата порция
@@ -307,7 +315,7 @@ function paintInvBookRows(append) {
     rowsHtml: invBookRowsHtml,
     emptyHtml: INVBOOK_QUERY.trim()
       ? `<tr><td colspan="11" class="empty">Няма съвпадения за „${esc(INVBOOK_QUERY)}“.</td></tr>`
-      : `<tr><td colspan="11" class="empty">Инвентарната книга е празна.</td></tr>`,
+      : INVBOOK_EMPTY_HTML(),
     moreHtml: (moreShown, shownTotal) => {
       const more = INVBOOK_WINDOWED ? total - rows.length : moreShown;
       return more > 0
@@ -345,7 +353,7 @@ function invBookRowMatchesText(r, t) {
   return String(r.inv_number ?? '').includes(t)
     || (r.author || '').toLowerCase().includes(t)
     || (r.title || '').toLowerCase().includes(t)
-    || (r.call_number || '').toLowerCase().includes(t);
+    || effectiveCallNumber(r).toLowerCase().includes(t);
 }
 /* Връща { rows, label, limited } — редовете за печат, човешкото описание на
    диапазона и дали изобщо е ограничаван. Празно/непопълнено поле не ограничава
@@ -528,6 +536,18 @@ async function invBookPrintRange() {
     q: d.useQuery ? INVBOOK_QUERY : '' });
 }
 window.invBookPrintRange = invBookPrintRange;
+/* Един ред от разпечатката — изнесен, за да може между редовете да се вмъкнат
+   празните места в поредицата (П8, v2.4.69). */
+function invBookPrintRow(r) {
+  const qtyOf = (x) => (x.quantity == null ? 1 : Number(x.quantity) || 0);
+  return `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
+      <td>${invBookChecksText(r.checks)}</td>
+      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
+      <td>${esc(r.year || '')}</td><td>${qtyOf(r)}</td><td>${mny(r.price)}</td>
+      <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(effectiveCallNumber(r))}</td>
+      <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td>
+      <td>${esc(r.status || '')}</td><td>${esc(r.description || '')}</td></tr>`;
+}
 async function printInvBookDoc(range) {
   // Пълният списък се тегли винаги (в прозоречен режим — от базата); диапазонът
   // се прилага след това, за да е сигурно, че печатът никога не зависи от това
@@ -603,7 +623,59 @@ async function printInvBookDoc(range) {
      няма. Виж обяснението при самата функция: инвентарната книга и КДБФ броят
      по различен ключ и разликата трябва да е написана на меродавния документ. */
   const undatedNote = invBookUndatedNote(invBookSummaryOf(rows));
-  setPrintPage({ name: `Инвентарна книга — ${bg(today())}`, landscape: true, margin: '10mm' });
+  /* ПРАЗНИТЕ МЕСТА В ПОРЕДИЦАТА — НА ХАРТИЯ, НА МЯСТОТО СИ (v2.4.69, кръг 44, П8).
+     (а) Дотук прескочените (№ 6–10) и изтритите (№ 13) номера просто ги нямаше на
+         листа — след № 5 идваше № 11 без дума, макар дневникът да ги пази.
+     (б) Листът се прошнурова и заверява (чл. 26, ал. 2), а при проверка по
+         чл. 17, ал. 2 за всеки номер от поредицата трябва да има отговор; лист с
+         дупка без обяснение изглежда като лист с изрязани редове.
+     (в) Интервалите и обясненията им идват от обработчика (books:invGaps — по
+         целия регистър, с датата от дневника); тук се вмъква ред на мястото,
+         където номерата биха стояли, и в края се казва колко са. При диапазон се
+         показват само празните места МЕЖДУ отпечатаните редове. */
+  const gaps = (await call(window.api.books.invGaps())) || [];
+  const gapText = (g) => {
+    const nos = g.from === g.to ? '№ ' + g.from : '№ ' + g.from + ' – ' + g.to;
+    const cnt = g.to - g.from + 1;
+    if (g.why === 'изтрит') {
+      return `${nos} — ИЗТРИТ${g.ts ? ' на ' + bg(g.ts) + ' г.' : ''}${g.title ? ' („' + esc(g.title) + '“)' : ''};
+        следата е в дневника („Изтрит документ“). Номерът не се използва повторно.`;
+    }
+    if (g.why === 'прескочен') {
+      return `${nos} — НЕИЗПОЛЗВАН${cnt === 1 ? '' : 'И'} (${cnt === 1 ? 'прескочен' : 'прескочени'}${g.ts ? ' на ' + bg(g.ts) + ' г.' : ''}
+        при ръчно въведен по-голям номер; следата е в дневника — „Прескочени инвентарни номера“). По ${cnt === 1 ? 'него' : 'тях'} няма вписан документ.`;
+    }
+    return `${nos} — НЕИЗПОЛЗВАН${cnt === 1 ? '' : 'И'} в тази инвентарна книга (${cnt.toLocaleString('bg-BG')}
+      ${cnt === 1 ? 'номер' : 'номера'}; дневникът на програмата няма следа — обичайно внос на стар опис или номерация,
+      продължена от предишна книга).`;
+  };
+  let gapRowsShown = 0, gapNosShown = 0;
+  const bodyRows = [];
+  let prevInv = null;
+  const gapCells = '<td colspan="12" style="font-style:italic">';
+  /* Редовете и интервалите са подредени по номер — един показалец, не двоен
+     цикъл (15 000 реда × стотици интервали биха се усетили при печат). */
+  const gapsSorted = gaps.slice().sort((a, b) => a.from - b.from);
+  let gi = 0;
+  for (const r of rows) {
+    const n = r.inv_number == null ? null : Number(r.inv_number);
+    if (n != null) {
+      while (gi < gapsSorted.length && gapsSorted[gi].to < n) {
+        const g = gapsSorted[gi++];
+        if (prevInv != null && g.from > prevInv) {
+          bodyRows.push(`<tr class="ibGap">${gapCells}${gapText(g)}</td></tr>`);
+          gapRowsShown++; gapNosShown += g.to - g.from + 1;
+        }
+      }
+      prevInv = n;
+    }
+    bodyRows.push(invBookPrintRow(r));
+  }
+  /* Името на PDF-а — по ОТПЕЧАТАНОТО, не по днешната дата (v2.4.69, находка Е10).
+     Дотук всеки печат се казваше „Инвентарна книга — 26.09.2026“, каквато и година
+     да е избрана; в папката с разпечатките годините не можеха да се различат. */
+  setPrintPage({ name: 'Инвентарна книга — ' + (sel.limited ? sel.label : 'цялата книга към ' + bg(today())),
+    landscape: true, margin: '10mm' });
   doPrint(`<div class="pdoc">${shead()}
     <h2>ИНВЕНТАРНА КНИГА</h2>
     <div class="pmeta">Приложение № 4 към чл. 16, ал. 1 от Наредба № 3 от 18.11.2014 г.<br>
@@ -641,16 +713,13 @@ async function printInvBookDoc(range) {
     ${undatedNote ? `<div class="pmeta">${undatedNote}</div>` : ''}
     <table><thead><tr><th>Дата</th><th>Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Бр.</th><th>Цена</th>
     <th>№/дата в КДБФ</th><th>Сигнатура</th><th>№/дата на акт</th><th>Състояние</th><th>Забележка</th></tr></thead><tbody>
-    ${rows.map(r => `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
-      <td>${invBookChecksText(r.checks)}</td>
-      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
-      <td>${esc(r.year || '')}</td><td>${qtyOf(r)}</td><td>${mny(r.price)}</td>
-      <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(r.call_number || '')}</td>
-      <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td>
-      <td>${esc(r.status || '')}</td><td>${esc(r.description || '')}</td></tr>`).join('')}
+    ${bodyRows.join('')}
     </tbody></table>
     <div class="pmeta">Настоящата разпечатка съдържа ${rows.length} вписвания${
       sel.limited ? ` от избрания диапазон (${esc(sel.label)}) и НЕ е пълната инвентарна книга` : ''}.
+    ${gapRowsShown ? `Празни места в поредицата между отпечатаните номера: ${gapNosShown.toLocaleString('bg-BG')}
+      ${gapNosShown === 1 ? 'номер' : 'номера'} в ${gapRowsShown} ${gapRowsShown === 1 ? 'интервал' : 'интервала'} —
+      всеки е вписан на мястото си в таблицата с обяснението от дневника.` : ''}
     Листовете се прошнуроват, номерират, подпечатват и
     заверяват с подписа на ръководителя (чл. 26, ал. 2).</div>
     ${ssig(['Библиотекар: ' + esc((SETTINGS_CACHE || {}).librarian || '…………………'), esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': ' + esc((SETTINGS_CACHE || {}).director || '…………………')])}</div>`);

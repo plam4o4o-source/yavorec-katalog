@@ -2,7 +2,7 @@
 // модул (Фаза 4, стъпка 18). amount > 0 = начислено (дължи се), amount < 0 =
 // платено. Балансът е SUM(amount). Не е касов модул — само дневник на
 // движенията + квитанция за печат.
-const { LOST_CHARGE_TYPE } = require('../db/enum-triggers');
+const { LOST_CHARGE_TYPE, LATE_FEE_CHARGE_TYPE } = require('../db/enum-triggers');
 
 /* Балансът се закръгля до стотинки, преди да излезе оттук. Сумите се пазят
    като REAL и 1.10+1.10+1.10−3.30 дава 4.44e-16, а не 0 — платената докрай
@@ -73,7 +73,11 @@ function chargeOverdueFine(db, { reader_id, amount, date, note }) {
   // в сметката — той изглежда като задължение и мърси картона.
   if (!amt) return null;
   const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(reader_id, date, 'начисление', 'обезщетение', amt, note || null);
+    /* Видът е ЗАБАВА, не „обезщетение“ (v2.4.69) — виж LATE_FEE_CHARGE_TYPE в
+       db/enum-triggers.js: по вида се решава кое е платено, а „обезщетение“ се
+       ползва и за ръчни начисления (повредена корица), които нямат нищо общо със
+       забавата и не бива да „изяждат“ плащането ѝ. */
+    .run(reader_id, date, 'начисление', LATE_FEE_CHARGE_TYPE, amt, note || null);
   return { id: info.lastInsertRowid, amount: amt };
 }
 
@@ -158,6 +162,29 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
          0.004 лв. минаваше и се записваше ред от 0.00 лв. */
       const amt = toCents(raw);
       if (!amt) throw new Error('Сумата трябва да е положителна (поне 0.01 €).');
+      /* ЗАБАВАТА И ОБЕЗЩЕТЕНИЕТО ЗА ИЗГУБЕН ДОКУМЕНТ НЕ СЕ НАЧИСЛЯВАТ НА РЪКА
+         (v2.4.69, находка Г2).
+         (а) От v2.4.69 забавата има собствен вид („забава“), и точно по него
+             „Просрочени“, писмото по чл. 43 и SMS-ът решават колко от нея е
+             платено. Ръчен ред „забава“ от „Друго начисление“ не е свързан с
+             нито едно заемане: той би се сметнал за забава по просрочените
+             документи и би „изял“ заварената забава в loans.fine (виж
+             unpaidForRows в handlers/loans.js) — обратният вариант на
+             дефекта, който видът поправя.
+         (б) Двата вида се пишат от програмата — забавата при връщане,
+             продължение и „изгубен“ (chargeOverdueFine), обезщетението за
+             изгубен документ — от „Изгубена“ (chargeLost), където редът се
+             свързва с документа и после с акта по чл. 30, т. 5.
+         (в) Отказът казва откъде се прави всяко от двете. Ръчното
+             „обезщетение“ (повредена корица, изгубен картон) си остава. */
+      if (type === LATE_FEE_CHARGE_TYPE || type === LOST_CHARGE_TYPE) {
+        throw new Error(type === LATE_FEE_CHARGE_TYPE
+          ? 'Забавата се начислява от програмата — при връщане, продължение или „Изгубена“ на просрочения документ, '
+            + 'за да е свързана със заемането и да се приспада вярно в писмото по чл. 43. За повреда или друго '
+            + 'обезщетение изберете вид „обезщетение“. Нищо не е начислено.'
+          : 'Обезщетението за изгубен документ се начислява от бутона „Изгубена“ до заемането — така редът '
+            + 'се свързва с документа и с акта по чл. 30, т. 5. Нищо не е начислено.');
+      }
       const info = db.prepare('INSERT INTO account_lines (reader_id, date, kind, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)')
         .run(reader_id, date || today(), 'начисление', type || 'друго', amt, note || null);
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(reader_id);
@@ -211,6 +238,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
    не регистрира нищо повторно — модулът вече е в кеша на Node и се взима
    готов. */
 module.exports.LOST_CHARGE_TYPE = LOST_CHARGE_TYPE;
+module.exports.LATE_FEE_CHARGE_TYPE = LATE_FEE_CHARGE_TYPE;
 module.exports.chargeLost = chargeLost;
 module.exports.chargeOverdueFine = chargeOverdueFine;
 module.exports.chargeCoverage = chargeCoverage;

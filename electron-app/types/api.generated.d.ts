@@ -149,6 +149,10 @@ interface InvLibApi {
     deaccessionedWithoutAct: InvLibInvoke;
     /** канал „books:clearOrphanDeaccession“ */
     clearOrphanDeaccession: InvLibInvoke;
+    /** канал „books:byIsbn“ */
+    byIsbn: InvLibInvoke;
+    /** канал „books:invGaps“ */
+    invGaps: InvLibInvoke;
   };
   isbn: {
     /** канал „isbn:lookup“ */
@@ -439,6 +443,8 @@ interface InvLibApi {
     update: InvLibInvoke;
     /** канал „mzs:delete“ */
     delete: InvLibInvoke;
+    /** канал „mzs:overdue“ */
+    overdue: InvLibInvoke;
   };
   analytics: {
     /** канал „analytics:list“ */

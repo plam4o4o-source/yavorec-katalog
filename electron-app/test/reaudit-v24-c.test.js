@@ -124,10 +124,14 @@ test('labelCount(): продукционния изход на lblCard() (гол
   const html3 = window.lblCard({ inv_number: 1, barcode: '1' }) +
     window.lblCard({ inv_number: 2, barcode: '2' }) +
     window.lblCard({ inv_number: 3, barcode: '3' });
-  // Санитарна проверка: lblCard() наистина произвежда гол `class="lbl">`
-  // (без интервал/втора дума), точно граничният случай от одита.
-  assert.match(html3, /<div class="lbl">/);
+  // Санитарна проверка. v2.4.69 (кръг 44, Е3) — НАРОЧНА ПРОМЯНА: lblCard() вече
+  // носи втори клас (`class="lbl lbl-fund"` — по него се мащабира заглавната част,
+  // без да се пипат сигнатурните етикети и картите). Граничният случай от одита —
+  // гол `class="lbl">` — остава покрит отделно по-долу със синтетичен низ.
+  assert.match(html3, /<div class="lbl lbl-fund">/);
   assert.equal(window.labelCount(html3), 3);
+  assert.equal(window.labelCount('<div class="lbl">1</div><div class="lbl">2</div>'), 2,
+    'голият class="lbl" също се брои');
 });
 
 test('labelCount(): трите реални генератора (lblCard/sigLblCard/readerCardHtml), конкатенирани — какъвто е реалният път през printLabelSheet()', async () => {

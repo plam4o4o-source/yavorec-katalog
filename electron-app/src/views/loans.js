@@ -117,6 +117,18 @@ async function renderCirc() {
         съгласието за обработване на лични данни се дава от него, не от детето, и заемане не се допуска.
         Отбележете го в картона, с датата, на която родителят се е подписал.
         <button class="btn sm" style="margin-left:8px" onclick="readerForm(${r.id})">Отвори картона</button></div>` : ''}
+      ${/* ИЗТЕКЛА РЕГИСТРАЦИЯ (v2.4.69, находка Г10). Гишето мълчеше за
+            читател, регистриран или пререгистриран преди повече от година —
+            проба: регистрация, изтекла преди 400 дни, без дума. Таблото ги брои
+            („Дължими пререгистрации“), но библиотекарката е с читателя пред
+            себе си ТУК, и точно тук е моментът да го пререгистрира.
+            Заемането НЕ се спира — регистрацията по чл. 42 е годишна, но
+            пререгистрацията е работа на гишето, не пречка; бутонът отваря
+            картона, където се вписва датата. */''}
+      ${circRegExpired(r) ? `<div class="note w">📅 Регистрацията е изтекла на <b>${bg(circRegExpired(r))}</b>
+        (${r.re_registered_at ? 'последна пререгистрация ' + bg(r.re_registered_at) : 'записан ' + bg(r.registered_at)}) —
+        пререгистрирайте читателя: впишете днешната дата в полето „Пререгистрация“ в картона.
+        <button class="btn sm" style="margin-left:8px" onclick="readerForm(${r.id})">Отвори картона</button></div>` : ''}
       ${acc && acc.balance > 0 ? `<div class="hint">💰 Дължи по сметка: <b style="color:var(--red)">${mny(acc.balance)}</b></div>` : ''}
       ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
     const myHolds = (holdsAll || []).filter(h => h.reader_id === CIRC.readerId);
@@ -200,11 +212,90 @@ async function renderCirc() {
     bs.addEventListener('keydown', async e => {
       if (e.key !== 'Enter') return; e.preventDefault();
       const code = bs.value.trim(); bs.value = ''; if (!code) return;
-      const res = await window.api.loans.checkoutByCode({ reader_id: CIRC.readerId, code, date_out: today() });
+      const logLine = (cls, html) => { const lg = $('#outLog'); if (lg) lg.insertAdjacentHTML('afterbegin', `<div class="scanlog ${cls}">${html}</div>`); };
+      /* КАРТА НА ЧИТАТЕЛ В ПОЛЕТО ЗА ДОКУМЕНТИ (v2.4.69, находка Г1).
+         (а) КАКВО СТАВАШЕ ДОТУК. Кодът отиваше направо в заемането. В читалище,
+             което номерира картите 1, 2, 3…, а документите — също 1, 2, 3…,
+             следващият читател подава картата си № 5, библиотекарката я
+             сканира по навик в полето за документи — и инв. № 5 се заемаше на
+             ПРЕДИШНИЯ читател, със зелено известие и звук „ok“ (тестер № 2,
+             сценарий 3). Таблото вече предупреждаваше за такъв код, гишето — не.
+         (б) ЗАЩО Е ГРЕШНО. Документ, записан на човек, който не го е взел,
+             става просрочие, напомнително писмо по чл. 43 и обезщетение за
+             чужд човек — а книгата изобщо не е излязла от рафта.
+         (в) ЗАЩО ТОЧНО ТАКА. Преди заемането кодът се проверява и като карта
+             (същите два канала като на таблото, dashLookup). Само карта —
+             гишето минава на новия читател и го казва. И карта, и документ —
+             двусмислено: питаме първо дали да сменим читателя, после дали да
+             заемем, и при два отказа нищо не се записва. Картата на СЪЩИЯ
+             читател не заема нищо, ако не е и документ. */
+      const [rdRes, bkRes] = await Promise.all([window.api.readers.byCard(code), window.api.books.byBarcode(code)]);
+      const rd = rdRes && rdRes.ok ? rdRes.data : null;
+      const bk = bkRes && bkRes.ok ? bkRes.data : null;
+      const curName = circReader ? circReader.name : 'текущия читател';
+      if (rd && !bk) {
+        if (rd.id === CIRC.readerId) {
+          beep('err');
+          logLine('warn', `Кодът <b>${esc(code)}</b> е читателската карта на <b>${esc(rd.name)}</b>, който вече е избран — сканирайте баркода на документа. Нищо не е заето.`);
+          return;
+        }
+        toast('Сканирана е читателската карта на ' + rd.name + ' — гишето премина към него. Нищо не е заето на ' + curName + '.', 'ok');
+        selectCircReader(rd.id);
+        return;
+      }
+      if (rd && bk) {
+        const what = 'инв. № ' + (bk.inv_number ?? '—') + ' („' + (bk.title || '') + '“)';
+        if (rd.id !== CIRC.readerId && await askConfirm('Кодът „' + code + '“ е едновременно читателската карта на ' + rd.name
+            + ' и ' + what + '.\n\nДа премина ли към читателя ' + rd.name + '? (При отказ ще попитам дали да заема документа на '
+            + curName + '.)', { kind: 'ask', title: 'Карта или документ?', okLabel: 'Смени читателя', cancelLabel: 'Не — това е документ' })) {
+          toast('Гишето премина към ' + rd.name + '. Нищо не е заето на ' + curName + '.', 'ok');
+          selectCircReader(rd.id);
+          return;
+        }
+        if (!await askConfirm('Да заема ли ' + what + ' на ' + curName + '?'
+            + (rd.id === CIRC.readerId ? ' (Кодът е и читателската карта на самия ' + rd.name + '.)' : ''),
+            /* 'warn' — фокусът е на „Отказ“: следващото сканиране (Enter от
+               четеца) не бива да потвърди заемането по инерция. */
+            { kind: 'warn', title: 'Заемане', okLabel: 'Заеми' })) {
+          logLine('warn', `Кодът <b>${esc(code)}</b> — нищо не е заето.`);
+          return;
+        }
+      }
+      /* „ЛИПСВАЩ“ И „ЗА РЕСТАВРАЦИЯ“ (v2.4.69, находка Г4) — правилото е в
+         обработчика (checkoutStatusGate в handlers/loans.js); тук е въпросът.
+         „Липсващ“ се заема само ако библиотекарката потвърди, че е намерен —
+         тогава състоянието му става „наличен“. „За реставрация“ — само
+         предупреждение: решението да се даде е нейно. */
+      let found = false;
+      if (bk && bk.status === 'липсващ') {
+        found = await askConfirm('Инв. № ' + (bk.inv_number ?? '—') + ' („' + (bk.title || '') + '“) е отбелязан „липсващ“ — '
+          + 'не е намерен при инвентаризация.\n\nДокументът е намерен? Ако потвърдите, състоянието му става „наличен“ '
+          + '(вписва се в одитната следа) и заемането се записва.',
+          { kind: 'warn', title: 'Документът е намерен?', okLabel: 'Намерен е — заеми', cancelLabel: 'Отказ' });
+        if (!found) {
+          beep('err');
+          logLine('warn', `Инв. № ${esc(String(bk.inv_number ?? '—'))} не е зает — състоянието остава „липсващ“.`);
+          return;
+        }
+      } else if (bk && bk.status === 'за реставрация') {
+        if (!await askConfirm('Инв. № ' + (bk.inv_number ?? '—') + ' („' + (bk.title || '') + '“) е отбелязан „за реставрация“.\n\n'
+            + 'Да го заема ли въпреки това? Състоянието остава „за реставрация“ — ако документът е поправен, сменете го от „Книги“.',
+            { kind: 'warn', title: 'Документ за реставрация', okLabel: 'Заеми въпреки това' })) {
+          logLine('warn', `Инв. № ${esc(String(bk.inv_number ?? '—'))} не е зает — отбелязан е „за реставрация“.`);
+          return;
+        }
+      }
+      const res = await window.api.loans.checkoutByCode({ reader_id: CIRC.readerId, code, date_out: today(), found });
       const log = $('#outLog');
+      if (!log) return;   // междувременно гишето е пречертано (смяна на читателя)
       if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
       beep('ok');
       const l = res.data;
+      if (l.foundBack) {
+        logLine('ok', `Инв. № ${esc(String(l.inv_number ?? '—'))} беше „липсващ“ и е намерен — състоянието му е върнато на „наличен“.`);
+        toast('Инв. № ' + l.inv_number + ' беше „липсващ“ и е намерен — състоянието е върнато на „наличен“.', 'ok');
+      }
+      if (l.warning) { logLine('warn', esc(l.warning)); toast(l.warning, 'err'); }
       // v1.70.0: бутон за печат на разписка за заемане — по образец на
       // printReceiptLine() в account.js (квитанция за платена такса), но за
       // самото заемане, което дотогава нямаше никакъв печатен документ.
@@ -231,6 +322,19 @@ async function renderCirc() {
   }
 }
 function selectCircReader(id) { CIRC.readerId = id; CIRC.mode = 'out'; renderCirc(); }
+/* Денят, в който е изтекла годишната регистрация на читателя (ГГГГ-ММ-ДД), или
+   '' ако не е изтекла. Същата година, от която тръгва и „Дължими
+   пререгистрации“ на таблото (handlers/dashboard.js): последната от
+   пререгистрацията и записването + 1 година. Изтекла = преди днес. */
+function circRegExpired(r) {
+  const base = (r && (r.re_registered_at || r.registered_at)) || '';
+  if (!/^\d{4}-\d{2}-\d{2}/.test(base)) return '';
+  const d = new Date(base.slice(0, 10) + 'T12:00:00Z');
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  const end = d.toISOString().slice(0, 10);
+  return end < today() ? end : '';
+}
+window.circRegExpired = circRegExpired;
 window.selectCircReader = selectCircReader;
 
 /* Разписка за заемане (v1.70.0) — по образец на printReceiptLine() в
@@ -479,6 +583,12 @@ async function saveFoundLoan(id) {
       + ' — редът ОСТАВА в сметката на ' + (res.reader_name || 'читателя') + ' и се урежда от „Сметка“ в картона.', 'err');
   }
   if (res.fineLeft) toast('Начислената забава ' + mny(res.fineLeft) + ' остава дължима.', 'err');
+  /* Намереният документ е пак на рафта — ако някой го чака, той е повикан
+     (v2.4.69, loans:found) и библиотекарката трябва да го чуе ТУК. */
+  if (res.hold) {
+    toast('📌 Заделена за ' + res.hold.reader_name + (res.hold.phone ? ' (тел. ' + res.hold.phone + ')' : '')
+      + ' — не се връща на рафта!', 'err');
+  }
   if (VIEW === 'over') renderOver(true); else if (VIEW === 'circ') renderCirc(); else if (RENDERERS[VIEW]) RENDERERS[VIEW]();
 }
 window.saveFoundLoan = saveFoundLoan;
@@ -495,9 +605,14 @@ function lostPolicyDialog() {
       (вътрешни правила по чл. 43, ал. 2 от Наредба № 3). Наредбата не задава число — тук се записва
       решението на вашата библиотека и то се използва само като предложение.</div>
     <form id="lostPolF" onsubmit="return false">
-      ${fld('Кратност спрямо цената по инвентарната книга', 'multiplier', {
-        type: 'number', step: '0.1', min: 0, req: 1, val: p.multiplier ?? def.multiplier,
-        hint: 'например 3 = троен размер на цената' })}
+      ${/* ДЕСЕТИЧНА ЗАПЕТАЯ (v2.4.69, находка П1). Полето беше type="number":
+            Chromium с език bg-BG изпуска запетаята — „1,5“ ставаше 15, а
+            предложението за изгубена книга за 5 € — 75 € вместо 7,50 €.
+            decField (src/views/core.js) е общото лечение за десетичните числа,
+            които не са пари: текстово поле, „1,5“ → „1.5“ за обработчика. */''}
+      ${decField('Кратност спрямо цената по инвентарната книга', 'multiplier', {
+        min: 0, req: 1, val: p.multiplier ?? def.multiplier,
+        hint: 'например 3 = троен размер на цената, 1,5 = размер и половина' })}
       ${mnyField('За документ без вписана цена', 'fallback', { req: 1, min: 0, val: p.fallback ?? def.fallback })}
     </form>`,
     `<button class="btn" onclick="closeModal2()">Отказ</button>
@@ -505,6 +620,9 @@ function lostPolicyDialog() {
 }
 window.lostPolicyDialog = lostPolicyDialog;
 async function saveLostPolicy() {
+  // Невалиден текст в десетичното поле се казва с името на полето (П1, v2.4.69).
+  const bad = badDecimalField('#lostPolF');
+  if (bad) return toast('„' + bad.label + '“: „' + bad.value + '“ не е число. Напишете го с цифри, дробната част със запетая — например 1,5.', 'err');
   const d = formData('#lostPolF');
   const p = await call(window.api.loans.lostPolicySave({ multiplier: d.multiplier, fallback: d.fallback }), 'Правилото е записано.');
   if (!p) return;
@@ -559,9 +677,13 @@ async function circTodayPanel() {
       <span class="chip ${back ? 'ok' : ''}">${pl(back, 'връщане', 'връщания')}</span>
       ${rows.length >= 500 ? '<span class="chip" title="Одитната следа се чете до 500 реда назад">последните 500 записа</span>' : ''}
     </div>
-    <div class="hint" style="margin:-4px 0 8px">Броят се операциите, ВПИСАНИ днес на това работно място —
-      включително заемания и връщания със задна дата. Колко документа са заети на определена дата
-      показват „Дневник“ и годишният отчет.</div>
+    ${/* ЧЕСТЕН НАДПИС (v2.4.69, находка Г11). Дотук тук пишеше „на това работно
+          място“ — а числата идват от ОБЩАТА одитна следа на базата: при две
+          работни места към една база всяко вижда и заеманията на другото.
+          Надписът казва точно това, което се брои. */''}
+    <div class="hint" style="margin:-4px 0 8px">Броят се операциите, ВПИСАНИ днес в одитната следа на тази база —
+      от всички работни места, които я ползват, включително заемания и връщания със задна дата.
+      Колко документа са заети на определена дата показват „Дневник“ и годишният отчет.</div>
     ${ops.length ? `<div class="circOps">${ops.slice(0, 8).map(r => `<div class="circOp">
         <span class="num">${r.at.time}</span>
         <span class="badge ${r.action === 'Заемане' ? 'ok' : ''}">${r.action === 'Заемане' ? 'заемане' : 'връщане'}</span>

@@ -310,6 +310,23 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
      Редът с book_id IS NULL (изтрит картон — ON DELETE SET NULL) СЕ ВРЪЩА, но без
      инвентарен номер: за интерфейса той е „неинвентирана година“ и бутонът отново
      работи. Виж дългата бележка в db/schema.sql защо връзката е SET NULL. */
+  /* ГОДИНАТА НА КОМПЛЕКТА, НЕ ГОДИНАТА НА ПОСТЪПВАНЕ (v2.4.69, Л2).
+     =====================================================================
+     ДОТУК всеки брой се слагаше в годишния комплект по `substr(i.date, 1, 4)`,
+     а `date` е ДАТАТА НА ПОСТЪПВАНЕ. Измерено (тестер № 6, s3-periodika.js):
+     бр. 250 на „Труд“ от 31.12.2025, получен на 03.01.2026, влизаше в
+     комплекта за 2026 г. — с цената си, — а комплектът за 2025 г. оставаше с
+     един брой по-малко. При ежедневник това става ВСЕКИ януари, а сборът на
+     годината е цената на комплекта в инвентарната книга (чл. 16) и в КДБФ.
+     Физически броят е подвързан с 2025 г. — регистърът трябва да казва същото.
+     Миграция 18 (main.js) добави `volume_year` и попълни заварените с годината
+     на датата — тоест за старите данни нищо не се мести. Новите броеве носят
+     годината, избрана във формата (по подразбиране — годината на датата).
+     COALESCE пази реда, ако някой ред все пак е без `volume_year` (внос от стар
+     файл, второ работно място на стара версия): тогава важи старото четене.
+     Изразът е ЕДИН и се ползва навсякъде, където броеве се групират по година:
+     годишните комплекти, изборът на година в кардекса, инвентирането, триенето. */
+  const VOL_YEAR = "COALESCE(CAST(i.volume_year AS TEXT), substr(i.date, 1, 4))";
   function volumeRows(db, periodicalId, title) {
     ensureVolumesTable(db);
     /* ПРИЗРАЧНАТА ГОДИНА СЕ ЧИСТИ (одит v2.4.61, находка 8).
@@ -343,15 +360,15 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     return db.prepare(`
       SELECT y.year AS year,
              (SELECT COUNT(*) FROM periodical_issues i
-               WHERE i.periodical_id = @pid AND substr(i.date, 1, 4) = y.year) AS issue_count,
+               WHERE i.periodical_id = @pid AND ${VOL_YEAR} = y.year) AS issue_count,
              (SELECT COALESCE(SUM(i.price), 0) FROM periodical_issues i
-               WHERE i.periodical_id = @pid AND substr(i.date, 1, 4) = y.year) AS issue_sum,
+               WHERE i.periodical_id = @pid AND ${VOL_YEAR} = y.year) AS issue_sum,
              v.id AS volume_id, v.book_id, v.issue_count AS registered_issue_count,
              b.inv_number, b.register_date, b.price AS volume_price, b.status,
              b.deaccession_date, a.no AS acq_no, a.year AS acq_year
       FROM (
-        SELECT DISTINCT substr(i.date, 1, 4) AS year FROM periodical_issues i
-          WHERE i.periodical_id = @pid AND i.date IS NOT NULL AND i.date <> ''
+        SELECT DISTINCT ${VOL_YEAR} AS year FROM periodical_issues i
+          WHERE i.periodical_id = @pid AND (i.volume_year IS NOT NULL OR (i.date IS NOT NULL AND i.date <> ''))
         UNION
         SELECT year FROM periodical_volumes WHERE periodical_id = @pid
       ) y
@@ -425,7 +442,8 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
      `issue_total`/`issue_years` се връщат винаги, за да може прозорецът да каже
      „показани N от M“ — числото М е това, което дотук се чертаеше. */
   const YEAR_ALL = 'всички';
-  const issueYearExpr = "COALESCE(NULLIF(substr(i.date, 1, 4), ''), '—')";
+  // Годината на КОМПЛЕКТА (v2.4.69, Л2 — виж VOL_YEAR по-горе), не на постъпването.
+  const issueYearExpr = "COALESCE(CAST(i.volume_year AS TEXT), NULLIF(substr(i.date, 1, 4), ''), '—')";
   function resolveIssueYear(db, id, asked) {
     const years = db.prepare(`SELECT ${issueYearExpr} AS year, COUNT(*) AS n
       FROM periodical_issues i WHERE i.periodical_id = ? GROUP BY 1 ORDER BY 1 DESC`).all(id);
@@ -630,6 +648,26 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
          човешки език какво е станало; индексът е, защото двете работни места не се
          виждат едно друго. Двоен брой с РАЗЛИЧНА дата (притурка, второ издание на
          същия номер) минава — той наистина е друг физически брой. */
+      /* ГОДИНАТА НА КОМПЛЕКТА (v2.4.69, Л2 — виж VOL_YEAR по-горе).
+         По подразбиране — годината на датата на постъпване. Формата предлага и
+         предходната (брой от края на декември, получен през януари) и следващата
+         (януарският брой на месечник, получен през декември). По-далеч от това
+         е печатна грешка, а не случай от практиката — и би сложила броя и цената
+         му в чужд годишен комплект в инвентарната книга. */
+      const dateYear = parseInt(date.slice(0, 4), 10);
+      const vyRaw = issue.volume_year == null ? '' : String(issue.volume_year).trim();
+      let volumeYear = dateYear;
+      if (vyRaw !== '') {
+        if (!/^\d{4}$/.test(vyRaw)) {
+          throw new Error('Годината на комплекта („' + vyRaw + '“) трябва да е четирицифрена година, напр. ' + dateYear + '.');
+        }
+        volumeYear = parseInt(vyRaw, 10);
+        if (Math.abs(volumeYear - dateYear) > 1) {
+          throw new Error('Брой, постъпил на ' + date + ', не може да е от комплекта за ' + volumeYear + ' г. — '
+            + 'допустими са ' + (dateYear - 1) + ', ' + dateYear + ' и ' + (dateYear + 1) + ' г. '
+            + 'Проверете годината на комплекта или датата на постъпване.');
+        }
+      }
       const dup = db.prepare('SELECT id FROM periodical_issues WHERE periodical_id = ? AND issue_no = ? AND date = ?')
         .get(issue.periodical_id, issueNo, date);
       if (dup) {
@@ -638,10 +676,12 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
           + 'втори ред би завишил сбора за годината, а той става цена на годишния комплект в инвентарната книга.');
       }
       const info = db.prepare(`
-        INSERT INTO periodical_issues (periodical_id, issue_no, date, price, note)
-        VALUES (@periodical_id, @issue_no, @date, @price, @note)
-      `).run({ periodical_id: issue.periodical_id, issue_no: issueNo, date, price, note: issue.note || null });
-      logAudit('Постъпил брой', per.title + ' — бр. ' + issueNo);
+        INSERT INTO periodical_issues (periodical_id, issue_no, date, price, note, volume_year)
+        VALUES (@periodical_id, @issue_no, @date, @price, @note, @volume_year)
+      `).run({ periodical_id: issue.periodical_id, issue_no: issueNo, date, price, note: issue.note || null,
+        volume_year: volumeYear });
+      logAudit('Постъпил брой', per.title + ' — бр. ' + issueNo
+        + (volumeYear !== dateYear ? ' (постъпил на ' + date + ', за комплекта за ' + volumeYear + ' г.)' : ''));
       return info.lastInsertRowid;
     })
   );
@@ -649,15 +689,16 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       ensureVolumesTable(db);
-      const row = db.prepare(`SELECT i.issue_no, i.date, i.price, i.periodical_id, p.title FROM periodical_issues i
-        LEFT JOIN periodicals p ON p.id = i.periodical_id WHERE i.id = ?`).get(id);
+      const row = db.prepare(`SELECT i.issue_no, i.date, i.price, i.periodical_id, p.title, ${VOL_YEAR} AS vol_year
+        FROM periodical_issues i LEFT JOIN periodicals p ON p.id = i.periodical_id WHERE i.id = ?`).get(id);
       if (!row) throw new Error('Броят вече не съществува — вероятно е изтрит от друго работно място.');
       /* Годината на броя се чете ПРЕДИ триенето и влиза в следата отделно от
          датата. Дотук следата пишеше само „бр. 5 от 2025-03-14“ — при проверка
          въпросът обаче е ЗА КОЯ ГОДИШНИНА липсва брой, защото по година се
          подвързва комплектът и по година се отчита фондът; а след триенето реда го
          няма и годината не може да се извади отникъде. */
-      const year = row.date ? String(row.date).slice(0, 4) : null;
+      // Годината на КОМПЛЕКТА на броя (v2.4.69, Л2), не на постъпването му.
+      const year = row.vol_year ? String(row.vol_year) : null;
       /* И най-важното: ако годината вече е ИНВЕНТИРАНА, този брой е физическа част
          от подвързан библиотечен документ с инвентарен номер. Триенето му не се
          отказва — сгрешено вписване трябва да може да се поправи, — но следата
@@ -773,8 +814,9 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
         }
 
         // --- Цена ---
-        const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(price), 0) AS s
-          FROM periodical_issues WHERE periodical_id = ? AND substr(date, 1, 4) = ?`).get(p.id, year);
+        // Броевете на КОМПЛЕКТА за годината (v2.4.69, Л2 — виж VOL_YEAR), не постъпилите през нея.
+        const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(i.price), 0) AS s
+          FROM periodical_issues i WHERE i.periodical_id = ? AND ${VOL_YEAR} = ?`).get(p.id, year);
         /* Празно поле → сборът от цените на вписаните броеве. Това е обичайният
            случай и е и най-верният: стойността на комплекта Е сборът на платените
            броеве. Ръчната стойност остава възможна, защото фактурата за абонамент

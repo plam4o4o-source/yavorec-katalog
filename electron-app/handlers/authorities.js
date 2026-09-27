@@ -200,6 +200,20 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
       const stmt = db.prepare(`UPDATE books SET ${field} = ? WHERE ${field} = ?`);
       let changed = 0;
       db.transaction(() => { for (const v of list) changed += stmt.run(target, v).changes; }).immediate();
+      /* СЛИВАНЕТО СТИГА И ДО ОНЛАЙН КАТАЛОГА (v2.4.69, кръг 44, К2).
+         (а) Дотук сливането сменяше автора/издателството/отдела на десетки
+             документи, а katalog.json оставаше със старите стойности до
+             следващата случайна редакция — тестер № 5: след „Вазов, Иван“ →
+             „Вазов, Иван Минчов“ файлът не се промени за 6 секунди, в него
+             остана „Вазов, Иван“.
+         (б) Сайтът тогава показва двама автори там, където каталогът вече има
+             един, и търсене по новото име не намира книгите.
+         (в) Насрочва се същият отложен запис, който пуска всяка редакция на
+             книга (4 секунди, по „фондовата“ скорост). Само ако нещо наистина се
+             е променило. Зависимостта е незадължителна: main.js трябва да подаде
+             scheduleCatalogWrite (виж доклада на кръга); тестовите обвръзки
+             без нея продължават без каталог. */
+      if (changed > 0 && typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite();
       logAudit('Авторитетни данни', `${AUTHORITY_FIELDS[field]}: ${list.length === 1 ? '1 стойност слята' : list.length + ' стойности слети'} в „${target}“ (${changed === 1 ? '1 документ' : changed + ' документа'})`);
       return { changed, merged: list.length };
     })

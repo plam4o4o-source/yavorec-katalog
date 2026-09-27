@@ -96,15 +96,20 @@ test('mzs:update modifies fields and logs an audit entry', async () => {
   const { db, ipcMain, auditLog } = setup();
   const id = (await ipcMain.invoke('mzs:create', { no: 1, date: '2026-08-02', partner: 'X', title: 'Оригинал' })).data;
   auditLog.length = 0;
-  await ipcMain.invoke('mzs:update', {
+  /* v2.4.69 (кръг 44, К8): „заявено“ → „получено“ вече е прескачане и се
+     отказва, а входяща заявка в „изпратено“ иска наш документ. Тук се
+     проверява редакцията на полетата, затова състоянието е следващата
+     позволена стъпка — „отказано“, — а следата добавя и прехода. */
+  const res = await ipcMain.invoke('mzs:update', {
     id, no: 1, direction: 'входящо', partner: 'Нов партньор', author: null, title: 'Оригинал',
-    isbn: null, requester: null, status: 'получено', due_date: null, note: null
+    isbn: null, requester: null, status: 'отказано', due_date: null, note: null
   });
+  assert.equal(res.ok, true, res.error);
   const row = db.prepare('SELECT direction, partner, status FROM mzs_requests WHERE id = ?').get(id);
   assert.equal(row.direction, 'входящо');
   assert.equal(row.partner, 'Нов партньор');
-  assert.equal(row.status, 'получено');
-  assert.equal(auditLog[0].detail, '№ 1 — Оригинал');
+  assert.equal(row.status, 'отказано');
+  assert.equal(auditLog[0].detail, '№ 1 — Оригинал; състояние „заявено“ → „отказано“');
 });
 
 test('mzs:delete removes the row', async () => {

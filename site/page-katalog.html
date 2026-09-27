@@ -178,8 +178,13 @@
 /* ---------- Карта на записа (собствен слой) ---------- */
 .kat-veil{position:fixed;inset:0;background:rgba(26,18,8,.42);z-index:9998;opacity:0;pointer-events:none;transition:opacity .2s}
 .kat-veil.kat-on{opacity:1;pointer-events:auto}
-.kat-dr{position:fixed;top:0;right:0;bottom:0;width:min(580px,100%);background:#fff;z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;box-shadow:-20px 0 60px rgba(0,0,0,.25);transform:translateX(102%);transition:transform .24s cubic-bezier(.16,1,.3,1);font-family:'Jost','Raleway',sans-serif;font-weight:300;color:#1a1208}
-.kat-dr.kat-on{transform:none}
+/* К12 (v2.4.69): сянката е само на ОТВОРЕНАТА карта. Затворената стои на
+   translateX(102%) — извън екрана, но сянката ѝ (-20px 0 60px) стигаше 80px
+   наляво и оставяше сива ивица по десния край на всяка страница. visibility
+   се сменя след края на плъзгането, за да не се вижда и да не се стига до
+   нея с Tab, докато е затворена. */
+.kat-dr{position:fixed;top:0;right:0;bottom:0;width:min(580px,100%);background:#fff;z-index:9999;overflow-y:auto;-webkit-overflow-scrolling:touch;box-shadow:none;visibility:hidden;transform:translateX(102%);transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s,visibility 0s linear .24s;font-family:'Jost','Raleway',sans-serif;font-weight:300;color:#1a1208}
+.kat-dr.kat-on{transform:none;visibility:visible;box-shadow:-20px 0 60px rgba(0,0,0,.25);transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s,visibility 0s}
 .kat-dr *{box-sizing:border-box}
 .kat-dr-x{position:absolute;top:.7rem;right:.8rem;width:36px;height:36px;border:0;background:rgba(255,255,255,.7);font-size:1.6rem;line-height:1;color:var(--kat-ink2);cursor:pointer;border-radius:50%}
 .kat-dr-x:hover{background:#fff;color:#1a1208}
@@ -378,6 +383,9 @@ var FT_BASE="Народно читалище „Васил Левски – 1922
 var FT_POWEREDBY='<br><span class="kat-poweredby">Библиотечен софтуер: InvLib</span>';
 var D=[],LOG=[];
 var SHELVES=[],NEW_SET=null,NEW_DAYS=60;
+/* К9 (v2.4.69): „стойност на отдела → публичен надпис“ от katalog.json
+   (ключ departments). Празно при стар файл и при демо записите. */
+var DEPTS={};
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function $(id){return document.getElementById(id)}
 
@@ -462,7 +470,7 @@ async function boot(){
   catch(e){
     console.error('[каталог] стартирането пропадна:',e);
     try{
-      D=STATIC; SHELVES=[]; setupDynamic();
+      D=STATIC; SHELVES=[]; DEPTS={}; setupDynamic();
       finish(STATIC_GEN,'<br><span style="color:#a0522d">Каталогът не можа да се зареди '+
         '('+esc(e&&e.message?e.message:'неизвестна грешка')+') — показва се последно запазено копие.</span>'+diagHtml());
     }catch(e2){
@@ -478,13 +486,13 @@ async function bootInner(){
   if(j&&j.items&&j.__stale){
     /* Има кеш от по-раншен успешен fetch — показва се, но НЕ като живи данни:
        предупреждение с датата на кеша (j.generated) плюс диагностиката. */
-    D=j.items; SHELVES=(j.shelves||[]); setupDynamic();
+    D=j.items; SHELVES=(j.shelves||[]); DEPTS=(j.departments&&typeof j.departments==='object')?j.departments:{}; setupDynamic();
     var genStr=(j.generated||'').split('-').reverse().join('.');
     var whenTxt=genStr?(' от '+genStr):'';
     finish(genStr||'—','<br><span style="color:#a0522d">Показват се кеширани данни'+whenTxt+' — свързаност с живите източници не бе възможна.</span>'+diagHtml());
   }
-  else if(j&&j.items){ D=j.items; SHELVES=(j.shelves||[]); setupDynamic(); finish((j.generated||'').split('-').reverse().join('.'),''); }
-  else{ D=STATIC; SHELVES=[]; setupDynamic(); finish(STATIC_GEN,'<br><span style="color:#a0522d">Няма връзка към живите данни в момента — показва се последно запазено копие.</span>'+diagHtml()); }
+  else if(j&&j.items){ D=j.items; SHELVES=(j.shelves||[]); DEPTS=(j.departments&&typeof j.departments==='object')?j.departments:{}; setupDynamic(); finish((j.generated||'').split('-').reverse().join('.'),''); }
+  else{ D=STATIC; SHELVES=[]; DEPTS={}; setupDynamic(); finish(STATIC_GEN,'<br><span style="color:#a0522d">Няма връзка към живите данни в момента — показва се последно запазено копие.</span>'+diagHtml()); }
 }
 /* Малка, скрита по подразбиране диагностика — вижда се само когато нещо не е наред, за да може
    администраторът на сайта да разбере кой източник е отказал и защо, без да отваря конзолата. */
@@ -541,6 +549,18 @@ var TILES=[
   {t:'Аудио, видео и други носители',f:{vid:'!книга'},c:'n'}
 ];
 var HINTS=['Йовков','приказки','краезнание','речник'];
+/* ПЛОЧКИТЕ СЛЕДВАТ ПУБЛИЧНИЯ НАДПИС НА ОТДЕЛА (v2.4.69, кръг 44, К9).
+   (а) Плочките търсят отдела по вътрешното му име („за деца“). Щом библиотеката
+       му даде публичен надпис („Детски отдел“), в данните стои надписът,
+       плочката не намира нищо и изчезва — точно „Детски книги“.
+   (б) Публичният надпис е за по-хубав каталог, не за изчезнал раздел.
+   (в) Програмата изнася речник стойност → надпис (departments); плочката
+       превежда своя отдел през него. Без речник — както досега. */
+function tileFilter(t){
+  var f={};for(var k in t.f)f[k]=t.f[k];
+  if(f.otdel&&DEPTS&&DEPTS[f.otdel])f.otdel=DEPTS[f.otdel];
+  return f;
+}
 
 function groupKey(i){
   return String(i.t||'').trim().toLowerCase()+'|'+String(i.a||'').trim().toLowerCase();
@@ -556,12 +576,20 @@ function buildGroups(){
     if(!g){
       g={t:i.t||'',a:i.a||'',s:i.s||'',c:i.c||'',p:i.p||'',y:i.y||'',v:i.v||'',l:i.l||'',
          u:i.u||'',g:i.g||'',o:i.o||'',k:i.k||'',n:i.n||'',cv:i.cv||'',d:i.d||'',
-         cp:[],na:0,id:G.length};
+         cp:[],na:0,id:G.length,os:{},vs:{},_avPick:0};
       g.cls=clsOf(g.u);
       map[k]=g;G.push(g);
     }
     g.cp.push(i);
     if(i.av)g.na++;
+    /* К5 (v2.4.69): отделите и видовете на ВСИЧКИ екземпляри — филтрите и
+       плочките питат „има ли екземпляр в детския отдел“, не „в кой отдел е
+       първият“. */
+    g.os[i.o||'']=1; g.vs[i.v||'']=1;
+    /* Сигнатурата и отделът, които картата и редът показват („по нея се намира
+       на рафта“), са на първия НАЛИЧЕН екземпляр — не на първия изобщо, който
+       може да е заетият в друг отдел. */
+    if(i.av&&!g._avPick){g._avPick=1;g.g=i.g||'';g.o=i.o||'';}
     if(i.d&&i.d>g.d)g.d=i.d;             /* групата е „нова“ по най-скорошния екземпляр */
     if(!g.cv&&i.cv)g.cv=i.cv;
     BYINV[String(i.inv)]=g;
@@ -570,10 +598,33 @@ function buildGroups(){
      инвентарните номера (търсене по инв. № продължава да работи). */
   for(var m=0;m<G.length;m++){
     var q=G[m],parts=[q.a,q.t,q.s,q.k,q.u,q.p,q.c,q.y,q.n,q.g];
-    for(var z=0;z<q.cp.length;z++)parts.push(q.cp[z].inv);
+    for(var z=0;z<q.cp.length;z++){parts.push(q.cp[z].inv);if(q.cp[z].g)parts.push(q.cp[z].g);}
     q._s=parts.join(' ').toLowerCase();
+    q._k=skel(q._s);
   }
 }
+/* ТЪРСЕНЕ С ТРАНСЛИТЕРАЦИЯ (v2.4.69, кръг 44, К12).
+   (а) „vazov“ не намираше „Вазов“, „толкин“ — „Tolkien“, „хамлет“ — „Hamlet“:
+       търсенето сравняваше буква по буква, а читателите пишат на латиница от
+       телефон без кирилска клавиатура и на кирилица имена на чужди автори.
+   (б) Каталог, който не намира книгата по начина, по който читателят я пише,
+       казва „нямаме я“ за книга, която стои на рафта.
+   (в) Всеки текст се свежда до „скелет“ на латиница: кирилицата — по
+       обтекаемата система (Закон за транслитерацията), после няколко
+       изравнявания, които не сменят смисъла на думата при сравнение: w→v,
+       y/j→i, ie→i, ph→f, th→t, ck/c/q→k, x→ks, двойна буква → една. Думата от
+       търсенето се сравнява и дословно (както досега), и по скелет — тоест
+       нищо, което се намираше, не изчезва. */
+var TR={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sht','ъ':'a','ь':'y','ю':'yu','я':'ya','ё':'yo','э':'e','ы':'i'};
+function skel(s){
+  s=String(s==null?'':s).toLowerCase();
+  if(s.normalize)s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  s=s.replace(/[а-яёэы]/g,function(c){return TR[c]||c;});
+  return s.replace(/ph/g,'f').replace(/th/g,'t').replace(/ck/g,'k').replace(/kh/g,'h').replace(/x/g,'ks')
+    .replace(/w/g,'v').replace(/[cq]/g,'k').replace(/[yj]/g,'i').replace(/ie/g,'i')
+    .replace(/([a-z])\1+/g,'$1');
+}
+function wordHit(g,w,wk){return g._s.indexOf(w)>-1||(wk.length>1&&g._k.indexOf(wk)>-1);}
 
 /* ---------- дребни помощни ---------- */
 function fmtN(n){return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,' ');}
@@ -662,18 +713,23 @@ function setupDynamic(){
             .sort(function(a,b){return a.d<b.d?1:(a.d>b.d?-1:0);});
 
   /* Числа за фонда */
+  /* „НАЛИЧНИ СЕГА“ БРОИ ЕКЗЕМПЛЯРИ И ГО КАЗВА (v2.4.69, кръг 44, К10).
+     Дотук стоеше „13 800 екземпляра · 432 налични сега“, а второто число
+     броеше ЗАГЛАВИЯ с поне един наличен екземпляр — до екземплярите изглеждаше
+     като че ли 97% от фонда е зает. Сега се броят наличните екземпляри (както
+     „от тях налични“ в програмата) и думата го казва. */
   var av=0,cp=0;
-  G.forEach(function(g){cp+=g.cp.length;if(g.na)av++;});
+  G.forEach(function(g){cp+=g.cp.length;av+=g.na;});
   $('katStats').innerHTML=
-    '<span><b>'+fmtN(G.length)+'</b> заглавия</span>'+
-    '<span><b>'+fmtN(cp)+'</b> екземпляра</span>'+
-    '<span><b>'+fmtN(av)+'</b> налични сега</span>'+
+    '<span><b>'+fmtN(G.length)+'</b> '+(G.length===1?'заглавие':'заглавия')+'</span>'+
+    '<span><b>'+fmtN(cp)+'</b> '+(cp===1?'екземпляр':'екземпляра')+'</span>'+
+    '<span><b>'+fmtN(av)+'</b> '+(av===1?'наличен екземпляр':'налични екземпляра')+' сега</span>'+
     (news.length?'<span><b>'+fmtN(news.length)+'</b> нови</span>':'');
 
   /* Подсказки за търсене — само тези, които наистина дават резултат */
   $('katHints').innerHTML='<span>Опитайте:</span>'+HINTS.filter(function(w){
-    var lw=w.toLowerCase();
-    for(var i=0;i<G.length;i++)if(G[i]._s.indexOf(lw)>-1)return true;
+    var lw=w.toLowerCase(),lk=skel(lw);
+    for(var i=0;i<G.length;i++)if(wordHit(G[i],lw,lk))return true;
     return false;
   }).map(function(w){return '<button type="button" data-hint="'+esc(w)+'">'+esc(w)+'</button>';}).join('');
 
@@ -688,7 +744,7 @@ function setupDynamic(){
 
   /* Плочки на разделите */
   $('katTiles').innerHTML=TILES.map(function(t){
-    var n=matchList(t.f).length;
+    var n=matchList(tileFilter(t)).length;
     if(!n)return '';
     var c=t.c||(t.f.razdel?t.f.razdel.charAt(0):'0');
     return '<button type="button" class="kat-tile kat-c'+c+'" data-tile="'+esc(t.t)+'">'+
@@ -715,7 +771,10 @@ function setupDynamic(){
   var letters={},authors={};
   G.forEach(function(g){ if(g.a){authors[g.a]=1;letters[g.a.charAt(0).toUpperCase()]=1;} });
   $('katAbcN').textContent=pl(Object.keys(authors).length,'автор','автори');
-  $('katAbc').innerHTML='АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЮЯ'.split('').map(function(ch){
+  /* К12: латинските букви, с които наистина започва автор (Tolkien, Orwell), се
+     добавят след кирилицата — дотук такива автори бяха недостъпни от азбучника. */
+  var lat='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(function(ch){return letters[ch];});
+  $('katAbc').innerHTML='АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЮЯ'.split('').concat(lat).map(function(ch){
     return '<button type="button" data-abc="'+ch+'"'+(letters[ch]?'':' disabled')+
       ' aria-label="Автори на '+ch+'">'+ch+'</button>';
   }).join('');
@@ -755,6 +814,7 @@ function finish(gen,note){
 /* ---------- Филтриране ---------- */
 function matchList(f){
   var out=[],ws=f.q?String(f.q).toLowerCase().split(/\s+/).filter(Boolean):[];
+  var wks=ws.map(skel);
   var shelfSet=null;
   if(f.vitrina){
     if(f.vitrina==='__new__')shelfSet=NEW_SET;
@@ -767,10 +827,11 @@ function matchList(f){
   for(var i=0;i<G.length;i++){
     var g=G[i];
     if(f.samo&&!g.na)continue;
-    if(f.otdel&&g.o!==f.otdel)continue;
+    /* К5 (v2.4.69): по екземпляри, не по първия. */
+    if(f.otdel&&!g.os[f.otdel])continue;
     if(f.vid){
-      if(f.vid.charAt(0)==='!'){ if(g.v===f.vid.slice(1))continue; }
-      else if(g.v!==f.vid)continue;
+      if(f.vid.charAt(0)==='!'){ var nv=f.vid.slice(1),other=false; for(var vv in g.vs)if(vv!==nv){other=true;break;} if(!other)continue; }
+      else if(!g.vs[f.vid])continue;
     }
     if(f.razdel&&f.razdel.indexOf(g.cls)<0)continue;
     if(f.avtor&&(!g.a||g.a.charAt(0).toUpperCase()!==f.avtor))continue;
@@ -781,7 +842,7 @@ function matchList(f){
     }
     if(ws.length){
       var ok=true;
-      for(var w=0;w<ws.length;w++)if(g._s.indexOf(ws[w])<0){ok=false;break;}
+      for(var w=0;w<ws.length;w++)if(!wordHit(g,ws[w],wks[w])){ok=false;break;}
       if(!ok)continue;
     }
     out.push(g);
@@ -865,10 +926,12 @@ function run(){
 
   /* Лента с филтри: наличност, отдели (по броя), вид на документа */
   var deps={},depOrder=[];
-  noDep.forEach(function(g){var o=g.o||'—';if(!deps[o]){deps[o]=0;depOrder.push(o);}deps[o]++;});
+  /* К5: заглавие с екземпляри в два отдела се брои и в двата — чипът казва
+     колко заглавия ще покаже, когато го натиснеш. */
+  noDep.forEach(function(g){for(var oo in g.os){var o=oo||'—';if(!deps[o]){deps[o]=0;depOrder.push(o);}deps[o]++;}});
   depOrder.sort(function(a,b){return deps[b]-deps[a];});
   var vids={},vidOrder=[];
-  noVid.forEach(function(g){var v=g.v||'—';if(!vids[v]){vids[v]=0;vidOrder.push(v);}vids[v]++;});
+  noVid.forEach(function(g){for(var vv in g.vs){var v=vv||'—';if(!vids[v]){vids[v]=0;vidOrder.push(v);}vids[v]++;}});
   vidOrder.sort(function(a,b){return vids[b]-vids[a];});
 
   var h='<button type="button" class="kat-fchip'+(F.samo?' kat-fchip-on':'')+'" data-f="samo">само налични'+
@@ -1077,7 +1140,8 @@ document.addEventListener('click',function(e){
 
   if(el.hasAttribute('data-tile')){
     var tile=tileByName(el.getAttribute('data-tile'));if(!tile)return;
-    F={q:'',vid:tile.f.vid||'',otdel:tile.f.otdel||'',razdel:tile.f.razdel||'',avtor:'',samo:false};
+    var tf=tileFilter(tile);
+    F={q:'',vid:tf.vid||'',otdel:tf.otdel||'',razdel:tf.razdel||'',avtor:'',samo:false};
     SHELF='';FNAME=tile.t;$('katQ').value='';
     return showResults(true);
   }

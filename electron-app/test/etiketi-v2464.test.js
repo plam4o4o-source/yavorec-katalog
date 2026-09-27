@@ -130,6 +130,12 @@ function normalized(html) {
   return d.innerHTML;
 }
 const sheetHtml = () => h.$('#ppSheet').innerHTML;
+/* v2.4.69 (кръг 44, Е2/Е7) — НАРОЧНА ПРОМЯНА: листът вече се строи на изрични
+   страници (<div class="lblpage"> с точно колони × редове етикета и нов лист между
+   тях), за да падат етикетите в клетките на готовите листове и да няма празна
+   последна страница. Сравнението знак по знак остава — но на ЕТИКЕТИТЕ, в реда, в
+   който са на листа; обвивката на страниците се проверява в test/pechat-v2469. */
+const sheetLabels = () => Array.from(h.document.querySelectorAll('#ppSheet .lbl')).map(e => e.outerHTML).join('');
 function noRendererErrors() {
   const errs = h.errors.splice(0);
   assert.equal(errs.length, 0, 'грешки в екранния слой:\n'
@@ -147,7 +153,7 @@ test('1. „Етикети за фонда — диапазон“: листът
   await h.window.printLabelsRange();
   await h.settle();
 
-  assert.equal(sheetHtml(), normalized(`<div class="pdoc"><div class="lblsheet">${expected.html}</div></div>`),
+  assert.equal(sheetLabels(), normalized(expected.html),
     'отпечатаният лист се различава от листа по стария начин');
   assert.equal((sheetHtml().match(/<div class="lbl[ "]/g) || []).length, 10, 'броят етикети на листа');
 
@@ -166,7 +172,7 @@ test('2. „Етикети за фонда — всички“: същият л�
   await h.go('labels');
   await h.window.printLabelsAll();
   await h.settle();
-  assert.equal(sheetHtml(), normalized(`<div class="pdoc"><div class="lblsheet">${expected.html}</div></div>`),
+  assert.equal(sheetLabels(), normalized(expected.html),
     'листът „Всички“ се различава от листа по стария начин');
   assert.equal(expected.rows[0].inv_number, null,
     'редовете без инвентарен номер трябва да са първи — така ги нареждаше устойчивото сортиране');
@@ -186,7 +192,7 @@ test('3. Сигнатурните етикети (диапазон и всичк
     if (from != null) { h.type('[name=sigFrom]', String(from)); h.type('[name=sigTo]', String(to)); }
     await h.window[fn]();
     await h.settle();
-    assert.equal(sheetHtml(), normalized(`<div class="pdoc"><div class="lblsheet">${expected.html}</div></div>`),
+    assert.equal(sheetLabels(), normalized(expected.html),
       'сигнатурният лист (' + what + ') се различава от листа по стария начин');
     /* Документът без УДК и без авторски знак пак си казва защо е празен — това
        е единственото място, на което сигнатурният етикет проговаря. */

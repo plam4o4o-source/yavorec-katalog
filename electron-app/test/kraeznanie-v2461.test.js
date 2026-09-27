@@ -120,8 +120,17 @@ test('година „abc“ не влиза в летописа, а „ок. 19
 });
 
 test('персоналия: дата „12.03.1890“ и смърт преди раждане се отказват', async () => {
-  const { ipcMain } = setup();
-  assert.match(bad(await ipcMain.invoke('persons:create', { name: 'Невалидна дата', birth_date: '12.03.1890' }), 'дата не по ISO'),
+  const { ipcMain, db } = setup();
+  /* v2.4.69 (Л9): тук стоеше „12.03.1890 се отказва“. Полето за дата на раждане
+     вече е текстово (приема и само година — „1890“, „ок. 1890“), затова
+     българският изпис е ЗАКОНЕН вход и се превежда в ISO; отказва се онова,
+     което не е нито дата, нито година. Смисълът на теста (в базата не влиза
+     дата, която bg() после показва като безсмислица) остава. */
+  const pid = ok(await ipcMain.invoke('persons:create', { name: 'Български изпис', birth_date: '12.03.1890' }), 'дата по български');
+  assert.equal(db.prepare('SELECT birth_date FROM persons WHERE id = ?').get(pid).birth_date, '1890-03-12');
+  assert.match(bad(await ipcMain.invoke('persons:create', { name: 'Невалидна дата', birth_date: '31.02.1890' }), '31 февруари'),
+    /не е валидна дата на раждане/);
+  assert.match(bad(await ipcMain.invoke('persons:create', { name: 'Невалидна дата', birth_date: '24.0' }), '„24.0“'),
     /не е валидна дата на раждане/);
   assert.match(bad(await ipcMain.invoke('persons:create', { name: 'Обърнати дати', birth_date: '1950-01-01', death_date: '1940-01-01' }), 'смърт преди раждане'),
     /преди датата на раждане/);

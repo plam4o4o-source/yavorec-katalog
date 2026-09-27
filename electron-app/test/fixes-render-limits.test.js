@@ -520,9 +520,15 @@ test('Етикети за целия фонд: при съгласие низъ�
   await window.printLabelsAll();
   await settled();
   assert.equal(st.atConfirm, 0, 'пак първо въпросът');
-  assert.equal(st.calls, 600, 'а след съгласието — всичките 600 етикета');
+  /* v2.4.69 (кръг 44, Е4) — НАРОЧНА ПРОМЯНА: 600 етикета вече не са един документ,
+     а партиди от цели листове до 300 етикета (12 листа × 24 = 288), всяка отделен
+     документ — един документ с хиляди етикети не се подготвяше на обикновен
+     компютър (3 000 етикета — 56 s и 4 ГБ). Затова след съгласието се сглобява
+     САМО първата партида; следващата — след като тази е отпечатана. Същината на
+     теста остава: нищо не се строи преди въпроса, а след него — точно отпечатаното. */
+  assert.equal(st.calls, 288, 'а след съгласието — първата партида (12 листа по 24)');
   assert.match(window.document.getElementById('ppSheet').innerHTML, /lblsheet/);
-  assert.equal((window.document.getElementById('ppSheet').innerHTML.match(/<div class="lbl[ "]/g) || []).length, 600);
+  assert.equal((window.document.getElementById('ppSheet').innerHTML.match(/<div class="lbl[ "]/g) || []).length, 288);
 });
 
 test('Етикети със сигнатура и читателски карти минават по същия ред', async () => {

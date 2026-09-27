@@ -395,7 +395,9 @@ test('Книги (прозоречен режим): първата порция,
   assert.equal(calls().at(-1).dept, 'детски');
   assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
   assert.match(doc.querySelector('#bMore').textContent, /150 от общо 450/);
-  assert.ok([...doc.querySelectorAll('#bBody tr td:nth-child(6)')].every(td => td.textContent === 'детски'));
+  /* v2.4.69 (кръг 44, П4): колоната „Сигнатура“ след „Автор“ измести „Отдел“ на
+     седмо място в реда. Проверката е същата — всички показани са от „детски“. */
+  assert.ok([...doc.querySelectorAll('#bBody tr td:nth-child(7)')].every(td => td.textContent === 'детски'));
   // Избери всички → idsOnly, изборът е целият резултат (450), не само видимите 300
   await window.toggleBookSelAll(true); await settle();
   assert.ok(calls().some(p => p.idsOnly && p.dept === 'детски'));

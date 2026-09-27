@@ -303,6 +303,8 @@ async function saveAnalytic(id) {
 window.saveAnalytic = saveAnalytic;
 async function analyticDelete(id) {
   if (!await askConfirm('Изтриване на това аналитично описание?')) return;
+  // v2.4.69 (Л13): вече изтритото описание е отказ — известието казва защо, а
+  // указателят се пречертава и тогава, за да изчезне редът, който вече го няма.
   await call(window.api.analytics.delete(id), 'Описанието е изтрито.');
   renderAnalytics();
 }

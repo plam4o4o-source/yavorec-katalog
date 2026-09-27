@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS account_lines (
   reader_id   INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
   date        TEXT NOT NULL,
   kind        TEXT NOT NULL,   -- начисление | плащане
-  type        TEXT,            -- годишна такса | обезщетение | друго | плащане
+  type        TEXT,            -- годишна такса | обезщетение | друго | плащане | забава (от v2.4.69)
                                -- ('плащане' се записва от account:pay в същата колона;
                                --  наборът се пази от тригер, виж db/enum-triggers.js)
   amount      REAL NOT NULL,
@@ -543,7 +543,13 @@ CREATE TABLE IF NOT EXISTS periodical_issues (
   issue_no      TEXT NOT NULL,
   date          TEXT,
   price         REAL DEFAULT 0,
-  note          TEXT
+  note          TEXT,
+  /* Годината на КОМПЛЕКТА, към който принадлежи броят (v2.4.69, находка Л2).
+     `date` е датата на ПОСТЪПВАНЕ: бр. 250 от 31.12.2025, получен на 03.01.2026,
+     принадлежи на комплекта за 2025, а групирането по substr(date,1,4) го
+     слагаше — заедно с цената му — в комплекта за 2026 г., и то в инвентарната
+     книга. Миграция 18 попълва заварените с годината на датата. */
+  volume_year   INTEGER
 );
 /* ЕДИН БРОЙ — ЕДИН РЕД (v2.4.61, находка 4 от одита).
    ===========================================================================
@@ -646,7 +652,18 @@ CREATE TABLE IF NOT EXISTS mzs_requests (
   requester   TEXT,
   status      TEXT DEFAULT 'заявено',
   due_date    TEXT,
-  note        TEXT
+  note        TEXT,
+  /* v2.4.69 (находки К6, К7, К8 от пълния тест): МЗС вече не е само регистър.
+     book_id — НАШ документ, изпратен по входяща заявка (докато е при другата
+     библиотека, не се заема и излиза „зает“ онлайн); reader_id — читателят, за
+     когото е изходящата заявка (заличаването по чл. 17 го намира по картата, а
+     не по дословното име); date_sent / date_received / date_returned — кога
+     заявката е минала през всяко състояние, за да се следи срокът. */
+  book_id       INTEGER REFERENCES books(id) ON DELETE SET NULL,
+  reader_id     INTEGER REFERENCES readers(id) ON DELETE SET NULL,
+  date_sent     TEXT,
+  date_received TEXT,
+  date_returned TEXT
 );
 
 -- Одитна следа — кой служител какво е извършил

@@ -29,6 +29,38 @@ function linkListHtml(links) {
     <td style="width:80px"><button class="btn sm dgr" onclick="lnkDel(${l.id}, '${jsq(l.to_kind + ': ' + l.label)}')">Махни</button></td>
   </tr>`).join('')}</tbody></table>`;
 }
+/* ОБРАТНИТЕ ВРЪЗКИ — „КОЙ СОЧИ КЪМ ТОЗИ ЗАПИС“ (v2.4.69, Л6).
+   =========================================================================
+   ДОТУК връзките се виждаха само в едната посока. Летописът за 1972 г. сочи
+   „Вълчев, Стефан“, а картонът на Вълчев казваше „Няма свързани материали“;
+   картонът на книга не показваше кои персоналии, записи в летописа и статии се
+   позовават на нея. Каналът links:backlinks съществуваше от самото начало, но
+   не го викаше нито един екран (тестер № 6, s2-letopis-personalii.js).
+   Панелът е само за четене: обратната връзка се маха от картона, ОТ КОЙТО
+   тръгва (там е и бележката към нея), а статията, чийто източник е книгата —
+   като се смени източникът в описанието. Всеки ред отваря картона на
+   източника си, за да се стигне до него с едно щракване.
+   backlinksHtmlFor(toKind, toId) е за картоните на други раздели — картонът на
+   книгата (src/views/books.js) го вика с 'книга'. */
+const BACKLINK_OPEN = { 'персона': 'personView', 'летопис': 'chronicleView', 'статия': 'analyticForm' };
+function backlinksPanelHtml(list) {
+  const rows = list || [];
+  return `<div class="card" style="margin-top:14px" id="backlinks"><h3 style="margin-top:0">Сочат към този запис</h3>
+    ${rows.length ? `<table class="ledger"><tbody>${rows.map(l => {
+      const fn = BACKLINK_OPEN[l.from_kind];
+      const open = fn ? ` <button class="btn sm" onclick="closeModal();${fn}(${Number(l.from_id)})">Отвори</button>` : '';
+      return `<tr><td style="width:110px"><span class="tag">${esc(l.from_kind)}</span></td>
+        <td>${esc(l.label)}${l.source ? ' <span class="hint">— източник на статията</span>' : ''}</td>
+        <td style="width:80px">${open}</td></tr>`;
+    }).join('')}</tbody></table>`
+      : '<div class="hint">Нито една персоналия, запис в летописа или статия не сочи към този запис.</div>'}
+  </div>`;
+}
+async function backlinksHtmlFor(toKind, toId) {
+  const rows = await call(window.api.links.backlinks({ toKind, toId }));
+  return rows ? backlinksPanelHtml(rows) : '';
+}
+window.backlinksHtmlFor = backlinksHtmlFor;
 /* ЕДИН ЗНАК ПАК Е ИНВЕНТАРЕН НОМЕР (v2.4.61).
    =========================================================================
    Полето подсказва „заглавие, автор, инв. №…“, но правилото „поне 2 знака“
@@ -101,7 +133,18 @@ function linksRefreshListIfChanged() {
 }
 window.linksRefreshListIfChanged = linksRefreshListIfChanged;
 
-async function localPhotoChoose(table, id) {
+/* „СМЕНИ…“ И „МАХНИ“ СНИМКА ПИТАТ (v2.4.69, Л8).
+   =========================================================================
+   ДОТУК „Махни“ триеше снимката с едно щракване, а „Смени…“ я заместваше без
+   въпрос — старата не се пази никъде. За краеведа снимката често е
+   ЕДИНСТВЕНОТО копие: сканирана е от хартия, която после се връща на
+   семейството. Връзките („Махни“ в „Свързани материали“) питат от v2.4.61;
+   снимката, която е по-ценна от връзката, беше останала без въпрос.
+   `hasPhoto` идва от картона: първа снимка („Снимка…“) не заменя нищо и не пита. */
+async function localPhotoChoose(table, id, hasPhoto) {
+  if (hasPhoto && !await askConfirm('Новата снимка ще ЗАМЕСТИ сегашната. Старата не се пази никъде в програмата — '
+    + 'ако е единственото ѝ копие, първо я запазете отделно.\n\nДа изберете ли нова снимка?',
+    { okLabel: 'Избери нова' })) return null;
   const res = await window.api.localPhoto.choose({ table, id });
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
   toast('Снимката е добавена.', 'ok'); markSaved();
@@ -111,7 +154,9 @@ async function localPhotoChoose(table, id) {
 }
 window.localPhotoChoose = localPhotoChoose;
 async function localPhotoClear(table, id) {
-  await call(window.api.localPhoto.clear({ table, id }), 'Снимката е премахната.');
+  if (!await askConfirm('Да се махне ли снимката? Тя не се пази никъде другаде в програмата и не може да бъде върната — '
+    + 'ако е единственото ѝ копие, първо я запазете отделно.', { kind: 'delete', okLabel: 'Махни снимката' })) return;
+  if (await call(window.api.localPhoto.clear({ table, id }), 'Снимката е премахната.') === null) return;
   closeModal();
   if (table === 'persons') { await renderPersons(); personView(id); }
   else { await renderChronicle(); chronicleView(id); }

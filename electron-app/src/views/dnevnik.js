@@ -6,9 +6,42 @@
 let DNEVNIK_YEAR = null, DNEVNIK_MONTH = null, DNEVNIK_TAB = 'a';
 const MESETSI = ['Януари', 'Февруари', 'Март', 'Април', 'Май', 'Юни', 'Юли', 'Август', 'Септември', 'Октомври', 'Ноември', 'Декември'];
 function hhmm(mins) { mins = mins || 0; return Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0'); }
+/* ЧАСОВЕТЕ НА ОБСЛУЖВАНЕ — КАКВОТО Е НАПИСАНО, ТОВА СЕ ЗАПИСВА, ИЛИ НИЩО (v2.4.69, Л1).
+   =====================================================================
+   ДОТУК тук стоеше `/^(\d+):(\d{1,2})$/` и всичко друго ставаше 0 без дума.
+   Измерено в жив прозорец (тестер № 6, s9-chasove.js): „8“, „7,5“ и „7.30“ в
+   клетката „Часове“ не влизаха в базата, а клетката продължаваше да показва
+   „8“; „6“ върху вече записани 8:00 записваше 0:00; във формата „Подробно за
+   деня“ „5“ ставаше 0:00, а известието казваше „Денят е записан.“ Часовете на
+   обслужване са ред от годишния статистически отчет (Раздел А и Б) — тиха
+   нула там е невярно число на подписан формуляр.
+   Сега се приемат четирите начина, по които човек пише часове на българска
+   клавиатура, и НИЩО друго:
+     „8“        → 8:00   (цели часове)
+     „7:30“     → 7:30   (часове и минути)
+     „7.30“     → 7:30   (точката като разделител — минутите са ДВЕ цифри)
+     „7,5“      → 7:30   (десетична запетая — ЕДНА цифра след нея; „7.5“ също)
+   Всичко друго („7,30“ — 7:18 ли е или 7:30?, „7.75“, „осем“, „25“) връща null
+   и клетката/формата го отказва поименно, без да пипа базата. Над 24:00 в един
+   ден също е отказ — и в обработчика (handlers/dnevnik.js), който е границата. */
 function parseHhmm(s) {
-  const m = String(s || '').trim().match(/^(\d+):(\d{1,2})$/);
-  return m ? parseInt(m[1], 10) * 60 + Math.min(59, parseInt(m[2], 10)) : 0;
+  const t = String(s == null ? '' : s).trim();
+  if (t === '') return 0;            // празна клетка = нищо за този ден, както досега
+  let m = t.match(/^(\d{1,2})$/);
+  let mins = null;
+  if (m) mins = parseInt(m[1], 10) * 60;
+  else if ((m = t.match(/^(\d{1,2})[:.](\d{2})$/))) {
+    const mm = parseInt(m[2], 10);
+    mins = mm > 59 ? null : parseInt(m[1], 10) * 60 + mm;
+  } else if ((m = t.match(/^(\d{1,2})[,.](\d)$/))) {
+    mins = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) * 6;
+  }
+  if (mins == null || mins > 24 * 60) return null;
+  return mins;
+}
+function dnevnikHoursHelp(raw) {
+  return '„' + raw + '“ не е разпознато като часове. Пишете „8“ (8:00), „7:30“, „7.30“ или „7,5“ (= 7:30), '
+    + 'най-много 24:00 за един ден.';
 }
 const DNEVNIK_A_COLS = [
   ['a_hours', 'Часове'], ['$a_total_age', 'Всичко'], ['a_age_u14', 'До 14'], ['a_age_15_18', '15–18'],
@@ -151,6 +184,37 @@ function dnevnikCoverageNote(r) {
    MAX е брой колони на лист. 20 + колоната с деня заемат ~13 mm на колона при
    А4 пейзаж — колкото е и сега на екрана. */
 const DNEVNIK_PRINT_MAX_COLS = 20;
+/* ДНЕВНИКЪТ ЗА 31-ДНЕВЕН МЕСЕЦ — НА ДВА ЛИСТА, НЕ НА ЧЕТИРИ (v2.4.69, Е10).
+   =====================================================================
+   ДОТУК всеки раздел на месеца излизаше на ЧЕТИРИ листа А4 (измерено с PDF от
+   „Запази PDF…“, тестер № 4 и № 6): таблицата на лист 1 — 31 дни + „Всичко за
+   месеца“ + „Всичко от нач. на годината“ — не се побираше под бланката,
+   заглавието и бележката за покритието, двата сборни реда преливаха сами на
+   лист 2, разделителят на групите (.pbreak) отваряше лист 3, а подписите
+   преливаха на лист 4. Сборните редове, откъснати от дните си, и подписи на
+   отделен празен лист са точно онова, което проверяващият не приема: подписът
+   трябва да стои под числата, които заверява.
+   Поправката е в плътността на ОФИЦИАЛНИЯ лист, не в съдържанието: редовете на
+   таблицата са без вътрешно поле (като в хартиената тетрадка), бланката и
+   бележките над таблицата — по-сбити, а всеки лист на таблицата е едно цяло
+   (break-inside: avoid), така че ако все пак нещо не се побере (дълго име на
+   читалището, лого), се мести целият лист, а не само двата сборни реда.
+   Стилът се подава през setPrintPage({ extraCss }) — важи и за прегледа преди
+   печат, и за самия печат, и само за документите с клас .dnvDoc (Дневникът и
+   годишният отчет А/Б), без да пипа останалите разпечатки. Пробата е с PDF в
+   test/kraeved-v2469.test.js (брой листове на истински Chromium) и в доклада.
+   ppScopeCss ограничава само първия селектор на всяко правило — затова тук
+   всяко правило е с ЕДИН селектор. */
+const DNEVNIK_PRINT_CSS = '#printArea .dnvDoc{padding:0}'
+  + '.dnvDoc h2{margin:0 0 1mm}'
+  + '.dnvDoc .porg{margin-bottom:2mm;line-height:1.25}'
+  + '.dnvDoc .pmeta{margin-bottom:1.2mm;line-height:1.3;font-size:8.5pt}'
+  + '.dnvDoc table.dnvPrint{margin-bottom:1mm}'
+  + '.dnvDoc table.dnvPrint td{padding:0 1px;line-height:1.2}'
+  + '.dnvDoc table.dnvPrint th{padding:1px}'
+  + '.dnvDoc .pnote{margin-top:.5mm}'
+  + '.dnvDoc .psig{margin-top:8mm}'
+  + '.dnvDoc .dnvPart{break-inside:avoid;page-break-inside:avoid}';
 function dnevnikPrintPages(cols, groups, max) {
   const g = groups || dnevnikGroups(cols);
   const limit = max || DNEVNIK_PRINT_MAX_COLS;
@@ -226,8 +290,22 @@ async function renderDnevnik() {
      точно като всеки друг: библиотекарката нямаше как да разбере, че вписва
      работа в затворен ден, а годишният отчет го броеше за работен. Денят се
      надписва и в заглавието на клетката (title), за да се види причината. */
+  /* ЧИСЛОТО НА ДЕНЯ ОТВАРЯ ПОДРОБНАТА ФОРМА ЗА ТОЗИ ДЕН (v2.4.69, Л5).
+     =====================================================================
+     ДОТУК единственият път до „Подробно за деня“ и до „⚡ Предложи от
+     регистрите“ беше бутонът „Подробно за днес…“ — само за ДНЕШНИЯ ден.
+     Обработчикът (dnevnik:suggest) дава верни числа за всяка дата, но
+     библиотекарката, която попълва дневника в понеделник за събота или на
+     1-во число за последния ден на месеца, нямаше как да стигне до тях:
+     тестерът търси път до формата за 01.09 и намира само канала. Сега числото
+     в първата колона е бутон — същото място, откъдето човек започва реда на
+     хартиения дневник. Бутон, а не щракване върху клетката: достъпен е с
+     клавиатурата (Tab + Enter) и четецът на екран го обявява. */
+  const dayBtn = (row) => `<button type="button" class="dnvDayBtn" onclick="dnevnikDayForm('${row.date}')"
+      title="${esc('Подробно за ' + bg(row.date) + ' — всички колони и „⚡ Предложи от регистрите“')}"
+      style="background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;text-decoration:underline dotted">${row.day}</button>`;
   const dayRowHtml = (row) => `<tr class="${row.date === todayStr ? 'dnvToday' : ''}${row.closed ? ' dnvClosed' : ''}">
-    <td class="num dnvDay"${row.closed ? ` title="${esc('Затворен ден' + (row.closedReason ? ' — ' + row.closedReason : ''))}"` : ''}>${row.day}${
+    <td class="num dnvDay"${row.closed ? ` title="${esc('Затворен ден' + (row.closedReason ? ' — ' + row.closedReason : ''))}"` : ''}>${dayBtn(row)}${
       row.closed ? ' <span class="hint" aria-label="затворен ден">·затв.</span>' : ''}</td>${
     cols.map(([k]) => cellHtml(row, k)).join('')}</tr>`;
   const totalRowHtml = (label, row, cls) => `<tr class="dnvTotal ${cls || ''}"><td>${esc(label)}</td>
@@ -236,7 +314,8 @@ async function renderDnevnik() {
     <div class="note">Електронен вариант на месечния статистически дневник на читалищните библиотеки —
     Раздел А (читатели и посещения) и Раздел Б (заети материали). <b>Попълва се направо в таблицата</b> —
     всяка стойност се записва веднага при излизане от полето. Колоните „Всичко“ и двата обобщителни
-    реда се изчисляват автоматично и не се въвеждат ръчно.</div>
+    реда се изчисляват автоматично и не се въвеждат ръчно. <b>Щракнете числото на деня</b>, за да отворите
+    подробната форма и „⚡ Предложи от регистрите“ за него.</div>
     <div class="note ${r.daysFilled ? '' : 'd'}" style="margin-top:0">${esc(dnevnikCoverageNote(r))}${
       r.days.some(d => d.closed) ? ' Дните, отбелязани „·затв.“, са затворени по календара на библиотеката.' : ''}</div>
     <div class="toolbar">
@@ -286,6 +365,13 @@ async function dnevnikSaveCell(el) {
       return toast('Дневникът брои хора и документи — въведете цяло число, 0 или повече'
         + (raw ? ' (въведено е „' + raw + '“).' : '.'), 'err');
     }
+  }
+  /* Часовете: неразпознатото НЕ става 0:00 (v2.4.69, Л1 — виж parseHhmm). Клетката
+     се връща на записаното в базата и се казва как се пише. */
+  if (hours && parseHhmm(el.value) === null) {
+    const raw = String(el.value == null ? '' : el.value).trim();
+    el.value = hhmm(row ? row[field] : 0);
+    return toast(dnevnikHoursHelp(raw) + ' Нищо не е записано — клетката е върната на ' + el.value + '.', 'err');
   }
   const val = hours ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
   /* v2.4.29: отрицателно число не се записва — клетката се връща на старата стойност. */
@@ -391,7 +477,7 @@ async function dnevnikDayForm(date) {
     <div class="cards" id="dnvPreview" style="margin-bottom:12px"></div>
     <h3 style="font-size:14px">Раздел А — читатели и посещения</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове (чч:мм)</label>
+      <div class="field"><label>Часове („8“, „7:30“ или „7,5“)</label>
       <input type="text" name="a_hours_hhmm" value="${hhmm(row.a_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По възраст', [['a_age_u14', 'До 14 г.'], ['a_age_15_18', '15–18 г.'], ['a_age_19_28', '19–28 г.'], ['a_age_o28', 'Над 28 г.']], row)}
@@ -405,7 +491,7 @@ async function dnevnikDayForm(date) {
     ${dnevnikGroup('Посещения', [['a_visit_home', 'В заемна за дома'], ['a_visit_child', 'Деца до 14 г.'], ['a_visit_reading', 'В читалня'], ['a_visit_internet', 'Интернет']], row)}
     <h3 style="font-size:14px">Раздел Б — заети материали</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове (чч:мм)</label>
+      <div class="field"><label>Часове („8“, „7:30“ или „7,5“)</label>
       <input type="text" name="b_hours_hhmm" value="${hhmm(row.b_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По вид', [['b_type_books', 'Книги'], ['b_type_period', 'Периодични издания'], ['b_type_graphic', 'Графични издания'],
@@ -491,6 +577,13 @@ async function dnevnikSuggest(date) {
        попълва се картонът на документа, а не се мести колона (находка Б15). */
     (missing ? ` · ${missing === 1 ? '1 заемане е на документ' : missing + ' заемания са на документи'} без посочен вид`
       + ` и ${missing === 1 ? 'е предложено' : 'са предложени'} в „Книги“ — посочете вида в картона на документа („Книги → Вид документ“)` : '') +
+    /* „В заемна за дома“ — от какво е сглобено, поименно (v2.4.69, Л3): читателите
+       на гишето (заемане или връщане, всеки веднъж) и посещенията по домовете. */
+    (A && (A.visitHomeDesk || A.visitHomeHousebound)
+      ? ` · „В заемна за дома“ = ${pl(A.visitHomeDesk || 0, 'читател', 'читатели')} на гишето (заемане или връщане)`
+        + (A.visitHomeHousebound ? ` + ${pl(A.visitHomeHousebound, 'посещение', 'посещения')} по домовете` : '')
+        + (A.visitChild ? `, от тях деца до 14 г. — ${A.visitChild}` : '')
+      : '') +
     aNote +
     ' — прегледайте и поправете преди запис.';
   toast('⚡ Попълнени ' + filled + ' полета — прегледайте преди „Запиши деня“.', 'ok');
@@ -526,6 +619,12 @@ async function saveDnevnikDay(date) {
       + bad.join(', ') + '.', 'err');
   }
   const d = formData('#dnvF');
+  /* Часовете — отказ, не тиха нула (v2.4.69, Л1). Дотук „5“ тук ставаше 0:00, а
+     известието казваше „Денят е записан.“ */
+  const hoursBad = [['a_hours_hhmm', 'Раздел А'], ['b_hours_hhmm', 'Раздел Б']]
+    .filter(([k]) => parseHhmm(d[k]) === null)
+    .map(([k, s]) => '„Часове“ на ' + s + ': ' + dnevnikHoursHelp(String(d[k] == null ? '' : d[k]).trim()));
+  if (hoursBad.length) return toast('Денят НЕ е записан. ' + hoursBad.join(' '), 'err');
   d.date = date;
   d.a_hours = parseHhmm(d.a_hours_hhmm); delete d.a_hours_hhmm;
   d.b_hours = parseHhmm(d.b_hours_hhmm); delete d.b_hours_hhmm;
@@ -551,9 +650,14 @@ function printDnevnikDoc() {
   const pages = dnevnikPrintPages(cols);
   const rowHtml = (pc, label, row) => `<tr><td>${esc(label)}</td>${
     pc.map(([k]) => `<td>${dnevnikCell(row, k)}</td>`).join('')}</tr>`;
+  /* Всеки лист на таблицата е ЕДНО ЦЯЛО (.dnvPart, виж DNEVNIK_PRINT_CSS), а
+     подписите стоят ВЪТРЕ в последния — не могат да останат сами на празен лист
+     (v2.4.69, Е10). Заглавието на раздела и месецът са на един ред: дотук бяха
+     на два и изяждаха реда, който липсваше за „Всичко от нач. на годината“. */
+  const sig = ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………']);
   const tableHtml = (page, i) => `
-    ${i ? '<div class="pbreak"></div>' : ''}
-    <div class="pmeta"><b>${esc(sectionTitle)}</b><br>${esc(MESETSI[r.month - 1])} ${r.year} г.${
+    ${i ? '<div class="pbreak"></div>' : ''}<div class="dnvPart">
+    <div class="pmeta"><b>${esc(sectionTitle)}</b> · ${esc(MESETSI[r.month - 1])} ${r.year} г.${
       pages.length > 1 ? ` · лист ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
     <table class="dnvPrint"><colgroup><col style="width:11%">${
       page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
@@ -571,9 +675,10 @@ function printDnevnikDoc() {
         ? 'Дни, отбелязани като затворени в календара на библиотеката: '
           + r.days.filter(d => d.closed).map(d => d.day).join(', ') + '.'
         : ''
-    ])}`;
-  setPrintPage({ name: `Дневник ${String(DNEVNIK_MONTH).padStart(2, '0')}.${DNEVNIK_YEAR}`, landscape: true, margin: '8mm' });
-  doPrint(`<div class="pdoc">${shead()}
+    ])}${i === pages.length - 1 ? sig : ''}</div>`;
+  setPrintPage({ name: `Дневник ${String(DNEVNIK_MONTH).padStart(2, '0')}.${DNEVNIK_YEAR}`, landscape: true, margin: '8mm',
+    extraCss: DNEVNIK_PRINT_CSS });
+  doPrint(`<div class="pdoc dnvDoc">${shead()}
     <h2 style="font-size:14pt">ДНЕВНИК НА БИБЛИОТЕКАТА</h2>
     ${/* ПРАЗНИЯТ МЕСЕЦ СИ ГО КАЗВА (одит v2.4.65, находка В2). Дотук печатът на
          месец без нито един вписан ден излизаше като готов за подпис официален
@@ -581,8 +686,7 @@ function printDnevnikDoc() {
          точно каквото годишният отчет вече не прави (reportCoverageNote в
          src/views/reports.js). Един и същ текст стои и на екрана. */''}
     <div class="pmeta">${esc(dnevnikCoverageNote(r))}</div>
-    ${pages.map(tableHtml).join('')}
-    ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${pages.map(tableHtml).join('')}</div>`);
 }
 window.printDnevnikDoc = printDnevnikDoc;
 async function exportDnevnikCsv() {
