@@ -75,7 +75,30 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     const title = String(p.title || '').trim();
     if (!title) throw new Error('Заглавието на изданието е задължително.');
     const nz = (v) => (v == null || String(v).trim() === '' ? null : String(v).trim());
-    return { title, freq: nz(p.freq), publisher: nz(p.publisher), issn: normalizeIssn(nz(p.issn)), department: nz(p.department), note: nz(p.note) };
+    return { title, freq: nz(p.freq), publisher: nz(p.publisher), issn: normalizeIssn(nz(p.issn)), department: nz(p.department), note: nz(p.note),
+      language: languageOf(p) };
+  }
+  /* ЕЗИКЪТ НА ИЗДАНИЕТО (v2.4.71, находка Д2 от кръг 45).
+     =====================================================================
+     (а) ДОТУК картонът на изданието нямаше поле „Език“, а годишният комплект се
+     вписваше в `books` без език (виж INSERT-а в periodicalVolumes:register).
+     Дневникът, Раздел Б, разпределя всяко заемане по език — и заетият „Труд,
+     2025“ отиваше в колона „Език — други“ (тестер, a1-periodika.js: 1 заемане на
+     български вестник → b_lang_bg 0, b_lang_other 1).
+     (б) Раздел Б е официалният месечен формуляр, от който се сглобява годишният
+     отчет към регионалната библиотека: всеки абонамент за български вестник
+     излизаше като чуждоезично заемане, всеки месец.
+     (в) Езикът се пази в картона на изданието (колона от миграция 19) и се
+     ПРЕНАСЯ в реда на комплекта при инвентирането — така Дневникът, КДБФ
+     („Фонд по езици“) и справките го четат оттам, откъдето четат всеки документ,
+     без нито един от тях да се пипа. По подразбиране е „български“: така е
+     почти всеки абонамент на читалище, а формата го показва избран, тоест
+     изборът е видим, не скрит. `undefined` (стар екран или внос, който не знае за
+     полето) при РЕДАКЦИЯ значи „не пипай“, не „изтрий“. */
+  function languageOf(p) {
+    if (p.language === undefined) return undefined;
+    const v = p.language == null ? '' : String(p.language).trim();
+    return v || 'български';
   }
 
   /* ISSN СЕ ПРОВЕРЯВА НА ВХОДА (одит v2.4.61, находка 3).
@@ -485,12 +508,17 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     run(() => {
       const db = getDb();
       const row = periodicalPayload(p);
+      /* Д2: подразбирането (виж languageOf()). Формата винаги праща езика — видимо
+         избран; когато го НЕ праща извикващият (внос, второ работно място по
+         API), подразбирането се казва в следата — нищо не се слага мълчаливо. */
+      const langDefaulted = row.language === undefined;
+      if (langDefaulted) row.language = 'български';
       assertNoDuplicate(db, row, null);
       const info = db.prepare(`
-        INSERT INTO periodicals (title, freq, publisher, issn, department, note)
-        VALUES (@title, @freq, @publisher, @issn, @department, @note)
+        INSERT INTO periodicals (title, freq, publisher, issn, department, note, language)
+        VALUES (@title, @freq, @publisher, @issn, @department, @note, @language)
       `).run(row);
-      logAudit('Ново периодично издание', row.title);
+      logAudit('Ново периодично издание', row.title + (langDefaulted ? ' (език по подразбиране: български)' : ''));
       return info.lastInsertRowid;
     })
   );
@@ -519,15 +547,35 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
          документи под старото име, и единственото честно нещо е това да се КАЖЕ —
          тук, в следата, с инвентарните номера, за да се знае кои картони трябва да
          се поправят на ръка във „Фонд“, ако библиотекарят иска пълно съвпадение. */
-      const before = db.prepare('SELECT title FROM periodicals WHERE id = ?').get(p.id);
+      const before = db.prepare('SELECT title, language FROM periodicals WHERE id = ?').get(p.id);
       ensureVolumesTable(db);
       const vols = db.prepare(`SELECT b.inv_number AS inv, v.year FROM periodical_volumes v
         JOIN books b ON b.id = v.book_id WHERE v.periodical_id = ? ORDER BY v.year`).all(p.id);
+      const langNext = row.language === undefined ? (before ? before.language : null) : row.language;
       const upd = db.prepare(`
-        UPDATE periodicals SET title=@title, freq=@freq, publisher=@publisher, issn=@issn, department=@department, note=@note
+        UPDATE periodicals SET title=@title, freq=@freq, publisher=@publisher, issn=@issn, department=@department, note=@note,
+          language=@language
         WHERE id=@id
-      `).run({ ...row, id: p.id });
+      `).run({ ...row, language: langNext, id: p.id });
       if (!upd.changes) throw new Error('Изданието не е намерено — вероятно е изтрито от друго работно място.');
+      /* СМЕНЕНИЯТ ЕЗИК СТИГА И ДО ВЕЧЕ ИНВЕНТИРАНИТЕ КОМПЛЕКТИ (v2.4.71, Д2).
+         =================================================================
+         Обновяването до v2.4.71 попълни езика на заварените издания като
+         „български“ и в одитната следа каза: „Ако някое списание е на друг език —
+         сменете го в картона на изданието.“ Ако смяната тук не стигаше до
+         комплектите, този съвет щеше да е празен: годишният комплект на руското
+         списание щеше да остане „български“ в Дневника и във „Фонд по езици“.
+         За разлика от заглавието (по-горе — то е в инвентарната книга по чл. 16 и
+         не се пренаписва със задна дата), езикът НЕ е реквизит на инвентарната
+         книга, а сведение за разпределението в статистиката — затова се пренася.
+         Казва се в следата и в отговора (екранът го показва) — нищо не мърда
+         мълчаливо. Отчислените комплекти не се пипат: те са вече в акт. */
+      let langVolumes = 0;
+      if (before && langNext && langNext !== before.language) {
+        langVolumes = db.prepare(`UPDATE books SET language = ? WHERE id IN (
+            SELECT v.book_id FROM periodical_volumes v WHERE v.periodical_id = ? AND v.book_id IS NOT NULL)
+          AND ${F.fundByStatusPlain} AND COALESCE(language, '') <> ?`).run(langNext, p.id, langNext).changes;
+      }
       /* Допълнението се пише САМО когато преименуването наистина засяга фонда
          (сменено заглавие + вече инвентирани комплекти). Обикновената поправка на
          издател или забележка оставя следата такава, каквато е била от години —
@@ -541,7 +589,12 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
             + ' във фонда със старото заглавие — инв. № '
             + vols.map(v => (v.inv == null ? '—' : v.inv) + ' за ' + v.year + ' г.').join(', ')
             + '; инвентарната книга не се преименува със задна дата'
+          : '')
+        + (before && langNext !== before.language
+          ? '; език: „' + (before.language || '—') + '“ → „' + langNext + '“'
+            + (langVolumes ? ' (сменен и в ' + langVolumes + (langVolumes === 1 ? ' инвентиран годишен комплект' : ' инвентирани годишни комплекта') + ')' : '')
           : ''));
+      return { languageVolumes: langVolumes };
     })
   );
   ipcMain.handle('periodicals:delete', (e, id) =>
@@ -675,13 +728,56 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
           + 'Ако наистина са постъпили два екземпляра, отбележете го в забележката на вписания брой — '
           + 'втори ред би завишил сбора за годината, а той става цена на годишния комплект в инвентарната книга.');
       }
+      /* БРОЙ В ВЕЧЕ ИНВЕНТИРАН КОМПЛЕКТ (v2.4.71, находка Д4 от кръг 45).
+         =====================================================================
+         (а) ДОТУК броят се вписваше в годината на комплекта без поглед дали тази
+         година вече е подвързана и вписана в инвентарната книга. Тестерът
+         (a1-periodika.js): комплектът „Труд, 2025“ е инвентиран с 4 бр. за
+         4,80 €; после е вписан още един брой за 2025 г. Той не влиза в никой
+         документ — комплектът за 2025 г. е вписан със снимката към
+         инвентирането и не се пренаписва, а в комплекта за 2026 г. броят не
+         влиза, защото е отбелязан за 2025. Значката на реда обаче казваше „новите
+         броеве влизат в следващия комплект“, а абонаментният списък показваше
+         6,00 € срещу инвентирани 4,80 € без дума.
+         (б) Цената на такъв брой е платена, но липсва от фонда (КДБФ, чл. 16);
+         при проверка разминаването между кардекса и документа на рафта няма с
+         какво да се обясни.
+         (в) Затова вписването в инвентиран (жив) комплект се ОТКАЗВА с
+         обяснение и с предложение: следващата година, ако е в допустимия
+         диапазон спрямо датата (тогава броят влиза в следващия комплект —
+         онова, което значката досега само обещаваше). Истински закъснял брой от
+         вече подвързан том може все пак да се впише — само в кардекса, — но с
+         изрично `outside_volume: true`; тогава следата казва, че е извън
+         комплекта и цената му не е във фонда. Екранът задава точно този въпрос
+         (src/views/periodicals.js, addIssue). Отчисленият комплект не пречи —
+         годината може да получи заместващ том. */
+      const boundVol = db.prepare(`SELECT b.inv_number, b.price, v.issue_count FROM periodical_volumes v
+        JOIN books b ON b.id = v.book_id
+        WHERE v.periodical_id = ? AND v.year = ? AND ${F.fundByStatus} AND b.deaccession_date IS NULL`)
+        .get(issue.periodical_id, String(volumeYear));
+      if (boundVol && issue.outside_volume !== true) {
+        const next = volumeYear + 1;
+        const nextOk = Math.abs(next - dateYear) <= 1;
+        throw new Error('Комплектът на „' + per.title + '“ за ' + volumeYear + ' г. вече е подвързан и вписан в '
+          + 'инвентарната книга като инв. № ' + (boundVol.inv_number == null ? '—' : boundVol.inv_number)
+          + ' (' + (boundVol.issue_count == null ? '?' : boundVol.issue_count) + ' бр., '
+          + (Number(boundVol.price) || 0).toFixed(2) + ' €). Брой, вписан в него сега, не влиза в нито един '
+          + 'документ във фонда и цената му остава извън КДБФ. '
+          + (nextOk
+            ? 'Изберете „' + next + ' г.“ в „Годишен комплект“ — тогава броят влиза в следващия комплект.'
+            : 'Проверете годината на комплекта и датата на постъпване.')
+          + ' Ако това е закъснял брой от вече подвързания том, впишете го само в кардекса (екранът пита за това изрично).');
+      }
       const info = db.prepare(`
         INSERT INTO periodical_issues (periodical_id, issue_no, date, price, note, volume_year)
         VALUES (@periodical_id, @issue_no, @date, @price, @note, @volume_year)
       `).run({ periodical_id: issue.periodical_id, issue_no: issueNo, date, price, note: issue.note || null,
         volume_year: volumeYear });
       logAudit('Постъпил брой', per.title + ' — бр. ' + issueNo
-        + (volumeYear !== dateYear ? ' (постъпил на ' + date + ', за комплекта за ' + volumeYear + ' г.)' : ''));
+        + (volumeYear !== dateYear ? ' (постъпил на ' + date + ', за комплекта за ' + volumeYear + ' г.)' : '')
+        + (boundVol ? '; ВНИМАНИЕ: комплектът за ' + volumeYear + ' г. вече е инвентиран като инв. № '
+          + (boundVol.inv_number == null ? '—' : boundVol.inv_number) + ' — броят е вписан само в кардекса, '
+          + 'извън подвързания том, и цената му (' + price.toFixed(2) + ' €) не е във фонда' : ''));
       return info.lastInsertRowid;
     })
   );
@@ -887,10 +983,22 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
            през декември и комплектът му законно се завежда тогава, с декемврийска
            дата. По-рано от това не е ранно завеждане, а сгрешена година. */
         const minRegister = (parseInt(year, 10) - 1) + '-12-01';
+        /* ТЕКУЩАТА ГОДИНА НЕ Е „ПРИКЛЮЧЕН РЕГИСТЪР“ (v2.4.71, находка Д18).
+           ДОТУК съобщението казваше за всяка по-ранна година „регистър, който вече
+           е приключен“ — и за ТЕКУЩАТА: комплект за 2027 г., вписван на
+           29.09.2026, получаваше „КДБФ за 2026 г. — регистър, който вече е
+           приключен“. Регистърът за 2026 г. е отворен и тече; съобщението
+           твърдеше неистина за официален документ и библиотекарката можеше да
+           реши, че нещо в КДБФ за годината е заключено. Отказът си остава същият
+           (комплектът за 2027 г. още не съществува) — само причината се казва
+           вярно: приключен е само регистър за МИНАЛА година. */
         if (registerDate < minRegister) {
+          const regYear = registerDate.slice(0, 4);
+          const closedReg = parseInt(regYear, 10) < parseInt(yearOf(), 10);
           throw new Error('Датата на вписване ' + registerDate + ' е преди годината на комплекта (' + year + ' г.). '
-            + 'Документът би влязъл като постъпление в КДБФ за ' + registerDate.slice(0, 4) + ' г. — регистър, '
-            + 'който вече е приключен, а комплектът за ' + year + ' г. още не е съществувал. '
+            + 'Документът би влязъл като постъпление в КДБФ за ' + regYear + ' г.'
+            + (closedReg ? ' — регистър, който вече е приключен, —' : ',')
+            + ' а комплектът за ' + year + ' г. още не е съществувал. '
             + 'Допустимо е от ' + minRegister + ' нататък (абонаментът за идната година се завежда през декември).');
         }
 
@@ -1013,11 +1121,17 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
         const info = db.prepare(`
           INSERT INTO books (inv_number, register_date, title, author, category_id, year, volume,
                              publisher, series, series_no, department, status, status_date,
-                             price, description, acquisition_id)
+                             price, description, acquisition_id, language)
           VALUES (@inv_number, @register_date, @title, NULL, @category_id, @year, 'годишен комплект',
                   @publisher, @series, @series_no, @department, 'наличен', @status_date,
-                  @price, @description, @acquisition_id)
+                  @price, @description, @acquisition_id, @language)
         `).run({
+          /* Езикът идва от картона на изданието (v2.4.71, Д2 — виж languageOf()).
+             Дотук тази колона изобщо не се пишеше и Дневникът броеше всяко
+             заемане на комплекта в „Език — други“. Празният език на заварено
+             издание (ако миграцията е минала преди картонът да бъде създаден по
+             друг път) пада на същото подразбиране — „български“. */
+          language: String(p.language || '').trim() || 'български',
           inv_number: invNumber, register_date: registerDate, title,
           category_id: cat ? cat.id : null, year,
           publisher: p.publisher || null, series: p.title, series_no: year + ' г.',

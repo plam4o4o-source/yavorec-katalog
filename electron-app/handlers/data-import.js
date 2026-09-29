@@ -38,6 +38,28 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
        прегледа: отчетът след вноса се прави от import:run, който дотогава нямаше
        никакъв достъп до него (виж report.fileWarning по-долу). */
     IMPORT_CACHE = { path: filePath, headers, body, warning: t.warning || null };
+    const mapping = importers.guessMapping(headers);
+    /* Кръг 45, Ф11 — датите в ПРЕГЛЕДА.
+       (а) Какво ставаше: Excel пази датата като число на дни; прегледът в
+       диалога за съответствие показваше суровата клетка — „37755“ вместо
+       „14.05.2003“ (тестер, сценарий d2, файл opis-evro.xlsx). В базата датата
+       влизаше вярна (parseDate() разпознава серийния номер), лъжеше само прегледът.
+       (б) Защо е грешно: прегледът е точно мястото, където библиотекарката
+       проверява ПРЕДИ вноса дали колоната е разчетена правилно; число вместо дата
+       я кара да мисли, че датите ще се развалят (и да откаже годен внос), или да
+       свикне да не гледа прегледа изобщо.
+       (в) Защо точно така: колоните, разпознати като „Дата на вписване“, минават
+       през СЪЩИЯ parseDate(), който ползва самият внос — прегледът показва точно
+       онова, което ще влезе в инвентарната книга (и „1998“ → 01.01.1998, както
+       вносът го чете). Неразчетена клетка остава каквато е. Екранът показва ISO
+       датата с bg() по индексите в previewDateCols. */
+    const previewDateCols = Object.keys(mapping).filter(i => mapping[i] === 'register_date').map(Number);
+    const preview = body.slice(0, 8).map(r => {
+      if (!previewDateCols.length || !Array.isArray(r)) return r;
+      const out = r.slice();
+      for (const i of previewDateCols) { const iso = parseDate(out[i]); if (iso) out[i] = iso; }
+      return out;
+    });
     return {
       path: filePath, encoding: t.encoding, delimiter: t.delimiter,
       // BUG FIX (одит #11): предупреждение за незатворена кавичка или подозрителен
@@ -46,8 +68,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       // реда“ и повторно в отчета след вноса (src/views/data-import.js). Не спира
       // внасянето: файлът може и да е наред, решението е на библиотекарката.
       warning: t.warning || null,
-      headers, mapping: importers.guessMapping(headers),
-      preview: body.slice(0, 8), total: body.length, fields: IMPORT_FIELDS
+      headers, mapping, preview, previewDateCols, total: body.length, fields: IMPORT_FIELDS
     };
   }
   /* Пътят идва от екранния слой (влачене и пускане на файл върху прозореца, виж
@@ -316,7 +337,10 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         .map(r => titleKey(r.title, r.author)));
 
       const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [], convertedLeva: 0,
-        priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: null };
+        priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: null,
+        // Ф3 (кръг 45): редовете с дата на вписване след днешния ден — виж по-долу.
+        futureDated: /** @type {Array<{line:number, inv:(number|null), title:string, date:string}>} */ ([]),
+        futureDatedCount: 0, futureDateNote: /** @type {string|null} */ (null) };
       /* П2 (v2.4.69): валутата от заглавието на колоната с цените — виж
          headerCurrency в importers.js. */
       const priceHeader = cols.price != null ? String(IMPORT_CACHE.headers[cols.price] ?? '').trim() : '';
@@ -657,6 +681,26 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
             // Броят се само РЕАЛНО въведените редове — ред, паднал в catch-а
             // по-долу, не е в базата и не бива да утежнява числото в отчета.
             if (!regDate) report.registerDateDefaulted++;
+            /* Кръг 45, Ф3 — дата на вписване В БЪДЕЩЕТО от самия файл.
+               (а) Какво ставаше: ред с „10.01.2030“ влизаше без дума. Таблото
+               показваше 16 документа, КДБФ към 31.12 — 15; разликата лъсваше едва
+               в „Проверка на данните“, седмици по-късно.
+               (б) Защо е грешно: такъв документ се брои „наличен“ (табло,
+               инвентарна книга), но до 2030 г. не влиза нито в КДБФ Част № 2, нито
+               в годишния отчет — подписаният отчет е с един документ по-малко, а
+               никой не знае кой е той. Най-честата причина е сгрешена година.
+               (в) Защо точно така: като формата за книга (books:create →
+               registerDateWarning) — редът СЕ ПРИЕМА (законен случай има:
+               предварително вписване за партида, която ще постъпи), но се казва
+               ПОИМЕННО в отчета на вноса: ред, инв. №, заглавие, дата. Датата по
+               подразбиране за стар фонд вече се отказва, ако е в бъдещето (по-горе)
+               — тук остават само датите, дошли от клетката. */
+            if (regDate && regDate > today()) {
+              report.futureDatedCount = (report.futureDatedCount || 0) + 1;
+              if (report.futureDated.length < 100) {
+                report.futureDated.push({ line: lineNo, inv: inv || null, title: title || '', date: regDate });
+              }
+            }
             free--;
           } catch (err) {
             // Грешката на един ред не бива да проваля целия внос — събира се и се
@@ -718,6 +762,18 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
           + 'Ако това е стар фонд, повторете вноса с попълнено поле „Дата на вписване по подразбиране“ '
           + '(или поправете датите в „Инвентарна книга“ → „Редакция“).');
       }
+      /* Ф3 (кръг 45): изречението е тук, в обработчика, за да важи еднакво за
+         всеки екран; прозорецът го показва в отделна кутия заедно с поименния
+         списък (report.futureDated), а не в общите предупреждения, които се режат
+         на 15 реда и биха скрили точно тези редове при голям внос. */
+      if (report.futureDatedCount) {
+        const n = report.futureDatedCount;
+        report.futureDateNote = `${n} ${n === 1 ? 'ред е вписан' : 'реда са вписани'} с дата на вписване СЛЕД днешния `
+          + `ден (${today()}). До настъпването ѝ ${n === 1 ? 'документът се брои' : 'документите се броят'} на таблото и `
+          + 'в инвентарната книга, но НЕ влиза в Книгата за движение на фонда и в годишния отчет за тази година. '
+          + 'Ако годината е сгрешена (най-честата причина), поправете датата от картона на документа или от '
+          + '„Инвентарна книга“ → „Редакция“.';
+      }
       if (overLimit) {
         report.warnings.push(`${overLimit} ${overLimit === 1 ? 'ред не беше въведен' : 'реда не бяха въведени'}: достигнат е зададеният лимит от `
           + `${limitBooks} документи във фонда („Настройки“ → „Ограничения“). Увеличете или премахнете лимита и повторете вноса `
@@ -732,6 +788,11 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         (report.registerDateDefaulted
           ? `; на ${report.registerDateDefaulted} от тях датата на вписване е сложена от програмата (`
             + (defaultRegDate ? 'посочена за стар фонд: ' + defaultRegDate : 'днешна дата: ' + today()) + ')'
+          : '') +
+        (report.futureDatedCount
+          ? `; ${report.futureDatedCount} с дата на вписване в бъдещето (`
+            + report.futureDated.slice(0, 10).map(f => 'ред ' + f.line + ' → ' + f.date).join(', ')
+            + (report.futureDatedCount > 10 ? ', …' : '') + ')'
           : '') +
         /* Повреденият файл влиза и в дневника: ако след месец се окаже, че в
            инвентарната книга липсват документи от точно този внос, това е

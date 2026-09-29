@@ -45,6 +45,13 @@ function noRendererErrors() {
 /* ---- календарна аритметика за фикстурите ---- */
 const dow = (d) => new Date(d + 'T00:00:00Z').getUTCDay();
 function lastDow(from, wd) { let d = from; while (dow(d) !== wd) d = E.addDays(d, -1); return d; }
+/* Дни забава — огледалото от test/helpers/e2e-app.js, но от ПЪРВИЯ РАБОТЕН ДЕН
+   на или след падежа (v2.4.71, находка Ч4: падеж в затворен/почивен ден не
+   носи забава за самия себе си — виж effectiveDaysLate в handlers/loans.js).
+   За падеж в работен ден е точно старото огледало; разликата се вижда в т. 15,
+   където т. 12 слага падежи T−3/T−5/T−20, а те в някои дни от седмицата са
+   събота или неделя (работните дни тук са пон–пет). */
+const lateDays = (due, inD) => E.effectiveDaysLate(h.db, E.nextWorkDay(h.db, due), inD);
 const W = lastDow(E.addDays(T, -15), 3);   // сряда, поне 15 дни назад
 const S0 = lastDow(E.addDays(T, -40), 6);  // събота, поне 40 дни назад
 const M1 = E.addDays(S0, 16);              // понеделникът след S0 + 14 (събота)
@@ -427,7 +434,7 @@ test('5. връщане на падежа / с един ден / през зат
   assert.equal(q("SELECT COUNT(*) AS n FROM events WHERE kind = 'връщане' AND book_id = ? AND date = ?", ids.b3, E.addDays(W, 1)).n, 1, 'събитието носи датата на връщане');
   // (в) 12 календарни дни по-късно (понеделник) — минус 4 уикенд дни (и затворения M1, ако е в периода)
   const inC = E.addDays(W, 12);
-  const effC = E.effectiveDaysLate(h.db, W, inC);
+  const effC = lateDays(W, inC);
   assert.ok(effC >= 7 && effC <= 8, 'фикстурата: 12 календарни дни = 7–8 работни, има ' + effC);
   res = ok(await h.api.loans.return({ id: lc, date_in: inC }), 'връщане през затворен период');
   assert.equal(res.daysLate, effC);
@@ -523,7 +530,7 @@ test('6. продължения — броят, лимитът, просроче
   // Продължение на ПРОСРОЧЕНО заемане от „Просрочени“: урежда забавата, срокът тръгва от днес.
   const lo = ok(await h.api.loans.checkout({ reader_id: ids.r3, book_id: ids.b2, date_out: E.addDays(W, -14) }), 'заемане');
   h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(W, lo);
-  const late = E.effectiveDaysLate(h.db, W, T);
+  const late = lateDays(W, T);
   assert.ok(late > 0);
   await h.go('over');
   assert.match(h.viewText(), rx('Общо дължимо обезщетение: ' + E.mny(cents(late * 0.10))));
@@ -640,7 +647,23 @@ test('8. връщане на незает документ; два екземп�
    9. Заемане и връщане със задна дата; бъдеща дата; връщане преди заемане
    ================================================================== */
 test('9. задна дата — падежът и събитието следват датата на заемане; невъзможни дати', async () => {
-  const out = E.addDays(T, -20);
+  /* ДАТАТА НА ЗАЕМАНЕТО СЕ ИЗБИРА В ДЕН БЕЗ ДРУГИ СЪБИТИЯ (v2.4.71, находка Т1).
+     (а) Дотук датата беше твърдо T−20. Фикстурите на т. 5 зависят от деня от
+         седмицата (W е последната сряда преди T−15): във вторник T−20 = W, в
+         сряда T−20 = W+1 — и в двата случая е ден на връщане от друг читател.
+         Тогава Дневникът ПРАВИЛНО брои двама посетители за онзи ден, а тестът
+         очакваше един: падаше във вторник, сряда и неделя (22.09, 29.09, 30.09,
+         04.10, 06.10 с подменен часовник), а т. 12 падаше след него като
+         последица — незатвореното заемане на инв. № 8 даваше на Иван 3
+         просрочени вместо 2.
+     (б) Програмата е вярна; тестът твърдеше нещо, което зависи от календара.
+     (в) Тръгва се от T−20 и се върви назад до първия ден, в който базата няма
+         нито едно събитие — така „един посетител, една книга“ е вярно за тази
+         дата по построение, в който и ден да се пусне поредицата. Датата остава
+         достатъчно далеч в миналото, за да е заемането просрочено днес и да се
+         върне с T−3 със забава. */
+  let out = E.addDays(T, -20);
+  while (q('SELECT COUNT(*) AS n FROM events WHERE date = ?', out).n > 0) out = E.addDays(out, -1);
   const lid = ok(await h.api.loans.checkout({ reader_id: ids.r1, book_id: ids.b8, date_out: out }), 'задна дата');
   const l = q('SELECT * FROM loans WHERE id = ?', lid);
   assert.equal(l.date_due, E.nextWorkDay(h.db, E.addDays(out, 14)));
@@ -650,11 +673,11 @@ test('9. задна дата — падежът и събитието следв
   assert.equal(sug.suggestions.a_age_o28, 1);
   // Просрочено е (падежът е преди днес) → в „Просрочени“ със същите дни като огледалото.
   const ov = ok(await h.api.loans.overdue(), 'просрочени').find(x => x.id === lid);
-  assert.ok(ov); assert.equal(ov.daysLate, E.effectiveDaysLate(h.db, l.date_due, T));
+  assert.ok(ov); assert.equal(ov.daysLate, lateDays(l.date_due, T));
   // Връщане със задна дата (преди 3 дни).
   const inD = E.addDays(T, -3);
   const rr = ok(await h.api.loans.return({ id: lid, date_in: inD }), 'връщане със задна дата');
-  assert.equal(rr.daysLate, E.effectiveDaysLate(h.db, l.date_due, inD));
+  assert.equal(rr.daysLate, lateDays(l.date_due, inD));
   assert.equal(q("SELECT date FROM events WHERE kind = 'връщане' AND book_id = ?", ids.b8).date, inD);
   ok(await h.api.readers.clearSuspension(ids.r1), 'снемане');
 
@@ -702,7 +725,7 @@ test('9. задна дата — падежът и събитието следв
 test('10. изгубен документ: прозорецът, начислението, състоянието, актът по чл. 30, т. 5', async () => {
   const lid = ok(await h.api.loans.checkout({ reader_id: ids.r5, book_id: ids.b5, date_out: E.addDays(W, -14) }), 'заемане');
   h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(W, lid);
-  const late = E.effectiveDaysLate(h.db, W, T);
+  const late = lateDays(W, T);
   await selectReader('1005');
   assert.match(h.viewText(), /Читателят има просрочени документи/);
   await h.clickButton('Изгубена', loanRow(5));
@@ -990,7 +1013,17 @@ test('15. годишният отчет брои заеманията по да�
       SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0)=0 AND date_in > date_due THEN 1 ELSE 0 END) AS late,
       SUM(fine) AS fines FROM loans WHERE date_in BETWEEN ? AND ?`, Y + '-01-01', Y + '-12-31');
   assert.equal(r.returnedOnTime, ret.onTime); assert.equal(r.returnedLate, ret.late);
-  assert.equal(cents(r.finesCharged), cents(ret.fines));
+  /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.71, находка Ч3 — handlers/stats.js): „Начислени
+     обезщетения“ вече не се събират от loans.fine на върнатите заемания (само
+     забавите, заедно с опростените), а от ЧИТАТЕЛСКАТА СМЕТКА — начисленията с
+     дата в годината от видовете „забава“, „обезщетение“ и „обезщетение за
+     изгубен документ“, същите, по които се броят и „Събрани обезщетения“. Така
+     събраното вече не може да надхвърли начисленото само защото двата реда мерят
+     различни неща. `ret.fines` (loans.fine) остава за забавите по заемания. */
+  const chargedInAccount = q(`SELECT COALESCE(SUM(amount), 0) AS s FROM account_lines WHERE kind = 'начисление'
+      AND type IN ('забава', 'обезщетение', 'обезщетение за изгубен документ') AND date >= ? AND date < ?`,
+    Y + '-01-01', (Number(Y) + 1) + '-01-01').s;
+  assert.equal(cents(r.finesCharged), cents(chargedInAccount));
   assert.equal(r.openOverdue, q("SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL AND date_due < date('now', 'localtime')").n);
   assert.equal(cents(r.finesCollected), 25, 'платените 25 € по изгубения документ са събрано обезщетение');
   assert.ok(r.topLoans.some(x => x.title === 'Тютюн'), 'най-търсеното: ' + JSON.stringify(r.topLoans));
@@ -1004,7 +1037,7 @@ test('15. годишният отчет брои заеманията по да�
   assert.equal(d.overdueCount, r.openOverdue);
   assert.equal(d.loansOpen, q('SELECT COUNT(*) AS n FROM loans WHERE date_in IS NULL').n);
   assert.equal(d.loansYear, r.loansCount, 'таблото и отчетът броят еднакво');
-  assert.ok(d.overdueRows.every(x => x.daysLate === E.effectiveDaysLate(h.db, x.date_due, T)), 'дните на таблото са същите като на гишето');
+  assert.ok(d.overdueRows.every(x => x.daysLate === lateDays(x.date_due, T)), 'дните на таблото са същите като на гишето');
   await h.go('dash');
   assert.match(h.viewText(), rx(String(d.overdueCount)));
   noRendererErrors();

@@ -24,6 +24,22 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
      обяснено защо „изгубен“ и „липсващ“ са две различни неща (чл. 30, т. 5
      срещу т. 6). Преписан литерал би се разминал с тригера при преименуване. */
   const { BOOK_STATUS_LOST } = require('../db/enum-triggers');
+  /* Правилото „нашият документ е при партньора по МЗС“ живее в handlers/mzs.js
+     (mzsAwayCount — едно място за гишето, резервациите и оттук и
+     инвентаризацията). Взима се оттам, а не се преписва (v2.4.71, находка М1). */
+  const { mzsAwayCount } = require('./mzs');
+
+  /* КОЛОНИТЕ НА КРЪГ 45 СЕ ПОЛЗВАТ ЗАЩИТЕНО (v2.4.71, находки И1 и М1).
+     Приключването снима още две числа — документите при партньора по МЗС
+     (mzs_away) и постъпилите след началото на проверката (added_late) — и
+     помни при започването най-големия books.id (last_book_id), за да знае кои
+     записи са вписани, ДОКАТО проверката тече. Трите колони се добавят от
+     миграция в main.js (извън този модул). Докато ги няма (стара база или
+     модулът е зареден самостоятелно), поведението пада обратно към
+     заварените снимки — виж closeSnapshot() и inventorySessions:get. */
+  function sessionColumns(db) {
+    return new Set(db.prepare('PRAGMA table_info(inventory_sessions)').all().map(r => r.name));
+  }
 
   /* ИНВЕНТАРИЗАЦИЯТА БРОИ БИБЛИОТЕЧНИ ДОКУМЕНТИ, НЕ РЕДОВЕ (v2.4.61).
      =====================================================================
@@ -205,6 +221,26 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          следващият номер без дума, „-3“ и „1.5“ минаваха. Проверката е ПРЕДИ
          транзакцията — правото на запис не се взима заради невалиден вход. */
       const typed = parseRegisterNo(s.no, 'Протокол №', true);
+      /* „КАКВО Е ПРОВЕРЯВАНО: ЦЕЛИЯТ ФОНД · ОТДЕЛ „ЗА ДЕЦА““ (v2.4.71, находка И3).
+         =================================================================
+         (а) Полето „Какво се проверява“ идва предварително попълнено с „целият
+             фонд“ и не се сменяше при избор на отдел. Тестерът започна проверка
+             само на отдел „за деца“, без да пипа полето, и подписаният протокол
+             гласеше „Какво е проверявано: целият фонд · отдел „за деца““.
+         (б) Протоколът по чл. 40 удостоверява ОБХВАТА на проверката; два
+             взаимно изключващи се обхвата на един ред правят документа
+             негоден пред проверяващ — не личи дали липсите са за отдела или
+             за целия фонд.
+         (в) Правилото е тук, в обработчика (екранът също сменя полето, но през
+             този канал минават и други пътища): при ограничение до отдел
+             празно поле или непипнатото „целият фонд“ стават „отдел „…““.
+             Всякакъв друг текст е писан от човек и не се пипа. Промяната не е
+             мълчалива — новото описание стои в списъка на проверките и в
+             заглавието на екрана „Проверка в ход“. */
+      const scopeIn = String((s && s.scope) || '').trim();
+      const scope = (s.department && (!scopeIn || scopeIn === 'целият фонд'))
+        ? 'отдел „' + s.department + '“' : (s.scope || '');
+      const cols = sessionColumns(db);
       const tx = db.transaction(() => {
         const no = typed
           || ((db.prepare('SELECT MAX(no) AS m FROM inventory_sessions WHERE year = ?').get(year).m || 0) + 1);
@@ -212,19 +248,34 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
           throw new Error('Протокол № ' + no + '/' + year + ' вече съществува — най-вероятно е създаден от друго '
             + 'работно място към същата база. Затворете и отворете формата отново, за да получите следващия свободен номер.');
         }
+        /* director — И6 (v2.4.71): снимка на името на ръководителя от Настройки към
+           съставянето; разпечатката го слага до „УТВЪРДИЛ“ (виж approverLine в
+           src/views/core.js). Препечатан стар документ пази СВОЕТО име. */
         const info = db.prepare(`
           INSERT INTO inventory_sessions (date, scope, department, committee1, committee2, committee3,
-                                          pool_size, closed, no, year, order_no)
-          VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0, @no, @year, @order_no)
+                                          pool_size, closed, no, year, order_no, director)
+          VALUES (@date, @scope, @department, @committee1, @committee2, @committee3, @pool_size, 0, @no, @year, @order_no,
+                  (SELECT NULLIF(TRIM(director), '') FROM settings WHERE id = 1))
         `).run(Object.assign({}, s, {
-          department: s.department || null, pool_size: pool.n, no, year, order_no: s.order_no || null
+          scope, department: s.department || null, pool_size: pool.n, no, year, order_no: s.order_no || null
         }));
+        /* ГРАНИЦАТА „ВПИСАН ПРЕДИ / СЛЕД НАЧАЛОТО“ (v2.4.71, находка И1) — виж
+           дългата бележка в classifySession(). books.id расте само нагоре
+           (AUTOINCREMENT не преизползва номера), затова най-големият id към
+           този миг е точна граница, независима от часовника на компютъра —
+           при две работни места към една мрежова база часовниците им могат
+           да се разминават, а id-то идва от самата база. Пише се в същата
+           транзакция с .immediate(): между четенето и записа никой не вписва. */
+        if (cols.has('last_book_id')) {
+          db.prepare('UPDATE inventory_sessions SET last_book_id = (SELECT COALESCE(MAX(id), 0) FROM books) WHERE id = ?')
+            .run(info.lastInsertRowid);
+        }
         return info.lastInsertRowid;
       });
       return tx.immediate();
     })
   );
-  ipcMain.handle('inventorySessions:get', (e, id) =>
+  ipcMain.handle('inventorySessions:get', (e, id, opts) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(id);
@@ -299,12 +350,47 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
          тогава са в липсите) — редът просто не се печата, вместо протоколът да
          твърди „0 изгубени“. Отрицателен остатък (повредена или ръчно пипана
          база) се показва като липсващо число, а не като отрицателен брой. */
+      /* ПРИ ПАРТНЬОРА ПО МЗС И ПОСТЪПИЛИТЕ СЛЕД НАЧАЛОТО (v2.4.71, М1 и И1) —
+         двете нови снимки влизат в равенството ПРЕДИ остатъка, иначе
+         остатъкът би ги обявил за „изгубени от ползватели“:
+           в обхвата = проверени + заети + при партньора по МЗС + за реставрация
+                       + изгубени + постъпили след началото + липсващи.
+         NULL (проверка отпреди v2.4.71 или база без колоните) = 0 — тогава и
+         приключването не ги е отделяло. */
+      s.mzsAway = s.mzs_away != null ? Number(s.mzs_away) : null;
+      s.addedLate = s.added_late != null ? Number(s.added_late) : null;
       if (s.mode === 'full' && s.pool_final != null && s.scanned_final != null
           && s.on_loan != null && s.at_binder != null) {
-        const rest = s.pool_final - s.scanned_final - s.on_loan - s.at_binder - s.missingDocs;
+        const rest = s.pool_final - s.scanned_final - s.on_loan - s.at_binder - s.missingDocs
+          - (s.mzsAway || 0) - (s.addedLate || 0);
         s.lostBefore = rest > 0 ? rest : 0;
       } else {
         s.lostBefore = null;
+      }
+      /* ПРЕГЛЕДЪТ ПРЕД ПРИКЛЮЧВАНЕТО (v2.4.71, находка И1, втора половина).
+         =================================================================
+         (а) Прозорецът „Какъв е видът на тази инвентаризация?“ смяташе
+             „Проверени са 5 от 5 … Останалите 0 не са сканирани“ от СНИМКАТА
+             pool_size при започването, а приключването брои обхвата наново,
+             от живата база. Шеста книга, вписана междувременно, не се
+             виждаше в прозореца — и след „Пълна проверка“ излизаше
+             „Липсващи 1 — надвишават норматива“.
+         (б) Точно в този прозорец библиотекарката решава дали да позволи
+             масово презаписване на състояния. Число, различно от онова,
+             което приключването ще направи, е обещание, което програмата
+             не спазва.
+         (в) Затова прегледът се смята от СЪЩАТА функция, от която и
+             приключването (classifySession), в същия миг и без запис. Иска
+             се изрично ({ preview: true }) — протоколът и екранът „Проверка в
+             ход“ не плащат цената на обхождането на целия обхват. */
+      if (!s.closed && opts && opts.preview) {
+        const full = classifySession(db, s, 'full');
+        s.preview = {
+          pool: full.poolDocs, scanned: full.scannedInPool, outOfScope: full.outOfScope,
+          onLoan: full.onLoanInPool, mzsAway: full.mzsAwayDocs, atBinder: full.excusedDocs,
+          lostBefore: full.lostDocs, addedLate: full.lateDocs,
+          missingIfFull: full.missingDocs, lateTracked: full.lateTracked
+        };
       }
       return s;
     })
@@ -402,7 +488,126 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
         if (!s) throw new Error('Няма такава сесия.');
         if (s.closed) throw new Error('Тази инвентаризация вече е приключена.');
-        const scannedIds = db.prepare('SELECT book_id FROM inventory_session_scans WHERE session_id = ?').all(sessionId).map(r => r.book_id);
+        /* Разпределението на обхвата — в classifySession() по-долу (v2.4.71):
+           същата функция дава и прегледа в прозореца преди приключването. */
+        const c = classifySession(db, s, mode);
+        const { pool, missing, missingQty, missingDocs, poolDocs, scannedInPool, outOfScope,
+          excusedDocs, lostDocs, onLoanInPool, mzsAwayDocs, lateDocs } = c;
+        /* БРОЙКАТА СЕ СНИМА ЗАЕДНО С ЦЕНАТА И ЗАГЛАВИЕТО (v2.4.61).
+           Редът тук е снимка към деня на приключването — затова носи заглавие,
+           автор и цена, а не само book_id. Бройката липсваше от снимката и се
+           четеше наживо от inventory: поправка на „Налични бройки“ на вече
+           липсващ документ променяше вече отпечатания и подписан протокол със
+           задна дата. Сега се пази и тя — точно както deaccession_items.quantity
+           пази бройката в акта (чл. 35, ал. 2). */
+        const insMissing = db.prepare(`
+          INSERT INTO inventory_session_missing (session_id, book_id, inv_number, title, author, price, quantity)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        missing.forEach(b => {
+          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price, missingQty(b));
+        });
+        /* Отбелязването като „липсващ“ е ЕДНА заявка върху току-що вписаните редове,
+           а не по една на документ. Дотук в обхождането стоеше db.prepare(...) —
+           тоест при пълна проверка на фонд от 15 000 документа, в която комисията
+           още не е сканирала нищо, 14 000 отделни КОМПИЛАЦИИ на един и същ SQL плюс
+           14 000 изпълнения. Измерено: приключването отнемаше 657 ms — почти
+           секунда, в която прозорецът стои залепнал, точно при „Приключи“.
+           Условието за статуса се пази дословно: то е излишно, защото обхватът и без
+           това изключва отчислените, но е предпазна мярка и не се маха мимоходом. */
+        if (missing.length) {
+          /* Ред с отворено заемане (частично зает стар запис) не се отбелязва като
+             „липсващ“ целият: една от бройките му е у читател и връщането ѝ трябва
+             да мине нормално. Липсващите му бройки са в протокола с точния брой;
+             „Проект за акт от липсите“ разделя стария запис, преди да отчисли. */
+          db.prepare(`UPDATE books SET status='липсващ', status_date=date('now', 'localtime')
+            WHERE ${fundByStatusPlain}
+              AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)
+              AND id NOT IN (SELECT book_id FROM loans WHERE date_in IS NULL)
+              AND id NOT IN (SELECT value FROM json_each(?))`)
+            .run(sessionId, JSON.stringify(c.mzsAwayIds));
+        }
+        /* Видът се ЗАПИСВА в базата (v2.3.0). Дотогава оставаше само в отговора към
+           прозореца, затова в списъка приключена представителна проверка с 0 липсващи
+           изглеждаше точно като пълна с 0 липсващи — а пред проверяващ от регионалната
+           библиотека няма как да се докаже кое от двете е било. */
+        /* Пулът и заетите се ЗАПИСВАТ такива, каквито са в момента на приключване.
+           pool_size е снимка от започването; книги, вписани докато проверката тече,
+           влизат в `unchecked`/`missing`, но не и в снимката — протоколът можеше да
+           гласи „в обхвата 10 · проверени 10 · липсващи 30“. Одит на документите
+           v2.4.17. */
+        /* Процентът за норматива по чл. 41 се СНИМА тук (v2.4.67) — виж миграция 17. */
+        const pctNow = (db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {}).free_access_pct;
+        /* ДВЕТЕ НОВИ СНИМКИ (v2.4.71, М1 и И1) — в собствени колони, ако базата
+           ги има. Без колоната mzs_away документите при партньора се добавят към
+           заетите: протоколът пак се събира до обхвата и нищо не се обявява за
+           „изгубено от ползвател“ (остатъка в inventorySessions:get), а разликата
+           е само в думата. Без added_late границата изобщо не се следи
+           (lateTracked = false) и lateDocs е 0. */
+        const hasCol = (k) => Object.prototype.hasOwnProperty.call(s, k);
+        const onLoanSnap = onLoanInPool + (hasCol('mzs_away') ? 0 : mzsAwayDocs);
+        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ?, free_access_pct = ? WHERE id = ?')
+          .run(mode, poolDocs, onLoanSnap, excusedDocs, scannedInPool, pctNow, sessionId);
+        if (hasCol('mzs_away')) db.prepare('UPDATE inventory_sessions SET mzs_away = ? WHERE id = ?').run(mzsAwayDocs, sessionId);
+        if (hasCol('added_late')) db.prepare('UPDATE inventory_sessions SET added_late = ? WHERE id = ?').run(lateDocs, sessionId);
+        logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
+          /* Числата в следата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ, както в протокола.
+             Когато инвентарните номера са по-малко (стар неразделен запис), се
+             казва и това — иначе следата и таблицата в протокола изглеждат като
+             две различни проверки. */
+          ' — проверени ' + scannedInPool + ', липсващи ' + missingDocs +
+          (missingDocs !== missing.length ? ' (под ' + missing.length + ' инвентарни номера)' : '') +
+          ' от ' + poolDocs + ' библиотечни документа' +
+          (outOfScope ? ', ' + outOfScope + ' сканирани излязоха от обхвата по време на проверката' : '') +
+          (excusedDocs ? ', ' + excusedDocs + (excusedDocs === 1 ? ' документ за реставрация (не се проверява на място)'
+            : ' документа за реставрация (не се проверяват на място)') : '') +
+          /* Изгубените от ползватели се назовават ОТДЕЛНО и в следата: дневникът
+             е мястото, от което библиотекарката на другия ден вижда защо
+             липсите в протокола са по-малко от несканираните. */
+          (lostDocs ? ', ' + lostDocs + (lostDocs === 1
+            ? ' документ, изгубен от ползвател преди проверката (чл. 30, т. 5 — не е липса по чл. 40)'
+            : ' документа, изгубени от ползватели преди проверката (чл. 30, т. 5 — не са липси по чл. 40)') : '') +
+          /* Същото за двете нови категории (v2.4.71): следата повтаря протокола. */
+          (mzsAwayDocs ? ', ' + mzsAwayDocs + (mzsAwayDocs === 1
+            ? ' документ при друга библиотека по МЗС (не е липса)'
+            : ' документа при други библиотеки по МЗС (не са липси)') : '') +
+          (lateDocs ? ', ' + lateDocs + (lateDocs === 1
+            ? ' документ, постъпил след началото на проверката (не е липса)'
+            : ' документа, постъпили след началото на проверката (не са липси)') : ''));
+        const s2 = { free_access_pct: pctNow };
+        return {
+          mode, scanned: scannedInPool, missing: missingDocs, missingRows: missing.length,
+          pool: poolDocs, poolRows: pool.length, outOfScope,
+          unchecked: c.unchecked,
+          onLoan: onLoanInPool, atBinder: excusedDocs,
+          /* Изгубените преди проверката се връщат със собствено число (v2.4.65),
+             за да ги покаже прозорецът след приключването отделно от липсите —
+             те не се отчисляват с един и същ акт и не се сравняват с чл. 41. */
+          lostBefore: lostDocs, lostBeforeRows: c.lostRows,
+          /* И двете нови категории (v2.4.71) — за прозореца след приключването. */
+          mzsAway: mzsAwayDocs, addedLate: lateDocs,
+          allowedLoss: naturalLoss(poolDocs, s2.free_access_pct)
+        };
+      });
+      const out = tx.immediate();
+      /* Пълната проверка току-що е направила несканираните „липсващ“ — онлайн
+         каталогът трябва да спре да ги показва налични (находка К2, виж горе).
+         Извън транзакцията: пише файл, не база. Представителната не пипа
+         състояния и няма какво да публикува. */
+      if (out.mode === 'full' && out.missingRows > 0) scheduleCatalogWrite();
+      return out;
+    })
+  );
+  /* РАЗПРЕДЕЛЕНИЕТО НА ОБХВАТА — ЕДНО МЯСТО ЗА ПРИКЛЮЧВАНЕТО И ЗА ПРЕГЛЕДА ПРЕДИ
+     НЕГО (v2.4.71, находка И1). Дотук тези изчисления живееха вътре в
+     inventorySessions:close, а прозорецът преди приключването смяташе своите
+     числа от снимката pool_size — две места, две истини (виж бележката при
+     inventorySessions:get). Функцията само ЧЕТЕ; записите прави close().
+     Декларирана е след close() нарочно — function declaration е достъпна в
+     целия модул, а test/perf-v2448.test.js чете заявката за обхвата в текста
+     от close() надолу. */
+  function classifySession(db, s, mode) {
+        const scannedIds = db.prepare('SELECT book_id FROM inventory_session_scans WHERE session_id = ?').all(s.id).map(r => r.book_id);
         /* Одит v2.3.1 №20 — виж бележката в inventorySessions:requirement по-горе.
            Полетата са ИЗБРОЕНИ, а не „*“: приключването ползва шест от тях, а
            таблицата има 38 колони, сред които анотация и адрес на корица.
@@ -449,6 +654,72 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         const openLoanIds = new Set(openLoanCount.keys());
         const loanedOf = (b) => Math.min(openLoanCount.get(b.id) || 0, qtyOf(b));
         const scannedSet = new Set(scannedIds);
+        /* ДОКУМЕНТ, ИЗПРАТЕН ПО МЗС, НЕ Е ЛИПСВАЩ (v2.4.71, находка М1).
+           =================================================================
+           (а) Наш документ, изпратен на друга библиотека по входяща заявка
+               (mzs_requests.book_id, „изпратено“ или „получено“ — у партньора),
+               падаше в `unchecked`: тестерът получи „Липсващи: 1 … надвишава
+               норматива“, проектът за акт го включи по чл. 30, т. 6, а след
+               „върнато“ в МЗС книгата си оставаше „липсващ“.
+           (б) Документът не е изгубен — местоположението му е записано в самата
+               програма, със срок за връщане. Да се обяви за установена липса
+               по чл. 40 значи акт на грешно основание и норматив по чл. 41,
+               надхвърлен от документи, които никой не е губил.
+           (в) Извинява се КАТО ЗАЕТИТЕ — не може да бъде сканиран на място по
+               причина, известна преди проверката, — но в СВОЯ категория, за да
+               го назове протоколът. Броят бройки при партньора идва от
+               mzsAwayCount() в handlers/mzs.js (едно правило за гишето,
+               резервациите и инвентаризацията). Той се пита само за записите,
+               по които изобщо има входяща заявка (обикновено шепа) — не по
+               веднъж за всеки от 15 000 документа в обхвата. */
+        const awayCount = new Map();
+        db.prepare(`SELECT DISTINCT book_id FROM mzs_requests
+                     WHERE book_id IS NOT NULL AND direction = 'входящо'`).all()
+          .forEach(r => { const n = mzsAwayCount(db, r.book_id); if (n > 0) awayCount.set(r.book_id, n); });
+        /* Бройките при партньора — само незаетите: един стар запис с 3 бройки,
+           1 у читател и 1 по МЗС, има 1 бройка, която е трябвало да е на рафта. */
+        const awayOf = (b) => Math.min(awayCount.get(b.id) || 0, Math.max(0, qtyOf(b) - loanedOf(b)));
+        const takenOf = (b) => loanedOf(b) + awayOf(b);
+        /* „Извън сградата по известна причина“ — има отворено заемане или МЗС.
+           Проверява се по НАЛИЧИЕТО им, не по сбора на бройките, точно както
+           дотук с openLoanIds: ред с изрично 0 бройки и отворено заемане не
+           бива да падне в липсите като ред с 0 документа. */
+        const isOut = (b) => openLoanIds.has(b.id) || awayCount.has(b.id);
+        /* ПОСТЪПИЛИТЕ СЛЕД НАЧАЛОТО НЕ СА ЛИПСВАЩИ (v2.4.71, находка И1).
+           =================================================================
+           (а) Пет книги, всички сканирани; докато проверката тече, се вписва
+               шеста. Приключването смята обхвата наново, от живата база, и
+               шестата — никога невиждана от комисията — излизаше „Липсващи 1 —
+               надвишават норматива“, получаваше състояние „липсващ“, влизаше в
+               протокола, в проекта за акт по чл. 30, т. 6 и излизаше неналична
+               в онлайн каталога. Прозорецът преди това обещаваше „5 от 5“.
+           (б) Липса по чл. 40 е документ, който е БИЛ във фонда, когато
+               комисията е тръгнала по рафтовете, и не е намерен. Новопостъпилата
+               книга не е била там — тя е на бюрото за обработка. Да влезе в
+               липсите значи акт за отчисляване на току-що купена книга.
+           (в) Записите, вписани след началото (books.id > last_book_id, снет
+               при започването), се изброяват ОТДЕЛНО: не са липси, състоянието
+               им не се пипа, а протоколът ги назовава с отделен ред —
+               „постъпили след началото на проверката“. Остават в обхвата
+               (pool_final), за да се събира равенството; сканираните сред тях
+               са просто проверени. Предимство пред заетите/МЗС имат нарочно:
+               новата книга, заета още същия ден, пак е „постъпила след
+               началото“ — такава е истината за протокола.
+               Известно ограничение: разделянето на стар неразделен запис
+               (books:splitCopies) ДОКАТО проверката тече също дава нови id;
+               такива бройки ще се водят „постъпили след началото“, а не липси.
+               Протоколът ги назовава, тоест нищо не се губи мълчаливо.
+           Проверка, започната преди v2.4.71 (или в база без колоната), няма
+           граница — тогава поведението е заварено и това се казва на екрана
+           (lateTracked = false). */
+        const lateTracked = s.last_book_id != null && Object.prototype.hasOwnProperty.call(s, 'added_late');
+        const lateIds = lateTracked
+          ? new Set(db.prepare('SELECT id FROM books WHERE id > ?').all(s.last_book_id).map(r => r.id))
+          : new Set();
+        const lateRows = pool.filter(b => !scannedSet.has(b.id) && lateIds.has(b.id));
+        /* Несканиран документ, който е бил във фонда при започването — само за
+           такива има смисъл въпросът „зает / при подвързвача / изгубен / липсващ“. */
+        const unscannedOld = (b) => !scannedSet.has(b.id) && !lateIds.has(b.id);
         /* Одит v2.4.24: извинени са само заетите. Документ „за реставрация“ е при
            подвързвача — по определение не може да бъде сканиран на място, а
            „за реставрация“ е валидно състояние, което библиотекарят задава изрично
@@ -464,7 +735,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            щеше да гласи „в обхвата 100 · проверени 40 · заети 5 · за реставрация 3 ·
            липсващи 53“, тоест 101 от 100. */
         const excused = pool.filter(b => b.status === 'за реставрация'
-          && !scannedSet.has(b.id) && !openLoanIds.has(b.id));
+          && unscannedOld(b) && !isOut(b));
         /* ИЗГУБЕНИЯТ ОТ ЧИТАТЕЛ НЕ Е ЛИПСВАЩ ПРИ ИНВЕНТАРИЗАЦИЯ (v2.4.65).
            =================================================================
            ЗАВАРЕНОТО. Документ, приключен на гишето с „Документът е изгубен“
@@ -505,14 +776,16 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            Категориите остават ВЗАИМНО ИЗКЛЮЧВАЩИ СЕ (виж бележката отгоре):
            в обхвата = проверени + заети + за реставрация + изгубени + липсващи. */
         const lostBefore = pool.filter(b => b.status === BOOK_STATUS_LOST
-          && !scannedSet.has(b.id) && !openLoanIds.has(b.id));
+          && unscannedOld(b) && !isOut(b));
         const excusedIds = new Set(excused.map(b => b.id).concat(lostBefore.map(b => b.id)));
-        const unchecked = pool.filter(b => !scannedSet.has(b.id) && !openLoanIds.has(b.id) && !excusedIds.has(b.id));
+        const unchecked = pool.filter(b => unscannedOld(b) && !isOut(b) && !excusedIds.has(b.id));
         /* Частично заети: несканиран ред с отворени заемания, но с повече бройки от
            тях. Незаетите му бройки не са извинени от нищо — не са намерени. */
-        const partlyAll = pool.filter(b => !scannedSet.has(b.id) && openLoanIds.has(b.id)
-          && !excusedIds.has(b.id) && qtyOf(b) - loanedOf(b) > 0);
-        const restOf = new Map(partlyAll.map(b => [b.id, qtyOf(b) - loanedOf(b)]));
+        /* Заетите бройки и тези при партньора по МЗС се вадят ЗАЕДНО (v2.4.71):
+           и двете са извън сградата по причина, известна преди проверката. */
+        const partlyAll = pool.filter(b => unscannedOld(b) && isOut(b)
+          && !excusedIds.has(b.id) && qtyOf(b) - takenOf(b) > 0);
+        const restOf = new Map(partlyAll.map(b => [b.id, qtyOf(b) - takenOf(b)]));
         /* Състоянието на записа важи и за незаетите му бройки (преглед на кръга):
            „за реставрация“ — те са в подвързията, „изгубен“ — у ползвател; нито
            едните, нито другите са липса по чл. 40 и не се броят срещу чл. 41. */
@@ -525,54 +798,16 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         // При представителна проверка непроверените НЕ са липсващи — те просто не
         // са влизали в обхвата на тазгодишната извадка.
         const missing = mode === 'full' ? unchecked.concat(partlyLoaned) : [];
-        /* БРОЙКАТА СЕ СНИМА ЗАЕДНО С ЦЕНАТА И ЗАГЛАВИЕТО (v2.4.61).
-           Редът тук е снимка към деня на приключването — затова носи заглавие,
-           автор и цена, а не само book_id. Бройката липсваше от снимката и се
-           четеше наживо от inventory: поправка на „Налични бройки“ на вече
-           липсващ документ променяше вече отпечатания и подписан протокол със
-           задна дата. Сега се пази и тя — точно както deaccession_items.quantity
-           пази бройката в акта (чл. 35, ал. 2). */
-        const insMissing = db.prepare(`
-          INSERT INTO inventory_session_missing (session_id, book_id, inv_number, title, author, price, quantity)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `);
-        missing.forEach(b => {
-          insMissing.run(sessionId, b.id, b.inv_number, b.title, b.author, b.price, missingQty(b));
-        });
-        /* Отбелязването като „липсващ“ е ЕДНА заявка върху току-що вписаните редове,
-           а не по една на документ. Дотук в обхождането стоеше db.prepare(...) —
-           тоест при пълна проверка на фонд от 15 000 документа, в която комисията
-           още не е сканирала нищо, 14 000 отделни КОМПИЛАЦИИ на един и същ SQL плюс
-           14 000 изпълнения. Измерено: приключването отнемаше 657 ms — почти
-           секунда, в която прозорецът стои залепнал, точно при „Приключи“.
-           Условието за статуса се пази дословно: то е излишно, защото обхватът и без
-           това изключва отчислените, но е предпазна мярка и не се маха мимоходом. */
-        if (missing.length) {
-          /* Ред с отворено заемане (частично зает стар запис) не се отбелязва като
-             „липсващ“ целият: една от бройките му е у читател и връщането ѝ трябва
-             да мине нормално. Липсващите му бройки са в протокола с точния брой;
-             „Проект за акт от липсите“ разделя стария запис, преди да отчисли. */
-          db.prepare(`UPDATE books SET status='липсващ', status_date=date('now', 'localtime')
-            WHERE ${fundByStatusPlain}
-              AND id IN (SELECT book_id FROM inventory_session_missing WHERE session_id = ?)
-              AND id NOT IN (SELECT book_id FROM loans WHERE date_in IS NULL)`)
-            .run(sessionId);
-        }
-        /* Видът се ЗАПИСВА в базата (v2.3.0). Дотогава оставаше само в отговора към
-           прозореца, затова в списъка приключена представителна проверка с 0 липсващи
-           изглеждаше точно като пълна с 0 липсващи — а пред проверяващ от регионалната
-           библиотека няма как да се докаже кое от двете е било. */
-        /* Пулът и заетите се ЗАПИСВАТ такива, каквито са в момента на приключване.
-           pool_size е снимка от започването; книги, вписани докато проверката тече,
-           влизат в `unchecked`/`missing`, но не и в снимката — протоколът можеше да
-           гласи „в обхвата 10 · проверени 10 · липсващи 30“. Одит на документите
-           v2.4.17. */
         /* Заетите се броят СРЕД НЕПРОВЕРЕНИТЕ, по същата причина като „за реставрация“
            по-горе: четирите числа в протокола трябва да се събират до обхвата.
            Заета книга, която все пак е сканирана (върната на гишето, но още
            нерегистрирана), е ПРОВЕРЕНА — тя е била в ръцете на комисията. */
-        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && !scannedSet.has(b.id))
+        const onLoanInPool = pool.filter(b => openLoanIds.has(b.id) && unscannedOld(b))
           .reduce((n, b) => n + loanedOf(b), 0);
+        /* При партньора по МЗС — собствено число (v2.4.71, М1), по същото правило
+           като заетите: сканиран документ е проверен, каквото и да пише в заявката. */
+        const mzsAwayRows = pool.filter(b => awayCount.has(b.id) && unscannedOld(b) && awayOf(b) > 0);
+        const mzsAwayDocs = mzsAwayRows.reduce((n, b) => n + awayOf(b), 0);
         /* „Проверени“ се брои СРЕЩУ ОБХВАТА, а не като брой сканирания. Обхватът
            се смята наново при приключване (книга, отчислена или преместена в друг
            отдел, докато проверката тече, вече не е в него), а сканиранията са
@@ -613,49 +848,17 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            проверка — и в прозореца, и в протокола; при представителна — в
            нито едно, и в следата също не (тя повтаря протокола). */
         const lostDocs = mode === 'full' ? docs(lostBefore) + restSum(partlyLost) : 0;
-        /* Процентът за норматива по чл. 41 се СНИМА тук (v2.4.67) — виж миграция 17. */
-        const pctNow = (db.prepare('SELECT free_access_pct FROM settings WHERE id = 1').get() || {}).free_access_pct;
-        db.prepare('UPDATE inventory_sessions SET closed = 1, mode = ?, pool_final = ?, on_loan = ?, at_binder = ?, scanned_final = ?, free_access_pct = ? WHERE id = ?')
-          .run(mode, poolDocs, onLoanInPool, excusedDocs, scannedInPool, pctNow, sessionId);
-        logAudit('Инвентаризация', (mode === 'full' ? 'пълна' : 'представителна') +
-          /* Числата в следата са в БИБЛИОТЕЧНИ ДОКУМЕНТИ, както в протокола.
-             Когато инвентарните номера са по-малко (стар неразделен запис), се
-             казва и това — иначе следата и таблицата в протокола изглеждат като
-             две различни проверки. */
-          ' — проверени ' + scannedInPool + ', липсващи ' + missingDocs +
-          (missingDocs !== missing.length ? ' (под ' + missing.length + ' инвентарни номера)' : '') +
-          ' от ' + poolDocs + ' библиотечни документа' +
-          (outOfScope ? ', ' + outOfScope + ' сканирани излязоха от обхвата по време на проверката' : '') +
-          (excusedDocs ? ', ' + excusedDocs + (excusedDocs === 1 ? ' документ за реставрация (не се проверява на място)'
-            : ' документа за реставрация (не се проверяват на място)') : '') +
-          /* Изгубените от ползватели се назовават ОТДЕЛНО и в следата: дневникът
-             е мястото, от което библиотекарката на другия ден вижда защо
-             липсите в протокола са по-малко от несканираните. */
-          (lostDocs ? ', ' + lostDocs + (lostDocs === 1
-            ? ' документ, изгубен от ползвател преди проверката (чл. 30, т. 5 — не е липса по чл. 40)'
-            : ' документа, изгубени от ползватели преди проверката (чл. 30, т. 5 — не са липси по чл. 40)') : ''));
-        const s2 = { free_access_pct: pctNow };
+        const lateDocs = docs(lateRows);
         return {
-          mode, scanned: scannedInPool, missing: missingDocs, missingRows: missing.length,
-          pool: poolDocs, poolRows: pool.length, outOfScope,
+          pool, scannedIds, scannedInPool, outOfScope, poolDocs,
+          missing, missingQty, missingDocs,
           unchecked: docs(unchecked) + restSum(partlyLoaned),
-          onLoan: onLoanInPool, atBinder: excusedDocs,
-          /* Изгубените преди проверката се връщат със собствено число (v2.4.65),
-             за да ги покаже прозорецът след приключването отделно от липсите —
-             те не се отчисляват с един и същ акт и не се сравняват с чл. 41. */
-          lostBefore: lostDocs, lostBeforeRows: mode === 'full' ? lostBefore.length + partlyLost.length : 0,
-          allowedLoss: naturalLoss(poolDocs, s2.free_access_pct)
+          excusedDocs, lostDocs,
+          lostRows: mode === 'full' ? lostBefore.length + partlyLost.length : 0,
+          onLoanInPool, mzsAwayDocs, mzsAwayIds: mzsAwayRows.map(b => b.id),
+          lateDocs, lateTracked
         };
-      });
-      const out = tx.immediate();
-      /* Пълната проверка току-що е направила несканираните „липсващ“ — онлайн
-         каталогът трябва да спре да ги показва налични (находка К2, виж горе).
-         Извън транзакцията: пише файл, не база. Представителната не пипа
-         състояния и няма какво да публикува. */
-      if (out.mode === 'full' && out.missingRows > 0) scheduleCatalogWrite();
-      return out;
-    })
-  );
+  }
 };
 
 /* ИЗГУБЕН ДОКУМЕНТ, НАМЕРЕН НА РАФТА ПРИ ИНВЕНТАРИЗАЦИЯ (v2.4.69, находка О3).

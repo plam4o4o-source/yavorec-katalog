@@ -103,6 +103,9 @@
   <div id="manualMsg"></div>
 
   <ul id="list"></ul>
+  <!-- Под списъка — колко номера не са показани (v2.4.71, находка И5; виж VISIBLE). -->
+  <div class="since" id="more" style="display:none"><span id="moreTxt"></span>
+    <button class="btn sec" id="moreBtn" type="button">Покажи всички</button></div>
 
   <textarea id="out" readonly placeholder="Тук се събира списъкът за пренасяне"></textarea>
 </main>
@@ -161,20 +164,51 @@ function escHtml(v) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
   });
 }
-function render() {
+/* ДОБАВЯНЕТО НЕ ЗАВИСИ ОТ ДЪЛЖИНАТА НА СПИСЪКА (v2.4.71, находка И5).
+   ===========================================================================
+   (а) Всяко добавено число минаваше през render(): целият <ul> се сглобяваше
+       наново (1 250 реда), текстовото поле „за пренасяне“ получаваше целия текст
+       наново, после — localStorage. Тестерът измери на Pixel 5 (4× по-бавен
+       процесор): 83 ms при 250 номера, 270 ms при 1 000, 301 ms при 1 250 — и
+       нараства с всеки следващ номер. Повторено с неговата проба (медиана от 15
+       добавяния): 92 ms при 250, 200 ms при 1 000, 482 ms при 2 500.
+   (б) Страницата е за цял рафт, цял ден. Когато всеки бийп закъснява с
+       половин секунда, човекът с телефона вече е насочил камерата към
+       следващия етикет и не знае дали предишният е прочетен — точно така се
+       пропускат номера, а пропуснатият номер при пълна проверка става
+       „липсващ“ в протокола.
+   (в) Измерено поотделно, двете скъпи неща са (1) ПОЛЕТО ЗА ПРЕНАСЯНЕ — целият
+       текст на всяко добавяне, 221 ms при 2 500 номера дори без списъка — и
+       (2) самият дълъг <ul>: вмъкване на ред най-отгоре в списък от 2 500 реда
+       пак струва 110 ms, защото браузърът нарежда наново всичко под него.
+       Затова:
+       • добавянето вмъква САМО новия ред най-отгоре и сменя броячите;
+       • на екрана стоят последните VISIBLE номера (100 — колкото човек
+         преглежда, за да махне току-що сгрешения); под тях пише колко са
+         всички, с бутон „Покажи всички“ за редкия случай, в който трябва да се
+         махне стар номер. Списъкът в паметта и изнесеният текст са ЦЕЛИТЕ;
+       • полето за пренасяне се попълва, когато потрябва — при докосване, при
+         „Копирай списъка“ и „Запиши файл“ — и отложено, след пауза в
+         сканирането, за да не стои остаряло на екрана;
+       • паметта на браузъра (persist) се пише ВЕДНАГА след всяко добавяне,
+         както досега: тя пази списъка при заключен екран и не бива да
+         изостава нито с един номер (измерено — не тя е скъпото).
+       Резултат със същата проба: 30 ms при 250 и 28 ms при 2 500 номера.
+       Пълно прерисуване остава за редките случаи — махане на ред (номерата на
+       редовете след него се сменят), „Изчисти“, „Покажи всички“ и зареждането. */
+var VISIBLE = 100;
+var SHOW_ALL = false;
+function renderMore() {
+  var more = document.getElementById('more');
+  var hidden = SHOW_ALL ? 0 : Math.max(0, codes.length - VISIBLE);
+  if (!hidden) { more.style.display = 'none'; return; }
+  more.style.display = 'block';
+  document.getElementById('moreTxt').textContent = 'Показани са последните ' + VISIBLE + ' от ' + codes.length
+    + ' номера. Всички са в списъка и влизат в изнесения текст.';
+}
+function renderMeta() {
   document.getElementById('cnt').textContent = codes.length;
   document.getElementById('dupCnt').textContent = dups;
-  var ul = document.getElementById('list');
-  /* Сканираният низ идва от четеца на баркодове (BarcodeDetector rawValue) или
-     от ръчното поле и се вкарваше в innerHTML както е — единственото такова
-     място в целия проект. QR код, съдържащ <img src=x onerror=...>, се
-     изпълняваше в страницата. */
-  ul.innerHTML = codes.slice().reverse().map(function (c, i) {
-    var idx = codes.length - 1 - i;
-    return '<li><span>' + escHtml(c) + '</span><span class="x" role="button" aria-label="Махни ' + escHtml(c)
-      + '" data-i="' + idx + '">&times;</span></li>';
-  }).join('');
-  document.getElementById('out').value = exportText();
   var since = document.getElementById('since'), old = document.getElementById('oldList');
   since.textContent = codes.length
     ? (STARTED ? 'Списъкът е започнат на ' + bgDay(STARTED) + ' г.' : 'Списъкът е записан от по-стара версия на страницата — датата му не е известна.')
@@ -187,8 +221,53 @@ function render() {
   } else {
     old.style.display = 'none';
   }
+}
+/* Един ред от списъка. Сканираният низ идва от четеца на баркодове
+   (BarcodeDetector rawValue) или от ръчното поле и се вкарваше в innerHTML
+   както е — единственото такова място в целия проект. QR код, съдържащ
+   <img src=x onerror=...>, се изпълняваше в страницата. Затова escHtml. */
+function liHtml(c, idx) {
+  return '<li><span>' + escHtml(c) + '</span><span class="x" role="button" aria-label="Махни ' + escHtml(c)
+    + '" data-i="' + idx + '">&times;</span></li>';
+}
+/* Текстовото поле за пренасяне — попълва се при нужда (виж бележката отгоре). */
+var outTimer = null;
+function fillOut() {
+  if (outTimer) { clearTimeout(outTimer); outTimer = null; }
+  document.getElementById('out').value = exportText();
+}
+function fillOutLater() {
+  if (outTimer) clearTimeout(outTimer);
+  outTimer = setTimeout(fillOut, 1500);
+}
+document.getElementById('out').addEventListener('focus', fillOut);
+/* Пълното прерисуване — само при махане на ред, „Изчисти“ и зареждане. */
+function render() {
+  renderMeta();
+  var shown = SHOW_ALL ? codes : codes.slice(-VISIBLE);
+  var base = codes.length - shown.length;   // индексът в codes на първия показан
+  document.getElementById('list').innerHTML = shown.slice().reverse().map(function (c, i) {
+    return liHtml(c, base + shown.length - 1 - i);
+  }).join('');
+  renderMore();
+  fillOut();
   persist();
 }
+/* Добавянето — само новият ред и броячите (находка И5). */
+function renderAdded() {
+  var i = codes.length - 1;
+  var ul = document.getElementById('list');
+  ul.insertAdjacentHTML('afterbegin', liHtml(codes[i], i));
+  /* Най-старият показан ред слиза от екрана — не от списъка. */
+  if (!SHOW_ALL && ul.children.length > VISIBLE) ul.removeChild(ul.lastElementChild);
+  /* Датата/бележката „не е от днес“ зависят само от първия номер. */
+  if (codes.length === 1) renderMeta();
+  else document.getElementById('cnt').textContent = codes.length;
+  if (codes.length > VISIBLE) renderMore();
+  fillOutLater();
+  persist();
+}
+document.getElementById('moreBtn').addEventListener('click', function () { SHOW_ALL = true; render(); });
 document.getElementById('list').addEventListener('click', function (e) {
   var i = e.target.getAttribute('data-i');
   if (i !== null) { codes.splice(+i, 1); render(); }
@@ -208,9 +287,15 @@ function beep(ok) {
 function addCode(raw) {
   var c = String(raw || '').trim();
   if (!c) return;
-  if (codes.indexOf(c) >= 0) { dups++; beep(false); render(); return; }
+  /* Повторният номер сменя само брояча на повторните — списъкът не се пипа. */
+  if (codes.indexOf(c) >= 0) {
+    dups++; beep(false);
+    document.getElementById('dupCnt').textContent = dups;
+    persist();
+    return;
+  }
   if (!codes.length) STARTED = localDay();
-  codes.push(c); beep(true); render();
+  codes.push(c); beep(true); renderAdded();
 }
 
 /* РЪЧНОТО ПОЛЕ: ЕДИН НОМЕР НАВЕДНЪЖ (v2.4.69, находка О2).
@@ -254,6 +339,9 @@ function takePending() {
 }
 document.getElementById('copyBtn').addEventListener('click', function () {
   takePending();
+  /* Полето за пренасяне се попълва преди маркирането — то вече не се пише
+     при всяко добавяне (находка И5), а маркира се именно то. */
+  fillOut();
   var t = document.getElementById('out');
   t.select(); t.setSelectionRange(0, 999999);
   if (navigator.clipboard) navigator.clipboard.writeText(exportText());
@@ -278,7 +366,7 @@ document.getElementById('fileBtn').addEventListener('click', function () {
 });
 document.getElementById('clearBtn').addEventListener('click', function () {
   if (!confirm('Изчистване на целия списък?')) return;
-  codes = []; dups = 0; STARTED = null; manualSay(''); render();
+  codes = []; dups = 0; STARTED = null; SHOW_ALL = false; manualSay(''); render();
 });
 
 /* ---- Камерата като баркод четец ----

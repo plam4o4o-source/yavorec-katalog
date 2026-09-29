@@ -108,6 +108,11 @@ test('„Снимай баркод“ разчита номера от сним�
 
   /* v2.4.69 (находка О5): списъкът за пренасяне започва със заглавен ред „# …“ с датата на
      започване; номерата са по един на ред след него. Заменено нарочно. */
+  /* v2.4.71 (находка И5): полето за пренасяне вече НЕ се попълва при всяко добавяне —
+     това беше най-скъпото нещо на дълъг списък (221 ms при 2 500 номера). Попълва се
+     при докосване, при „Копирай“/„Запиши файл“ и след пауза. Тестът го докосва, както
+     човекът, който иска да го прочете. Променено нарочно. */
+  d.getElementById('out').dispatchEvent(new w.Event('focus'));
   assert.deepEqual(d.getElementById('out').value.split('\n').slice(1), ['1024', '1025'], 'номерата от снимката влизат в списъка');
   assert.equal(d.getElementById('cnt').textContent, '2');
   assert.equal(state.bitmaps, 1, 'снимката се чете веднъж');
@@ -159,6 +164,9 @@ test('копираният списък: един заглавен ред „# �
   man.dispatchEvent(Object.assign(new w.Event('keydown'), { key: 'Enter' }));
   man.value = '1025';
   man.dispatchEvent(Object.assign(new w.Event('keydown'), { key: 'Enter' }));
+  /* v2.4.71 (находка И5): полето се попълва при докосване, не при всяко добавяне —
+     виж бележката в теста за „Снимай баркод“ по-горе. Променено нарочно. */
+  d.getElementById('out').dispatchEvent(new w.Event('focus'));
   const lines = d.getElementById('out').value.split('\n');
   assert.match(lines[0], /^# Инвентаризация — списък започнат на \d{2}\.\d{2}\.\d{4} г\., 2 номера$/);
   assert.deepEqual(lines.slice(1), ['1024', '1025']);

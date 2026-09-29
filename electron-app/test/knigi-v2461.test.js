@@ -191,7 +191,9 @@ test('отчислен с акт документ не се връща във ф
   const { ipcMain, db } = setup();
   const id = ok(ipcMain.invoke('books:create', NEW({ inv_number: 1, price: 10 })), 'книга');
   ok(ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: TODAY, reason_code: 4, reason_text: 'Физически изхабени', disposal: 'вторични суровини' },
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no: 1, date: TODAY, reason_code: 4, reason_text: 'Физически изхабени', disposal: 'вторични суровини', committee1: 'А', committee3: 'В' },
     bookIds: [id]
   }), 'акт');
   const b = ok(ipcMain.invoke('books:get', id), 'get');
@@ -318,7 +320,7 @@ test('съгласуването разпознава документ с дат
   const { ipcMain, db } = setup();
   const id = ok(ipcMain.invoke('books:create', NEW({ inv_number: 1, price: 10 })), 'книга');
   ok(ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: TODAY, reason_code: 4, reason_text: 'Физически изхабени' }, bookIds: [id]
+    act: { no: 1, date: TODAY, reason_code: 4, reason_text: 'Физически изхабени', committee1: 'А', committee3: 'В' }, bookIds: [id]
   }), 'акт');
   // Така изглежда ред, останал от по-стара версия или от внос: актът е на място,
   // но състоянието е върнато на „наличен“.

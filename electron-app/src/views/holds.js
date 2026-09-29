@@ -37,6 +37,11 @@ async function holdPrompt(readerId) {
   window._HOLD_READER = reader;
   modal('Нова резервация', `
     <div class="note">Резервацията ще се запише на <b>${esc(reader.name)}</b>${reader.card_no ? ' · карта ' + esc(reader.card_no) : ''}.</div>
+    ${/* v2.4.71 (находка Ч7): прекратена регистрация не резервира — правилото е в
+          holds:add (handlers/holds.js); тук се казва по-рано, с изхода. */''}
+    ${reader.status === 'прекратен' ? `<div class="note w">⛔ Регистрацията на ${esc(reader.name)} е <b>прекратена</b> —
+      резервация не се допуска. Ако читателят се е върнал, върнете състоянието му на „активен“ в картона.
+      <button class="btn sm" style="margin-left:8px" onclick="closeModal();readerForm(${reader.id})">Отвори картона</button></div>` : ''}
     <form id="holdF" onsubmit="return false">
       ${fld('Заета книга', 'code', { val: '', hint: 'баркод или инв. №', req: 1, onkey: `if(event.key==='Enter'){event.preventDefault();saveHold(${reader.id})}` })}
     </form>`,

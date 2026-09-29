@@ -812,8 +812,12 @@ test('9. читателски картон, читателска карта, р�
   h.window.printReceiptLine(ids.charge);
   await h.settle();
   await soft('9f. квитанция за начислението', () => {
-    const k = sheet('квитанция за начисление');
-    assert.match(k, seq('Начислена сума:', E.mny(5), 'Основание:', 'годишна такса', 'Бележка: за ' + Y + ' г.'));
+    /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.71, находка Ч8): за начисление се печата
+       „ИЗВЕСТИЕ ЗА НАЧИСЛЕНИЕ“ с „Дължима сума“ — квитанция удостоверява само
+       получени пари. */
+    const k = sheet('известие за начисление');
+    assert.match(k, seq('ИЗВЕСТИЕ ЗА НАЧИСЛЕНИЕ № ' + ids.charge));
+    assert.match(k, seq('Дължима сума:', E.mny(5), 'Основание:', 'годишна такса', 'Бележка: за ' + Y + ' г.'));
   });
   closePreview();
   h.window.closeModal();
@@ -1123,7 +1127,11 @@ test('13. Запази PDF: файлът, името, одитната след�
   await h.clickButton('Запази PDF…', '#printPreview');
   await h.settle();
   await soft('13e. грешка при записа — съобщение, без вписване', () => {
-    assert.ok(h.toastsSince(n3).some(t => t.type === 'err' && t.msg === 'принтерът изгоря'), JSON.stringify(h.toastsSince(n3)));
+    /* v2.4.71 (кръг 45, Р4): грешката вече не излиза гола — казва какво е станало
+       и какво да се направи („Документът не можа да се превърне в PDF (…). Нищо не
+       е записано. …“); суровият текст остава в скобите. */
+    assert.ok(h.toastsSince(n3).some(t => t.type === 'err'
+      && /^Документът не можа да се превърне в PDF \(принтерът изгоря\)\. Нищо не е записано\./.test(t.msg)), JSON.stringify(h.toastsSince(n3)));
     assert.equal(q('SELECT COUNT(*) AS n FROM notice_log').n, before3);
     assert.equal(ppOpen(), true);
   });
@@ -1336,9 +1344,16 @@ test('16. ръбове: дарение без инвентирани докум�
   h.window.closeModal();
 
   // Акт без заповед и без комисия: празни редове за подпис, „№ …………“.
+  /* v2.4.71 (находка И2): НОВ акт без член 1 и член 3 на комисията вече се отказва
+     (чл. 35). Такива актове обаче има в заварените бази — утвърдени преди тази
+     версия — и те пак се отварят и печатат. Затова актът се съставя с комисия, а
+     после комисията се изтрива направо в базата: така проверката по-долу остава
+     за онова, което наистина може да се срещне — стар акт без комисия. */
   const a3 = ok(await h.api.deaccessionActs.create({
-    act: { no: 3, date: T, reason_code: 2, reason_text: 'дублетни екземпляри', disposal: '' }, bookIds: [ids.b2]
+    act: { no: 3, date: T, reason_code: 2, reason_text: 'дублетни екземпляри', disposal: '',
+      committee1: 'Мария Иванова', committee3: 'Ана Счетоводителка' }, bookIds: [ids.b2]
   }), 'акт № 3');
+  h.db.prepare('UPDATE deaccession_acts SET committee1 = NULL, committee2 = NULL, committee3 = NULL WHERE id = ?').run(a3);
   await h.go('acts');
   await h.window.openAct(a3);
   await h.waitFor(() => h.modalOpen() && /Акт за отчисляване № 3/.test(h.modal()), 'акт № 3');

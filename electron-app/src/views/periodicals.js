@@ -55,9 +55,21 @@ function periodicalNextHtml(p) {
    jsq() — и заедно с това вкарваше в атрибута и p.issues, тоест цялата история
    на изданието (стотици килобайта при дълга поредица от броеве). */
 async function periodicalForm(id) {
-  const p = id ? await call(window.api.periodicals.get(id)) : null;
+  const [p, av] = await Promise.all([
+    id ? call(window.api.periodicals.get(id)) : null,
+    call(window.api.av.options())
+  ]);
   if (id && !p) return;
-  const v = p || { freq: 'месечно', department: 'периодика' };
+  const v = p || { freq: 'месечно', department: 'периодика', language: 'български' };
+  /* ПОЛЕ „ЕЗИК“ (v2.4.71, находка Д2). Дотук картонът нямаше език и годишният
+     комплект влизаше във фонда без него — Дневникът, Раздел Б, броеше всяко
+     заемане на „Труд, 2025“ в „Език — други“. Списъкът е същият като при
+     книгите (номенклатурата от „Номенклатури“, иначе вградените езици), а
+     подразбирането — „български“, избрано и видимо. Езикът се пренася в реда на
+     комплекта при инвентирането (handlers/periodicals.js). */
+  const langs = (av && av.language && av.language.length) ? av.language.map(o => o.value) : EZICI.slice();
+  const lang = v.language || 'български';
+  if (!langs.includes(lang)) langs.push(lang);
   modal(p ? 'Редакция на периодично издание' : 'Ново периодично издание', `
     <form id="perF" onsubmit="return false">
       ${fld('Заглавие', 'title', { val: v.title || '', req: 1 })}
@@ -66,7 +78,11 @@ async function periodicalForm(id) {
         ${fld('Издател', 'publisher', { val: v.publisher || '' })}
         ${fld('ISSN', 'issn', { val: v.issn || '' })}
       </div>
-      ${fld('Отдел', 'department', { type: 'select', opts: OTDELI, val: v.department })}
+      <div class="grid g2">
+        ${fld('Отдел', 'department', { type: 'select', opts: OTDELI, val: v.department })}
+        ${fld('Език', 'language', { type: 'select', opts: langs, val: lang, allowEmpty: false,
+          hint: 'пренася се в инвентирания годишен комплект — по него Дневникът брои Раздел Б' })}
+      </div>
       ${fld('Забележка', 'note', { val: v.note || '' })}
     </form>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
@@ -80,6 +96,9 @@ async function savePeriodical(id) {
   const ok = id ? await call(window.api.periodicals.update(d), 'Записано.')
     : await call(window.api.periodicals.create(d), 'Записано.');
   if (ok === null) return;
+  /* Сменен език стига и до вече инвентираните комплекти (Д2) — казва се. */
+  const nVol = ok && typeof ok === 'object' ? Number(ok.languageVolumes) || 0 : 0;
+  if (nVol) toast('Езикът „' + d.language + '“ е вписан и в ' + (nVol === 1 ? '1 инвентиран годишен комплект' : nVol + ' инвентирани годишни комплекта') + ' — Дневникът ги брои по него.', 'ok');
   closeModal(); renderPeriodika();
 }
 window.savePeriodical = savePeriodical;
@@ -128,20 +147,51 @@ let PER_ISSUES_PAINTED = 0;
    на една стрелка разстояние — точно за броя от края на декември. Следващата е
    за януарския брой на месечник, получен през декември. Правилото (най-много
    година разлика) е в обработчика; тук е само изборът. */
-function perVolumeYearOptionsHtml(date) {
+/* КРАТКИ ИМЕНА НА ИЗБОРА (v2.4.71, находка Д17). Дотук всяка възможност носеше
+   цялото обяснение („2026 г. — годината на датата“), а полето стои в четвърт
+   ред: при 1366 px менюто показваше „2026 г. — годината на датат“ и
+   библиотекарката не виждаше коя година е избрана, а годината е точно онова,
+   което трябва да се види. Сега възможността е годината плюс една дума в скоби
+   само за предходната и следващата; обяснението стои в етикета над полето и в
+   подсказката (title) на всяка възможност. `selected` — годината, която да остане
+   избрана (виж perIssueDateChanged). */
+function perVolumeYearOptionsHtml(date, selected) {
   const y = parseInt(String(date || today()).slice(0, 4), 10) || parseInt(yr(), 10);
-  return [[y, 'годината на датата'], [y - 1, 'брой от края на предходната'], [y + 1, 'брой за следващата']]
-    .map(([v, t], i) => `<option value="${v}" ${i === 0 ? 'selected' : ''}>${v} г. — ${t}</option>`).join('');
+  const want = selected == null ? y : Number(selected);
+  return [[y, '', 'годината на датата на постъпване'], [y - 1, ' (предх.)', 'брой от края на предходната година'],
+    [y + 1, ' (след.)', 'брой за следващата година']]
+    .map(([v, t, title]) => `<option value="${v}" title="${title}" ${v === want ? 'selected' : ''}>${v} г.${t}</option>`).join('');
 }
 function perVolumeYearField(date) {
   return `<div class="field"><label>Годишен комплект <span class="fh">към коя година се подвързва броят</span></label>
-    <select name="volume_year" id="perIssueVolYear">${perVolumeYearOptionsHtml(date)}</select></div>`;
+    <select name="volume_year" id="perIssueVolYear" onchange="this.dataset.chosen='1'">${perVolumeYearOptionsHtml(date)}</select>
+    <span class="hint" id="perIssueVolHint"></span></div>`;
 }
+/* ИЗБРАНАТА ГОДИНА НА КОМПЛЕКТА НЕ СЕ ВРЪЩА САМА (v2.4.71, находка Д13).
+   ДОТУК всяка промяна на датата пресъздаваше менюто с избрана годината на
+   датата: библиотекарката избира „2025“ (брой от края на декември), после
+   поправя датата от 03.01 на 06.01 — и изборът тихо става 2026. Броят отива в
+   чуждия комплект, заедно с цената си, а оттам — в инвентарната книга.
+   Сега: докато човекът не е избирал сам, годината следва датата (обичайният
+   случай); щом е избрал (`data-chosen`), изборът остава, ако е допустим за
+   новата дата (най-много година разлика — правилото на обработчика). Ако вече
+   не е допустим, годината се връща на тази на датата И ТОВА СЕ КАЗВА до полето. */
 function perIssueDateChanged() {
-  const f = $('#issueF'); const sel = $('#perIssueVolYear');
+  const f = $('#issueF'); const sel = /** @type {HTMLSelectElement} */ ($('#perIssueVolYear'));
   if (!f || !sel) return;
-  const d = f.querySelector('[name=date]');
-  sel.innerHTML = perVolumeYearOptionsHtml(d && d.value);
+  const d = /** @type {HTMLInputElement} */ (f.querySelector('[name=date]'));
+  const date = d && d.value;
+  const dateYear = parseInt(String(date || today()).slice(0, 4), 10);
+  const hint = $('#perIssueVolHint');
+  const chosen = sel.dataset.chosen === '1' ? parseInt(sel.value, 10) : null;
+  const keep = chosen != null && Math.abs(chosen - dateYear) <= 1;
+  sel.innerHTML = perVolumeYearOptionsHtml(date, keep ? chosen : null);
+  if (hint) {
+    hint.textContent = chosen != null && !keep
+      ? 'Избраната година ' + chosen + ' не е допустима за дата ' + bg(date) + ' — комплектът е върнат на ' + dateYear + ' г.'
+      : '';
+  }
+  if (chosen != null && !keep) delete sel.dataset.chosen;
 }
 window.perIssueDateChanged = perIssueDateChanged;
 /* Годината на комплекта на един брой (v2.4.69, Л2): volume_year, а за ред без
@@ -289,6 +339,18 @@ async function openPeriodical(id, year) {
      закъснял. */
   onModalClose(periodikaRefreshIfShown);
   paintPerIssues(); // първата порция броеве — тялото се вписва чак сега (виж горе)
+  /* КОЙ СОЧИ КЪМ ИЗДАНИЕТО (v2.4.71, находка Д9 — остатък от Л6). Статиите с
+     източник това издание и летописните записи/персоналии, свързани с него, не
+     се виждаха от картона на изданието — само от другата страна. Панелът е
+     същият като в картона на книгата (backlinksHtmlFor в src/views/links.js):
+     пуска се след отварянето, без await, и при липса на връзки не показва нищо. */
+  if (typeof backlinksHtmlFor === 'function') {
+    backlinksHtmlFor('периодика', id).then(h => {
+      const f = $('#issueF');
+      const box = f && f.closest('.body');
+      if (box && h && window._PER_KARDEX === p) box.insertAdjacentHTML('beforeend', h);
+    }).catch(err => console.error('Връзките към изданието не се заредиха:', err));
+  }
   setTimeout(() => { const f = $('#issueF [name=issue_no]'); if (f) f.focus(); }, 0);
 }
 window.openPeriodical = openPeriodical;
@@ -414,7 +476,12 @@ function periodicalVolumesSection(p) {
       ? `<b>инв. № ${esc(String(v.inv_number ?? '—'))}</b>${v.register_date ? ' · вписан ' + bg(v.register_date) : ''}`
         + `${v.acq_no ? ' · партида № ' + esc(String(v.acq_no)) + '/' + esc(String(v.acq_year)) : ' · <span class="hint">без партида</span>'}`
         + `${v.deaccession_date ? ' · <span class="badge warn">отчислен</span>' : ''}`
-        + (diverged ? ` · <span class="badge warn" title="Кардексът показва ${liveCount} бр., а комплектът е подвързан и вписан в инвентарната книга с ${snap} бр. на стойност ${mny(v.volume_price)}. Документът във фонда не се променя със задна дата — новите броеве влизат в следващия комплект.">разминаване: подвързан с ${snap} бр. при инвентирането, в кардекса ${liveCount}</span>` : '')
+        /* v2.4.71 (Д4): подсказката обещаваше „новите броеве влизат в следващия
+           комплект“ — а брой, вписан за вече инвентирана година, не влиза в НИТО
+           ЕДИН: годината му е тази, не следващата. Сега се казва истината и
+           сумата, която остава извън фонда; обработчикът вече и отказва такова
+           вписване без изричното „само в кардекса“. */
+        + (diverged ? ` · <span class="badge warn" title="Кардексът показва ${liveCount} бр. на стойност ${mny(v.issue_sum)}, а комплектът е подвързан и вписан в инвентарната книга с ${snap} бр. на стойност ${mny(v.volume_price)}. Документът във фонда не се променя със задна дата. ${liveCount > snap ? 'Броевете, вписани за тази година след инвентирането, остават само в кардекса — не влизат в нито един документ във фонда.' : 'В кардекса има по-малко броеве, отколкото в подвързания том — изтрит е брой, който е в документа.'}">разминаване: подвързан с ${snap} бр. при инвентирането, в кардекса ${liveCount}${liveCount > snap ? ' — излишните са само в кардекса, извън фонда' : ''}</span>` : '')
       : '<span class="hint">не е инвентиран</span>';
     /* Бутонът НОСИ ЕДНО И СЪЩО ИМЕ и за празната, и за отчислената година —
        действието е едно (вписване на годишен комплект в инвентарната книга) и
@@ -493,7 +560,7 @@ async function volumeForm(periodicalId, year) {
           ${fld('Общ брой документи', 'acq_total_count', { val: 1, type: 'number' })}
         </div>
         <div class="grid g4">
-          ${fld('Вид първичен документ', 'acq_doc_type', { type: 'select', opts: PARV_DOK })}
+          ${fld('Вид първичен документ', 'acq_doc_type', { type: 'select', opts: PARV_DOK, onchange: 'volumeAcqDocTypeChanged(this)' })}
           ${fld('Номер на документа', 'acq_doc_no', {})}
           ${fld('Дата на документа', 'acq_doc_date', { val: today(), type: 'date' })}
           ${fld('Адрес на дарителя', 'acq_donor_address', { hint: 'задължително при дарение — чл. 6, ал. 5' })}
@@ -522,6 +589,34 @@ function volumeAcqToggle() {
   box.style.display = show ? '' : 'none';
 }
 window.volumeAcqToggle = volumeAcqToggle;
+/* ПАРТИДА „БЕЗ ДОКУМЕНТ“ ОТ КАРДЕКСА — НОМЕРЪТ И ДАТАТА СЕ ЗАКЛЮЧВАТ (v2.4.71, Ф8).
+   =====================================================================
+   (а) ДОТУК при вид „без документ — протокол на комисия“ полетата „Номер на
+   документа“ и „Дата на документа“ оставаха отключени и попълнени (датата — с
+   днешната). Обработчикът (handlers/acquisitions.js, от v2.4.61) правилно ги
+   изхвърля при такъв вид, тоест написаното в тях МЪЛЧАЛИВО отпадаше: базата е
+   вярна, екранът — не.
+   (б) Партидата без първичен документ (чл. 3, ал. 2) няма нито номер, нито
+   дата на документ — екран, който ги приема, внушава, че има документ.
+   (в) Същото поведение като в „Постъпления“ (acqDocTypeChanged в
+   src/views/acquisitions.js): полетата се изпразват и заключват при избора на
+   този вид, с подсказка защо; saveVolume() ги чисти и при запис. Правилото
+   (кой вид е „без документ“) е едно — acqWithoutDoc() от същия файл. */
+function volumeWithoutDoc(docType) {
+  return typeof acqWithoutDoc === 'function' ? acqWithoutDoc(docType) : String(docType || '').indexOf('без документ') > -1;
+}
+function volumeAcqDocTypeChanged(sel) {
+  const form = sel && sel.form ? sel.form : $('#volF');
+  if (!form) return;
+  const without = volumeWithoutDoc(sel.value);
+  ['acq_doc_no', 'acq_doc_date'].forEach(n => {
+    const el = /** @type {HTMLInputElement} */ (form.querySelector('[name=' + n + ']'));
+    if (!el) return;
+    if (without) { el.value = ''; el.readOnly = true; el.title = 'Партида без първичен документ — номер и дата няма'; }
+    else { el.readOnly = false; el.title = ''; if (n === 'acq_doc_date' && !el.value) el.value = today(); }
+  });
+}
+window.volumeAcqDocTypeChanged = volumeAcqDocTypeChanged;
 async function saveVolume(periodicalId, year) {
   const missing = firstMissingRequired('#volF');
   if (missing) return toast(missing + ' е задължително поле.', 'err');
@@ -538,6 +633,8 @@ async function saveVolume(periodicalId, year) {
     if (String(d.acq_how) === 'дарение' && !String(d.acq_donor_address || '').trim()) {
       return toast('При дарение адресът на дарителя е задължителен (чл. 6, ал. 5).', 'err');
     }
+    // Ф8 (v2.4.71): при „без документ“ номер и дата на документ няма — виж volumeAcqDocTypeChanged.
+    if (volumeWithoutDoc(d.acq_doc_type)) { d.acq_doc_no = ''; d.acq_doc_date = ''; }
     const no = await call(window.api.acquisitions.nextNo(yr(d.acq_date)));
     if (no === null) return;
     const newId = await call(window.api.acquisitions.create({
@@ -598,6 +695,31 @@ async function addIssue(periodicalId) {
   const d = formData('#issueF');
   if (!d.issue_no) return toast('Въведете номер на брой.', 'err');
   d.periodical_id = periodicalId;
+  /* ГОДИНАТА Е ВЕЧЕ ПОДВЪРЗАНА (v2.4.71, находка Д4). Обработчикът отказва брой
+     в инвентиран комплект (виж дългата бележка в periodicalIssues:add); тук
+     екранът пита по-рано и предлага двата честни изхода: следващият комплект
+     (ако е допустим за датата) или — изрично — само кардексът, извън
+     подвързания том. Отказът и на двата въпроса не вписва нищо и го казва. */
+  const kx = window._PER_KARDEX && window._PER_KARDEX.id === periodicalId ? window._PER_KARDEX : null;
+  const volYear = String(d.volume_year || String(d.date || today()).slice(0, 4));
+  const bound = kx && (kx.volumes || []).find(v => String(v.year) === volYear && v.book_id != null
+    && v.deaccession_date == null && v.status !== 'отчислен');
+  if (bound) {
+    const dateYear = parseInt(String(d.date || today()).slice(0, 4), 10);
+    const next = parseInt(volYear, 10) + 1;
+    const head = 'Комплектът за ' + volYear + ' г. вече е подвързан и вписан в инвентарната книга като инв. № '
+      + (bound.inv_number ?? '—') + '. Брой, вписан в него сега, не влиза в нито един документ във фонда.';
+    if (Math.abs(next - dateYear) <= 1 && await askConfirm(head + '\n\nДа впиша ли бр. ' + d.issue_no
+      + ' в комплекта за ' + next + ' г.?', { okLabel: 'Впиши за ' + next + ' г.' })) {
+      d.volume_year = String(next);
+    } else if (await askConfirm(head + '\n\nДа го впиша ли само в кардекса, извън подвързания том? Цената му няма '
+      + 'да влезе във фонда и в КДБФ.', { okLabel: 'Само в кардекса', kind: 'warn' })) {
+      d.outside_volume = true;
+    } else {
+      return toast('Бр. ' + d.issue_no + ' НЕ е вписан — комплектът за ' + volYear + ' г. вече е инвентиран. '
+        + 'Изберете друга година в „Годишен комплект“.', 'err');
+    }
+  }
   // Затваря се/пречертава се само при успех; отказът (невалидна дата, цена) остава във формата.
   const ok = await call(window.api.periodicalIssues.add(d), 'Брой ' + d.issue_no + ' е вписан в кардекса.');
   if (ok === null) return;
@@ -693,7 +815,14 @@ async function periodikaYearRows(year) {
        казва кой инвентарен номер е бил и какво е станало с него; само броенето
        минава през `live`, тоест през ключа „налично днес“ на db/fund-sql.js. */
     const live = !!(vol && vol.book_id != null && vol.deaccession_date == null && vol.status !== 'отчислен');
+    /* Броеве след инвентирането (Д4): живият кардекс срещу снимката при инвентирането. */
+    const snapN = vol && vol.registered_issue_count != null ? Number(vol.registered_issue_count) : null;
+    const after = live && snapN != null && issues.length > snapN
+      ? { n: issues.length - snapN,
+          sum: Math.round((issues.reduce((s, i) => s + (Number(i.price) || 0), 0) - (Number(vol.volume_price) || 0)) * 100) / 100 }
+      : null;
     rows.push({
+      after,
       title: d.title, issn: d.issn, freq: d.freq, department: d.department,
       count: issues.length,
       sum: issues.reduce((s, i) => s + (Number(i.price) || 0), 0),
@@ -734,9 +863,20 @@ async function printPeriodikaYear() {
        <td>${totalCount}</td><td>${mny(totalSum)}</td>
        <td>${inventoried} от ${rows.length} ${inventoried === 1 ? 'инвентиран комплект' : 'инвентирани комплекта'}</td></tr>` : ''}
      </tbody></table>
+     ${/* v2.4.71 (Д11): второто изречение („Отчисленият комплект е бил вписан…“)
+           се печаташе при ВСЯКО неинвентирано заглавие, включително когато в
+           списъка няма нито един отчислен комплект — подписан лист, който говори
+           за акт по чл. 35, какъвто няма. Сега то стои само ако има ред „ОТЧИСЛЕН“. */''}
      ${rows.some(r => r.count && !r.live) ? `<div class="pmeta">Заглавията с получени броеве и без инвентиран годишен
        комплект <b>във фонда</b> не влизат нито в КДБФ Част № 1, нито в отчета за фонда за ${esc(String(year))} г.
-       Отчисленият комплект е бил вписан, но вече е изваден от фонда с акт по чл. 35 и се отчита в КДБФ Част № 3.</div>` : ''}
+       ${rows.some(r => r.deacc) ? 'Отчисленият комплект е бил вписан, но вече е изваден от фонда с акт по чл. 35 и се отчита в КДБФ Част № 3.' : ''}</div>` : ''}
+     ${/* v2.4.71 (Д4): стойността в „Стойност“ е сборът от кардекса; когато той
+           е по-голям от вписаната в инвентарната книга стойност на комплекта,
+           разликата са броеве, вписани след инвентирането — те не са във фонда.
+           Дотук листът показваше 6,00 € срещу инвентирани 4,80 € без обяснение. */''}
+     ${rows.some(r => r.after) ? `<div class="pmeta">${rows.filter(r => r.after).map(r => '„' + esc(r.title) + '“: комплектът е подвързан с '
+         + r.vol.registered_issue_count + ' бр. за ' + mny(r.vol.volume_price) + '; ' + r.after.n + ' бр. за ' + mny(r.after.sum)
+         + ' ' + (r.after.n === 1 ? 'е вписан' : 'са вписани') + ' в кардекса след инвентирането и не ' + (r.after.n === 1 ? 'влиза' : 'влизат') + ' във фонда.').join('<br>')}</div>` : ''}
      ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
 }
 window.printPeriodikaYear = printPeriodikaYear;

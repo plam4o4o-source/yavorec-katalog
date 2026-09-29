@@ -187,10 +187,12 @@ function insertBook(db, overrides = {}) {
   return db.prepare('INSERT INTO books (inv_number, title, status, price) VALUES (?, ?, ?, ?)')
     .run(b.inv_number, b.title, b.status, b.price).lastInsertRowid;
 }
+/* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+   отказва по чл. 35 — затова всеки утвърден акт в този файл носи комисия. */
 function actPayload(overrides = {}) {
   return Object.assign({
     no: 1, date: '2026-08-21', order_no: null, reason_code: 1, reason_text: 'амортизация',
-    disposal: null, attach: null, committee1: null, committee2: null, committee3: null
+    disposal: null, attach: null, committee1: 'А', committee2: null, committee3: 'В'
   }, overrides);
 }
 

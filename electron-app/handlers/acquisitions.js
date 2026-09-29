@@ -274,11 +274,14 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
            стойност — без да казва, че го прави. Изрична нула вече е възможна и
            се пази като нула. */
         const declared = declaredSum;
+        /* director — И6 (v2.4.71): снимка на името на ръководителя от Настройки към
+           съставянето; разпечатката го слага до „УТВЪРДИЛ“ (виж approverLine в
+           src/views/core.js). Препечатан стар документ пази СВОЕТО име. */
         const info = db.prepare(`
           INSERT INTO acquisitions (no, year, date, how, from_source, doc_type, doc_no, doc_date, total_count, sum, donor_address, note,
-                                    committee1, committee2, committee3)
+                                    committee1, committee2, committee3, director)
           VALUES (@no, @year, @date, @how, @from_source, @doc_type, @doc_no, @doc_date, @total_count, @sum, @donor_address, @note,
-                  @committee1, @committee2, @committee3)
+                  @committee1, @committee2, @committee3, (SELECT NULLIF(TRIM(director), '') FROM settings WHERE id = 1))
         `).run({
           no, year, date: a.date, how: a.how || null,
           from_source: a.from_source || null, doc_type: a.doc_type || null, doc_no: a.doc_no || null,

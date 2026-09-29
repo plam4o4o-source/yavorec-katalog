@@ -46,16 +46,55 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
       if (!(k in out)) continue;
       const raw = out[k];
       if (raw === '' || raw === null || raw === undefined) { out[k] = null; continue; }
-      const n = kind === 'int' ? parseInt(raw, 10) : parseFloat(raw);
+      /* Дробна запетая (С8, v2.4.71): „40,5“ пристигнало като текст (стар екран,
+         друг вход) дотук минаваше през parseFloat и ставаше 40 — тихо. Запетаята
+         е българският десетичен знак и се чете като точка. */
+      const txt = kind === 'real' && typeof raw === 'string' ? raw.trim().replace(',', '.') : raw;
+      const n = kind === 'int' ? parseInt(txt, 10) : parseFloat(txt);
       out[k] = Number.isFinite(n) ? n : null;
     }
     return out;
   }
+  /* ЧЕТИМИ ИМЕНА НА НАСТРОЙКИТЕ — за реда в одитната следа (С10). Същите думи
+     като етикетите в „Настройки“, за да се разпознае полето от следата. */
+  const SETTING_LABELS = {
+    org: 'Организация', lib_name: 'Наименование на библиотеката', place: 'Населено място',
+    bulstat: 'ЕИК / БУЛСТАТ', reg_no: 'Рег. № в Мин. на културата', director: 'Ръководител',
+    director_role: 'Длъжност', librarian: 'Библиотекар', cat_url: 'Адрес на сайта',
+    loan_days: 'Срок за заемане (дни)', max_books: 'Максимум документи на читател',
+    extensions_count: 'Брой продължения', extension_days: 'Дни на продължение',
+    fine_per_day: 'Обезщетение за забава (на ден)', annual_fee: 'Годишна такса',
+    free_access_pct: 'Фонд на свободен достъп (%)', next_inv_number: 'Следващ инвентарен номер',
+    committee1: 'Член 1 на комисията', committee2: 'Член 2 на комисията', committee3: 'Член 3 на комисията',
+    sru_endpoint: 'SRU сървър', suspend_per_day: 'Наказание при забава (дни за ден)',
+    suspend_max: 'Таван на наказанието (дни)', remind2_days: '2-ро напомняне след (дни)',
+    remind3_days: '3-то напомняне след (дни)', anonymize_years: 'Анонимизиране след (години)',
+    lost_price_multiplier: 'Обезщетение за изгубен документ — кратност',
+    lost_fallback_amount: 'Обезщетение за документ без цена'
+  };
+  const UPDATE_FIELDS = Object.keys(SETTING_LABELS);
 
   ipcMain.handle('settings:update', (e, s0) =>
     run(() => {
       const s = normalizeNumericSettings(s0);
-      getDb().prepare(`
+      /* ФОНД НА СВОБОДЕН ДОСТЪП — ПРОЦЕНТ МЕЖДУ 0 И 100 (v2.4.71, кръг 45, С8).
+         (а) Полето беше пропуснато при поправката на дробните полета (П1):
+         type="number" в Chromium с български език изпуска запетаята, и „40,5“ се
+         записваше като 405 (тестер: „62,5“ → 625).
+         (б) По чл. 41 процентът решава нормата на допустимите естествени загуби
+         (над 50 % на свободен достъп — 1 %, иначе 0,5 %). 405 „процента“ дават
+         грешна норма, по която комисията подписва протокола за липсите.
+         (в) Екранът вече е decField (запетаята се чете), а ПРАВИЛОТО е тук:
+         стойност извън 0–100 не се записва и никоя от настройките не се пипа —
+         изречението казва кое поле и какво да се напише. */
+      if (s.free_access_pct != null && (s.free_access_pct < 0 || s.free_access_pct > 100)) {
+        throw new Error('„Фонд на свободен достъп (%)“ трябва да е процент между 0 и 100 — въведено е '
+          + String(s0 && s0.free_access_pct) + '. Настройките НЕ са записани. Напишете процента с цифри, '
+          + 'дробната част със запетая — напр. 62,5.');
+      }
+      const db = getDb();
+      const before = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
+      db.prepare(`
         UPDATE settings SET org=@org, lib_name=@lib_name, place=@place, bulstat=@bulstat, reg_no=@reg_no,
           director=@director, director_role=@director_role, librarian=@librarian, cat_url=@cat_url,
           loan_days=@loan_days, max_books=@max_books, extensions_count=@extensions_count, extension_days=@extension_days,
@@ -66,7 +105,32 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
           lost_price_multiplier=@lost_price_multiplier, lost_fallback_amount=@lost_fallback_amount
         WHERE id = 1
       `).run(s);
-      logAudit('Редакция на настройки', 'настройките на библиотеката са обновени');
+      /* „ПРЕДИ/СЛЕД“ В СЛЕДАТА (v2.4.71, кръг 45, С10).
+         (а) Редът беше винаги едно и също изречение — „настройките на
+         библиотеката са обновени“ — без diff. Смяна на срока за заемане, на
+         обезщетението за забава или на следващия инвентарен номер не личеше от
+         следата: проверяващият вижда, че нещо е пипано, но не и какво.
+         (б) Следващият инв. № решава номерацията в инвентарната книга (чл. 17,
+         ал. 2 от Наредба № 3 — поправките се документират), а таксата и
+         забавата — парите, които се искат от читателите. Точно тези промени
+         трябва да се виждат с „кой, кога, от колко на колко“.
+         (в) Сравнява се прочетеното ПРЕДИ записа с прочетеното СЛЕД него (не с
+         подаденото — нормализирането може да е сменило вида), само по полетата
+         на този формуляр; diff-ът е във формата на всички други редакции
+         ({field, before, after}), така че „Одитна следа“ го показва както
+         останалите, а подробността назовава променените полета с думи. */
+      const after = db.prepare('SELECT * FROM settings WHERE id = 1').get() || {};
+      const diff = [];
+      for (const f of UPDATE_FIELDS) {
+        const b = before[f] == null ? '' : String(before[f]);
+        const a = after[f] == null ? '' : String(after[f]);
+        if (b !== a) diff.push({ field: f, before: before[f] ?? null, after: after[f] ?? null });
+      }
+      const shown = (v) => (v == null || v === '' ? '—' : String(v));
+      logAudit('Редакция на настройки', diff.length
+        ? 'настройките на библиотеката са обновени: ' + diff.map(d => SETTING_LABELS[d.field]
+          + ' ' + shown(d.before) + ' → ' + shown(d.after)).join('; ')
+        : 'настройките на библиотеката са записани без промяна', diff);
     })
   );
   // Шаблоните за напомняния — отделен формуляр, за да не се засяга основният

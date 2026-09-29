@@ -232,7 +232,54 @@ function resolveDbPath() {
    екрана „всичко е изчезнало“, а въведеното след това остава завинаги отделено от
    общата база. Сега се пита изрично, преди базата да бъде отворена. Самото решение
    живее в db-folder.js без зависимост от Electron, за да е тестваемо. */
+/* КАКВО ВСЪЩНОСТ Е „ЛОКАЛНАТА БАЗА“ (v2.4.71, кръг 45, находка С4).
+   (а) КАКВО СТАВАШЕ ДОТУК. Двата диалога — „папката с базата не е достъпна“ и
+   „config.json не се чете“ — обещаваха „ПРАЗНА локална база“. На компютър, чиято
+   база е била ПРЕМЕСТЕНА в мрежовата папка („Работа в мрежа“ копира файла и
+   оставя стария на мястото му), локалната база НЕ е празна: тя е пълната стара
+   база от деня на преместването. Тестерът (s11-papka.js missing) натисна
+   „Работи с локална база“ и получи фонд, читатели и заемания, които изглеждат
+   като истинските — но са отпреди седмици.
+   (б) ЗАЩО Е ГРЕШНО. Празната база веднага личи; пълната стара — не.
+   Библиотекарката работи цял ден в нея, днешните заемания и новите документи
+   влизат в стария файл, а общата база продължава без тях: данните се разцепват
+   на две бази, без никой да разбере кога.
+   (в) ЗАЩО ТОЧНО ТАКА. Текстът казва каквото ИМА на диска: ако локален файл
+   няма (или е празен) — „нова, празна база“; ако има — „старата локална база“,
+   с датата на последната промяна и броя документи в нея, за да се разпознае
+   на пръв поглед. Файлът не се преименува и не се пипа: може да е единственото
+   копие на нещо, а решението е на човека пред екрана. */
+function localDbFileStamp(ms) {
+  const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+  return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' г. ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ' ч.';
+}
+function describeLocalFallback() {
+  const p = path.join(defaultDbDir(), 'library.db');
+  let st = null;
+  try { st = fs.existsSync(p) ? fs.statSync(p) : null; }
+  catch (e) { console.error('Локалната база не се прочете:', e.message); }
+  if (!st || st.size === 0) {
+    return { exists: false, text: 'програмата ще създаде НОВА, ПРАЗНА локална база на този компютър' };
+  }
+  let touched = st.mtimeMs;
+  try { if (fs.existsSync(p + '-wal')) touched = Math.max(touched, fs.statSync(p + '-wal').mtimeMs); }
+  catch (e) { console.error('Журналът на локалната база не се прочете:', e.message); }
+  let books = null;
+  try {
+    const ro = new Database(p, { readonly: true, fileMustExist: true });
+    try { books = ro.prepare('SELECT COUNT(*) AS n FROM books').get().n; } finally { ro.close(); }
+  } catch (e) { books = null; }
+  return {
+    exists: true,
+    text: 'програмата ще отвори СТАРАТА локална база на този компютър — последна промяна на '
+      + localDbFileStamp(touched)
+      + (books != null ? ', ' + books + (books === 1 ? ' документ' : ' документа') + ' във фонда' : '')
+      + '. Най-често това е базата отпреди преместването в общата папка: в нея НЯМА нищо, въведено '
+      + 'в общата база след тази дата, макар да изглежда пълна'
+  };
+}
 function askAboutMissingDbFolder(folder) {
+  const local = describeLocalFallback();
   const choice = dialog.showMessageBoxSync({
     type: 'warning',
     noLink: true,
@@ -244,7 +291,7 @@ function askAboutMissingDbFolder(folder) {
     detail: 'Обикновено това означава, че мрежовият диск не е свързан или че компютърът, '
       + 'който споделя папката, е изключен.\n\n'
       + '• „Опитай отново“ — свържете диска и натиснете бутона.\n'
-      + '• „Работи с локална база“ — програмата ще отвори ПРАЗНА локална база. Данните, '
+      + '• „Работи с локална база“ — ' + local.text + '. Данните, '
       + 'въведени в нея, НЯМА да попаднат в общата база.\n'
       + '• „Изход“ — затваря програмата, без да променя нищо. Това е безопасният избор.'
   });
@@ -283,9 +330,19 @@ function seedAuthorisedValues(category, defaults) {
   db.transaction(() => values.forEach((v, i) => ins.run(category, v, i))).immediate();
 }
 
+/* Отворена ли е при ТОЗИ старт нова/празна база (файлът липсваше или беше с
+   дължина 0) — С2, виж askRestoreForEmptyDb(). */
+let DB_OPENED_EMPTY = false;
 function initDb() {
   const dbPath = resolveDbPath();
   const isNew = !fs.existsSync(dbPath);
+  /* С2 (v2.4.71): файл с дължина 0 (спрян ток насред запис, антивирусна, която
+     го е „изчистила“) SQLite отваря като НОВА база — за библиотекарката това е
+     същото като изчезнал файл и се третира като него. */
+  let isEmptyFile = false;
+  try { isEmptyFile = !isNew && fs.statSync(dbPath).size === 0; }
+  catch (e) { console.error('Размерът на базата не се прочете:', e.message); }
+  DB_OPENED_EMPTY = isNew || isEmptyFile;
   const isNetwork = dbIsNetwork(); // папката НЕ е локалната по подразбиране — обичайно мрежов диск
   db = new Database(dbPath);
   /* busy_timeout е настройка на връзката, не запис във файла — и трябва да е ПРЕДИ
@@ -625,6 +682,7 @@ function initDb() {
   }
 
   if (isNew) console.log('Нова база данни създадена на:', dbPath);
+  else if (isEmptyFile) console.log('Празен файл на базата (0 байта) — отворен като нова база:', dbPath);
 }
 
 /* ---------------- Версия на схемата (PRAGMA user_version) ----------------
@@ -1048,16 +1106,18 @@ const MIGRATIONS = [
         абонаментите на читалищата са почти само български вестници и списания.
         Същото отива в заварените годишни комплекти без език (свързани по
         поредицата = заглавието на изданието). И двете се казват в одитната
-        следа с броя, за да може библиотекарят да поправи чуждоезично списание. */
+        следа с броя, за да може библиотекарят да поправи чуждоезично списание.
+     3. inventory_sessions.last_book_id/added_late/mzs_away (И1, М1) — виж долу.
+     4. director в acquisitions/deaccession_acts/inventory_sessions (И6) — виж долу. */
   { version: 19, run: () => {
-    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
-      SELECT id, substr(registered_at, 1, 10), 'записване' FROM readers
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind)
+      SELECT id, 'r' || id, substr(registered_at, 1, 10), 'записване' FROM readers
       WHERE registered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`);
-    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
-      SELECT id, substr(re_registered_at, 1, 10), 'пререгистрация' FROM readers
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind)
+      SELECT id, 'r' || id, substr(re_registered_at, 1, 10), 'пререгистрация' FROM readers
       WHERE re_registered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`);
-    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
-      SELECT a.reader_id, MIN(substr(a.date, 1, 10)), 'пререгистрация'
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind)
+      SELECT a.reader_id, 'r' || a.reader_id, MIN(substr(a.date, 1, 10)), 'пререгистрация'
       FROM account_lines a JOIN readers r ON r.id = a.reader_id
       WHERE a.kind = 'начисление' AND a.type = 'годишна такса'
         AND a.date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
@@ -1065,6 +1125,19 @@ const MIGRATIONS = [
                         WHERE x.reader_id = a.reader_id AND substr(x.date, 1, 4) = substr(a.date, 1, 4))
       GROUP BY a.reader_id, substr(a.date, 1, 4)`);
     ensureColumns('periodicals', { language: 'TEXT' });
+    /* 3. inventory_sessions: last_book_id, added_late, mzs_away (находки И1 и
+       М1). Заварените сесии остават с NULL: за тях границата „постъпили след
+       началото“ не се знае и не се измисля — обработчикът пада на досегашното
+       броене, а протоколът им излиза както е бил подписан. */
+    ensureColumns('inventory_sessions', { last_book_id: 'INTEGER', added_late: 'INTEGER', mzs_away: 'INTEGER' });
+    /* 4. director (находка И6) в партидите, актовете за отчисляване и
+       инвентаризациите — снимка на името на ръководителя към съставянето, за
+       да стои до „УТВЪРДИЛ“. Полето „Ръководител“ в Настройки досега не се
+       печаташе никъде. Заварените документи остават без име (празна линия за
+       ръчно попълване): кой е бил председател тогава, базата не знае. */
+    ensureColumns('acquisitions', { director: 'TEXT' });
+    ensureColumns('deaccession_acts', { director: 'TEXT' });
+    ensureColumns('inventory_sessions', { director: 'TEXT' });
     const perN = db.prepare("UPDATE periodicals SET language = 'български' WHERE language IS NULL OR TRIM(language) = ''").run().changes;
     const volN = db.prepare(`UPDATE books SET language = 'български'
       WHERE volume = 'годишен комплект' AND (language IS NULL OR TRIM(language) = '')
@@ -1475,6 +1548,117 @@ function openEmergencyRestoreWindow(reason) {
   }
 }
 
+/* ---------------- Изчезнала или празна база при налични копия (v2.4.71, кръг 45, С2) ----------------
+   (а) КАКВО СТАВАШЕ ДОТУК. Изтрит library.db (антивирусна „карантина“,
+   случайно изтриване) или файл с дължина 0 (спрян ток насред запис) —
+   initDb() тихо създаваше НОВА база и програмата тръгваше като току-що
+   инсталирана: право в „Първоначална настройка“. Единствената следа беше ред
+   „Нова база данни създадена“ в дневника на конзолата. Екранът не споменаваше
+   нито с дума, че в папката до базата стоят пет здрави копия (тестер:
+   s3-povreda.js zero/deleted). А при затваряне празната база ставаше
+   НАЙ-НОВОТО копие в списъка — над последното здраво.
+   (б) ЗАЩО Е ГРЕШНО. Библиотекарката вижда „нова библиотека“, решава, че нещо
+   се е объркало с инсталацията, и започва да въвежда наново — или затваря
+   програмата, с което празната база изтласква здравите копия нагоре в
+   списъка и надолу в степенуваното пазене. Изходът (възстановяване от копие)
+   съществува, но програмата мълчи за него точно в мига, в който е нужен.
+   (в) ЗАЩО ТОЧНО ТАКА. Щом базата е нова/празна И в папката с копията има
+   копия, програмата ПИТА, преди да отвори прозореца: „Базата не е намерена —
+   да възстановя ли копие?“, с името и датата на най-новото ЗДРАВО копие
+   (проверено — handlers/backup.js, findStartupBackups). Изходите:
+     • „Възстанови най-новото здраво копие“ — същият път като „Възстанови“ в
+       списъка (проверки, подмяна, рестарт), без предпазно копие на празната
+       база (то щеше да стане най-новият файл);
+     • „Избери копие от списъка…“ — аварийният екран (там има и поле за
+       паролата на криптираните);
+     • „Започни с празна база“ — само изрично; вписва се в следата, а копията,
+       които са в папката в този миг, не се трият до края на сесията;
+     • „Изход“ — нищо не се пипа.
+   Без копия в папката въпрос няма — това е истинското първо пускане. */
+function askRestoreForEmptyDb() {
+  let info;
+  try { info = backupHandlers.findStartupBackups(); }
+  catch (err) {
+    logToFile('error', 'Копията не можаха да бъдат прегледани при старт с празна база: ' + err.message);
+    return true;
+  }
+  if (!info || !info.count) return true;
+  const best = info.newestHealthy;
+  const buttons = [], actions = [];
+  if (best && !best.encrypted) { buttons.push('Възстанови най-новото здраво копие'); actions.push('newest'); }
+  buttons.push('Избери копие от списъка…'); actions.push('list');
+  buttons.push('Започни с празна база'); actions.push('empty');
+  buttons.push('Изход'); actions.push('quit');
+  const bestText = best
+    ? 'Най-новото здраво копие е „' + best.name + '“ от ' + localDbFileStamp(best.mtime)
+      + (best.encrypted ? ' — то е КРИПТИРАНО: изберете го от списъка и въведете паролата за защита на личните данни' : '')
+      + '.'
+    : 'Нито едно от проверените копия не мина проверката — отворете списъка и опитайте с по-старо.';
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    noLink: true,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    title: 'Базата данни не е намерена',
+    message: 'Базата не е намерена — да възстановя ли копие?',
+    detail: 'На мястото на базата данни на библиотеката няма файл (или файлът е празен):\n' + resolveDbPath()
+      + '\n\nТака изглежда базата след антивирусна „карантина“, спрян ток насред запис или случайно изтриване. '
+      + 'В папката с резервните копия има ' + info.count + (info.count === 1 ? ' копие' : ' копия') + '. ' + bestText + '\n\n'
+      + (actions[0] === 'newest' ? '• „Възстанови най-новото здраво копие“ — безопасният избор; програмата се стартира наново сама.\n' : '')
+      + '• „Избери копие от списъка…“ — всички копия с дата и час; за криптираните се въвежда паролата.\n'
+      + '• „Започни с празна база“ — САМО ако това наистина е нова библиотека. Копията остават в папката.\n'
+      + '• „Изход“ — затваря програмата, без да променя нищо.'
+  });
+  const act = actions[choice] || 'quit';
+  /* Празният файл, който initDb() току-що създаде (схема, без нито един запис),
+     НЕ бива да остане на диска при „Изход“ или при отваряне на списъка: иначе
+     при следващото пускане файлът вече „съществува“, въпросът не се задава и
+     програмата тихо тръгва с празната база — точно находката С2. Затова се
+     затваря и се маха; на диска остава каквото е имало преди старта (нищо). */
+  const discardFreshEmptyDb = () => {
+    try { if (db) db.close(); } catch (e) { console.error('Празната база не се затвори:', e.message); }
+    db = null;
+    const p = resolveDbPath();
+    for (const s of ['', '-wal', '-shm', '-journal']) {
+      try { if (fs.existsSync(p + s)) fs.unlinkSync(p + s); }
+      catch (e) { logToFile('error', 'Празният файл на базата не можа да бъде махнат: ' + p + s + ' — ' + e.message); }
+    }
+  };
+  if (act === 'newest') {
+    try {
+      backupHandlers.restoreFromBackupsDir(best.path, '', { liveIsEmpty: true });
+    } catch (err) {
+      logToFile('error', 'Възстановяване на най-новото копие при старт: ' + err.message);
+      try {
+        dialog.showErrorBox('Копието не можа да бъде възстановено',
+          err.message + '\n\nОтваря се списъкът с всички копия — изберете друго.');
+      } catch (e) { console.error('Диалогът за грешка не се показа:', e.message); }
+      discardFreshEmptyDb();
+      openEmergencyRestoreWindow('Най-новото копие не можа да бъде възстановено: ' + err.message);
+    }
+    return false; // възстановяването рестартира програмата само
+  }
+  if (act === 'list') {
+    discardFreshEmptyDb();
+    openEmergencyRestoreWindow('Базата данни не е намерена (файлът липсва или е празен). Изберете копие за възстановяване.');
+    return false;
+  }
+  if (act === 'empty') {
+    const kept = backupHandlers.confirmEmptyStart();
+    try {
+      logAudit('База данни', 'ВНИМАНИЕ: при старта файлът на базата данни липсваше (или беше празен), а в папката '
+        + 'с копията има ' + info.count + (info.count === 1 ? ' копие' : ' копия') + '. По изричен избор („Започни с '
+        + 'празна база“) програмата работи с НОВА, ПРАЗНА база. ' + bestText + ' Копията остават в папката; '
+        + kept + ' автоматични копия са защитени от изчистване до края на тази сесия.');
+    } catch (e) { console.error('Следата за празната база не се записа:', e.message); }
+    return true;
+  }
+  discardFreshEmptyDb();
+  app.exit(0);
+  return false;
+}
+
 /* ---------------- Автоматично обновяване (GitHub Releases) ----------------
    Работи само в инсталирана (пакетирана) версия — при `npm start` в режим
    на разработка автоматично се прескача, за да не пречи. Изисква публичен
@@ -1499,7 +1683,32 @@ ipcMain.handle('app:checkForUpdates', () =>
     return true;
   })
 );
-ipcMain.handle('app:installUpdate', () => run(() => { autoUpdater.quitAndInstall(); }));
+/* КОПИЕ ПРЕДИ „ИНСТАЛИРАЙ И РЕСТАРТИРАЙ“ (v2.4.71, кръг 45, С19).
+   (а) Копието при затваряне се прави в 'window-all-closed' (виж по-долу), а
+   autoUpdater.quitAndInstall() затваря програмата по свой път и не излъчва това
+   събитие — тоест точно при обновяването работата от последните часове оставаше
+   без копие при затваряне (тестерът го отбелязва като вероятно — без пакетирана
+   програма не се проверява до край, затова тук не се разчита на събитието).
+   (б) Обновяването е моментът, в който програмата сменя кода си, а миграцията
+   на новата версия пипа базата — най-лошото време да липсва прясно копие.
+   (в) Копието се прави ИЗРИЧНО, ПРЕДИ quitAndInstall(), по същия път като при
+   затваряне (backupBeforeQuit — само ако базата е променяна). Провал на копието
+   не спира обновяването, но се вписва в дневника; таймерът се спира, за да не
+   тръгне второ копие насред изхода. */
+ipcMain.handle('app:installUpdate', () => run(() => {
+  stopAutoBackupTimer();
+  /* Насроченият запис на онлайн каталога — също ПРЕДИ изхода, както в
+     'window-all-closed' (v2.4.71, след С19): акт или заемане в последните
+     секунди иначе оставаше невидимо в katalog.json до следващото пускане на
+     вече обновената програма. Таймерът за публикуване се спира, за да не
+     тръгне git насред изхода. */
+  try { if (catalogWriteDebouncer.pending()) flushCatalogWrite(); }
+  catch (err) { logToFile('error', 'Записът на онлайн каталога преди обновяването — грешка: ' + err.message); }
+  stopAutoPushTimer();
+  try { backupBeforeQuit(); }
+  catch (err) { logToFile('error', 'Резервно копие преди обновяването — грешка: ' + err.message); }
+  autoUpdater.quitAndInstall();
+}));
 
 /* ---------------- Анонимно отчитане на инсталацията (v2.4.56) ----------------
    Целият механизъм, заедно с изчерпателния списък какво се изпраща и какво
@@ -1585,6 +1794,9 @@ app.whenReady().then(() => {
     readConfigOrThrow();
   } catch (err) {
     logToFile('error', 'config.json не се прочете: ' + err.message);
+    /* С4 (v2.4.71): „локалната база“ тук може да е СТАРАТА пълна база отпреди
+       преместването в мрежата — виж describeLocalFallback(). */
+    const local = describeLocalFallback();
     const choice = dialog.showMessageBoxSync({
       type: 'error',
       noLink: true,
@@ -1594,7 +1806,7 @@ app.whenReady().then(() => {
       title: 'Настройките на програмата не могат да бъдат прочетени',
       message: 'Файлът с настройките (config.json) не можа да бъде прочетен.',
       detail: 'В него се пази пътят до базата данни на библиотеката. Докато не бъде прочетен, '
-        + 'програмата не знае къде е базата и би отворила ПРАЗНА локална база.\n\n'
+        + 'програмата не знае къде е базата: ' + local.text + '.\n\n'
         + 'Причина: ' + err.message + '\n'
         + '(Ако до config.json се е появил файл config.bad.json, той е копие на повредения — '
         + 'от него може да се прочете пътят до базата. При заключен файл такова копие може и да липсва.)\n\n'
@@ -1610,6 +1822,10 @@ app.whenReady().then(() => {
     app.exit(0);
     return;
   }
+  /* С17 (v2.4.71): часът на файла ПРЕДИ сервизните записи на стартирането —
+     за да различава копието при затваряне „работа отпреди“ от „самото пускане“. */
+  try { backupHandlers.noteDbStateBeforeOpen(); }
+  catch (e) { console.error('Състоянието на базата преди отварянето:', e.message); }
   initDb();
   /* Проверката на целостта е ПРЕДИ авто-копието и преди прозореца: повредена
      база не бива да стане днешното резервно копие, а библиотекарката не бива да
@@ -1620,6 +1836,10 @@ app.whenReady().then(() => {
   // "Кой служител работи в момента" е настройка на този компютър (не на споделената база
   // данни) — всяко работно място пази собствения си избор в локалния config.json.
   CURRENT_USER = readConfig().lastUserName || '';
+  /* С2 (v2.4.71): изчезнала/празна база при налични копия — въпрос, преди
+     прозорецът и преди първото копие. false = тръгнало е възстановяване или
+     „Изход“; прозорецът на програмата тогава не се отваря. */
+  if (DB_OPENED_EMPTY && !askRestoreForEmptyDb()) return;
   /* И по таймер (на 3 часа, само при променена база), защото компютър в
      читалище често стои включен със седмици — а дотук копие се правеше САМО при
      стартиране, тоест цяла седмица работа висеше на един-единствен файл отпреди
@@ -1857,6 +2077,11 @@ app.on('window-all-closed', () => {
   try { backupBeforeQuit(); }
   catch (err) { console.error('Резервно копие при затваряне — грешка:', err.message); }
   if (db) db.close();
+  /* С17 (v2.4.71): отпечатъкът на файла СЛЕД затварянето (SQLite вече е прехвърлил
+     -wal) — по него следващото пускане познава, че базата не е пипана отвън и не
+     прави копие само защото часът на файла е по-нов от последното копие. */
+  try { backupHandlers.noteCleanClose(); }
+  catch (err) { console.error('Състоянието при затваряне не се записа:', err.message); }
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -1984,7 +2209,12 @@ require('./handlers/categories')(ipcMain, { getDb: () => db, run, logAudit, sche
    самата библиотека (програмата не носи таблицата, виж модула). */
 require('./handlers/author-mark')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path,
-  importers: require('./importers')
+  importers: require('./importers'),
+  /* v2.4.71 (находка М6): груповото попълване на авторски знак сменя
+     сигнатурата в онлайн каталога (УДК + авторски знак, от П4 насам) — без
+     тази зависимост katalog.json оставаше със старата до следващата случайна
+     промяна. */
+  scheduleCatalogWrite
 });
 
 /* ---------------- Книги (фонд) + Лимит на броя записи ----------------
@@ -2041,7 +2271,10 @@ require('./handlers/deaccession-acts')(ipcMain, {
          Смисълът е забавата в акта да е СЪЩОТО число, което екранът „Просрочени“
          и напомнителното писмо показват — три различни суми за едно просрочие
          вече веднъж са били дефект (виж бележката при loans:overdue). */
-  logEvent, closedDaysBetween: (a, b) => closedDaysBetween(a, b), today
+  logEvent, closedDaysBetween: (a, b) => closedDaysBetween(a, b), today,
+  /* v2.4.71 (находка Ч4): забавата се брои от първия работен ден след падежа —
+     същото правило като в handlers/loans.js, обвито по същата причина. */
+  nextWorkDay: (d) => nextWorkDay(d)
 });
 
 /* ---------------- КДБФ — книга за движение на фонда ---------------- */
@@ -2060,7 +2293,11 @@ require('./handlers/readers')(ipcMain, {
      следващия в опашката — със същата функция, с която го прави заличаването
      по чл. 17 (handlers/gdpr.js). Модулът има резервен път през
      require('./loans'), но зависимостта трябва да се вижда тук. */
-  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId)
+  activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId),
+  /* v2.4.71 (находка М4): изтриването на читател, което освобождава заделена
+     книга, я прави „налична“ — и онлайн каталогът трябва да го разбере (при
+     заличаването по ОРЗД същото вече става в handlers/gdpr.js). */
+  scheduleCatalogWrite
 });
 
 /* ---------------- Печат → PDF файл ----------------
@@ -2225,7 +2462,9 @@ require('./handlers/mzs')(ipcMain, { getDb: () => db, run, logAudit, yearOf, sch
 // (Фаза 4, стъпка 30). dnevnikSumRow се връща обратно, защото
 // handlers/stats.js (извадено по-рано) вече го ползва по референция.
 const { dnevnikSumRow } = require('./handlers/dnevnik')(ipcMain, {
-  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs
+  /* today — за отказа на бъдеща дата (v2.4.71, Д5): същото „днес“ по местния
+     часовник, което ползва и гишето. */
+  getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, today
 });
 
 /* ============================================================================
@@ -2331,7 +2570,7 @@ require('./handlers/export-all')(ipcMain, {
 require('./handlers/search-history')(ipcMain, { getDb: () => db, run, getCurrentUser: () => CURRENT_USER });
 
 /* ---------------- Посещения ---------------- */
-require('./handlers/visits')(ipcMain, { getDb: () => db, run, logAudit });
+require('./handlers/visits')(ipcMain, { getDb: () => db, run, logAudit, today }); // today — Д5 (v2.4.71)
 
 /* ---------------- Справки и статистика + Готови справки ----------------
    Извадени в handlers/stats.js (Фаза 4, стъпка 29 от разбиването на

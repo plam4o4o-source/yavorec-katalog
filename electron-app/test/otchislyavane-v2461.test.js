@@ -360,7 +360,9 @@ test('бележката на проекта не се губи при запи�
   // Втори запис от формата, която няма поле за бележката (formData не я връща).
   ok(ipcMain.invoke('deaccessionActs:saveDraft', {
     id: draftId,
-    draft: { date: TODAY, reason_code: 6, reason_text: 'Констатирани като липсващи при инвентаризация', disposal: 'унищожени' },
+    draft: { date: TODAY, reason_code: 6, reason_text: 'Констатирани като липсващи при инвентаризация', disposal: 'унищожени',
+      /* v2.4.71 (И2): утвърждаването иска член 1 и член 3 на комисията (чл. 35). */
+      committee1: 'А', committee3: 'В' },
     bookIds: [b1]
   }), 'поправка на проекта');
   assert.equal(db.prepare('SELECT note FROM deaccession_drafts WHERE id = ?').get(draftId).note, NOTE,

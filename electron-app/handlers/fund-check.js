@@ -100,17 +100,36 @@ module.exports = function registerFundCheckHandlers(ipcMain, deps) {
     /* --- 2. Двата ключа за „фонд“ -------------------------------------- */
     const byDate = endY;   // същото число като горе — фондът по регистъра към 31.12.Y
     const byStatus = stockNow(db);
-    if (byDate.n !== byStatus.n) {
-      const bad = db.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(${F.QTY_JOIN}),0) AS n
+    /* Кръг 45, Ф4 — сравнява се и СТОЙНОСТТА, не само броят.
+       (а) Какво ставаше: условието беше само byDate.n !== byStatus.n. Пример на
+       тестера: КДБФ 2 документа / 5 €, табло 2 документа / 12 € (един документ,
+       отчислен без акт, на 0 €, и един с бъдеща дата на вписване, на 7 €) — броят
+       съвпада, находка няма и „Проверка на данните“ казва „Числата се връзват“.
+       (б) Защо е грешно: по Наредба № 3 КДБФ и годишният отчет носят и броя, И
+       стойността на фонда; подписаният отчет с 7 € по-малко от таблото е точно
+       разминаването, което тази проверка съществува да хване. Две противоположни
+       грешки, които се компенсират по брой, не се компенсират по стойност.
+       (в) Защо точно така: същият праг като при веригата по-горе (|Δ| > 0,005 €,
+       след toCents от двете страни), а изречението казва разликата в документи И
+       в евро, и всяка причина — с нейната стойност, за да се види, че причините
+       обясняват точно тази разлика. */
+    const eur = (x) => money(x).toFixed(2).replace('.', ',') + ' €';
+    const diffN = byStatus.n - byDate.n;
+    const diffV = money(money(byStatus.v) - money(byDate.v));
+    if (diffN !== 0 || Math.abs(diffV) > 0.005) {
+      const bad = db.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(${F.QTY_JOIN}),0) AS n,
+        COALESCE(SUM(b.price * ${F.QTY_JOIN}),0) AS v
         ${F.FROM_BOOKS_INV} WHERE ${F.BAD_DATE} AND ${F.fundByStatus}`).get();
       /* NOT (BAD_DATE) е задължително тук: SQLite сравнява текст побайтово, а
          кирилски низ като „НЕВАЛИДНА-99-99“ е ПО-ГОЛЯМ от всяка чисто цифрова
          дата (Н е след 0-9 в байтовете) — тоест без този филтър един-единствен
          документ с нечетима дата се брои ДВА пъти: веднъж в bad.n, веднъж тук
          в future.n, а обяснението за разлика от 1 документ сочи towards „2“. */
-      const future = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n
+      const future = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n,
+        COALESCE(SUM(b.price * ${F.QTY_JOIN}),0) AS v
         ${F.FROM_BOOKS_INV} WHERE b.register_date > ? AND NOT (${F.BAD_DATE}) AND ${F.fundByStatus}`).get(y + '-12-31');
-      const orphan = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n
+      const orphan = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n,
+        COALESCE(SUM(b.price * ${F.QTY_JOIN}),0) AS v
         ${F.FROM_BOOKS_INV} WHERE b.status = 'отчислен'
           AND b.deaccession_act_id IS NULL AND b.deaccession_date IS NULL`).get();
       /* ЧЕТВЪРТАТА ПРИЧИНА: ОТЧИСЛЕН С АКТ, НО „НАЛИЧЕН“ ПО СТАТУС (v2.4.61).
@@ -130,24 +149,32 @@ module.exports = function registerFundCheckHandlers(ipcMain, deps) {
          върне отчислен документ във фонда от картона — handlers/books.js), но
          редовете, вече създадени от по-стара версия или от внос, трябва да се
          намерят. */
-      const backInFund = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n
+      const backInFund = db.prepare(`SELECT COALESCE(SUM(${F.QTY_JOIN}),0) AS n,
+        COALESCE(SUM(b.price * ${F.QTY_JOIN}),0) AS v
         ${F.FROM_BOOKS_INV} WHERE COALESCE(b.status, '') != 'отчислен'
           AND b.deaccession_date IS NOT NULL`).get();
       const causes = [];
-      if (bad.n) causes.push(bad.n + ' без разпознаваема дата на вписване');
-      if (future.n) causes.push(future.n + ' с дата на вписване след 31.12.' + y);
-      if (orphan.n) causes.push(orphan.n + ' отчислени без акт');
-      if (backInFund.n) causes.push(backInFund.n + ' с дата на отчисляване, но със състояние във фонда');
+      if (bad.n) causes.push(bad.n + ' без разпознаваема дата на вписване (' + eur(bad.v) + ')');
+      if (future.n) causes.push(future.n + ' с дата на вписване след 31.12.' + y + ' (' + eur(future.v) + ')');
+      if (orphan.n) causes.push(orphan.n + ' отчислени без акт (' + eur(orphan.v) + ')');
+      if (backInFund.n) causes.push(backInFund.n + ' с дата на отчисляване, но със състояние във фонда ('
+        + eur(backInFund.v) + ')');
+      const diffText = 'Разлика (табло − отчет): ' + (diffN > 0 ? '+' : '') + diffN
+        + (Math.abs(diffN) === 1 ? ' документ' : ' документа') + ', ' + (diffV > 0 ? '+' : '') + eur(diffV) + '. ';
       add({
         key: 'keys',
-        level: causes.length ? 'важно' : 'бележка',
-        title: 'Таблото и годишният отчет броят различен фонд',
+        level: causes.length || diffN === 0 ? 'важно' : 'бележка',
+        title: diffN === 0
+          ? 'Таблото и годишният отчет броят еднакъв брой документи, но различна стойност на фонда ('
+            + (diffV > 0 ? '+' : '') + eur(diffV) + ')'
+          : 'Таблото и годишният отчет броят различен фонд',
         a: { label: 'годишен отчет и КДБФ (по датите в регистъра)', n: byDate.n, v: money(byDate.v) },
         b: { label: 'табло и инвентарна книга (по състоянието днес)', n: byStatus.n, v: money(byStatus.v) },
-        why: causes.length
-          ? 'Разликата се обяснява изцяло с: ' + causes.join('; ') + '.'
+        diff: { n: diffN, v: diffV },
+        why: diffText + (causes.length
+          ? 'Разликата се обяснява с: ' + causes.join('; ') + '.'
           : 'Двата ключа отговарят на два различни въпроса — „какво пише в регистъра към 31.12“ '
-            + 'и „какво стои на рафта днес“. Разлика се появява при документи, вписани след 31.12.' + y + '.',
+            + 'и „какво стои на рафта днес“. Разлика се появява при документи, вписани след 31.12.' + y + '.'),
         todo: bad.n
           ? 'Поправете датата на вписване на документите без разпознаваема дата — те не съществуват '
             + 'в Книгата за движение на фонда, макар да се броят на таблото.'

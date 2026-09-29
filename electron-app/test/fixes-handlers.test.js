@@ -321,19 +321,21 @@ test('deaccessionActs:create отказва втори акт със същия 
   const mk = (inv) => db.prepare('INSERT INTO books (inv_number, title) VALUES (?, ?)')
     .run(inv, 'Книга ' + inv).lastInsertRowid;
   const first = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2026-03-01', reason_code: 1, reason_text: 'износени' }, bookIds: [mk(51)]
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no: 5, date: '2026-03-01', reason_code: 1, reason_text: 'износени', committee1: 'А', committee3: 'В' }, bookIds: [mk(51)]
   });
   assert.equal(first.ok, true);
   // Второто работно място е взело същия № 5 при отваряне на формата.
   const second = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2026-04-01', reason_code: 1, reason_text: 'липсващи' }, bookIds: [mk(52)]
+    act: { no: 5, date: '2026-04-01', reason_code: 1, reason_text: 'липсващи', committee1: 'А', committee3: 'В' }, bookIds: [mk(52)]
   });
   assert.equal(second.ok, false);
   assert.match(second.error, /Акт № 5\/2026 вече съществува/);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM deaccession_acts WHERE year='2026' AND no=5").get().n, 1);
   // Друга година със същия номер е напълно законна.
   const otherYear = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 5, date: '2025-04-01', reason_code: 1, reason_text: 'износени' }, bookIds: [mk(53)]
+    act: { no: 5, date: '2025-04-01', reason_code: 1, reason_text: 'износени', committee1: 'А', committee3: 'В' }, bookIds: [mk(53)]
   });
   assert.equal(otherYear.ok, true);
 });
@@ -596,7 +598,7 @@ test('анулирането на акт отваря обратно заема�
      приема само по т. 5; по всяка друга причина се отказва, защото комисията не
      може да опише документ, който не е виждала. */
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-06-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели' },
+    act: { no: 1, date: '2026-06-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели', committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   });
   assert.equal(created.ok, true, created.error);
@@ -617,7 +619,7 @@ test('анулирането не отваря заемане, което е б�
   const returnedLoan = lendBook(db, { bookId, readerId, dateOut: '2026-05-01', dateIn: '2026-06-01' });
 
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 2, date: '2026-06-01', reason_code: 3, reason_text: 'износени' }, bookIds: [bookId]
+    act: { no: 2, date: '2026-06-01', reason_code: 3, reason_text: 'износени', committee1: 'А', committee3: 'В' }, bookIds: [bookId]
   });
   await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(returnedLoan).date_in, '2026-06-01',

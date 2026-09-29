@@ -142,7 +142,9 @@ test('deaccessionActs:nextNo returns max(no)+1 per year', async () => {
   /* Актът иска поне един документ (v2.4.58, чл. 35, ал. 2) — тук се проверява
      само номерирането, но през редовен акт. */
   const bookId = insertBook(db, { inv_number: 40 });
-  await ipcMain.invoke('deaccessionActs:create', { act: { no: 4, date: '2026-01-01', reason_code: 1, reason_text: 'x' }, bookIds: [bookId] });
+  /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+     отказва по чл. 35 — затова актовете в този файл носят комисия. */
+  await ipcMain.invoke('deaccessionActs:create', { act: { no: 4, date: '2026-01-01', reason_code: 1, reason_text: 'x', committee1: 'А', committee3: 'В' }, bookIds: [bookId] });
   const next = await ipcMain.invoke('deaccessionActs:nextNo', '2026');
   assert.equal(next.data, 5);
 });
@@ -151,7 +153,7 @@ test('deaccessionActs:revoke restores books to наличен and MARKS the act 
   const { db, ipcMain, scheduleCalls } = setup();
   const bookId = insertBook(db, { inv_number: 20 });
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-08-01', reason_code: 1, reason_text: 'грешка' },
+    act: { no: 1, date: '2026-08-01', reason_code: 1, reason_text: 'грешка', committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   });
   scheduleCalls.length = 0;

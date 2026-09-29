@@ -10,6 +10,38 @@ function ensureBglower(db) {
   return db;
 }
 
+/* ДАТАТА, КАКТО Я ВИЖДА ЧОВЕК (v2.4.71, кръг 45, находка С12).
+   (а) Търсенето гледаше само служителя, действието и подробността. Колоната
+   „Дата/час“ на екрана показва МЕСТНОТО време в български вид („29.09.2026 г.,
+   16:55:05 ч.“), а в базата стои UTC във вид „2026-09-29 13:55:05“ — и изобщо не
+   се търсеше. Тестер: „29.09“ в полето за търсене → 0 записа, при цял ден работа.
+   (б) Проверяващият търси „какво е правено на 29.09“ — най-естественият въпрос
+   към одитната следа, — и получава „няма записи“, тоест грешен отговор, не
+   празен.
+   (в) За всеки ред се сглобява низ с ДВАТА вида на местното време —
+   „4.09.2026 г., 18:03:07 ч.“ (точно като на екрана) и „04.09.2026“, плюс
+   „2026-09-04 18:03“ за търсене по ISO, — и по него се търси със същото
+   правило като по останалите колони. Часовата зона е тази на компютъра — същата,
+   в която екранът показва реда. */
+const AUDITTS_READY = new WeakSet();
+function ensureAuditTs(db) {
+  if (AUDITTS_READY.has(db)) return db;
+  const pad = (n) => String(n).padStart(2, '0');
+  db.function('audit_local_ts', (ts) => {
+    const raw = String(ts == null ? '' : ts);
+    if (!raw) return '';
+    const iso = /[TZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return raw;
+    const dd = pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+    const isoLocal = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return d.toLocaleString('bg-BG') + ' | ' + dd + ' | ' + isoLocal;
+  });
+  AUDITTS_READY.add(db);
+  return db;
+}
+
 module.exports = function registerAuditHandlers(ipcMain, deps) {
   const { getDb, run } = deps;
 
@@ -57,12 +89,17 @@ module.exports = function registerAuditHandlers(ipcMain, deps) {
          екраниране на „%“ и „_“, които иначе се четат като заместващи знаци. */
       ensureBglower(db);
       const q = '%' + String(query).trim().toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
+      /* С12 — и по датата, както е на екрана. Само когато в търсеното има цифра:
+         без цифра дата не може да съвпадне, а сглобяването струва ~6 µs на ред. */
+      const byDate = /\d/.test(String(query));
+      if (byDate) ensureAuditTs(db);
       return db.prepare(`
         SELECT * FROM audit_log
          WHERE bglower(user) LIKE ? ESCAPE '\\' OR bglower(action) LIKE ? ESCAPE '\\'
             OR bglower(detail) LIKE ? ESCAPE '\\'
+            ${byDate ? "OR bglower(audit_local_ts(ts)) LIKE ? ESCAPE '\\'" : ''}
         ORDER BY id DESC ${limit}
-      `).all(q, q, q);
+      `).all(...(byDate ? [q, q, q, q] : [q, q, q]));
     }
     return db.prepare(`SELECT * FROM audit_log ORDER BY id DESC ${limit}`).all();
   }

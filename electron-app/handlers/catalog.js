@@ -16,6 +16,10 @@
 // отложени callback-и, не веднага при зареждане, така че редът тук е
 // без значение (за разлика от scheduleCatalogWrite по-горе).
 const { localDate } = require('../local-date');
+/* Сигнатурата по ЕДНОТО правило (v2.4.71, кръг 45, М7) — виж дългия коментар
+   при полето 995 в marcRecord по-долу. Изнесената функция от handlers/books.js е
+   същата, която ползват етикетът, „Книги“, инвентарната книга и katalog.json. */
+const { effectiveCallNumber } = require('./books');
 
 module.exports = function registerCatalogHandlers(ipcMain, deps) {
   /* BOOK_SELECT вече НЕ се взима тук (v2.4.64): и трите износа минават през
@@ -155,6 +159,49 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     try { return await gitPublish(folder); }
     finally { PUBLISHING = false; }
   }
+  /* ПРОМЕНИ ОТ ДРУГО РАБОТНО МЯСТО СТИГАТ ДО САЙТА (v2.4.71, кръг 45, М5).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ. katalog.json се пише от отложения запис
+         (scheduleCatalogWrite в main.js), а той се насрочва САМО от
+         обработчиците в ТОЗИ процес. Заемане, връщане, нова книга или
+         отчисляване, направени на второ работно място към същата база (мрежова
+         папка), не насрочват нищо тук — и таймерът на 5 минути качваше в GitHub
+         стария файл, без да го генерира наново. Тестерът (две връзки към една
+         база): книга, заета от „станция Б“, стоеше „налична“ в katalog.json и
+         след 100 s; едва ръчното „Генерирай katalog.json“ я записа „заета“.
+         По-лошото: при две клонирани папки таймерът на станцията, която НЕ е
+         пипала нищо, качва своя стар файл, а rebase с `-X theirs` в gitPublish
+         нарочно дава предимство на нашия commit — тоест върху новия каталог на
+         другата станция.
+     (б) ЗАЩО Е ГРЕШНО. Онлайн каталогът е единственото, което читателят вижда от
+         фонда; отчислена на другия компютър книга остава „налична“, новата
+         партида я няма — до случайната следваща промяна точно на тази машина.
+         Библиотека с две работни места (гише и каталогизация) живее така
+         постоянно, а екранът не казва нищо, защото публикуването „минава“.
+     (в) ЗАЩО ТОЧНО ТАКА. Преди качване таймерът пита SQLite дали базата е
+         писана от ДРУГА връзка: `PRAGMA data_version` се сменя точно тогава и
+         мълчи за нашите собствени записи (те минават по отложения запис, както
+         досега). Ако е сменена — katalog.json се генерира наново през същата
+         flushCatalogWrite(), която ползват „Генерирай“ и „Публикувай сега“
+         (със същия предпазител и същата памет за последния запис), и чак тогава
+         се качва. При първия цикъл след пускане отпечатък още няма и файлът
+         също се генерира веднъж: какво е правила другата станция, докато тази е
+         била изключена, не се знае — съмнение значи ново сглобяване, не старо
+         качване. Отпечатъкът се взима ПРЕДИ записа: промяна, влязла докато
+         файлът се пише, ще бъде хваната на следващия цикъл, а не изгубена.
+         Ако записът е спрян или не успее, стар файл НЕ се качва — като при
+         „Публикувай сега“ — а причината застава в червената лента. */
+  let DB_SEEN = { db: null, v: null };
+  function dataVersionNow() {
+    const db = getDb();
+    const v = db && typeof db.pragma === 'function' ? db.pragma('data_version', { simple: true }) : null;
+    return { db, v };
+  }
+  function changedElsewhere() {
+    const now = dataVersionNow();
+    return now.v == null || DB_SEEN.db !== now.db || DB_SEEN.v !== now.v;
+  }
+  function rememberDbSeen(seen) { DB_SEEN = seen; }
   let AUTO_PUSH_TIMER = null;
   function startAutoPushTimer() {
     if (AUTO_PUSH_TIMER) return;
@@ -190,6 +237,18 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         // Ако точно сега тече ръчно публикуване, този цикъл се пропуска мълчаливо —
         // ръчното ще качи същото. Затова тук няма noteAutoPush за отказа.
         if (PUBLISHING) return;
+        // М5 (виж коментара при DB_SEEN): промяна от друго работно място → нов katalog.json преди качването.
+        if (changedElsewhere()) {
+          const seen = dataVersionNow();
+          const w = flushCatalogWrite() || {};
+          if (w.blocked || (!w.written && w.error)) {
+            const why = writeProblemText(w);
+            console.error('Автоматично публикуване — katalog.json не е генериран наново:', why);
+            noteAutoPush(why + ' Автоматичното публикуване НЕ качи стария файл; опитва отново след 5 минути.');
+            return;
+          }
+          rememberDbSeen(seen);
+        }
         const r = await gitPublishExclusive(s.catalog_folder);
         if (r.ok && r.committed) {
           console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
@@ -496,9 +555,11 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   ipcMain.handle('catalog:gitPublishNow', async () => {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
+    const seen = dataVersionNow();
     const w = flushCatalogWrite();
     try { assertCatalogWriteOk(w); }
     catch (err) { noteAutoPush(err.message); return { ok: false, error: err.message }; }
+    rememberDbSeen(seen);   // М5: файлът току-що е сглобен от базата — таймерът няма нужда да го прави пак
     const r = await gitPublishExclusive(s.catalog_folder);
     if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
     /* И ръчното публикуване обновява състоянието — иначе предупреждението за
@@ -517,8 +578,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
       if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
       const force = !!(opts && opts.force);
+      const seen = dataVersionNow();
       const w = force ? flushCatalogWrite({ force: true }) : flushCatalogWrite();
       assertCatalogWriteOk(w);
+      rememberDbSeen(seen);   // М5: вж. DB_SEEN
       if (force && w.forced) {
         logAudit('Онлайн каталог', 'katalog.json е записан ВЪПРЕКИ предпазителя, по изрично потвърждение: '
           + 'публикуваните ' + w.published + ' записа са заменени с ' + w.now + '. Сайтът ще покаже новия брой след '
@@ -623,7 +686,24 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     add('801', ' ', '0', [['a', 'BG'], ['b', agency],
       ['c', localDate().replace(/-/g, '')], ['g', 'unimarc']]);
     // 995 е полето за екземпляри в българската практика (COMARC).
-    add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', b.call_number],
+    /* 995$k Е СИГНАТУРАТА ПО ОБЩОТО ПРАВИЛО (v2.4.71, кръг 45, М7).
+       (а) Дотук $k беше голото `b.call_number`. Книга, описана с помощниците на
+           програмата — УДК „821.163.2-31“ и авторски знак „В 14“, без нищо в
+           полето „Сигнатура“, — излизаше в UNIMARC БЕЗ $k (тестерът: 995 носеше
+           само $f, $o и $r), а katalog.json и етикетът на гърба ѝ казват
+           „821.163.2-31 В 14“. Колоната „Сигнатура“ в CSV-то беше празна по
+           същата причина.
+       (б) Сигнатурата е адресът на документа на рафта и реквизит на
+           инвентарната книга (чл. 16, ал. 1 от Наредба № 3). Файлът за COBISS
+           или за сводния каталог е пренос на описанията — ако там липсва
+           адресът, който библиотеката вече показва навсякъде другаде,
+           приемащата система получава екземпляр, който не може да бъде намерен,
+           а служителят преписва сигнатурите на ръка, книга по книга.
+       (в) Правилото не се преписва: вика се effectiveCallNumber() от
+           handlers/books.js (попълнената „Сигнатура“ печели, иначе УДК +
+           авторски знак) — същата функция, от която идва полето `g` в
+           katalog.json. Затова EXPORT_SELECT по-долу тегли и `b.author_mark`. */
+    add('995', ' ', ' ', [['f', b.inv_number], ['d', b.department], ['k', effectiveCallNumber(b)],
       ['o', b.category_name], ['r', b.status]]);
     return `  <record>\n` +
       `    <leader>     nam  22     3a 4500</leader>\n` +
@@ -719,7 +799,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      се сравняват байт по байт. */
   const EXPORT_SELECT = `
     SELECT b.id, b.inv_number, b.barcode, b.register_date, b.title, b.subtitle, b.author,
-           b.year, b.volume, b.isbn, b.pages, b.language, b.udk, b.call_number,
+           b.year, b.volume, b.isbn, b.pages, b.language, b.udk, b.call_number, b.author_mark,
            b.city, b.publisher, b.series, b.series_no, b.keywords, b.annotation,
            b.department, b.status, b.price,
            c.name AS category_name,
@@ -821,7 +901,10 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         return [
           b.inv_number, b.barcode, b.register_date, b.category_name, b.author, b.title,
           [b.series, b.series_no].filter(Boolean).join(' '), b.city, b.publisher,
-          b.year, b.isbn, b.language, b.udk, b.call_number, b.department,
+          /* „Сигнатура“ — по общото правило, както 995$k (v2.4.71, М7): дотук
+             суровото поле оставяше колоната празна за книга, описана с УДК и
+             авторски знак, а етикетът и katalog.json я показват. */
+          b.year, b.isbn, b.language, b.udk, effectiveCallNumber(b), b.department,
           /* Цените се пазят в ЕВРО от v2.4.51; левът е справочна колонка до тях.
              Общата стойност се смята в записаната валута, не от преобразуваната —
              иначе сборът в изнесения файл не съвпада със сбора в програмата. */

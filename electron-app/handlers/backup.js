@@ -61,6 +61,14 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      „скорошно копие“ и „не пиши по цял ден в мрежовата папка“; при това копие се
      прави само ако базата наистина е променяна (виж dbChangedSince). */
   const AUTO_BACKUP_INTERVAL_MS = 3 * 60 * 60 * 1000;
+  /* Имената на автоматичните копия, които са били в папката в мига, в който
+     библиотекарката изрично е избрала „Започни с празна база“ при налични копия
+     (С2, виж confirmEmptyStart). До края на сесията степенуваното изчистване не
+     ги пипа — иначе междинните копия на празната база (до 4 на ден) изтласкват
+     точно последните здрави копия на изчезналата. */
+  const protectedFromPrune = new Set();
+  /* С18 — същото число като PDP_MIN_PASSWORD в handlers/pdp.js. */
+  const MANUAL_BACKUP_MIN_PASSWORD = 10;
 
   function backupsDir() {
     const dir = path.join(resolveDbDir(), 'backups');
@@ -99,10 +107,14 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          Прекъснат запис върху USB (изваден по време на копирането) иначе оставя
          отрязан файл с правилното име — в списъка изглежда като здраво копие. */
       const dest = path.join(folder, path.basename(srcPath));
-      const staged = dest + '.tmp';
-      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* ще гръмне по-долу, ако пречи */ }
-      fs.copyFileSync(srcPath, staged);
-      fs.renameSync(staged, dest);
+      /* Уникален временен файл и тук (С5): втората папка също може да е обща. */
+      const staged = stagingPath(dest);
+      try {
+        fs.copyFileSync(srcPath, staged);
+        fs.renameSync(staged, dest);
+      } finally {
+        try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { console.error('Временен файл във втората папка остана:', staged, e.message); }
+      }
       /* Ако това е криптираното копие за деня, некриптираният му близнак във
          втората папка пада — иначе точно там (обикновено USB, който се разнася
          между дома и читалището) остава пълен регистър с ЕГН в чист текст. */
@@ -233,6 +245,11 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         + 'най-често това е криптирано копие, архив или съвсем друг файл';
     }
     let ro = null;
+    /* С16: -wal/-shm, които САМАТА проверка създава до проверявания файл (копие
+       в режим WAL, донесено отвън или направено от по-стара версия), се махат
+       след нея. Пипат се само онези, които ги НЯМАШЕ преди отварянето. */
+    const hadSidecar = {};
+    for (const s of ['-wal', '-shm']) { try { hadSidecar[s] = fs.existsSync(filePath + s); } catch (e) { hadSidecar[s] = true; } }
     try {
       ro = new Database(filePath, { readonly: true, fileMustExist: true });
       const res = ro.pragma(deep ? 'integrity_check' : 'quick_check', { simple: true });
@@ -246,7 +263,12 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       if (/malformed|corrupt/i.test(m)) return 'файлът е повреден (непълен или презаписан)';
       return 'файлът не можа да бъде отворен за проверка: ' + m;
     } finally {
-      if (ro) { try { ro.close(); } catch (e) { /* проверката приключи */ } }
+      if (ro) { try { ro.close(); } catch (e) { console.error('Проверката на копието не затвори файла:', e.message); } }
+      for (const s of ['-wal', '-shm']) {
+        if (hadSidecar[s]) continue;
+        try { if (fs.existsSync(filePath + s)) fs.unlinkSync(filePath + s); }
+        catch (e) { console.error('Остатък от проверката не можа да бъде изтрит:', filePath + s, e.message); }
+      }
     }
   }
   /* Проверка на ПРЯСНО ЗАПИСАНО копие — включително криптирано. Криптираният
@@ -340,6 +362,20 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       return;
     }
     const snapshot = db.serialize();
+    /* КОПИЕТО Е В РЕЖИМ БЕЗ -wal/-shm (v2.4.71, кръг 45, находка С16).
+       (а) Снимката на локалната база носи в заглавието си „режим WAL“ (байтове
+       18 и 19 = 2). Проверката на прясното копие го отваря само за четене и SQLite
+       създава до него `*.tmp-shm` и `*.tmp-wal`, които след преименуването
+       остават сирачета до всяко копие — тестерът намери по два такива файла до
+       всяко копие; при копие на 3 часа и две години пазене това са около 117 МБ
+       боклук в мрежовата папка.
+       (б) Файлове, които никой не чете, в папка, която по документиран сценарий
+       е обща и често е на малък дял.
+       (в) Байтове 18–19 = 1 е обикновеният режим с журнал — копието е същата
+       база, само без изискването за -wal/-shm при отваряне. Живата база не се
+       пипа (това е буфер в паметта), а при възстановяване main.js сам слага WAL
+       отново (initDb). */
+    if (snapshot.length > 19 && snapshot[18] === 2 && snapshot[19] === 2) { snapshot[18] = 1; snapshot[19] = 1; }
     if (!password) {
       fs.writeFileSync(destPath, snapshot);
       return;
@@ -378,17 +414,67 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      казва „ok“ (verifyFreshBackup → quick_check, виж обяснението при нея) → чак
      тогава преименувай (атомарно, в същата папка). Провал на който и да е етап
      оставя предишното копие непокътнато. */
+  /* УНИКАЛНО ИМЕ НА ВРЕМЕННИЯ ФАЙЛ (v2.4.71, кръг 45, находка С5).
+     (а) КАКВО СТАВАШЕ ДОТУК. Временният файл беше винаги `<крайно име>.tmp`, а
+     doBackupTo() започваше с „ако такъв файл има — изтрий го“. Две работни места
+     върху една база в обща мрежова папка стигат до ЕДНО И СЪЩО крайно име
+     (дневното `auto-ГГГГ-ММ-ДД.db` при сутрешното пускане, междинното
+     `auto-ГГГГ-ММ-ДД-ЧЧММ.db` при затваряне в една и съща минута). Тогава всяко
+     от тях триеше и презаписваше полузаписания файл на другото, проверката
+     четеше смесица от двата записа и се проваляше. Измерено от тестера
+     (s5b-trka.js, два процеса): 50 от 50 опита пропадат с „липсва заглавието“,
+     „повредена страница“, „файлът не съществува“ — и в папката не остава НИТО
+     ЕДНО копие от никого.
+     (б) ЗАЩО Е ГРЕШНО. Точно в сценария „две места в обща папка“ (документиран в
+     „Работа в мрежа“) библиотеката остава без копие за деня, а следата пише
+     „ВНИМАНИЕ: копието не беше направено“ на двете места.
+     (в) ЗАЩО ТОЧНО ТАКА. Всеки запис пише в СВОЙ временен файл — pid на процеса
+     плюс случаен суфикс, — затова никой не пипа чужд полузаписан файл.
+     Окончателното име се появява с преименуване (атомарно в същата папка);
+     ако двама преименуват едновременно, остава по-късната снимка на ОБЩАТА база,
+     която съдържа всичко от по-ранната. Разширението остава `.tmp`, за да
+     разпознава всичко останало (почистването по-долу, тестовете) временния файл
+     по същия признак. */
+  function stagingPath(destPath) {
+    return destPath + '.' + process.pid + '-' + crypto.randomBytes(4).toString('hex') + '.tmp';
+  }
+  /* Съпътстващите файлове на SQLite до временния файл (С16) — виж бележката при
+     writeRawBackupTo. Премахват се само ако са на НАШИЯ временен файл (името му е
+     уникално, тоест чужди не може да бъдат). */
+  function removeSidecars(filePath) {
+    for (const s of ['-wal', '-shm', '-journal']) {
+      const f = filePath + s;
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); }
+      catch (e) { console.error('Остатък от проверката на копието не можа да бъде изтрит:', f, e.message); }
+    }
+  }
   function doBackupTo(destPath, password) {
-    const staged = destPath + '.tmp';
-    try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* ще гръмне по-долу, ако наистина пречи */ }
+    const staged = stagingPath(destPath);
     try {
       writeRawBackupTo(staged, password);
       const problem = verifyFreshBackup(staged, password);
       if (problem) throw new Error('новото копие не мина проверката — ' + problem);
-      fs.renameSync(staged, destPath);
+      try {
+        fs.renameSync(staged, destPath);
+      } catch (renameErr) {
+        /* ЗДРАВ КРАЕН ФАЙЛ = УСПЕХ (С5). Под Windows преименуване върху файл,
+           който другото работно място държи отворен (току-що го е записало и го
+           проверява), дава EPERM/EBUSY. Ако под крайното име вече стои копие,
+           което минава същата проверка, денят ИМА здраво копие на общата база —
+           това е успех, а не „копието НЕ беше направено“. Нашият временен файл
+           тогава е излишен и се чисти по-долу. */
+        if (fs.existsSync(destPath) && !verifyFreshBackup(destPath, password)) {
+          try { if (fs.existsSync(staged)) fs.unlinkSync(staged); }
+          catch (e) { console.error('Излишен временен файл на копието остана:', staged, e.message); }
+          return;
+        }
+        throw renameErr;
+      }
     } catch (err) {
-      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { /* нищо за чистене */ }
+      try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e) { console.error('Временен файл на копието остана:', staged, e.message); }
       throw err;
+    } finally {
+      removeSidecars(staged);
     }
   }
 
@@ -420,8 +506,25 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     const now = Date.now();
     const items = [];
     const doomed = new Set();
+    /* ОСТАТЪЦИТЕ ОТ ПО-СТАРИТЕ ВЕРСИИ (v2.4.71, кръг 45, С16). До v2.4.70 до всяко
+       копие оставаха `*.tmp-shm`/`*.tmp-wal` от проверката (виж writeRawBackupTo).
+       Те не са копия и никой не ги чете — махат се. Изоставен временен файл
+       (`*.tmp` — спрян ток насред запис) се маха само ако е по-стар от ден: по-млад
+       може да е чужд запис В МОМЕНТА (две работни места в обща папка, С5). */
+    for (const f of names) {
+      const full = path.join(dir, f);
+      let stale = false;
+      if (/\.tmp-(shm|wal)$/.test(f)) stale = true;
+      else if (/\.tmp$/.test(f)) {
+        try { stale = now - fs.statSync(full).mtimeMs > 86400000; } catch (e) { stale = false; }
+      }
+      if (!stale) continue;
+      try { fs.unlinkSync(full); } catch (e) { console.error('Остатък в папката с копията не можа да бъде изтрит:', full, e.message); }
+    }
     for (const f of names) {
       if (!f.startsWith('auto-')) continue;
+      /* С2: копията отпреди „започни с празна база“ не се трият в същата сесия. */
+      if (protectedFromPrune.has(f)) continue;
       const full = path.join(dir, f);
       let st;
       try { st = fs.statSync(full); } catch (e) { continue; }
@@ -614,10 +717,15 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   function recordAutoBackupSuccess(dest, encrypted, date) {
     lastAutoBackup = { path: dest, encrypted, date };
     lastAutoAttempt = { ok: true, at: new Date().toISOString(), date, path: dest, encrypted };
+    /* markBackedUp() (С17) НЕ е тук, а в края на всеки от трите пътя (дневно,
+       междинно, преправено криптирано дневно) — СЛЕД реда в одитната следа за
+       самото копие. Иначе този ред (запис в базата!) се броеше за „работа след
+       копието“ и всяко копие предизвикваше следващото. */
   }
 
   function autoBackupIfNeeded() {
     const { date: today, plainDest, encDest } = todayPaths();
+    markSessionStart();
     try {
       if (fs.existsSync(plainDest) || fs.existsSync(encDest)) return;
       const password = autoBackupPassword();
@@ -634,6 +742,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
             + ' (с паролата за защита на личните данни)');
           console.log('Автоматично резервно копие:', encDest, '(криптирано)');
           mirrorToSecondFolder(encDest);
+          markBackedUp();
           return;
         } catch (err) {
           recordAutoBackupFailure(today, err.message,
@@ -655,6 +764,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         + 'в „Настройки“ и я дръжте отключена, за да се криптират и дневните копия.');
       console.log('Автоматично резервно копие:', plainDest, '(некриптирано)');
       mirrorToSecondFolder(plainDest);
+      markBackedUp();
     } catch (err) {
       /* ДОТУК ТОЗИ КЛОН БЕШЕ САМО console.error — а през него минава провалът на
          САМОТО ПИСАНЕ на копието (пълен диск, изваден мрежов диск, файл, заключен
@@ -694,6 +804,120 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     } catch (e) { /* няма папка — значи няма и копие */ }
     return best;
   }
+
+  /* ПРОМЕНЯНА ЛИ Е БАЗАТА — ПО ЗАПИСИТЕ, НЕ ПО ЧАСА НА ФАЙЛА (v2.4.71, кръг 45,
+     находки С17 и С9).
+     (а) КАКВО СТАВАШЕ ДОТУК. Единственото мерило беше „часът на library.db или
+     на -wal е по-нов от най-новото автоматично копие“. Две неща го лъжеха:
+       • С17 — самото ПУСКАНЕ на програмата пише в базата (сервизната част на
+         стартирането: засяването на видовете документи вдига sqlite_sequence,
+         WAL създава -wal). Измерено (/tmp/r45/fix-sistema/c17.js): отваряне и
+         затваряне без нито едно действие → нов -wal от 4 152 байта и ново
+         междинно копие от ~20 МБ при ВСЯКО затваряне;
+       • С9 — отключването на защитата ПРЕКРИПТИРА старо междинно копие и то
+         получава свеж час на файла. Работата, свършена преди отключването,
+         излизаше „по-стара от най-новото копие“ и при затваряне програмата
+         решаваше „няма промени“ — тази работа не влизаше в НИТО ЕДНО копие.
+     (б) ЗАЩО Е ГРЕШНО. С17 пълни мрежовата папка с еднакви 20-мегабайтови
+     файлове и — по-лошо — изтласква по-старите междинни копия от прозореца от
+     4 на ден. С9 е загуба на данни: денят изглежда покрит, а не е.
+     (в) ЗАЩО ТОЧНО ТАКА. SQLite брои промените на връзката (total_changes():
+     всеки INSERT/UPDATE/DELETE, който наистина е променил ред). Броячът се
+     запомня в ДВА мига: след сервизната част на стартирането
+     (markSessionStart — от startAutoBackupTimer() и autoBackupIfNeeded(), които
+     main.js вика след initDb) и след всяко автоматично копие (markBackedUp).
+     „Променена“ значи:
+       1) броячът е мръднал от запомненото — работа в ТАЗИ сесия; или
+       2) базата е била пипната ПРЕДИ отварянето и след последното копие
+          (сесия, прекъсната от спрян ток, без копие при затваряне) — това се
+          засича с часа на файла, взет от main.js ПРЕДИ отварянето на базата
+          (noteDbStateBeforeOpen), тоест преди сервизните записи; или
+       3) файлът е пипнат след запомнения миг от ДРУГ (второ работно място в
+          обща папка, друга връзка) — пак по часа на файла, но сравнен с часа,
+          запомнен след нашия последен запис, не с часа на копието.
+     Без запомнен миг за текущата връзка (тестове на модула, база, отворена
+     наново след неуспешно възстановяване) важи старото правило по часа. */
+  let preOpenDirty = null;          // null = main.js не е казал какво е било преди отварянето
+  const sessionMark = { db: null, changes: 0, touched: 0 };
+  function totalChanges(db) {
+    try { return Number(db.prepare('SELECT total_changes() AS n').get().n) || 0; }
+    catch (e) { return null; } // затворена/повредена връзка — извикващият пада към часа на файла
+  }
+  function markBackedUp() {
+    const db = getDb();
+    sessionMark.db = db || null;
+    sessionMark.changes = db ? (totalChanges(db) || 0) : 0;
+    sessionMark.touched = dbTouchedAt();
+    preOpenDirty = false;
+  }
+  function markSessionStart() {
+    const db = getDb();
+    if (!db || sessionMark.db === db) return;
+    if (preOpenDirty === null) {
+      /* main.js не е подал часа отпреди отварянето — най-близкото е старото
+         правило, приложено веднъж, сега. */
+      const t = dbTouchedAt();
+      preOpenDirty = !!t && t > newestAutoBackupAt();
+    }
+    sessionMark.db = db;
+    sessionMark.changes = totalChanges(db) || 0;
+    sessionMark.touched = dbTouchedAt();
+  }
+  /* ЧИСТО ЗАТВАРЯНЕ (С17). Часът на файла сам не стига, за да се каже „базата е
+     същата като при последното копие“: при затваряне SQLite прехвърля -wal в
+     основния файл (нов час), а последното копие може да е отпреди часове, защото
+     в сесията не е имало работа. Затова при затваряне — СЛЕД db.close() — се
+     записва малко файлче до копията с отпечатъка на файла (час и размер) и дали
+     всичко от сесията е влязло в копие. При следващото пускане: същият отпечатък
+     и „чисто“ → нищо не е пипано отвън; различен (спрян ток, друго работно
+     място) → старото правило по часа. */
+  const STATE_FILE = '.invlib-backup-state.json';
+  let closeClean = false;
+  function dbFileStamp() {
+    const p = resolveDbPath();
+    const one = (f) => { try { const st = fs.statSync(f); return st.size + '@' + Math.round(st.mtimeMs); } catch (e) { return '-'; } };
+    return { db: p, main: one(p), wal: one(p + '-wal') };
+  }
+  function noteCleanClose() {
+    try {
+      const stamp = dbFileStamp();
+      fs.writeFileSync(path.join(backupsDir(), STATE_FILE), JSON.stringify(Object.assign(stamp, {
+        clean: !!closeClean, at: new Date().toISOString()
+      })));
+    } catch (e) {
+      console.error('Състоянието при затваряне не се записа — при следващото пускане важи часът на файла:', e.message);
+    }
+  }
+  /* Вика се от main.js ПРЕДИ initDb(): какъв е бил файлът, преди програмата да е
+     записала каквото и да е в него. */
+  function noteDbStateBeforeOpen() {
+    try {
+      let saved = null;
+      try { saved = JSON.parse(fs.readFileSync(path.join(backupsDir(), STATE_FILE), 'utf8')); }
+      catch (e) { saved = null; } // първо пускане с тази версия или изтрит файл — старото правило
+      const now = dbFileStamp();
+      if (saved && saved.clean && saved.db === now.db && saved.main === now.main && saved.wal === now.wal) {
+        preOpenDirty = false;
+        return;
+      }
+      const t = dbTouchedAt();
+      preOpenDirty = !!t && t > newestAutoBackupAt();
+    } catch (e) {
+      console.error('Състоянието на базата преди отварянето не се прочете — при затваряне ще се направи копие:', e.message);
+      preOpenDirty = true; // в посоката „по-добре едно копие повече“
+    }
+  }
+  function dbChangedSinceBackup() {
+    const touched = dbTouchedAt();
+    if (!touched) return false;
+    const db = getDb();
+    if (!db || sessionMark.db !== db) return touched > newestAutoBackupAt();
+    if (preOpenDirty) return true;
+    const n = totalChanges(db);
+    if (n === null) return touched > newestAutoBackupAt();
+    if (n > sessionMark.changes) return true;
+    return touched > sessionMark.touched && touched > newestAutoBackupAt();
+  }
   /* Име на МЕЖДИННО копие: auto-ГГГГ-ММ-ДД-ЧЧММ. Нарочно се различава от
      дневното (auto-ГГГГ-ММ-ДД), за да не се блъскат: дневното е онова, което
      autoBackupIfNeeded() търси при стартиране, и ако междинните носеха същото
@@ -718,12 +942,15 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       // Смяна на деня по време на работа — тогава дневното копие е по-важно.
       const { plainDest, encDest } = todayPaths();
       if (!fs.existsSync(plainDest) && !fs.existsSync(encDest)) { autoBackupIfNeeded(); return true; }
-      const touched = dbTouchedAt();
-      if (!touched) return false;
-      if (touched <= newestAutoBackupAt()) return false; // нищо ново не е записвано
+      // Нищо ново не е записвано (С17/С9 — виж dbChangedSinceBackup).
+      if (!dbChangedSinceBackup()) return false;
       const password = autoBackupPassword();
       const dest = intradayPath(password);
-      if (fs.existsSync(dest)) return false; // същата минута — няма смисъл от второ копие
+      /* СЪЩАТА МИНУТА (С5). Дотук: „копие с това име вече има — излизам“. При две
+         работни места в обща папка, затворени в една минута, второто излизаше и
+         работата му от последните минути не влизаше в никое копие. Сега копието
+         се ПРЕЗАПИСВА с по-новата снимка: базата е обща, тоест по-късната снимка
+         съдържа всичко от по-ранната плюс новото; броят файлове не расте. */
       doBackupTo(dest, password);
       pruneOldAutoBackups();
       recordAutoBackupSuccess(dest, !!password, today);
@@ -731,6 +958,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       logAudit('Резервно копие', 'автоматично междинно копие (' + reason + '): ' + dest
         + (password ? ' (криптирано)' : ' (НЕкриптирано — защитата на личните данни не е отключена)'));
       console.log('Автоматично междинно резервно копие:', dest, '(' + reason + ')');
+      markBackedUp();
       return true;
     } catch (err) {
       recordAutoBackupFailure(today, err.message,
@@ -746,6 +974,9 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      задържа тестовата поредица), но работи, докато програмата работи. */
   let autoBackupTimer = null;
   function startAutoBackupTimer() {
+    /* main.js вика това веднага след initDb() и проверката на целостта — тоест
+       след сервизните записи на стартирането. Оттук броим „работа в сесията“ (С17). */
+    markSessionStart();
     if (autoBackupTimer) return;
     autoBackupTimer = setInterval(() => {
       try { autoBackupTick('на всеки 3 часа'); }
@@ -763,8 +994,14 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      тоест ако компютърът се повреди през нощта, изгубена е цялата днешна работа.
      Вика се, докато базата още е отворена (виж реда в main.js). */
   function backupBeforeQuit() {
-    try { return autoBackupTick('при затваряне на програмата'); }
-    catch (err) { console.error('Резервно копие при затваряне — грешка:', err.message); return false; }
+    closeClean = false;
+    try {
+      const made = autoBackupTick('при затваряне на програмата');
+      /* С17: всичко от сесията е в копие (току-що направено или отпреди) —
+         noteCleanClose() го записва за следващото пускане. */
+      closeClean = !dbChangedSinceBackup();
+      return made;
+    } catch (err) { console.error('Резервно копие при затваряне — грешка:', err.message); return false; }
   }
 
   /* Авто-копието се прави при СТАРТИРАНЕ на програмата (main.js), а защитата на
@@ -805,12 +1042,21 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         try { fs.unlinkSync(full); done++; } catch (e) { failed.push(f); }
         continue;
       }
-      const staged = encDest + '.tmp';
+      const staged = stagingPath(encDest);
       try {
+        /* ЧАСЪТ НА СНИМКАТА, НЕ НА ФАЙЛА (v2.4.71, кръг 45, С9). Прекриптирането
+           не прави нова снимка — съдържанието е от часа на стария файл. Дотук
+           новият файл получаваше СЕГАШНИЯ час, минаваше за „най-новото копие“ и
+           работата отпреди отключването оставаше извън всяко копие (при
+           затваряне: „няма промени“). Часът на оригинала се пренася върху
+           криптирания близнак. */
+        const snapTime = fs.statSync(full);
         encryptBackupFile(full, staged, password);
         const problem = verifyFreshBackup(staged, password);
         if (problem) throw new Error('новото копие не мина проверката — ' + problem);
         fs.renameSync(staged, encDest);
+        try { fs.utimesSync(encDest, snapTime.atime, snapTime.mtime); }
+        catch (e) { console.error('Часът на прекриптираното копие не можа да бъде пренесен:', encDest, e.message); }
         fs.unlinkSync(full); // чак сега: дотук криптираното още не беше на мястото си
         done++;
       } catch (err) {
@@ -897,6 +1143,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     // с криптираното, иначе точно там (често USB, който се разнася) остава
     // единственият пълен регистър с лични данни в чист текст.
     mirrorToSecondFolder(encDest);
+    markBackedUp(); // С17 — снимката е от живата база, след реда в следата
     /* Съобщението назовава и междинните (А10): дотук зеленото „Днешното резервно
        копие беше прекриптирано“ се четеше като „всичко за днес е наред“, докато
        най-прясното копие — това от последното затваряне — стоеше със старата
@@ -962,9 +1209,10 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
           || /^Inventar-backup-.+\.invbak$/.test(f)
           || /^before-restore-.+\.invbak$/.test(f)
           || /^before-reset-.+\.invbak$/.test(f));
-    } catch (e) { return { done: 0, failed: [] }; }
+    } catch (e) { return { done: 0, failed: [], ownPassword: [] }; }
     let done = 0;
     const failed = [];
+    const ownPassword = []; // С14 — ръчни копия със собствена парола (виж по-долу)
     for (const f of files) {
       if (f === `auto-${today}.invbak`) continue; // за днешния се грижи upgradeTodayAutoBackup
       const full = path.join(dir, f);
@@ -978,7 +1226,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          Затова тук: разкриптирай със старата парола в паметта → запиши
          криптирано настрани с новата → провери, че се отваря → чак тогава
          преименувай върху оригинала. Съдържанието на файла остава своето. */
-      const staged = full + '.tmp';
+      const staged = stagingPath(full); // уникално (С5) — две места могат да сменят паролата едновременно
       /* Разшифрованото копие отива в ЛОКАЛНАТА временна папка, не до самото копие:
          папката с резервните копия обикновено е споделена в мрежата, а този файл
          съдържа ЕГН и № на лична карта на всички читатели. Същият избор като при
@@ -986,8 +1234,28 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          остане до целта — той не е четим без паролата. */
       const plainTmp = path.join(app.getPath('temp'), 'inventar-reenc-' + Date.now() + '-' + f + '.db');
       try {
-        const buf = prevPassword ? decryptBackupBuffer(full, prevPassword) : null;
+        /* РЪЧНО КОПИЕ СЪС СОБСТВЕНА ПАРОЛА (v2.4.71, кръг 45, С14).
+           (а) „Направи резервно копие“ позволява СВОЯ парола, различна от
+           паролата на защитата (копие за USB или за изпращане). Такъв файл не
+           се отваря нито с новата, нито със старата парола на защитата — и дотук
+           се броеше като провал: следата и тостът казваха „остана със СТАРАТА
+           парола — пазете старата парола“, което е невярно.
+           (б) Библиотекарката пази изоставената парола напразно, а истинското —
+           „това копие се отваря със своята парола“ — не се казва никъде.
+           (в) Ръчно копие, което не се отваря и със старата парола на защитата,
+           се води отделно (ownPassword): не е провал и не се пипа. За
+           автоматичните и предпазните копия правилото остава — те винаги се
+           пишат с паролата на защитата, тоест неотваряне със старата е провал. */
+        let buf = null;
+        if (prevPassword) {
+          try { buf = decryptBackupBuffer(full, prevPassword); }
+          catch (e) {
+            if (/^Inventar-backup-/.test(f)) { ownPassword.push(f); continue; }
+            throw e;
+          }
+        }
         if (!buf || buf.subarray(0, 15).toString('utf8') !== 'SQLite format 3') { failed.push(f); continue; }
+        const snapTime = fs.statSync(full); // С9: съдържанието е от часа на оригинала — и часът остава неговият
         fs.writeFileSync(plainTmp, buf);
         encryptBackupFile(plainTmp, staged, password);
         /* Прясно записан файл — значи и тук проверка, не само „отваря ли се“:
@@ -1000,6 +1268,8 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         const problem = verifyFreshBackup(staged, password);
         if (problem) throw new Error('новото копие не мина проверката — ' + problem);
         fs.renameSync(staged, full);
+        try { fs.utimesSync(full, snapTime.atime, snapTime.mtime); }
+        catch (e) { console.error('Часът на прекриптираното копие не можа да бъде пренесен:', full, e.message); }
         done++;
       } catch (err) {
         failed.push(f);
@@ -1007,11 +1277,11 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         /* Разшифрованият близнак съдържа личните данни на всички читатели, а
            папката с копията обикновено е споделена в мрежата — не бива да остава
            на диска по НИКОЙ път, включително при провал. */
-        try { if (fs.existsSync(plainTmp)) fs.unlinkSync(plainTmp); } catch (e2) { /* нищо не зависи от това */ }
-        try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e2) { /* нищо не зависи от това */ }
+        try { if (fs.existsSync(plainTmp)) fs.unlinkSync(plainTmp); } catch (e2) { console.error('Разшифрован временен файл остана:', plainTmp, e2.message); }
+        try { if (fs.existsSync(staged)) fs.unlinkSync(staged); } catch (e2) { console.error('Временен файл остана:', staged, e2.message); }
       }
     }
-    return { done, failed };
+    return { done, failed, ownPassword };
   }
 
   pii.onSession((meta) => {
@@ -1021,8 +1291,16 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       try {
         const password = autoBackupPassword();
         if (!password) return;
-        const { done, failed } = reencryptOldBackups(password, meta.prevPassword);
+        const { done, failed, ownPassword } = reencryptOldBackups(password, meta.prevPassword);
         if (done) logAudit('Резервно копие', done + ' по-стари автоматични копия бяха прекриптирани с новата парола');
+        /* С14: ръчните копия със своя парола се казват отделно и НЕ като провал. */
+        if (ownPassword && ownPassword.length) {
+          logAudit('Резервно копие', ownPassword.length + (ownPassword.length === 1
+            ? ' ръчно копие е направено със СОБСТВЕНА парола (не с паролата на защитата) и не е прекриптирано — '
+              + 'отваря се със своята парола, зададена при направата му: '
+            : ' ръчни копия са направени със СОБСТВЕНА парола (не с паролата на защитата) и не са прекриптирани — '
+              + 'отварят се със своята парола, зададена при направата им: ') + ownPassword.join(', '));
+        }
         if (failed.length) {
           logAudit('Резервно копие', 'ВНИМАНИЕ: ' + failed.length + ' по-стари копия НЕ можаха да бъдат '
             + 'прекриптирани и остават със старата парола: ' + failed.join(', '));
@@ -1078,7 +1356,19 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         && lastAutoBackupError.kind !== 'write' ? lastAutoBackupError : null;
       // Ако за днес още няма файл (копието се прави при стартиране), се пада към
       // намерението — какво ЩЕ стане при следващото копие.
-      const encrypted = today ? today.encrypted : (configured && unlocked);
+      /* СЛЕДВАЩОТО КОПИЕ, НЕ САМО ДНЕШНОТО (v2.4.71, кръг 45, С11).
+         (а) Дотук състоянието следваше САМО днешния файл: щом той е криптиран,
+         картата пишеше „🔒 копията се криптират“ — и след „Заключи“. А при
+         заключена защита следващото копие (таймерът на 3 часа, затварянето на
+         програмата) излиза в ЧИСТ ТЕКСТ.
+         (б) Библиотекарката заключва защитата, преди да стане от компютъра, и
+         чете, че копията са защитени; вечерното копие при затваряне е пълен
+         регистър с ЕГН на споделения дял.
+         (в) Днешният файл е криптиран И следващото копие ще бъде криптирано —
+         чак тогава „encrypted“. Заключена защита дава „locked“ дори при
+         криптиран днешен файл, а надписът казва и двете неща. */
+      const nextEncrypted = configured && unlocked;
+      const encrypted = today ? (today.encrypted && nextEncrypted) : nextEncrypted;
 
       /* Броят НЕкриптирани дневни копия се смята ПРЕДИ решението за състоянието
          (одит v2.4.24): включването на защитата криптира само ДНЕШНОТО копие
@@ -1100,7 +1390,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          бърка. Затова двете числа се броят отделно и надписът ги назовава
          поотделно; общият брой остава непроменен, защото по него се съди за
          експозицията. */
-      let plainDailyCount = 0, plainIntradayCount = 0, plainRestoreCount = 0;
+      let plainDailyCount = 0, plainIntradayCount = 0, plainRestoreCount = 0, plainManualCount = 0;
       try {
         const names = fs.readdirSync(backupsDir()).filter(f => f.endsWith('.db'));
         plainDailyCount = names.filter(f => f.startsWith('auto-')).length;
@@ -1117,7 +1407,19 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
            `before-restore-` и точно това копие — най-пълното и най-прясното —
            оставаше извън предупреждението на екрана. */
         plainRestoreCount = names.filter(f => f.startsWith('before-restore-') || f.startsWith('before-reset-')).length;
-      } catch (e) { plainDailyCount = 0; plainIntradayCount = 0; plainRestoreCount = 0; }
+        /* РЪЧНИТЕ НЕКРИПТИРАНИ КОПИЯ (v2.4.71, кръг 45, С11). „Направи резервно
+           копие“ без парола пише `Inventar-backup-….db` в същата папка — пълен
+           регистър в чист текст, както всяко друго. Дотук той не влизаше в нито
+           едно от числата и картата пишеше „🔒“, докато до автоматичните стоят
+           ръчни копия с ЕГН. Броят се отделно, защото съветът е различен: тях
+           библиотекарката ги е направила сама и решава сама. */
+        plainManualCount = names.filter(f => f.startsWith('Inventar-backup-')).length;
+      } catch (e) { plainDailyCount = 0; plainIntradayCount = 0; plainRestoreCount = 0; plainManualCount = 0; }
+      const manualNote = plainManualCount
+        ? ' В папката има и ' + plainManualCount + (plainManualCount === 1 ? ' ръчно копие' : ' ръчни копия')
+          + ' БЕЗ парола („Inventar-backup-….db“) — ' + (plainManualCount === 1 ? 'то съдържа' : 'те съдържат')
+          + ' личните данни на читателите в чист текст.'
+        : '';
 
       let state, warning;
       if (encrypted) {
@@ -1136,8 +1438,8 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
             + (plainIntradayCount ? plainIntradayCount + (plainIntradayCount === 1 ? ' междинно' : ' междинни')
               + ' (от таймера на всеки 3 часа и при затваряне на програмата)' : '')
             + '. Направени са, докато защитата на личните данни още не е била включена или отключена, '
-            + 'и всяко от тях е пълен списък с имената, адресите, телефоните и ЕГН на читателите.'
-          : null;
+            + 'и всяко от тях е пълен списък с имената, адресите, телефоните и ЕГН на читателите.' + manualNote
+          : (manualNote ? manualNote.trim() : null);
       } else if (failure) {
         state = 'failed';
         warning = 'Опитът днешното копие да се криптира не се получи: ' + failure.message + '. '
@@ -1153,8 +1455,12 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
           + 'за да се криптират и те, особено ако папката с базата е в мрежа.';
       } else if (!unlocked) {
         state = 'locked';
-        warning = 'Автоматичните дневни копия не се криптират, докато защитата на личните данни е заключена. '
-          + 'Отключете я от „Настройки“, за да се криптират с нейната парола.';
+        /* С11: криптиран днешен файл не значи криптирано СЛЕДВАЩО копие. */
+        warning = (today && today.encrypted
+          ? 'Днешното копие е криптирано, но защитата на личните данни в момента е ЗАКЛЮЧЕНА — следващото '
+            + 'копие (на всеки 3 часа и при затваряне на програмата) ще бъде в ЧИСТ ТЕКСТ. '
+          : 'Автоматичните дневни копия не се криптират, докато защитата на личните данни е заключена. ')
+          + 'Отключете я от „Настройки“, за да се криптират с нейната парола.' + manualNote;
       } else {
         // Защитата е отключена, но днешният файл е в чист текст и няма записан
         // провал — например копие, направено от друга програма/сесия.
@@ -1217,6 +1523,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         plainDailyCount,
         plainIntradayCount,
         plainRestoreCount,
+        plainManualCount,
         last: lastAutoBackup,
         failure,
         warning,
@@ -1256,6 +1563,20 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   ipcMain.handle('backup:now', async (e, opts) => {
     try {
       const password = opts && opts.password ? String(opts.password) : '';
+      /* ПАРОЛАТА НА РЪЧНОТО КОПИЕ — ПОНЕ 10 ЗНАКА (v2.4.71, кръг 45, С18).
+         (а) Дотук ръчното криптирано копие приемаше каквато и да е парола —
+         тестерът записа копие с парола от 6 знака, — докато защитата на личните
+         данни (handlers/pdp.js, PDP_MIN_PASSWORD) иска поне 10.
+         (б) Ръчното копие е точно файлът, който пътува на USB или по имейл, тоест
+         най-изложеното копие на целия регистър с ЕГН; кратка парола там
+         обезсмисля правилото за 10 знака другаде.
+         (в) Същото число като при защитата и отказ ПРЕДИ диалога за запис — нищо
+         не се записва и изречението казва какво да се направи. */
+      if (password && password.length < MANUAL_BACKUP_MIN_PASSWORD) {
+        return { ok: false, error: 'Паролата на копието трябва да е поне ' + MANUAL_BACKUP_MIN_PASSWORD
+          + ' знака (както паролата за защита на личните данни) — въведената е ' + password.length
+          + '. Копие НЕ е записано. Въведете по-дълга парола или махнете отметката за криптиране.' };
+      }
       const ext = password ? 'invbak' : 'db';
       const defaultPath = path.join(backupsDir(), `Inventar-backup-${backupTimestamp()}.${ext}`);
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
@@ -1315,7 +1636,42 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     }
   }
 
-  function performRestore(sourcePath, password) {
+  /* ОТВАРЯНЕ НАНОВО СЛЕД НЕУСПЕШНА ПОДМЯНА (С6). Ако main.js някой ден подаде
+     собствена функция (deps.reopenDb — с всички настройки на връзката от
+     initDb), се ползва тя. Дотогава — същите три настройки на връзката, от които
+     зависи работата: busy_timeout (20 s — горната граница на initDb, безопасна и
+     за локална база), foreign_keys (каскадите) и пробно четене, за да не се
+     обяви успех на връзка, която гърми при първото докосване. journal_mode се
+     пази във файла и не се пипа. */
+  function reopenLiveDb(activePath) {
+    try {
+      if (typeof deps.reopenDb === 'function') {
+        const d = deps.reopenDb();
+        if (d) setDb(d);
+        return { ok: !!getDb(), error: getDb() ? null : 'няма връзка' };
+      }
+      const d = new Database(activePath, { fileMustExist: true });
+      try {
+        d.pragma('busy_timeout = 20000');
+        d.pragma('foreign_keys = ON');
+        d.prepare('SELECT COUNT(*) AS n FROM sqlite_master').get();
+      } catch (err) {
+        try { d.close(); } catch (e) { console.error('Неуспешната връзка не се затвори:', e.message); }
+        throw err;
+      }
+      setDb(d);
+      return { ok: true, error: null };
+    } catch (err) {
+      console.error('Базата не можа да бъде отворена наново след неуспешното възстановяване:', err.message);
+      return { ok: false, error: err.message };
+    }
+  }
+
+  function performRestore(sourcePath, password, opts) {
+    /* opts.liveIsEmpty (С2): живата база е създадена ПРАЗНА при този старт
+       (файлът липсваше) — предпазно копие на празна база няма какво да пази, а
+       щеше да стане НАЙ-НОВИЯТ файл в папката с копията. */
+    const liveIsEmpty = !!(opts && opts.liveIsEmpty);
     let realSource = sourcePath;
     let tmpToClean = null;
     if (isEncryptedBackup(sourcePath)) {
@@ -1345,10 +1701,38 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     let safetyEncrypted = !!safetyPw;
     let safetyPath = path.join(backupsDir(),
       `before-restore-${backupTimestamp()}.` + (safetyPw ? 'invbak' : 'db'));
+    /* ВЪЗСТАНОВЯВАНЕ ТОЧНО КОГАТО БАЗАТА НЕ СЕ ОТВАРЯ (v2.4.71, кръг 45, С1).
+       (а) КАКВО СТАВАШЕ ДОТУК. Първият ред тук беше
+       `db.pragma('wal_checkpoint(TRUNCATE)')` върху ЖИВАТА връзка. Когато
+       програмата е стигнала до аварийния екран, защото базата е повредена,
+       връзката съществува (main.js е направил `new Database(...)`), но всяко
+       обръщение към файла гърми. Измерено (/tmp/r45/sistema/r1-avariyno.js):
+       повредено заглавие → „file is not a database“, повредени страници →
+       „database disk image is malformed“ — отговорът на „Възстанови това“, и
+       нищо не е възстановено. При всяко следващо пускане — същият екран и същата
+       грешка.
+       (б) ЗАЩО Е ГРЕШНО. Аварийният екран съществува ЕДИНСТВЕНО за повредена
+       база. Тоест точно единственият му случай беше единственият, в който не
+       работеше: библиотеката остава без програма, а копията — недостижими.
+       (в) ЗАЩО ТОЧНО ТАКА. checkpoint-ът е полезен за здрава база (записите от
+       -wal влизат в предпазното копие), затова остава — но в try. Ако гърми,
+       връзката се затваря и се забравя (setDb(null)): от този миг нататък всичко
+       по-долу работи с ФАЙЛА — предпазното копие минава по суровата пътека
+       („…-povredena.db“, байт по байт), а подмяната е същото атомарно
+       преименуване. Причината остава в следата и в съобщението. */
+    let liveBroken = null;
     const db = getDb();
-    if (db) { db.pragma('wal_checkpoint(TRUNCATE)'); }
+    if (db) {
+      try { db.pragma('wal_checkpoint(TRUNCATE)'); }
+      catch (err) {
+        liveBroken = err.message;
+        try { db.close(); } catch (e) { console.error('Повредената връзка не се затвори чисто:', e.message); }
+        setDb(null);
+      }
+    }
     const activePath = resolveDbPath();
-    if (fs.existsSync(activePath)) {
+    if (liveIsEmpty) safetyPath = null;
+    if (!liveIsEmpty && fs.existsSync(activePath)) {
       try {
         if (safetyPw) doBackupTo(safetyPath, safetyPw);
         else fs.copyFileSync(activePath, safetyPath);
@@ -1389,29 +1773,79 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     /* Редът за самото възстановяване влиза ТУК — в копието, докато е още
        настрани. Виж дългата бележка при noteRestoreInRestoredDb() (Б21). */
     noteRestoreInRestoredDb(stagedPath, sourcePath, safetyPath, safetyEncrypted);
-    if (db) { db.close(); setDb(null); }
+    const liveNow = getDb();
+    if (liveNow) { liveNow.close(); setDb(null); }
     try {
       fs.renameSync(stagedPath, activePath);
     } catch (err) {
-      /* Връщането минава през разшифроване, ако предпазното копие е криптирано —
-         иначе на мястото на базата би легнал криптиран блок и програмата не би
-         тръгнала изобщо. */
+      /* НЕУСПЕШНО ВЪЗСТАНОВЯВАНЕ НЕ ОСТАВЯ ПРОГРАМАТА БЕЗ БАЗА (v2.4.71, кръг 45, С6).
+         (а) КАКВО СТАВАШЕ ДОТУК. Връзката към базата вече е затворена (редът
+         отгоре), преименуването гърми — под Windows това е EBUSY/EPERM, когато
+         library.db е отворен от друго работно място или от антивирусна. Кодът
+         копираше предпазното копие „обратно“ и хвърляше „предишната база беше
+         върната на място“ — а програмата оставаше с db === null. Измерено
+         (/tmp/r45/sistema/s12-zaet-fail.js): след съобщението ВСЕКИ екран дава
+         „Cannot read properties of null (reading 'prepare')“, включително
+         „Направи резервно копие“.
+         (б) ЗАЩО Е ГРЕШНО. Съобщението обещава работеща база, а библиотекарката
+         остава с програма, която не може нито да заеме книга, нито да направи
+         копие, докато не я затвори — и не знае, че трябва.
+         (в) ЗАЩО ТОЧНО ТАКА. Неуспешното преименуване е атомарно: library.db
+         е НЕПОКЪТНАТ. Затова предпазното копие се връща САМО ако файла го няма
+         или не е база (иначе копирането върху зает файл само би гръмнало
+         второ); след това базата се ОТВАРЯ НАНОВО (reopenLiveDb) и съобщението
+         казва точно какво е станало — включително ако повторното отваряне не
+         успее и програмата трябва да се рестартира. */
+      let putBack = '';
       try {
-        if (fs.existsSync(safetyPath)) {
-          if (safetyEncrypted) {
-            const back = decryptBackupToTemp(safetyPath, safetyPw);
-            fs.copyFileSync(back, activePath);
-            try { fs.unlinkSync(back); } catch (e2) { /* временният файл ще се изчисти от системата */ }
-          } else {
-            fs.copyFileSync(safetyPath, activePath);
+        if (!fs.existsSync(activePath) || !sqliteHeaderOk(activePath)) {
+          if (fs.existsSync(safetyPath)) {
+            if (safetyEncrypted) {
+              const back = decryptBackupToTemp(safetyPath, safetyPw);
+              fs.copyFileSync(back, activePath);
+              try { fs.unlinkSync(back); } catch (e2) { console.error('Разшифрован временен файл остана:', back, e2.message); }
+            } else {
+              fs.copyFileSync(safetyPath, activePath);
+            }
+            putBack = ' Файлът на базата липсваше след опита и е върнат от предпазното копие.';
           }
         }
-      } catch (e) { /* виж съобщението долу */ }
-      try { fs.unlinkSync(stagedPath); } catch (e) { /* нищо за чистене */ }
-      throw new Error('Възстановяването се провали и предишната база беше върната на място. '
-        + 'Предпазното копие е запазено в „' + safetyPath + '“'
-        + (safetyEncrypted ? ' и е КРИПТИРАНО с паролата за защита на личните данни' : '')
-        + '. Грешка: ' + err.message);
+      } catch (e) {
+        putBack = ' ВНИМАНИЕ: файлът на базата липсваше и предпазното копие НЕ можа да бъде върнато ('
+          + e.message + ') — затворете програмата и я пуснете пак: при старта ще бъдат предложени копията.';
+      }
+      try { fs.unlinkSync(stagedPath); } catch (e) { console.error('Подготвеното копие остана:', stagedPath, e.message); }
+      if (tmpToClean) { try { fs.unlinkSync(tmpToClean); } catch (e) { console.error('Разшифрован временен файл остана:', tmpToClean, e.message); } }
+      const reopened = reopenLiveDb(activePath);
+      throw new Error('Възстановяването НЕ беше извършено: файлът на базата не можа да бъде заменен ('
+        + err.message + '). Най-честата причина е, че базата е отворена на друго работно място или е '
+        + 'заключена от антивирусна програма.' + putBack + ' '
+        + (reopened.ok
+          ? 'Програмата продължава да работи със СЪЩАТА база като преди опита — нищо не е изгубено. '
+            + 'Затворете програмата на другите компютри и опитайте пак.'
+          : 'Базата НЕ можа да бъде отворена наново (' + reopened.error + ') — затворете програмата и я пуснете пак.')
+        + (safetyPath
+          ? ' Предпазното копие е запазено в „' + safetyPath + '“'
+            + (safetyEncrypted ? ' и е КРИПТИРАНО с паролата за защита на личните данни.' : '.')
+          : ''));
+    }
+    /* С1: остатъците -wal/-shm на ПОВРЕДЕНАТА база не бива да останат до новия
+       файл — при следващото отваряне SQLite би „довършил“ възстановеното копие
+       със страници от стария журнал. -wal се пази до предпазното копие (от него
+       понякога се вадят данни), -shm е само индекс и се трие. При здрава база
+       чистото затваряне отгоре вече ги е махнало. Прави се СЛЕД успешната
+       подмяна: при провал старата база остава заедно със своя журнал. */
+    if (liveBroken) {
+      for (const s of ['-wal', '-shm']) {
+        const f = activePath + s;
+        try {
+          if (!fs.existsSync(f)) continue;
+          if (s === '-wal' && safetyPath) fs.copyFileSync(f, safetyPath + '-wal');
+          fs.unlinkSync(f);
+        } catch (e) {
+          console.error('Остатък от повредената база не можа да бъде преместен:', f, e.message);
+        }
+      }
     }
     if (tmpToClean) { try { fs.unlinkSync(tmpToClean); } catch (e) { /* временният файл ще се изчисти от системата */ } }
     app.relaunch();
@@ -1474,9 +1908,12 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
         'Възстановяване от резервно копие',
         'ЦЯЛАТА база данни на библиотеката беше заменена с резервното копие „' + sourcePath + '“. '
         + 'Всичко, вписано след датата на това копие, вече не е в базата. '
-        + 'Базата отпреди възстановяването е запазена в „' + safetyPath + '“'
-        + (safetyEncrypted ? ' и е КРИПТИРАНА с паролата за защита на личните данни' : '')
-        + ' — ако възстановяването е било по грешка, върнете се от него. '
+        + (safetyPath
+          ? 'Базата отпреди възстановяването е запазена в „' + safetyPath + '“'
+            + (safetyEncrypted ? ' и е КРИПТИРАНА с паролата за защита на личните данни' : '')
+            + ' — ако възстановяването е било по грешка, върнете се от него. '
+          : 'При старта на програмата файлът на базата липсваше (или беше празен) и беше създадена нова, '
+            + 'празна база — предпазно копие от нея не е правено, защото в нея нямаше нищо. ')
         + 'Този ред е вписан в САМОТО копие, за да оцелее след подмяната: редовете над него са от '
         + 'деня, в който копието е направено.'
       );
@@ -1617,6 +2054,57 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
      преди да изпразни базата, и дотук трябваше да преписва тази
      последователност у себе си. Оттук нататък я ВИКА — същата функция, същата
      проверка, същото атомарно преименуване. */
+  /* ИЗЧЕЗНАЛА ИЛИ ПРАЗНА БАЗА ПРИ НАЛИЧНИ КОПИЯ (v2.4.71, кръг 45, С2) — двете
+     функции, с които main.js пита при старта. Правилото „кое копие е здраво“
+     остава тук (sqliteProblem), а main.js само показва въпроса.
+     findStartupBackups() — колко копия има и кое е НАЙ-НОВОТО ЗДРАВО. Проверяват
+     се отгоре надолу само докато се намери здраво (дълбоката проверка е ~0,1 s
+     на файл — не си струва да се пуска на всичките 60). Криптираното не може да
+     се провери без парола: ако то е най-новото, се казва, и възстановяването
+     минава през аварийния екран, където има поле за паролата. */
+  function findStartupBackups() {
+    let dir;
+    try { dir = backupsDir(); } catch (e) { return { count: 0, newest: null, newestHealthy: null, dir: null }; }
+    let files = [];
+    try {
+      files = fs.readdirSync(dir).filter(f => /\.(db|invbak)$/.test(f)).map(f => {
+        const full = path.join(dir, f);
+        let st = null;
+        try { st = fs.statSync(full); } catch (e) { st = null; }
+        return st ? { name: f, path: full, mtime: st.mtimeMs, size: st.size, encrypted: isEncryptedBackup(full) } : null;
+      }).filter(Boolean).sort((a, b) => b.mtime - a.mtime);
+    } catch (e) {
+      console.error('Папката с копията не се прочете при старта:', e.message);
+      files = [];
+    }
+    let newestHealthy = null;
+    const skipped = [];
+    for (const b of files) {
+      if (b.size === 0) { skipped.push(b.name + ' (празен файл)'); continue; }
+      if (b.encrypted) { newestHealthy = b; break; } // проверява се при възстановяването, с паролата
+      const problem = sqliteProblem(b.path, { quick: true });
+      if (!problem) { newestHealthy = b; break; }
+      skipped.push(b.name + ' (' + problem + ')');
+    }
+    return { count: files.length, newest: files[0] || null, newestHealthy, skipped, dir };
+  }
+  /* „Започни с празна база“ е казано изрично — копията, които са в папката в
+     този миг, се пазят от изчистването до края на сесията (виж protectedFromPrune). */
+  function confirmEmptyStart() {
+    try {
+      for (const f of fs.readdirSync(backupsDir())) if (f.startsWith('auto-')) protectedFromPrune.add(f);
+    } catch (e) { console.error('Списъкът с копията за пазене не се прочете:', e.message); }
+    return protectedFromPrune.size;
+  }
+  /* Възстановяване на избрано копие от папката — същият път като
+     backup:restoreFromList (проверки, предпазно копие, подмяна, рестарт). */
+  function restoreFromBackupsDir(sourcePath, password, opts) {
+    if (!isInBackupsDir(sourcePath)) throw new Error('Копието трябва да е в папката с резервните копия.');
+    performRestore(sourcePath, password || '', opts);
+  }
+
   return { autoBackupIfNeeded, startAutoBackupTimer, stopAutoBackupTimer, backupBeforeQuit,
-    checkDbFile: sqliteProblem, doBackupTo };
+    checkDbFile: sqliteProblem, doBackupTo,
+    // v2.4.71 (кръг 45): С17 — състоянието отпреди отварянето; С2 — изчезнала база при налични копия.
+    noteDbStateBeforeOpen, noteCleanClose, findStartupBackups, confirmEmptyStart, restoreFromBackupsDir };
 };

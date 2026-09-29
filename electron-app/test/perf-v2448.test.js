@@ -153,7 +153,9 @@ test('акт за много документи се съставя и анул�
 
   const t0 = Date.now();
   const cr = await app.invoke('deaccessionActs:create', {
-    act: { date: dayOff(0), reason_code: 1, reason_text: 'морално остарели', no: 1, year: dayOff(0).slice(0, 4) },
+    act: { date: dayOff(0), reason_code: 1, reason_text: 'морално остарели', no: 1, year: dayOff(0).slice(0, 4),
+      /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+      committee1: 'А', committee3: 'В' },
     bookIds: ids
   });
   const msCreate = Date.now() - t0;

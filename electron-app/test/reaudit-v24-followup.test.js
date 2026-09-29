@@ -102,7 +102,9 @@ test('deaccessionActs:create отказва акт с невалидна/лип�
   assert.equal(book.status, 'наличен', 'книгата не биваше да е отчислена от нито един невалиден опит');
 
   const ok = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-08-21', reason_code: 1, reason_text: 'износени' },
+    act: { no: 1, date: '2026-08-21', reason_code: 1, reason_text: 'износени',
+      /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+      committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   });
   assert.equal(ok.ok, true, 'валидна дата трябва да работи както преди: ' + JSON.stringify(ok));

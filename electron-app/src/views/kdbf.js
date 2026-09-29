@@ -291,7 +291,7 @@ function printKdbfDoc() {
           отиват в счетоводството (отчисляването намалява отчетната стойност на
           актива), а листът, на който липсва редът за подпис на счетоводителя, се
           връща за преподписване. Затова блокът е един и същ навсякъде. */''}
-     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Ръководител', (SETTINGS_CACHE || {}).director, '')])}</div>
 
     <div class="pdoc">${shead()}<h2>КНИГА ЗА ДВИЖЕНИЕ НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 3. Регистриране на отчислените книги, периодични издания и други материали</b><br>
@@ -327,7 +327,7 @@ function printKdbfDoc() {
        Номерът им остава зает и актът остава в документацията по чл. 39, но документите по него са върнати
        във фонда и не участват в сборовете.</div>` : ''}
      ${/* Същият подписен блок като на Част № 1 и Част № 2 — виж бележката там. */''}
-     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Ръководител', (SETTINGS_CACHE || {}).director, '')])}</div>
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
      <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
@@ -354,6 +354,6 @@ function printKdbfDoc() {
      ${kdbfUndatedNote(r) ? `<div class="pmeta">${kdbfUndatedNote(r)}</div>` : ''}
      ${kdbfOutOfStockNote(r) ? `<div class="pmeta">${kdbfOutOfStockNote(r)}</div>` : ''}
      ${kdbfCrossNote(r, y) ? `<div class="pmeta">${kdbfCrossNote(r, y)}</div>` : ''}
-     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);
+     ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Ръководител', (SETTINGS_CACHE || {}).director, '')])}</div>`);
 }
 window.printKdbfDoc = printKdbfDoc;

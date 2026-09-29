@@ -335,7 +335,7 @@ async function openAcq(id) {
         : 'Документът не обявява стойност — разпечатките сумират оценките на инвентираните документи.'}
       · Комисия: ${[a.committee1, a.committee2, a.committee3].filter(Boolean).map(esc).join(' · ') || 'не е записана (стара партида) — актът се печата с празни редове за подпис'}</div>
     ${a.items.length ? `<div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
-      ${a.items.map(i => `<tr><td class="num">${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td>
+      ${a.items.map(i => `<tr><td class="num">${i.inv_number}</td><td>${esc(authorTitleText(i.author, i.title))}</td>
       <td class="num">${esc(i.year || '')}</td><td class="num">${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="hint">Все още няма инвентирани документи по тази партида.</div>'}`,
     `<button class="btn l dgr" onclick="delAcq(${id})">Изтрий</button>
@@ -391,7 +391,7 @@ async function printDonationDoc(id) {
         клетка се чете като грешка. Протоколът от инвентаризация вече е озаглавен
         „Стойност, € / лв.“ — тук се пише същото, за да се четат двата документа
         еднакво. */''}<th>Стойност, € / лв.</th></tr></thead><tbody>
-    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc(authorTitleText(i.author, i.title))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${
       acqHasMultiples(a.items) ? '<td></td>' : ''}<td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>` : ''}
@@ -406,7 +406,7 @@ async function printDonationDoc(id) {
           читалищата и общинските библиотеки я пишат различно). */''}
     ${/* Комисията — всеки член на своя линия (v2.4.69, Е5; виж commissionSig в core.js). */''}
     ${commissionSig([a.committee1, a.committee2, a.committee3])}
-    ${ssig(['Дарител: …………………', 'УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${ssig(['Дарител: …………………', approverLine(s.director_role || 'Ръководител', a.director)])}</div>`);
 }
 window.printDonationDoc = printDonationDoc;
 async function printAcqNoDocDoc(id) {
@@ -439,7 +439,7 @@ async function printAcqNoDocDoc(id) {
     ${a.note ? '<b>Забележка по партидата:</b> ' + esc(a.note) : ''}</div>
     ${a.items.length ? `<table><thead><tr><th>№</th><th>Инв. №</th><th>Автор и заглавие</th><th>Година</th>${
       acqHasMultiples(a.items) ? '<th>Бр.</th>' : ''}<th>Оценена стойност, € / лв.</th></tr></thead><tbody>
-    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc([i.author, i.title].filter(Boolean).join('. '))}</td><td>${esc(i.year || '')}</td>${
+    ${a.items.map((i, n) => `<tr><td>${n + 1}</td><td>${i.inv_number}</td><td>${esc(authorTitleText(i.author, i.title))}</td><td>${esc(i.year || '')}</td>${
       acqHasMultiples(a.items) ? `<td>${acqQty(i)}</td>` : ''}<td>${acqMark(i)}${mny(i.price)}</td></tr>`).join('')}
     <tr><td colspan="4"><b>ОБЩО ${pl(acqCount(a.items), 'документ', 'документа')}</b></td>${
       acqHasMultiples(a.items) ? '<td></td>' : ''}<td><b>${mny(acqValue(a.items))}</b></td></tr></tbody></table>`
@@ -447,7 +447,7 @@ async function printAcqNoDocDoc(id) {
     <div class="pmeta">Протоколът се съставя в два екземпляра и се прилага към Книгата за движение на библиотечния фонд,
     част № 1, като заместващ първичен документ.</div>
     ${commissionSig([a.committee1, a.committee2, a.committee3])}
-    ${ssig(['УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${ssig([approverLine(s.director_role || 'Ръководител', a.director)])}</div>`);
 }
 window.printAcqNoDocDoc = printAcqNoDocDoc;
 async function delAcq(id) {

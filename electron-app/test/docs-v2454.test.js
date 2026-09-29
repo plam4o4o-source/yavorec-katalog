@@ -214,7 +214,9 @@ test('анулираният акт КАЗВА колко резервации �
     const { bid } = seedBookWithHold(db, status);
 
     const created = ipc.invoke('deaccessionActs:create', {
-      act: { no: 9, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели' },
+      /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+         отказва по чл. 35 — затова актовете в този файл носят комисия. */
+      act: { no: 9, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
       bookIds: [bid]
     });
     assert.ok(created.ok, created.error);
@@ -243,7 +245,7 @@ test('без отказани резервации следата не плаш�
     VALUES (4200, 'Без резервации', 3, '2026-01-01', 'наличен', 'български')`).run().lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
   const c = ipc.invoke('deaccessionActs:create', {
-    act: { no: 11, date: '2026-06-01', reason_code: 1, reason_text: 'амортизация' }, bookIds: [bid]
+    act: { no: 11, date: '2026-06-01', reason_code: 1, reason_text: 'амортизация', committee1: 'А', committee3: 'В' }, bookIds: [bid]
   });
   const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(r.data.droppedHolds, 0);
@@ -261,7 +263,7 @@ test('броят се само резервациите на ТОЗИ акт, н
     VALUES (?,?, 'отказана', datetime('now'), datetime('now'))`).run(bid, rid2);
 
   const c = ipc.invoke('deaccessionActs:create', {
-    act: { no: 10, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели' }, bookIds: [bid]
+    act: { no: 10, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' }, bookIds: [bid]
   });
   assert.ok(c.ok, c.error);
   const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });

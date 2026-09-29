@@ -76,6 +76,14 @@ async function renderSetup() {
       „Запиши настройките“. Те се използват автоматично навсякъде — в заглавията на актовете,
       протоколите и регистрите за печат, в баркод етикетите и читателските карти, и в лентата
       вляво. Променят се само тук и важат веднага за всички разпечатки.</div>` : ''}
+    ${/* С2 (v2.4.71): първоначалната настройка при НАЛИЧНИ копия — най-често не е
+          ново читалище, а изчезнала база (антивирусна, спрян ток). Дотук екранът
+          мълчеше за копията точно тогава, когато те са изходът. */''}
+    ${needsSetup(s) && backups && backups.length ? `<div class="note w" id="setupBackupsNote">
+      <b>В папката с резервните копия има ${esc(pl(backups.length, 'копие', 'копия'))}</b> (най-новото —
+      ${esc(fmtDateTime(backups[0].mtime))}). Ако това НЕ е ново читалище, а базата е изчезнала (антивирусна
+      програма, спрян ток), не попълвайте наново: възстановете най-новото копие от „Копия и мрежа“ →
+      „Резервно копие“ → „Възстанови“.</div>` : ''}
     <div class="setupWrap">
     <nav class="setupNav" aria-label="Раздели на настройките">
       <input id="setupSearch" type="search" placeholder="Търсене в настройките…" autocomplete="off"
@@ -229,8 +237,11 @@ async function renderSetup() {
         <div class="grid g2">
           ${fld('Следващ инвентарен номер', 'next_inv_number', { val: s.next_inv_number, type: 'number', min: 1,
             hint: 'предлага се при всеки нов документ и се увеличава сам' })}
-          ${fld('Фонд на свободен достъп (%)', 'free_access_pct', { val: s.free_access_pct, type: 'number', min: 0,
-            hint: 'определя допустимите естествени загуби при инвентаризация (чл. 41)' })}
+          ${/* С8 (v2.4.71): decField, не type="number" — „40,5“ се записваше като 405
+                (Chromium с bg-BG изпуска запетаята). Границата 0–100 е в
+                обработчика; тук и в saveSetup() само се предупреждава по-рано. */''}
+          ${decField('Фонд на свободен достъп (%)', 'free_access_pct', { val: s.free_access_pct, min: 0,
+            hint: 'определя допустимите естествени загуби при инвентаризация (чл. 41) · от 0 до 100, дробно със запетая, напр. 62,5' })}
         </div>
         ${setupSave()}
       </div>
@@ -368,7 +379,7 @@ async function renderSetup() {
     ${setupCard('Външен вид', `
       <div class="hint" style="margin-top:0;margin-bottom:10px">Избраната тема се прилага веднага на всички компютри, които ползват тази база данни.</div>
       <div class="themeRow">
-        ${THEMES.map(t => `<button type="button" class="themeSw${s.theme === t.id ? ' on' : ''}" onclick="setTheme('${t.id}')" title="${esc(t.name)}">
+        ${THEMES.map(t => `<button type="button" class="themeSw${s.theme === t.id ? ' on' : ''}" data-theme-id="${esc(t.id)}" onclick="setTheme('${t.id}')" title="${esc(t.name)}">
           <span class="themeSwSpine" style="background:${t.spine}"></span>
           <span class="themeSwBrass" style="background:${t.brass}"></span>
           <span class="themeSwName" style="background:${t.paper}">${esc(t.name)}${s.theme === t.id ? ' ✓' : ''}</span>
@@ -377,7 +388,9 @@ async function renderSetup() {
       <label class="chk" style="margin-top:12px"><input type="checkbox" ${s.scan_sound == null || +s.scan_sound ? 'checked' : ''}
         onchange="setScanSound(this.checked)"><span>Звуков сигнал при сканиране в „Заемане и връщане“ —
         кратък висок тон при успех, двоен нисък при отказ/забава/заделена книга.</span></label>`)}
-    ${setupCard('Обновяване', updateStatusHtml())}
+    ${/* С7 (v2.4.71): #updBox се обновява сам (auto-update.js), без пречертаване
+          на цялата форма — иначе незаписаното в „Настройки“ изчезваше. */''}
+    ${setupCard('Обновяване', '<div id="updBox">' + updateStatusHtml() + '</div>')}
     ${setupCard('Помощ и обратна връзка', `
       <div class="note" style="margin-top:0">Програмата се ползва от читалищни, общински и училищни библиотеки в
       цялата страна — съобщение за забелязана грешка помага на всички.
@@ -982,6 +995,19 @@ async function loadCalendarBox() {
     ${cal.closed.map(c => `<tr><td class="num">${bg(c.date)}</td><td>${esc(c.reason || '')}</td>
       <td style="width:60px"><button class="btn sm dgr" onclick="removeClosedDay('${c.date}')">✕</button></td></tr>`).join('')}
     </tbody></table></div>` : '<div class="hint" style="margin-top:8px">Няма добавени затворени дни.</div>';
+  /* ОТ КОЯ ДАТА Е СПИСЪКЪТ (v2.4.71, Ч15). Обработчикът връща затворените дни,
+     които още могат да влязат в забава (от началото на годината или от най-стария
+     падеж на невърнато заемане) — екранът казва откъде, за да не изглежда списъкът
+     като „всички затворени дни изобщо“. */
+  if (cal.from) cb.insertAdjacentHTML('beforeend', `<div class="hint" style="margin-top:6px">Показани са затворените дни от ${bg(cal.from)} насам — те още влизат в сметката на забавата по невърнатите документи.</div>`);
+}
+/* ПРЕМЕСТЕНИТЕ ПАДЕЖИ (v2.4.71, находка Ч4). Нов затворен ден или смяна на
+   работните дни местят напред падежите на отворените заемания, които попадат в
+   неработен ден — обработчикът го прави и връща изречение кои. Дотук екранът
+   казваше само „Добавен затворен ден.“, а читателите с преместен срок научаваха
+   от следата. Изречението се показва като отделно известие, по-дълго време. */
+function calendarMovedNote(res) {
+  if (res && res.message) toast(res.message, 'warn');
 }
 async function saveWorkDays() {
   const days = [];
@@ -989,7 +1015,7 @@ async function saveWorkDays() {
   // Празният списък се отказва от обработчика с обяснение — дотук тук стоеше
   // предупреждение, което обещаваше обратното на това, което програмата правеше.
   const ok = await call(window.api.calendar.saveWorkDays(days), 'Работните дни са записани.');
-  if (ok !== null) { markSaved(); loadCalendarBox(); }
+  if (ok !== null) { markSaved(); calendarMovedNote(ok); loadCalendarBox(); }
 }
 window.saveWorkDays = saveWorkDays;
 async function addClosedDay() {
@@ -997,7 +1023,7 @@ async function addClosedDay() {
   const reason = /** @type {HTMLInputElement} */ (document.querySelector('[name=calReason]')).value;
   if (!date) return toast('Изберете дата.', 'err');
   const ok = await call(window.api.calendar.addClosed({ date, reason }), 'Добавен затворен ден.');
-  if (ok !== null) { markSaved(); loadCalendarBox(); }
+  if (ok !== null) { markSaved(); calendarMovedNote(ok); loadCalendarBox(); }
 }
 window.addClosedDay = addClosedDay;
 async function removeClosedDay(date) {
@@ -1058,6 +1084,12 @@ async function backupNow() {
   if (enc) {
     const d = formData('#bkF');
     if (!d.password) return toast('Въведете парола или махнете отметката за криптиране.', 'err');
+    /* С18 (v2.4.71): поне 10 знака — както паролата на защитата; правилото е в
+       backup:now, тук само се казва по-рано. */
+    if (String(d.password).length < 10) {
+      return toast('Паролата на копието трябва да е поне 10 знака (както паролата за защита на личните данни). '
+        + 'Копие НЕ е записано.', 'err');
+    }
     if (d.password !== d.password2) return toast('Двете пароли не съвпадат.', 'err');
     password = d.password;
   }
@@ -1151,8 +1183,10 @@ async function resetAllForm() {
   if (!p) return;
   RESET_PLAN = p;
   const goes = (p.groups || []).length
-    ? `<ul style="margin:0;padding-left:20px;line-height:1.55">${p.groups.map(g => `<li><b>${esc(g.group)}</b> — ${g.rows.toLocaleString('bg-BG')}
-        ${g.rows === 1 ? 'запис' : 'записа'}</li>`).join('')}</ul>`
+    /* С15 (v2.4.71): текстът идва готов от обработчика — „30 документа“, не
+       сборът от редовете на книгите и на инвентара („60 записа“). */
+    ? `<ul style="margin:0;padding-left:20px;line-height:1.55">${p.groups.map(g => `<li><b>${esc(g.group)}</b> — ${g.text
+        ? esc(g.text) : g.rows.toLocaleString('bg-BG') + ' ' + (g.rows === 1 ? 'запис' : 'записа')}</li>`).join('')}</ul>`
     : '<div class="hint">В базата няма нито един запис за изтриване.</div>';
   const stays = `<ul style="margin:0;padding-left:20px;line-height:1.55">${(p.keep || []).map(k =>
     `<li><b>${esc(k.label)}</b> <span class="hint" style="display:block;margin:2px 0 0">${esc(k.why)}</span></li>`).join('')}</ul>`;
@@ -1319,6 +1353,12 @@ async function saveSetup() {
   if (лошо) {
     return toast('„' + лошо.label + '“: „' + лошо.value + '“ не е число (или е отрицателно). Настройките НЕ са '
       + 'записани. Напишете числото с цифри, дробната част със запетая — напр. 2,5.', 'err');
+  }
+  /* С8 (v2.4.71): процентът на свободния достъп е между 0 и 100 — обработчикът
+     отказва иначе; тук се казва по-рано и с името на полето. */
+  if (d.free_access_pct != null && d.free_access_pct !== '' && (Number(d.free_access_pct) > 100)) {
+    return toast('„Фонд на свободен достъп (%)“: ' + String(d.free_access_pct).replace('.', ',') + ' е над 100 %. '
+      + 'Настройките НЕ са записани. Напишете процента от 0 до 100, дробната част със запетая — напр. 62,5.', 'err');
   }
   /* Позицията на превъртане се пази (v2.4.27): страницата се пречертава след
      запис, а библиотекарят е в раздел по средата ѝ. */
@@ -1507,7 +1547,7 @@ async function runDataChecks() {
   const many = multi.filter(r => Number(r.quantity) > 1);
   const zero = multi.filter(r => Number(r.quantity) === 0);
   const copies = many.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
-  const nameOf = (r) => esc([r.author, r.title].filter(Boolean).join('. '));
+  const nameOf = (r) => esc(authorTitleText(r.author, r.title));
   const fundHtml = !fund ? '' : `
     <h4 style="font-size:14px;margin:16px 0 6px">Съгласуване на фондовите числа за ${fund.year} г.</h4>
     ${fund.findings.length ? fund.findings.map(f => `

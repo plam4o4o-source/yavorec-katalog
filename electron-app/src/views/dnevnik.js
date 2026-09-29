@@ -24,6 +24,22 @@ function hhmm(mins) { mins = mins || 0; return Math.floor(mins / 60) + ':' + Str
    Всичко друго („7,30“ — 7:18 ли е или 7:30?, „7.75“, „осем“, „25“) връща null
    и клетката/формата го отказва поименно, без да пипа базата. Над 24:00 в един
    ден също е отказ — и в обработчика (handlers/dnevnik.js), който е границата. */
+/* ЕДНО ПРАВИЛО ЗА РАЗДЕЛИТЕЛЯ (v2.4.71, находка Д14 от кръг 45).
+   =====================================================================
+   (а) ДОТУК точката и запетаята значеха различно според това колко цифри
+   следват: „7.50“ ставаше 7:50 (минути), „7,5“ — 7:30 (дроб), „7.5“ — също 7:30
+   (дроб), а „7,25“ се отказваше. Тестерът (a3-dnevnik.js) не можа да предвиди
+   какво ще запише клетката, без да я пробва.
+   (б) Часовете на обслужване са ред в Раздел А и Б на годишния отчет; правило,
+   което човек не може да каже с едно изречение, дава числа, които той не може
+   да провери.
+   (в) Правилото вече е едно и следва българския правопис: ЗАПЕТАЯТА е
+   десетична — дроб от часа („7,5“ = 7:30, „7,25“ = 7:15, „7,75“ = 7:45);
+   ДВОЕТОЧИЕТО и ТОЧКАТА са разделител на часа от минутите, както се пише час
+   на български („7:30“, „7.30 ч.“) — и затова след тях стоят ТОЧНО две цифри
+   („7.5“ е двусмислено и се отказва с обяснение). Дроб, която не дава цели
+   минути („7,333“), също се отказва. Двусмисленото „7,30“ вече следва
+   правилото (7:18), но клетката/формата го КАЗВА — виж dnevnikHoursNote(). */
 function parseHhmm(s) {
   const t = String(s == null ? '' : s).trim();
   if (t === '') return 0;            // празна клетка = нищо за този ден, както досега
@@ -33,15 +49,28 @@ function parseHhmm(s) {
   else if ((m = t.match(/^(\d{1,2})[:.](\d{2})$/))) {
     const mm = parseInt(m[2], 10);
     mins = mm > 59 ? null : parseInt(m[1], 10) * 60 + mm;
-  } else if ((m = t.match(/^(\d{1,2})[,.](\d)$/))) {
-    mins = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) * 6;
+  } else if ((m = t.match(/^(\d{1,2}),(\d{1,4})$/))) {
+    const frac = Number('0.' + m[2]) * 60;
+    const whole = Math.round(frac);
+    mins = Math.abs(frac - whole) > 1e-9 ? null : parseInt(m[1], 10) * 60 + whole;
   }
   if (mins == null || mins > 24 * 60) return null;
   return mins;
 }
 function dnevnikHoursHelp(raw) {
-  return '„' + raw + '“ не е разпознато като часове. Пишете „8“ (8:00), „7:30“, „7.30“ или „7,5“ (= 7:30), '
-    + 'най-много 24:00 за един ден.';
+  return '„' + raw + '“ не е разпознато като часове. Запетаята е дроб от часа („7,5“ = 7:30, „7,25“ = 7:15), '
+    + 'двоеточието или точката отделят минутите („7:30“, „7.30“ — с две цифри); „8“ е 8:00. '
+    + 'Най-много 24:00 за един ден.';
+}
+/* Когато запетаята е последвана от ДВЕ и повече цифри, човекът почти сигурно е
+   мислил минути („7,30“ като 7:30), а правилото дава дроб (7:18). Записва се по
+   правилото, но се казва как е разчетено — иначе числото в отчета се различава
+   от мисълта без нито една дума. */
+function dnevnikHoursNote(raw, mins) {
+  const t = String(raw == null ? '' : raw).trim();
+  if (!/^\d{1,2},\d{2,}$/.test(t) || mins == null) return '';
+  return '„' + t + '“ е записано като ' + hhmm(mins) + ' — запетаята е дроб от часа. Ако сте имали предвид '
+    + t.replace(',', ':') + ', напишете го с двоеточие.';
 }
 const DNEVNIK_A_COLS = [
   ['a_hours', 'Часове'], ['$a_total_age', 'Всичко'], ['a_age_u14', 'До 14'], ['a_age_15_18', '15–18'],
@@ -263,10 +292,15 @@ async function renderDnevnik() {
   // Всяка клетка е поле за въвеждане — попълва се направо в таблицата, като в хартиения
   // дневник. Изчислените колони („Всичко“) и двата обобщителни реда остават само за четене,
   // защото се смятат от въведените стойности.
+  /* БЪДЕЩИТЕ ДНИ СА САМО ЗА ЧЕТЕНЕ (v2.4.71, Д5). Обработчикът отказва ден,
+     който още не е настъпил (handlers/dnevnik.js); екранът го казва по-рано —
+     утрешният ред стои точно под днешния и един Tab стига до него. */
+  const futureAttr = (row) => row.date > todayStr
+    ? ' readonly title="Денят още не е настъпил — Дневникът се попълва за днешния и минали дни"' : '';
   const cellHtml = (row, k) => {
     if (k.startsWith('$')) return `<td class="num calc">${dnevnikCell(row, k)}</td>`;
     if (k === 'a_hours' || k === 'b_hours') {
-      return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"
+      return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"${futureAttr(row)}
         data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
     }
     /* КЛЕТКАТА Е ТЕКСТОВА, А НЕ <input type="number"> (одит v2.4.65, находка Б17).
@@ -281,7 +315,7 @@ async function renderDnevnik() {
        обработчикът отказва втори път, вече като граница (handlers/dnevnik.js).
        inputmode="numeric" пази цифровата клавиатура там, където има такава;
        колоната „Часове“ е текстова по същата причина още отпреди. */
-    return `<td><input class="dnvCell" type="text" inputmode="numeric" value="${row[k] || 0}"
+    return `<td><input class="dnvCell" type="text" inputmode="numeric" value="${row[k] || 0}"${futureAttr(row)}
       data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
   };
   /* ЗАТВОРЕНИЯТ ДЕН СЕ ВИЖДА В ТАБЛИЦАТА (одит v2.4.65, находка В3).
@@ -374,6 +408,7 @@ async function dnevnikSaveCell(el) {
     return toast(dnevnikHoursHelp(raw) + ' Нищо не е записано — клетката е върната на ' + el.value + '.', 'err');
   }
   const val = hours ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
+  const hoursNote = hours ? dnevnikHoursNote(el.value, val) : '';
   /* v2.4.29: отрицателно число не се записва — клетката се връща на старата стойност. */
   if (val < 0) {
     el.value = row ? (row[field] || 0) : 0;
@@ -404,6 +439,7 @@ async function dnevnikSaveCell(el) {
   el.classList.add('saved');
   setTimeout(() => el.classList.remove('saved'), 700);
   if (hours) el.value = hhmm(val);
+  if (hoursNote) toast(hoursNote, 'ok'); // Д14 — как е разчетено „7,30“
   /* Предупрежденията идват от обработчика — той е границата и той знае какво е
      влязло в базата (одит v2.4.65, находка В3): вписана работа в ден, който
      календарът обявява за затворен, дотук минаваше без дума и влизаше в
@@ -450,7 +486,7 @@ function dnevnikGroup(title, fields, row) {
   return `<fieldset><legend>${esc(title)}</legend><div class="grid g4">
     ${fields.map(([k, l]) => `<div class="field"><label>${esc(l)}</label>
       <input type="text" inputmode="numeric" name="${k}" data-label="${esc(l)}" value="${row[k] || 0}"
-        oninput="dnevnikPreview()"></div>`).join('')}
+        data-saved="${row[k] || 0}" oninput="dnevnikPreview()"></div>`).join('')}
     </div></fieldset>`;
 }
 async function dnevnikDayForm(date) {
@@ -477,7 +513,7 @@ async function dnevnikDayForm(date) {
     <div class="cards" id="dnvPreview" style="margin-bottom:12px"></div>
     <h3 style="font-size:14px">Раздел А — читатели и посещения</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове („8“, „7:30“ или „7,5“)</label>
+      <div class="field"><label>Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
       <input type="text" name="a_hours_hhmm" value="${hhmm(row.a_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По възраст', [['a_age_u14', 'До 14 г.'], ['a_age_15_18', '15–18 г.'], ['a_age_19_28', '19–28 г.'], ['a_age_o28', 'Над 28 г.']], row)}
@@ -491,7 +527,7 @@ async function dnevnikDayForm(date) {
     ${dnevnikGroup('Посещения', [['a_visit_home', 'В заемна за дома'], ['a_visit_child', 'Деца до 14 г.'], ['a_visit_reading', 'В читалня'], ['a_visit_internet', 'Интернет']], row)}
     <h3 style="font-size:14px">Раздел Б — заети материали</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове („8“, „7:30“ или „7,5“)</label>
+      <div class="field"><label>Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
       <input type="text" name="b_hours_hhmm" value="${hhmm(row.b_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По вид', [['b_type_books', 'Книги'], ['b_type_period', 'Периодични издания'], ['b_type_graphic', 'Графични издания'],
@@ -526,13 +562,43 @@ async function dnevnikSuggest(date) {
     $('#dnvSugHint').textContent = 'Няма записани събития за този ден — нищо за предлагане.';
     return;
   }
-  let filled = 0, kept = 0;
+  /* ⚡ ВТОРИ ПЪТ ЗА СЪЩИЯ ДЕН (v2.4.71, находка Д7 от кръг 45).
+     =====================================================================
+     (а) ДОТУК всяко поле с число > 0 се водеше „ръчно въведено“ и не се пипаше.
+     Тестерът (a3c-vtoro-predlozhenie.js): ⚡ за 01.09 дава „Книги“ 3, денят се
+     записва; следва ново заемане същия ден; ⚡ отново — регистрите вече дават 4,
+     полето остава 3, а подсказката казва „12 ръчно въведени са запазени“ за
+     числа, които е написала самата програма.
+     (б) Раздел Б остава с едно заемане по-малко, а надписът лъже кой е писал
+     числото — и библиотекарката няма причина да го провери.
+     (в) Сега полето се различава по ПРОИЗХОДА си:
+         • написано от ⚡ в ТОЗИ прозорец (data-sug) и непипано оттогава —
+           обновява се направо: то е предложение, не решение на човека;
+         • ЗАПИСАНО в базата по-рано (data-saved) и непипано в прозореца —
+           програмата не знае дали е от ⚡ или от ръката на библиотекарката,
+           затова не го сменя сама, но го изброява поименно („Книги: записано 3,
+           регистрите дават 4“) с бутон „Обнови ги от регистрите“;
+         • написано от човека в прозореца — запазва се и само то се нарича
+           „ръчно въведено“. */
+  let filled = 0, kept = 0, updated = 0;
+  const stale = [];
   for (const k of keys) {
-    const el = f.querySelector(`[name=${k}]`);
+    const el = /** @type {HTMLInputElement} */ (f.querySelector(`[name=${k}]`));
     if (!el) continue;
-    if (parseInt(el.value, 10) > 0) { kept++; continue; }
-    el.value = sug[k]; filled++;
+    const cur = parseInt(el.value, 10) || 0;
+    const nv = Number(sug[k]) || 0;
+    if (cur <= 0) { el.value = String(nv); el.dataset.sug = String(nv); filled++; continue; }
+    if (el.dataset.sug != null && String(cur) === el.dataset.sug) {
+      if (cur !== nv) { el.value = String(nv); el.dataset.sug = String(nv); updated++; }
+      continue;
+    }
+    if (el.dataset.saved != null && String(cur) === el.dataset.saved) {
+      if (cur !== nv) stale.push({ k, from: cur, to: nv, label: el.dataset.label || k });
+      continue;
+    }
+    kept++;
   }
+  DNEVNIK_STALE = stale;
   dnevnikPreview();
   /* Заемане на книга без попълнен УДК не може да бъде подредено по съдържание.
      Казва се изрично, защото иначе редът „Всичко“ по съдържание излиза по-малък
@@ -567,7 +633,9 @@ async function dnevnikSuggest(date) {
       + ' четирите „Всичко“ трябва да съвпадат, а пол, образование и занятие не се пазят в картона на читателя — допълнете ги'
     : '';
   $('#dnvSugHint').textContent = `${filled === 1 ? 'Предложена 1 стойност' : 'Предложени ' + filled + ' стойности'} от ${pl(res.eventsCount, 'събитие', 'събития')}` +
+    (updated ? ` · ${updated === 1 ? '1 предложена по-рано стойност е обновена' : updated + ' предложени по-рано стойности са обновени'} по регистрите` : '') +
     (kept ? ` (${kept === 1 ? '1 ръчно въведена е запазена' : kept + ' ръчно въведени са запазени'})` : '') +
+    (stale.length ? ` · вече записани за деня и различни от регистрите: ${stale.map(x => x.label + ' — записано ' + x.from + ', регистрите дават ' + x.to).join('; ')}` : '') +
     (res.unclassified ? ` · ${res.unclassified === 1 ? '1 заемане е на книга' : res.unclassified + ' заемания са на книги'} без УДК и не ${res.unclassified === 1 ? 'влиза' : 'влизат'} в „по съдържание“ — допълнете ${res.unclassified === 1 ? 'го' : 'ги'} ръчно` : '') +
     (периодика ? ` · ${периодика === 1 ? '1 заемане е на периодично издание и се брои' : периодика + ' заемания са на периодични издания и се броят'} по вид, не по съдържание (така е и във формуляра)` : '') +
     (fbN ? ` · ${fbN === 1 ? '1 заемане е на вид' : fbN + ' заемания са на видове'} без собствен ред във формуляра (`
@@ -586,9 +654,35 @@ async function dnevnikSuggest(date) {
       : '') +
     aNote +
     ' — прегледайте и поправете преди запис.';
-  toast('⚡ Попълнени ' + filled + ' полета — прегледайте преди „Запиши деня“.', 'ok');
+  if (stale.length) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn sm'; b.id = 'dnvSugStale';
+    b.textContent = 'Обнови ' + (stale.length === 1 ? 'го' : 'ги') + ' от регистрите';
+    b.onclick = dnevnikSuggestApplyStale;
+    $('#dnvSugHint').appendChild(document.createTextNode(' '));
+    $('#dnvSugHint').appendChild(b);
+  }
+  toast('⚡ Попълнени ' + filled + ' полета' + (updated ? ', обновени ' + updated : '') + ' — прегледайте преди „Запиши деня“.', 'ok');
 }
 window.dnevnikSuggest = dnevnikSuggest;
+/* Записаните по-рано числа, които се разминават с регистрите (виж Д7 по-горе) —
+   сменят се САМО по изрично натискане, и то само ако човекът не ги е пипал
+   междувременно. Записът в базата пак е с „Запиши деня“. */
+let DNEVNIK_STALE = /** @type {Array<{k:string, from:number, to:number, label:string}>} */ ([]);
+function dnevnikSuggestApplyStale() {
+  const f = $('#dnvF'); if (!f) return;
+  let n = 0;
+  for (const x of DNEVNIK_STALE) {
+    const el = /** @type {HTMLInputElement} */ (f.querySelector(`[name=${x.k}]`));
+    if (!el || String(parseInt(el.value, 10) || 0) !== String(x.from)) continue;
+    el.value = String(x.to); el.dataset.sug = String(x.to); n++;
+  }
+  DNEVNIK_STALE = [];
+  const b = $('#dnvSugStale'); if (b) b.remove();
+  dnevnikPreview();
+  toast(n === 1 ? 'Обновена 1 стойност от регистрите — запишете деня.' : 'Обновени ' + n + ' стойности от регистрите — запишете деня.', 'ok');
+}
+window.dnevnikSuggestApplyStale = dnevnikSuggestApplyStale;
 function dnevnikPreview() {
   const f = $('#dnvF'); if (!f) return;
   const num = (n) => { const el = f.querySelector(`[name=${n}]`); return el ? (parseInt(el.value, 10) || 0) : 0; };
@@ -626,9 +720,12 @@ async function saveDnevnikDay(date) {
     .map(([k, s]) => '„Часове“ на ' + s + ': ' + dnevnikHoursHelp(String(d[k] == null ? '' : d[k]).trim()));
   if (hoursBad.length) return toast('Денят НЕ е записан. ' + hoursBad.join(' '), 'err');
   d.date = date;
+  const hoursNotes = [dnevnikHoursNote(d.a_hours_hhmm, parseHhmm(d.a_hours_hhmm)),
+    dnevnikHoursNote(d.b_hours_hhmm, parseHhmm(d.b_hours_hhmm))].filter(Boolean);
   d.a_hours = parseHhmm(d.a_hours_hhmm); delete d.a_hours_hhmm;
   d.b_hours = parseHhmm(d.b_hours_hhmm); delete d.b_hours_hhmm;
   const ok = await call(window.api.dnevnik.saveDay(d), 'Денят е записан.');
+  if (ok) hoursNotes.forEach(n => toast(n, 'ok')); // Д14 — как е разчетено „7,30“
   /* Предупрежденията на обработчика се изписват СЛЕД потвърждението за записа
      (одит v2.4.65, находки В3 и А): затворен ден по календара и четирите „Всичко“
      на Раздел А, които не съвпадат. Денят е записан — това не са откази, а
@@ -654,7 +751,7 @@ function printDnevnikDoc() {
      подписите стоят ВЪТРЕ в последния — не могат да останат сами на празен лист
      (v2.4.69, Е10). Заглавието на раздела и месецът са на един ред: дотук бяха
      на два и изяждаха реда, който липсваше за „Всичко от нач. на годината“. */
-  const sig = ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………']);
+  const sig = ssig(['Библиотекар: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Ръководител', (SETTINGS_CACHE || {}).director, '')]);
   const tableHtml = (page, i) => `
     ${i ? '<div class="pbreak"></div>' : ''}<div class="dnvPart">
     <div class="pmeta"><b>${esc(sectionTitle)}</b> · ${esc(MESETSI[r.month - 1])} ${r.year} г.${

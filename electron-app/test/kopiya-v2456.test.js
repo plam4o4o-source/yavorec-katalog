@@ -169,12 +169,19 @@ test('некриптираното копие се пише настрани и 
   t.handlers.autoBackupIfNeeded();
   const daily = path.join(t.backupsDir, 'auto-' + todayStr() + '.db');
 
-  assert.ok(writes.includes(daily + '.tmp'), 'снимката каца във временен файл до целта');
+  /* v2.4.71 (кръг 45, С5): временният файл вече НЕ е точно `<крайно име>.tmp`, а
+     `<крайно име>.<pid>-<случаен суфикс>.tmp` — две работни места в обща папка
+     иначе триеха и презаписваха полузаписания файл едно на друго (50 от 50
+     опита без копие). Смисълът на теста е същият: снимката каца настрани, до
+     целта, с разширение .tmp, и крайният файл се появява с преименуване. */
+  const isStaged = (p) => p.startsWith(daily + '.') && p.endsWith('.tmp');
+  const staged = writes.filter(isStaged);
+  assert.equal(staged.length, 1, 'снимката каца във временен файл до целта');
   assert.ok(!writes.includes(daily), 'крайното име НИКОГА не се пише направо');
-  assert.deepEqual(renames.filter(r => r[1] === daily), [[daily + '.tmp', daily]],
+  assert.deepEqual(renames.filter(r => r[1] === daily), [[staged[0], daily]],
     'крайният файл се появява с преименуване — операция на същото устройство, тоест атомарна');
   assert.ok(fs.existsSync(daily));
-  assert.ok(!fs.existsSync(daily + '.tmp'), 'временният файл не остава в папката');
+  assert.ok(!fs.readdirSync(t.backupsDir).some(f => f.endsWith('.tmp')), 'временният файл не остава в папката');
 });
 
 test('копие, което не мине проверката, НЕ се появява в папката и провалът се вписва', () => {

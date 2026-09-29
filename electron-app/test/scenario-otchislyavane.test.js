@@ -891,7 +891,9 @@ test('10. дата на акта: невалидна, бъдеща и по-ра�
 test('11. акт от минала година: анулирането му днес иска изрично потвърждение и вписва какво се променя в подписаната КДБФ', async () => {
   ids.bOld = await mkBook({ inv_number: 20, title: 'Стара книга от ' + Y1, register_date: Y1 + '-03-01', price: 8 });
   const prevNo = ok(await h.api.deaccessionActs.nextNo(Y1), 'nextNo');
-  const actOld = ok(await h.api.deaccessionActs.create({ act: { no: prevNo, date: Y1 + '-11-30', reason_code: 4, reason_text: 'Физически изхабени' }, bookIds: [ids.bOld] }), 'акт за ' + Y1);
+  const actOld = ok(await h.api.deaccessionActs.create({ act: { no: prevNo, date: Y1 + '-11-30', reason_code: 4, reason_text: 'Физически изхабени',
+    /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+    committee1: 'Мария Иванова', committee3: 'Ана Счетоводителка' }, bookIds: [ids.bOld] }), 'акт за ' + Y1);
   let kPrev = ok(await h.api.kdbf.report(Y1), 'КДБФ ' + Y1);
   const live = kPrev.part3.filter(a => !a.revoked_at);
   assert.equal(live.length, 1); assert.equal(live[0].item_value, 8);
@@ -948,7 +950,9 @@ test('12. сборът на акта = Σ(цена × бройка) и е едн
   ids.bC = await mkBook({ inv_number: 23, title: 'Цена 0.7', price: 0.7 });
   ids.bD = await mkBook({ inv_number: 24, title: 'Без цена', price: 0 });
   const no = ok(await h.api.deaccessionActs.nextNo(Y), 'nextNo');
-  const id = ok(await h.api.deaccessionActs.create({ act: { no, date: T, reason_code: 7, reason_text: 'Неизползваеми носители на информация, които нямат статута на културна ценност', disposal: 'унищожени' },
+  const id = ok(await h.api.deaccessionActs.create({ act: { no, date: T, reason_code: 7, reason_text: 'Неизползваеми носители на информация, които нямат статута на културна ценност', disposal: 'унищожени',
+    /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+    committee1: 'Мария Иванова', committee3: 'Ана Счетоводителка' },
     bookIds: [ids.bA, ids.bB, ids.bC, ids.bD] }), 'акт');
   ids.actSum = id;
   const row = ok(await h.api.deaccessionActs.list(), 'списък').find(x => x.id === id);
@@ -987,7 +991,9 @@ test('13. второ работно място: документът е отчи
   await h.scan('#actScan', '1');
   await h.scan('#actScan', '2');
   // Другият компютър отчислява инв. № 2 със същия номер.
-  ok(await h.api.deaccessionActs.create({ act: { no, date: T, reason_code: 3, reason_text: 'Неподходящи за профила на библиотеката' }, bookIds: [ids.b2] }), 'другото място');
+  ok(await h.api.deaccessionActs.create({ act: { no, date: T, reason_code: 3, reason_text: 'Неподходящи за профила на библиотеката',
+    /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+    committee1: 'Мария Иванова', committee3: 'Ана Счетоводителка' }, bookIds: [ids.b2] }), 'другото място');
   let n = h.toasts.length;
   await h.clickButton('Утвърди акта и отчисли', '#modal footer');
   const err = h.toastsSince(n).find(t => t.type === 'err');

@@ -138,7 +138,7 @@ function analyticSource(a) {
     return a.periodical_title + (a.issue ? ', бр. ' + a.issue : '') + (a.issue_date ? ' от ' + bg(a.issue_date) : '');
   }
   if (a.source_kind === 'книга' && a.book_title) {
-    return [a.book_author, a.book_title].filter(Boolean).join('. ') +
+    return authorTitleText(a.book_author, a.book_title) +
       (a.book_inv ? ' (инв. № ' + a.book_inv + ')' : '');
   }
   return a.source_text || '—';
@@ -180,7 +180,7 @@ async function printAnalytics() {
       ${a.udk ? `<div style="font-size:10pt">УДК ${esc(a.udk)}</div>` : ''}
       ${a.keywords ? `<div style="font-size:10pt"><i>Ключови думи: ${esc(a.keywords)}</i></div>` : ''}
     </div>`).join('')}
-    ${ssig(['Съставил: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
+    ${ssig(['Съставил: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Председател', (SETTINGS_CACHE || {}).director, '')])}</div>`);
 }
 window.printAnalytics = printAnalytics;
 
@@ -220,7 +220,7 @@ async function analyticForm(id) {
       </div>
       <div class="grid g4">
         ${fld('Подзаглавие', 'subtitle', { val: v.subtitle || '' })}
-        ${fld('Година', 'year', { val: v.year || '', hint: 'или „ок. 1930“' })}
+        ${fld('Година', 'year', { val: v.year || '', hint: 'или „ок. 1930“ · при дата на броя — нейната година' })}
         ${fld('Страници', 'pages', { val: v.pages || '', hint: 'напр. „12 – 14“' })}
         ${fld('УДК', 'udk', { val: v.udk || '', list: 'udk' })}
       </div>
@@ -254,6 +254,46 @@ async function analyticForm(id) {
     <datalist id="dl_anlBooks"></datalist>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      <button class="btn pri" onclick="saveAnalytic(${id || 'null'})">Запиши</button>`);
+  /* ГОДИНАТА СЛЕДВА ДАТАТА НА БРОЯ (v2.4.71, находка Д1). Формата предлага в
+     „Година“ текущата година; дотук статия от брой от 31.12.2025, вписана през
+     2026 г., оставаше с 2026 и влизаше в указателя под грешната година. Докато
+     човекът не е писал в „Година“ сам, тя се води по датата на броя — видимо, в
+     полето, с бележка до него. Ако я е писал и тя не съдържа годината на датата,
+     бележката предупреждава още тук; отказът е в обработчика
+     (handlers/analytics.js, checkAnalytic) — правилото е там. */
+  const yEl = /** @type {HTMLInputElement} */ ($('#anlF [name=year]'));
+  const dEl = /** @type {HTMLInputElement} */ ($('#anlF [name=issue_date]'));
+  if (yEl && dEl) {
+    const note = document.createElement('div');
+    note.className = 'hint'; note.id = 'anlYearNote';
+    yEl.insertAdjacentElement('afterend', note);
+    const dy = () => String(dEl.value || '').slice(0, 4);
+    // При редакция годината е „пипана“, освен ако вече съвпада с датата.
+    let touched = !!(a && String(v.year || '').trim() && !(v.issue_date && String(v.year).trim() === String(v.issue_date).slice(0, 4)));
+    yEl.addEventListener('input', () => { touched = true; note.textContent = ''; });
+    dEl.addEventListener('change', () => {
+      const y = dy();
+      if (!/^\d{4}$/.test(y)) { note.textContent = ''; return; }
+      if (!touched) {
+        if (yEl.value.trim() !== y) {
+          yEl.value = y;
+          note.textContent = 'Годината е сменена на ' + y + ' — по датата на броя.';
+        }
+      } else if (!(yEl.value.match(/\d{3,4}/g) || /** @type {string[]} */ ([])).includes(y)) {
+        note.textContent = 'Годината „' + yEl.value.trim() + '“ не отговаря на датата на броя (' + y + ' г.) — описанието няма да се запише, докато не ги съгласувате.';
+      } else note.textContent = '';
+    });
+  }
+  /* КОЙ СОЧИ КЪМ СТАТИЯТА (v2.4.71, находка Д9 — остатък от Л6). Персоналии и
+     летописни записи, свързани с тази статия, се виждаха само от тяхната
+     страна. Панелът е същият като в картона на книгата (src/views/links.js) и
+     при липса на връзки не показва нищо. */
+  if (id && typeof backlinksHtmlFor === 'function') {
+    backlinksHtmlFor('статия', id).then(h => {
+      const f = $('#anlF');
+      if (f && h) f.insertAdjacentHTML('afterend', h);
+    }).catch(err => console.error('Връзките към статията не се заредиха:', err));
+  }
   // Списъкът с книги се пълни при писане, за да не се зареждат хиляди записи наведнъж.
   /* Одит v2.4.29: изборът от <datalist> слага в полето ЦЕЛИЯ етикет („инв. № 101 ·
      Автор. Заглавие“), а търсенето с този низ не намира нищо (LIKE по заглавие и

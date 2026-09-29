@@ -319,7 +319,12 @@ test('А8: при ОТКЛЮЧЕНА защита следата излиза с
     'колоната „преди/след“ носи стария адрес и ЕГН — тя не излиза при никакво състояние');
   const readme = files.get('PROCHETI-ME.txt').text;
   assert.ok(readme.includes('odit-sleda.csv → diff'));
-  assert.match(readme, /odit-sleda\.csv съдържат лични данни|chitateli\.csv и odit-sleda\.csv/);
+  /* v2.4.71 (кръг 45, М3): изречението вече изброява ТРИ файла — към
+     chitateli.csv и odit-sleda.csv е добавен istoria-tarsenia.csv (търсенията в
+     „Читатели“ по телефон и фамилия), затова старият дословен текст „chitateli.csv
+     и odit-sleda.csv съдържат…“ нарочно се смени. Същината на твърдението остава:
+     следата е назована като файл с лични данни. */
+  assert.match(readme, /chitateli\.csv, odit-sleda\.csv и istoria-tarsenia\.csv\s+съдържат лични данни/);
 });
 
 test('Г3: архивът се свива на ниво 6 — 167 ms вместо 544 ms срещу 4 % по-голям файл', async () => {

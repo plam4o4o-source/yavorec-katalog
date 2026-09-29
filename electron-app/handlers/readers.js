@@ -5,12 +5,17 @@
 // стабилен модулен export в main.js, затворени над реалните мутируеми
 // състояния там (PDP_KEY, db) — работят коректно и извикани оттук.
 const { ANON_READER_NAME, rowFingerprint, assertUnchanged, isValidIsoDate } = require('../security-utils');
+const { isEncryptedField } = require('../pii-crypto');
 
 /* Категорията на читателите под 14 години — дословно както я пише формата (KATEG
    в src/views/core.js), както я разпознава дневникът (a_age_u14 в
    handlers/dnevnik.js) и както я ползва гишето (CHILD_CATEGORY в
    handlers/loans.js). По нея се иска съгласие на родител/настойник. */
 const CHILD_CATEGORY = 'дете до 14 г.';
+/* Видът на промяната за онлайн каталога — стойността е същата като
+   CATALOG_WRITE_CIRCULATION в main.js (бавният срок на гишето); виж
+   test/katalog-v2464.test.js, който пази всички повиквания. */
+const CIRCULATION = 'circulation';
 
 /* УСЛОВИЕТО „БЕЗ ОТБЕЛЯЗАНО СЪГЛАСИЕ“ — НА ЕДНО МЯСТО (v2.4.65).
    =====================================================================
@@ -38,6 +43,49 @@ const NO_CONSENT_SQL = `(r.name IS NOT '${ANON_NAME_SQL}' AND (COALESCE(r.gdpr_c
    или вече е навършила. Служебният запис на анонимизацията не е читател. */
 const REREG_DUE_SQL = `(r.status = 'активен' AND r.name != '${ANON_NAME_SQL}'
   AND date(COALESCE(r.re_registered_at, r.registered_at), '+1 year') <= date('now', 'localtime', '+14 days'))`;
+
+/* ЕГН — ФОРМАТ И КОНТРОЛНА ЦИФРА (v2.4.71, находка Ч11).
+   =====================================================================
+   (а) КАКВО СТАВАШЕ ДОТУК. Полето се записваше каквото е: тестерът (den45,
+       kanali) записа „12345“ и „abcdefghij“ като ЕГН на читател, без дума.
+   (б) ЗАЩО Е ГРЕШНО. ЕГН-то се събира по чл. 42, ал. 3 от Наредба № 3, за да се
+       установи самоличността на ползвателя; по ОРЗД (чл. 5, т. 1, буква „г“)
+       събраните лични данни трябва да са точни. „12345“ не идентифицира никого,
+       а е лично поле, което после се криптира, изнася и показва в картона като
+       истинско.
+   (в) ЗАЩО ТОЧНО ТАКА. Две нива:
+       • ФОРМАТЪТ (точно 10 цифри; интервали и тирета от преписване се махат) е
+         ПРАВИЛО — обработчикът отказва друго, по всеки път към таблицата;
+       • КОНТРОЛНАТА ЦИФРА и датата в ЕГН-то (месец 1–12, 21–32 или 41–52) са
+         ПРЕДУПРЕЖДЕНИЕ: в полето понякога се вписва ЛНЧ на чужденец (10 цифри, друга
+         контролна сума), а и стари картони носят ЕГН, преписано отнякъде. Екранът
+         пита преди записа (src/views/readers.js), а следата казва, че е записано
+         ЕГН с неверна контролна цифра — нищо не минава мълчаливо.
+       При редакция се проверява само ПРОМЕНЕНОТО ЕГН: заварен читател с
+       неправилно ЕГН от внос не бива да спира смяната на телефона му. */
+const EGN_WEIGHTS = [2, 4, 8, 5, 10, 9, 7, 3, 6];
+function normalizeEgn(v) {
+  if (v === undefined || v === null) return v;
+  const s = String(v).trim();
+  return /^[\d\s-]+$/.test(s) ? s.replace(/[\s-]/g, '') : s;
+}
+/* Връща '' за изправно ЕГН, иначе изречение какво не е наред с контролата. */
+function egnCheckProblem(egn) {
+  const d = String(egn).split('').map(Number);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += d[i] * EGN_WEIGHTS[i];
+  const ctrl = (sum % 11) % 10;
+  const mm = d[2] * 10 + d[3], dd = d[4] * 10 + d[5];
+  const monthOk = (mm >= 1 && mm <= 12) || (mm >= 21 && mm <= 32) || (mm >= 41 && mm <= 52);
+  if (!monthOk || dd < 1 || dd > 31) return 'цифрите за месец и ден не са възможна дата на раждане';
+  if (ctrl !== d[9]) return 'контролната цифра не съвпада (очаква се ' + ctrl + ')';
+  return '';
+}
+function isPiiPlaceholderOrCipher(v) {
+  const s = String(v == null ? '' : v).trim();
+  // Плейсхолдърите на защитата („Защитени данни…“) и шифротекстът не са въведено ЕГН.
+  return !s || /^Защитени данни/.test(s) || isEncryptedField(s);
+}
 
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
@@ -295,6 +343,27 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
      като заварените читатели без съгласие по чл. 47 (виж филтъра „без съгласие“
      в readers:list): намират се от „Читатели“ → филтър „без съгласие“ и се
      отбелязват с датата на подписа на родителя. */
+  /* Проверката на ЕГН — виж дългата бележка при egnCheckProblem горе. Връща
+     предупреждението (или '') за следата. `prev` — досегашният ред при
+     редакция: непромененото ЕГН не се проверява. */
+  function checkEgn(r, prev) {
+    if (!r || r.egn === undefined || r.egn === null || r.egn === '') return '';
+    r.egn = normalizeEgn(r.egn);
+    if (isPiiPlaceholderOrCipher(r.egn)) return '';
+    if (prev && prev.egn) {
+      let prevPlain = prev.egn;
+      if (isPiiPlaceholderOrCipher(prevPlain) && typeof maskReaderRow === 'function') {
+        const m = maskReaderRow({ egn: prev.egn, id_card_no: null });
+        prevPlain = m ? m.egn : prevPlain;
+      }
+      if (String(prevPlain).replace(/[\s-]/g, '') === r.egn) return '';
+    }
+    if (!/^\d{10}$/.test(r.egn)) {
+      throw new Error('ЕГН „' + r.egn + '“ не е ЕГН — трябва да е точно 10 цифри. Проверете го в личната карта '
+        + 'на читателя или оставете полето празно. Читателят НЕ е записан.');
+    }
+    return egnCheckProblem(r.egn);
+  }
   function assertConsent(r) {
     if (!r || !r.gdpr_consent) {
       throw new Error('Читателят не може да бъде записан без отбелязано съгласие по чл. 47, ал. 2 '
@@ -308,6 +377,56 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         + 'на читателския картон, с неговата дата) и запишете отново.');
     }
   }
+  /* ИСТОРИЯТА НА ЗАПИСВАНИЯТА (v2.4.71, находка Д3 — частта на гишето).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ ДОТУК. Картонът пази само ПОСЛЕДНАТА пререгистрация
+         (re_registered_at). „Регистрирани читатели през 2025 г.“ се броеше по
+         нея — и когато читателят се пререгистрира през 2026, той изчезваше от
+         вече подадения отчет за 2025 г.
+     (б) ЗАЩО Е ГРЕШНО. Годишният отчет е подписан документ; число за минала
+         година не бива да се сменя със задна дата от днешна работа на гишето.
+     (в) ЗАЩО ТОЧНО ТАКА. Всяко записване и всяка нова дата на пререгистрация
+         оставя ред в `reader_registrations` (миграция 19) — в СЪЩАТА транзакция
+         като картона. `INSERT OR IGNORE`, защото (reader_key, date) е уникално:
+         повторно записване на картона със същата дата не дублира реда, а
+         заварените редове (попълнени от миграцията) не се пипат. Броенето по
+         години е в handlers/stats.js. Таблицата се проверява веднъж на база —
+         изолиран тест със стара схема не бива да гърми при запис на читател. */
+  let regTableDb = null, regTableOk = false;
+  function noteRegistration(db, readerId, date, kind) {
+    if (!readerId || !date || !isValidIsoDate(String(date).slice(0, 10))) return;
+    if (regTableDb !== db) {
+      regTableOk = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reader_registrations'").get();
+      regTableDb = db;
+    }
+    if (!regTableOk) return;
+    /* reader_key = 'r' + id — остава и след изтриване/заличаване на картона,
+       за да не падне броят за вече отчетена година (виж db/schema.sql). */
+    db.prepare('INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind) VALUES (?, ?, ?, ?)')
+      .run(readerId, 'r' + readerId, String(date).slice(0, 10), kind);
+  }
+
+  /* ЧУЖДА КНИГА ПО МЗС У ЧИТАТЕЛЯ — ЗА ГИШЕТО (v2.4.71, находка М8).
+     (а) Изходяща заявка по МЗС в състояние „получено“ с читател значи, че
+         книгата на ДРУГА библиотека е у него. Таблото и регистърът я показват,
+         а гишето — „заети: 0 / 5“, дори когато срокът ѝ е изтекъл.
+     (б) Библиотекарката стои с читателя пред себе си точно на гишето — там е
+         моментът да я поиска обратно; чуждата книга е задължение на
+         библиотеката към партньора.
+     (в) Отделен канал (а не поле в readers:get, който пълни и формата за
+         редакция): връща заявките с `overdue`, за да ги оцвети екранът. */
+  ipcMain.handle('readers:mzsHeld', (e, readerId) =>
+    run(() => {
+      const db = getDb();
+      const cols = db.prepare('PRAGMA table_info(mzs_requests)').all().map(c => c.name);
+      if (!cols.includes('reader_id')) return [];
+      const t = today();
+      return db.prepare(`SELECT id, no, year, partner, author, title, due_date, date_received
+          FROM mzs_requests WHERE reader_id = ? AND direction = 'изходящо' AND status = 'получено'
+          ORDER BY COALESCE(due_date, '9999-12-31'), year, no`).all(readerId)
+        .map(m => Object.assign(m, { overdue: !!(m.due_date && m.due_date < t) }));
+    })
+  );
   ipcMain.handle('readers:create', (e, r) =>
     run(() => {
       const db = getDb();
@@ -317,13 +436,23 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          помогне. */
       checkRecordLimit('readers');
       assertConsent(r);
+      const egnWarn = checkEgn(r, null);   // Ч11 (v2.4.71)
       const payload = readerPayload(r);
       preparePiiForWrite(payload, null);
-      const info = db.prepare(`
-        INSERT INTO readers (${READER_FIELDS.join(',')}) VALUES (${READER_FIELDS.map(f => '@' + f).join(',')})
-      `).run(payload);
-      logAudit('Нов читател', 'карта ' + (r.card_no || '') + ' — ' + r.name);
-      return info.lastInsertRowid;
+      const id = db.transaction(() => {
+        const info = db.prepare(`
+          INSERT INTO readers (${READER_FIELDS.join(',')}) VALUES (${READER_FIELDS.map(f => '@' + f).join(',')})
+        `).run(payload);
+        // Историята на записванията (Д3, v2.4.71) — виж noteRegistration.
+        noteRegistration(db, info.lastInsertRowid, payload.registered_at, 'записване');
+        if (payload.re_registered_at && payload.re_registered_at !== payload.registered_at) {
+          noteRegistration(db, info.lastInsertRowid, payload.re_registered_at, 'пререгистрация');
+        }
+        return info.lastInsertRowid;
+      }).immediate();
+      logAudit('Нов читател', 'карта ' + (r.card_no || '') + ' — ' + r.name
+        + (egnWarn ? '; ВНИМАНИЕ: ЕГН с ' + egnWarn + ' — записано по потвърждение на библиотекаря' : ''));
+      return id;
     })
   );
   ipcMain.handle('readers:update', (e, r) =>
@@ -342,14 +471,27 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          чуждата промяна — телефонът, добавен от другото работно място преди
          минута, изчезваше без нищо на екрана. */
       assertUnchanged(prev, r._rev, READER_FIELDS, 'Читателят е променен');
+      const egnWarn = checkEgn(r, prev);   // Ч11 (v2.4.71) — само промененото ЕГН
       const payload = readerPayload(r, prev);
       preparePiiForWrite(payload, prev);
-      db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
-        .run(Object.assign({ id: r.id }, payload));
+      db.transaction(() => {
+        db.prepare(`UPDATE readers SET ${READER_FIELDS.map(f => f + '=@' + f).join(',')} WHERE id=@id`)
+          .run(Object.assign({ id: r.id }, payload));
+        /* Нова пререгистрация (или поправена дата на записване) влиза в историята
+           (Д3, v2.4.71). Старият ред НЕ се трие: пререгистрацията през 2026 не
+           отменя тази през 2025 — точно това правеше броенето по картона. */
+        if (payload.re_registered_at && payload.re_registered_at !== prev.re_registered_at) {
+          noteRegistration(db, r.id, payload.re_registered_at, 'пререгистрация');
+        }
+        if (payload.registered_at && payload.registered_at !== prev.registered_at) {
+          noteRegistration(db, r.id, payload.registered_at, 'записване');
+        }
+      }).immediate();
       // ЕГН и номер на документ за самоличност не влизат в диференца на одитната следа —
       // тя се пази с експорт в CSV и не бива да удвоява най-чувствителните лични данни.
       const diff = diffFields(prev, payload, READER_FIELDS.filter(f => f !== 'egn' && f !== 'id_card_no'));
-      logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name, diff);
+      logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name
+        + (egnWarn ? '; ВНИМАНИЕ: ЕГН с ' + egnWarn + ' — записано по потвърждение на библиотекаря' : ''), diff);
     })
   );
   // Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
@@ -516,6 +658,16 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
           }
         }
       }).immediate();
+      /* ОНЛАЙН КАТАЛОГЪТ СЛЕД ОСВОБОДЕНА ЗАДЕЛЕНА КНИГА (v2.4.71, находка М4).
+         (а) Изтриването освобождаваше заделената книга (или я заделяше за
+             следващия), а katalog.json не се пишеше: сайтът я показваше „заета“
+             до следващата случайна промяна.
+         (б) Читателят проверява сайта, преди да тръгне към библиотеката.
+         (в) Насрочва се запис като промяна на гишето („circulation“ — бавният
+             таймер), само когато наистина е имало заделена книга. Зависимостта
+             идва от main.js (`scheduleCatalogWrite`); проверява се с typeof,
+             защото по-стар main.js не я подава. Извън транзакцията — пише файл. */
+      if (setAside.length && typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite(CIRCULATION);
       /* ВПИСВАНЕТО Е БЕЗУСЛОВНО (v2.4.65).
          =================================================================
          КАКВО СТАВАШЕ ДОТУК. Този logAudit стоеше ВЪТРЕ в `if (attached.length)`,

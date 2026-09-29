@@ -1044,6 +1044,10 @@ table.ledger input[type=checkbox]{width:17px; height:17px; accent-color:var(--br
    Височината на лентите идва от --lbh (printLabelSheet я смята от височината на
    етикета, между 6,5 и 11 мм). */
 .lbl svg{width:100%; height:var(--lbh, 11mm); flex:0 0 auto}
+/* Етикетът за фонда: лентите са модули × модул (--bw от lblFundHtml в core.js), не
+   цялата ширина — така от двете страни остават поне 10 модула празно (v2.4.71, Р2;
+   дотук L7160, инв. № 1: модул 1,31 мм и 2 модула празно). */
+.lbl.lbl-fund svg{width:var(--bw, 100%); max-width:100%}
 .lbl .lhead{flex:0 1 auto; min-height:0; overflow:hidden; width:100%}
 /* Празно място на листа (v2.4.69, Е2 — „започни от позиция N“): заема клетката, без
    рамка и без съдържание, за да легне първият етикет в N-тата клетка на листа. */
@@ -1158,6 +1162,34 @@ table.ledger input[type=checkbox]{width:17px; height:17px; accent-color:var(--br
 .pdoc .pmeta:has(+ .psig){break-inside:avoid; page-break-inside:avoid}
 .pdoc table:has(+ .pmeta + .psig) tbody tr:nth-last-child(-n+2){break-before:avoid; page-break-before:avoid}
 .pdoc .psigKeep{break-inside:avoid; page-break-inside:avoid}
+/* ОПАШКАТА — РЕД НА ТАБЛИЦАТА, НЕ СЪСЕДЕН БЛОК (v2.4.71, кръг 45, Р1).
+   (а) Горната верига (v2.4.69) свързва СЪСЕДНИ блокове и Chromium не я спазва при
+       многоредова бележка и два .psig: в истински PDF (и в Electron 43) актът за
+       отчисляване при 44 реда има лист 3 само с „УТВЪРДИЛ, Председател: ……“, при
+       47 — комисията е на два листа; същото в акта за дарение (48–56 реда),
+       протокола по чл. 3, ал. 2 (48–54), КДБФ (6–8 и 21–25 партиди) и
+       инвентарната книга (21–24 и 36 вписвания).
+   (б) Подписите заверяват описа над тях; лист само с подписи може да бъде
+       подменен, а разделена комисия не личи като една (Наредба № 3, чл. 13, 26,
+       30, 33, 40).
+   (в) ppKeepTails() в core.js слага бележката и подписите в ПОСЛЕДНИЯ РЕД на
+       таблицата — една клетка през всички колони (.ptailCell), без рамка. Ред
+       Chromium не цепи, а break-before:avoid МЕЖДУ РЕДОВЕ на една таблица спазва;
+       така с опашката на новия лист отиват и последните два реда на описа и
+       сборът (обикновено „ОБЩО N документа, сума“), а заглавието на таблицата
+       Chromium повтаря отгоре. Горните правила остават за подписите, които не са
+       опашка на документа (картонът — .psigKeep, Дневникът — .dnvPart). */
+.pdoc .ptail{break-inside:avoid; page-break-inside:avoid}
+.pdoc table tr.ptailRow{break-inside:avoid; page-break-inside:avoid; break-before:avoid; page-break-before:avoid}
+.pdoc table tbody tr:has(+ tr.ptailRow), .pdoc table tbody tr:has(+ tr + tr.ptailRow){break-before:avoid; page-break-before:avoid}
+.pdoc table td.ptailCell{border:none; padding:5mm 0 0; background:none; text-align:left}
+/* Клетката през всички колони не бива да мести колоните: дългата бележка иначе
+   влиза в сметката на Chromium за ширините (auto layout) и описът над нея излиза
+   с други ширини, отколкото без опашката (измерено: КДБФ Част № 1 — 89/31/204 px
+   ставаха 95/34/194, инвентарната книга — 89/54/88 → 95/55/94). Ширина 0 за
+   сметката, 100 % на листа. */
+.pdoc table td.ptailCell > .ptail{width:0; min-width:100%}
+.pdoc table.ptailTable{margin-bottom:0}
 /* Всеки подпис има поне 60 мм линия (v2.4.69, Е5). Дотук редът се делеше поравно
    между всички: трима членове на комисията на портретен лист получаваха по ~48 мм
    за „Член: Иванова, Мария ……“ и за самия подпис. Сега на портретен лист стоят по
@@ -1221,11 +1253,21 @@ table.ledger input[type=checkbox]{width:17px; height:17px; accent-color:var(--br
   html, body{height:auto !important; overflow:visible !important; width:auto !important}
   body > :not(#printArea){display:none !important}
   #printArea{position:static; width:auto; display:block !important; padding:0; margin:0}
-  #printArea .pdoc{page-break-after:always; padding:0 0 12mm}
+  /* ОТСТОЯНИЕТО МЕЖДУ ДОКУМЕНТИТЕ Е НОВИЯТ ЛИСТ, НЕ ОТСТЪП В КРАЯ (v2.4.71, Р1).
+     (а) Тук стоеше „padding:0 0 12mm“: 12 мм празно под ВСЕКИ документ (КДБФ — три
+         части, писмата — по едно на читател). Отстъпът в края на блока се слага
+         на листа заедно с последното му съдържание, тоест опашката с подписите
+         трябваше да събере 12 мм повече, отколкото заема — и при почти пълен лист
+         (КДБФ Част № 1 при 6–8 и 21–25 партиди) отиваше на нов лист без нужда.
+     (б) Отстъпът не носи нищо: всеки документ и без него започва на нов лист
+         (page-break-after:always), а на хартията няма какво да раздели.
+     (в) Затова отстоянието е само новият лист; последният документ не добавя и
+         него (Е7, долу). */
+  #printArea .pdoc{page-break-after:always; break-after:page; padding:0}
   /* ПОСЛЕДНИЯТ ДОКУМЕНТ НЕ ДОБАВЯ ПРАЗЕН ЛИСТ (v2.4.69, Е7). Отстъпът 12 мм под
      всеки документ разделя писмата помежду им, но под ПОСЛЕДНИЯ той само прелива:
      точно пълен лист с 24 етикета излизаше на 2 страници, втората празна. */
-  #printArea .pdoc:last-child{page-break-after:auto; padding-bottom:0}
+  #printArea .pdoc:last-child{page-break-after:auto; break-after:auto; padding-bottom:0}
   #printArea .pdoc.lbldoc{padding:0}
   /* Без това Windows отрязва фоновете и цветните ивици — читателската карта излиза
      като гол текст вместо като карта. */

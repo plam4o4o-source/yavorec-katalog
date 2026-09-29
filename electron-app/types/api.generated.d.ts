@@ -247,6 +247,8 @@ interface InvLibApi {
     clearSuspension: InvLibInvoke;
     /** канал „readers:exportCsv“ */
     exportCsv: InvLibInvoke;
+    /** канал „readers:mzsHeld“ */
+    mzsHeld: InvLibInvoke;
   };
   exportAll: {
     /** канал „exportAll:run“ */

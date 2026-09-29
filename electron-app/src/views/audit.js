@@ -15,8 +15,33 @@ const FIELD_LABELS = {
   category: 'Категория', registered_at: 'Дата на регистрация', re_registered_at: 'Дата на пререгистрация',
   gdpr_consent: 'Съгласие ЗЗЛД', gdpr_consent_date: 'Дата на съгласието', parent_consent: 'Съгласие на родител',
   parent_consent_date: 'Дата на съгласието на родителя', guarantor_name: 'Гарант', guarantor_relation: 'Отношение на гаранта',
-  guarantor_phone: 'Телефон на гаранта', note: 'Бележка'
+  guarantor_phone: 'Телефон на гаранта', note: 'Бележка',
+  /* „Редакция на настройки“ носи преди/след от v2.4.71 (С10, handlers/settings.js). */
+  org: 'Организация', lib_name: 'Наименование на библиотеката', place: 'Населено място',
+  bulstat: 'ЕИК / БУЛСТАТ', reg_no: 'Рег. № в Мин. на културата', director: 'Ръководител',
+  director_role: 'Длъжност', librarian: 'Библиотекар', cat_url: 'Адрес на сайта',
+  loan_days: 'Срок за заемане (дни)', max_books: 'Максимум документи на читател',
+  extensions_count: 'Брой продължения', extension_days: 'Дни на продължение',
+  fine_per_day: 'Обезщетение за забава (на ден)', annual_fee: 'Годишна такса',
+  free_access_pct: 'Фонд на свободен достъп (%)', next_inv_number: 'Следващ инвентарен номер',
+  committee1: 'Член 1 на комисията', committee2: 'Член 2 на комисията', committee3: 'Член 3 на комисията',
+  sru_endpoint: 'SRU сървър', suspend_per_day: 'Наказание при забава (дни за ден)',
+  suspend_max: 'Таван на наказанието (дни)', remind2_days: '2-ро напомняне след (дни)',
+  remind3_days: '3-то напомняне след (дни)', anonymize_years: 'Анонимизиране след (години)',
+  lost_price_multiplier: 'Обезщетение за изгубен документ — кратност',
+  lost_fallback_amount: 'Обезщетение за документ без цена'
 };
+/* „ПРЕДИ/СЛЕД“ КАТО ТЕКСТ — за CSV (v2.4.71, кръг 45, С12). Същото четене на
+   diff-а като auditDiffHtml, но в един ред: „Телефон: 0888 → 0899; Адрес: …“.
+   Повреден запис се казва с думи, не се пропуска. */
+function auditDiffText(diffJson) {
+  if (diffJson == null || diffJson === '') return '';
+  let diff;
+  try { diff = JSON.parse(diffJson); }
+  catch (e) { return '(записът за промените е повреден и не може да бъде прочетен)'; }
+  if (!Array.isArray(diff) || !diff.length) return '';
+  return diff.map(d => (FIELD_LABELS[d.field] || d.field) + ': ' + (d.before ?? '—') + ' → ' + (d.after ?? '—')).join('; ');
+}
 function auditDiffHtml(diffJson) {
   /* Повреден запис не бива да изглежда като „това действие не е променило нищо“.
      Одитната следа е документът, който проверяващият от регионалната библиотека
@@ -90,7 +115,7 @@ async function renderOdit() {
     <div class="note">Одитната следа записва автоматично кой служител какво е извършил. Задайте името си долу
     вляво в страничния панел, за да се отбелязва коректно.</div>
     <div class="toolbar">
-      <input id="oditSearch" type="search" style="flex:1;max-width:420px" placeholder="Търсене по служител, действие, подробност…" value="${esc(ODIT_Q)}">
+      <input id="oditSearch" type="search" style="flex:1;max-width:420px" placeholder="Търсене по дата (29.09), служител, действие, подробност…" value="${esc(ODIT_Q)}">
       <span style="flex:1"></span>
       <span class="hint" id="oditCount">${esc(auditCountText(rows.length))}</span>
       <button class="btn sm" onclick="exportAuditCSV()">CSV</button>
@@ -103,7 +128,15 @@ async function exportAuditCSV() {
   // audit:export — без лимита на екрана (одит v2.4.25): файлът е за проверяващия.
   const rows = await call(window.api.audit.export(ODIT_Q));
   if (!rows) return;
-  const h = ['Дата/час', 'Служител', 'Действие', 'Подробност'];
+  /* КОЛОНА „ПРЕДИ/СЛЕД“ (v2.4.71, кръг 45, С12).
+     (а) Екранът показва под подробността какво е било и какво е станало
+     (телефон, адрес, цена…), а CSV-то имаше само четирите колони — „Редакция на
+     читател“ излизаше във файла без нито дума какво е редактирано.
+     (б) CSV-то е файлът, който отива при проверяващия; без „преди/след“ той не
+     доказва нищо за поправките по чл. 17, ал. 2 от Наредба № 3 — а редът за
+     износа в следата изрично казва, че файлът ги съдържа.
+     (в) Пета колона със същия текст като на екрана (auditDiffText). */
+  const h = ['Дата/час', 'Служител', 'Действие', 'Подробност', 'Преди/след'];
   /* Одит v2.4.14: това беше ЕДИНСТВЕНОТО изнасяне в CSV, което преизмисляше
      цитирането на място и не прилагаше неутрализацията на водещите = + - @
      (security-utils.js: csvCell). Другите три — каталогът, читателите и
@@ -112,7 +145,7 @@ async function exportAuditCSV() {
      започват направо с данни: името на служителя, заглавие на предложение за
      покупка, име на нов служител. csvSafe е същите три реда, изнесени в
      src/views/core.js, защото екранният слой няма достъп до модула. */
-  const csv = [h.join(';')].concat(rows.map(a => [auditTs(a.ts), a.user, a.action, a.detail]
+  const csv = [h.join(';')].concat(rows.map(a => [auditTs(a.ts), a.user, a.action, a.detail, auditDiffText(a.diff)]
     .map(csvSafe).join(';'))).join('\r\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);

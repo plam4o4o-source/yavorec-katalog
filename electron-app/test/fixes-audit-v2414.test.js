@@ -839,7 +839,9 @@ test('одитната следа за отчисляване брои доку�
      инвентарен номер). Ядрото отказва и не пише нищо — нито акт, нито ред в
      следата, който после да се разминава с каквото и да е. */
   const refused = ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени' }, bookIds: ids
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени', committee1: 'А', committee3: 'В' }, bookIds: ids
   });
   assert.equal(refused.ok, false);
   assert.match(refused.error, /Под инв\. № 1 .* са вписани 3 екземпляра/);
@@ -850,7 +852,7 @@ test('одитната следа за отчисляване брои доку�
      документа, и следата, и списъкът казват същото число като самия акт. */
   db.prepare('UPDATE inventory SET quantity = 1').run();
   const res = ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени' }, bookIds: ids
+    act: { no: 1, date: '2026-03-01', reason_code: 1, reason_text: 'изхабени', committee1: 'А', committee3: 'В' }, bookIds: ids
   });
   assert.equal(res.ok, true, res.error);
   const line = audit.find(x => x.a === 'Отчисляване');

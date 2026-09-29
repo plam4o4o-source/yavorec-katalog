@@ -109,12 +109,28 @@ function setup() {
     close: () => { try { db.close(); } catch (e) { /* вече е затворена */ } pii.clearSession(); }
   };
 }
-/* Прави .invbak.tmp невъзможен за записване, като на негово място слага ПАПКА —
-   точно както е възпроизведен провалът от одита (EISDIR). Външна причина, без
-   подменен fs: криптирането гърми там, където и в живота — при писането. */
+/* Прави временния .invbak невъзможен за записване — точно както е възпроизведен
+   провалът от одита (EISDIR): криптирането гърми там, където и в живота — при
+   писането. */
+/* v2.4.71 (кръг 45, С5): временният файл вече е `<крайно име>.<pid>-<случаен>.tmp`
+   — уникален за всеки запис, за да не се блъскат две работни места в обща папка.
+   Папка на мястото на `.invbak.tmp` вече не блокира нищо (името е друго), затова
+   провалът се пресъздава при самото писане на временния криптиран файл — със
+   същата грешка EISDIR, която одитът е видял. Подмяната се връща в s.close(). */
 function blockStagedFile(s) {
   fs.mkdirSync(s.backupsDir, { recursive: true });
-  fs.mkdirSync(s.enc + '.tmp');
+  const orig = fs.writeFileSync;
+  fs.writeFileSync = function (p, ...rest) {
+    const f = String(p);
+    if (f.startsWith(s.enc + '.') && f.endsWith('.tmp')) {
+      const e = new Error("EISDIR: illegal operation on a directory, open '" + f + "'");
+      e.code = 'EISDIR';
+      throw e;
+    }
+    return orig.call(this, p, ...rest);
+  };
+  const close = s.close;
+  s.close = () => { fs.writeFileSync = orig; close(); };
 }
 function opens(file, password) {
   try { return decryptBackupBuffer(file, password).subarray(0, 15).toString('utf8') === 'SQLite format 3'; }

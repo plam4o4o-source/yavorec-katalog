@@ -12,6 +12,9 @@ const { isValidIsoDate, parseRegisterNo, resolveScannedBook } = require('../secu
 const { chargeCoverage, chargeLost, chargeOverdueFine } = require('./account');
 const { EVENT_KIND_LOST } = require('../db/enum-triggers');
 const { localDate } = require('../local-date');
+/* Правилото „нашият документ е при партньора по МЗС“ — едно за гишето, за
+   резервациите и оттук и за акта (v2.4.71, находка М2). */
+const { mzsBlockForBook } = require('./mzs');
 
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode,
@@ -19,7 +22,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
        защото този модул се регистрира и самостоятелно в тестовете, с ръчно сглобен
        deps-обект. Всяка от тях има поведение „по подразбиране“ по-долу, което е
        по-бедно, но никога не гърми. */
-    logEvent, closedDaysBetween, today } = deps;
+    logEvent, closedDaysBetween, today, nextWorkDay } = deps;
 
   /* Днешната дата — през main.js, когато е подадена, за да е ЕДНА и съща с тази,
      с която се датират заемането, връщането и дневникът. */
@@ -38,12 +41,28 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      Ако модулът е зареден без календара (самостоятелна регистрация в тест),
      затворените дни не се вадят — по-добре груб брой дни, отколкото отказ да се
      начисли каквото и да било. */
+  /* ПАДЕЖ В ЗАТВОРЕН ДЕН (v2.4.71, находка Ч4 от кръг 45). Гишето вече брои
+     забавата от ПЪРВИЯ РАБОТЕН ДЕН след падежа: падеж 13.10, обявен по-късно за
+     затворен (болничен), и връщане на 14.10 даваха „Забава 1 ден“ за ден, в
+     който читателят не е можел да върне книгата. Актът по т. 5 закрива същото
+     заемане и трябва да начисли СЪЩОТО число — иначе огледалото отново се
+     разминава с „Просрочени“ и писмото. Без календара (самостоятелен тест)
+     началото остава падежът. */
   function effectiveDaysLate(dueDate, inDate) {
     if (!dueDate || !inDate || inDate <= dueDate) return 0;
-    const raw = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(dueDate).getTime()) / 864e5));
+    let start = dueDate;
+    if (typeof nextWorkDay === 'function') {
+      try { start = nextWorkDay(dueDate) || dueDate; }
+      catch (err) {
+        logAudit('Отчисляване', 'ВНИМАНИЕ: първият работен ден след падежа не можа да се прочете от календара ('
+          + err.message + ') — забавата по закритото заемане е смятана от самия падеж.');
+      }
+    }
+    if (inDate <= start) return 0;
+    const raw = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(start).getTime()) / 864e5));
     let closed = 0;
     if (typeof closedDaysBetween === 'function') {
-      try { closed = Number(closedDaysBetween(dueDate, inDate)) || 0; }
+      try { closed = Number(closedDaysBetween(start, inDate)) || 0; }
       catch (err) {
         /* Календарът не бива да спира съставянето на акт — но мълчаливо
            различно число е точно болестта, срещу която е бележката по-горе. */
@@ -399,6 +418,24 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      заглавия по три екземпляра се виждаха като „3 документа, 30 лв.“ и се
      утвърждаваха като 9 документа за 90 лв. Оттук нататък екранът разполага със
      същото число, което ще влезе в акта. */
+  /* Отказът за документ при партньора по МЗС (v2.4.71, находка М2) — един текст
+     за сканирането в акта и за ядрото му. Решението „при партньора ли е“ взима
+     mzsBlockForBook (handlers/mzs.js); оттук идват само подробностите за
+     изречението: коя библиотека, коя заявка, от кога, до кога. */
+  function mzsAwayRowStmt(db) {
+    return db.prepare(`SELECT no, year, partner, date_sent, due_date FROM mzs_requests
+      WHERE book_id = ? AND direction = 'входящо' AND status IN ('изпратено', 'получено')
+      ORDER BY id DESC LIMIT 1`);
+  }
+  function mzsDeaccWhy(b, r, tail) {
+    return 'Инв. № ' + b.inv_number + (b.title ? ' („' + b.title + '“)' : '') + ' е изпратен по междубиблиотечно заемане'
+      + (r ? ' на ' + r.partner + ' (заявка № ' + r.no + '/' + r.year
+        + (r.date_sent ? ', изпратен на ' + bgDate(r.date_sent) + ' г.' : '')
+        + (r.due_date ? ', срок за връщане ' + bgDate(r.due_date) + ' г.' : '') + ')' : '')
+      + ' и не може да се отчисли: комисията не може да огледа документ, който е при друга библиотека, '
+      + 'а заявката би останала да сочи към отчислен документ. Когато се върне, отбележете заявката „върнато“ '
+      + 'в „МЗС“ и тогава съставете акта.' + (tail || ' Актът НЕ е съставен.');
+  }
   ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
     const c = normalizeScanCode(code);
     const db = getDb();
@@ -435,6 +472,10 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         + ' и не влиза във втори акт. Ако актът е сгрешен, анулирайте го от „Отчисляване“ — '
         + 'документът се връща във фонда и чак тогава може да влезе в нов акт.');
     }
+    /* При партньора по МЗС — казва се още при сканирането в акта (v2.4.71, М2),
+       със същия текст, с който ядрото на акта (createActCore) отказва. Екранът
+       само научава по-рано; правилото стои в ядрото. */
+    if (mzsBlockForBook(db, b.id)) throw new Error(mzsDeaccWhy(b, mzsAwayRowStmt(db).get(b.id), ' Документът не е добавен в списъка.'));
     const q = db.prepare('SELECT quantity FROM inventory WHERE book_id = ?').get(b.id);
     b.fund_qty = q ? q.quantity : null;
     /* Ако документът е приключен като ИЗГУБЕН (v2.4.56), актът по чл. 30, т. 5
@@ -551,11 +592,15 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             + (maxNo + 1 === no - 1 ? '№ ' + (maxNo + 1) : '№ ' + (maxNo + 1) + ' – ' + (no - 1))
             + ' — чл. 35 изисква номерата да текат последователно от 1 всяка календарна година'
           : '';
+        /* director — И6 (v2.4.71): снимка на името на ръководителя от Настройки към
+           съставянето; разпечатката го слага до „УТВЪРДИЛ“ (виж approverLine в
+           src/views/core.js). Препечатан стар документ пази СВОЕТО име. */
         const info = db.prepare(`
           INSERT INTO deaccession_acts (no, year, date, order_no, reason_code, reason_text, disposal, attach,
-                                        committee1, committee2, committee3, note, created_at, created_by)
+                                        committee1, committee2, committee3, note, created_at, created_by, director)
           VALUES (@no, @year, @date, @order_no, @reason_code, @reason_text, @disposal, @attach,
-                  @committee1, @committee2, @committee3, @note, datetime('now'), @created_by)
+                  @committee1, @committee2, @committee3, @note, datetime('now'), @created_by,
+                  (SELECT NULLIF(TRIM(director), '') FROM settings WHERE id = 1))
         `).run({
           no, year, date: act.date, order_no: act.order_no || null,
           reason_code: reasonCode, reason_text: String(act.reason_text).trim(),
@@ -627,11 +672,14 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           FROM loans l LEFT JOIN readers r ON r.id = l.reader_id
           WHERE l.book_id = ? AND l.date_in IS NULL
           ORDER BY l.date_out, l.id`);
+        /* ROUND(…, 2) (v2.4.71, Ч10): натрупаната сума по заемането се закръгля
+           до стотинка при всеки запис, както на гишето — 0,40 + 0,20 иначе
+           лягаше в базата като 0.6000000000000001. */
         const closeLoanStmt = db.prepare(`UPDATE loans SET
             date_in = @date, deaccession_act_id = @act,
             lost = 1, lost_date = @date, lost_resolution = @res, lost_amount = @amount,
             lost_account_line_id = @line, lost_note = @note,
-            fine = COALESCE(fine, 0) + @fine, deaccession_fine = @fine,
+            fine = ROUND(COALESCE(fine, 0) + @fine, 2), deaccession_fine = @fine,
             deaccession_fine_line_id = @fineLine
           WHERE id = @id AND date_in IS NULL`);
         const finePerDay = Number((db.prepare('SELECT fine_per_day FROM settings WHERE id = 1').get() || {}).fine_per_day) || 0;
@@ -780,6 +828,13 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
            нарушено в самото обхождане, което поправя. */
         const offStmt = db.prepare(`UPDATE books SET status = ?, status_date = ?,
           deaccession_act_id = ?, deaccession_date = ? WHERE id = ?`);
+        /* Записите, по които изобщо има входяща заявка по МЗС — ЕДНА заявка преди
+           обхождането (v2.4.71, М2). Точното правило (mzsBlockForBook) се пита само
+           за тях, а не по веднъж за всеки от хилядите номера в акта: то сглобява
+           своите заявки при всяко извикване (виж test/perf-v2448.test.js). */
+        const mzsCandidates = new Set(db.prepare(`SELECT DISTINCT book_id FROM mzs_requests
+          WHERE book_id IS NOT NULL AND direction = 'входящо'`).all().map(r => r.book_id));
+        const mzsAwayRow = mzsAwayRowStmt(db);
         bookIds.forEach(bookId => {
           const b = bookStmt.get(bookId);
           /* Одит v2.4.24: дотук липсващият ред просто се ПРОПУСКАШЕ (`if (!b) return`).
@@ -880,6 +935,24 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
               + 'приключете заемането с „Документът е изгубен“ и съставете акт по чл. 30, т. 5 '
               + '(повредени или невърнати от ползватели). Актът НЕ е съставен.');
           }
+          /* ДОКУМЕНТ, КОЙТО Е ПРИ ПАРТНЬОРА ПО МЗС (v2.4.71, находка М2).
+             =================================================================
+             (а) Наш документ, изпратен на друга библиотека по входяща заявка
+                 („изпратено“/„получено“), се отчисляваше без дума: заявката
+                 оставаше „изпратено“ и сочеше към отчислен документ, а при
+                 връщането му библиотеката получава книга, която вече не е във
+                 фонда — и в КДБФ, и в инвентарната книга.
+             (б) Комисията не може да огледа документ, който е в друг град, и
+                 не може да реши съдбата му, докато за него има открито
+                 задължение между двете библиотеки. Същото правило програмата
+                 вече пази за заетия от читател документ (точно отгоре) и за
+                 заемането на гишето (mzsBlockForBook в handlers/loans.js).
+             (в) Отказ с обяснение — по същото правило, по което гишето отказва
+                 заемане (mzsBlockForBook, handlers/mzs.js): отказва се, когато
+                 НЯМА свободна бройка извън партньора. Изходът е в „МЗС“. */
+          if (mzsCandidates.has(b.id) && mzsBlockForBook(db, b.id)) {
+            throw new Error(mzsDeaccWhy(b, mzsAwayRow.get(b.id)));
+          }
           insItem.run({
             act_id: actId, book_id: b.id, inv_number: b.inv_number, author: b.author, title: b.title,
             volume: b.volume, year: b.year, price: b.price, udk: b.udk,
@@ -965,8 +1038,47 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
             + '(чл. 35 и чл. 39) и такава дупка в поредицата не може да се обясни. Актът НЕ е съставен. '
             + 'Поправете бройките от „Настройки“ → „Проверка на данните“ и съставете акта отново.');
         }
-        db.prepare('UPDATE settings SET committee1=?, committee2=?, committee3=? WHERE id=1')
-          .run(act.committee1 || null, act.committee2 || null, act.committee3 || null);
+        /* АКТ БЕЗ КОМИСИЯ НЕ СЕ УТВЪРЖДАВА (v2.4.71, находка И2).
+           =================================================================
+           (а) Тестерът изтри трите полета на комисията и натисна „Утвърди“:
+               „Акт № 1/2026 е утвърден и 1 документ е отчислен“, в акта —
+               committee1..3 = NULL, разпечатката — „Комисия: 1. ………… 2. …………
+               3. …………“. И по-лошо: следващият ред в тази функция записваше
+               празните стойности в „Настройки“ и изтриваше оттам комисията —
+               следващият акт и партидата идваха с празни полета.
+           (б) Чл. 35 изисква актът да се състави от комисия, в която влизат
+               библиотекар и счетоводител. Акт без нито едно име е подписан
+               документ, за който не личи кой го подписва — а номерът му се заема
+               завинаги (чл. 35, чл. 39) и той влиза в КДБФ (Приложение № 3).
+           (в) Искат се член 1 (библиотекар) и член 3 (счетоводител) — същите
+               етикети, с които ги назовава „Настройки“. Член 2 не е задължителен:
+               наредбата не казва колко още членове има. Проверката е тук, в
+               ядрото — през него минават прекият акт, утвърждаването на проект и
+               второто работно място. Проектът НЕ се спира: той е работен лист и
+               комисията може да се допише преди утвърждаването.
+               Мястото е СЛЕД проверките по документите и вътре в транзакцията
+               (както проверката за 0 документа отгоре): отказът по конкретен
+               номер — зает, при партньора по МЗС, неразделен запис — е
+               по-полезен първи, а нищо не остава записано. */
+        const cm = (v) => (v == null ? '' : String(v).trim());
+        const needed = [];
+        if (!cm(act.committee1)) needed.push('член 1 (библиотекар)');
+        if (!cm(act.committee3)) needed.push('член 3 (счетоводител)');
+        if (needed.length) {
+          throw new Error('Актът не може да се утвърди без ' + needed.join(' и ') + ' на комисията: по чл. 35 '
+            + 'актът се съставя от комисия, в която влизат библиотекар и счетоводител. Впишете '
+            + (needed.length === 1 ? 'името' : 'имената') + ' в полетата „Член на комисия“ и утвърдете отново. '
+            + 'Актът НЕ е съставен, нищо не е отчислено.');
+        }
+        /* ЗАПОМНЯ СЕ САМО НАПИСАНОТО (v2.4.71, находка И2). Последната комисия
+           се помни в „Настройки“ нарочно — следващият акт и партидата я
+           предлагат. Но празно поле тук ТРИЕШЕ записаното там: един акт без
+           член 2 оставяше всички следващи форми без член 2. Празното значи
+           „този път няма“, не „забрави го“. (Членове 1 и 3 вече не могат да са
+           празни — виж проверката точно отгоре.) */
+        db.prepare(`UPDATE settings SET committee1 = COALESCE(?, committee1), committee2 = COALESCE(?, committee2),
+          committee3 = COALESCE(?, committee3) WHERE id = 1`)
+          .run(cm(act.committee1) || null, cm(act.committee2) || null, cm(act.committee3) || null);
         // `no`, а не `act.no`: parseRegisterNo() вече е нормализирал „007“ до 7 —
         // следата трябва да сочи номера, който Е ВПИСАН в регистъра.
         /* Изгубените документи в акта се назовават поименно в следата (v2.4.56):
@@ -1051,7 +1163,12 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           + 'Ако това е нарочно, в „Онлайн каталог“ натиснете „Запиши въпреки това…“.')));
       } else if (w && !w.written) {
         logAudit('Онлайн каталог', 'ВНИМАНИЕ: записът на каталога след отчисляване на акт № ' + act.no
-          + ' не успя' + (w.error ? ': ' + w.error : '.') + ' Проверете папката за онлайн каталога в „Настройки“.');
+          /* „в Настройки“ пращаше библиотекарката на грешно място (v2.4.71, М9):
+             папката за онлайн каталога се избира в „Отчети“ → „Онлайн каталог“.
+             Причината от записа се завършва с точка — дотук двете изречения
+             се слепваха („…не е достъпна Проверете…“). */
+          + ' не успя' + (w.error ? ': ' + String(w.error).replace(/[.!]?\s*$/, '.') : '.')
+          + ' Проверете папката за онлайн каталога в „Отчети“ → „Онлайн каталог“.');
       }
   }
   ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>

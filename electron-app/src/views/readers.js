@@ -422,6 +422,22 @@ async function clearSuspension(id) {
   if (ok !== null) { closeModal(); if (VIEW === 'circ') renderCirc(); else renderReaders(); }
 }
 window.clearSuspension = clearSuspension;
+/* Контролата на ЕГН — същата сметка като egnCheckProblem в handlers/readers.js
+   (тегла 2,4,8,5,10,9,7,3,6; остатък по модул 11, 10 → 0; месец 1–12, 21–32 или
+   41–52). Връща '' за изправно ЕГН или изречение какво не е наред. */
+function egnProblem(egn) {
+  const d = String(egn).split('').map(Number);
+  const w = [2, 4, 8, 5, 10, 9, 7, 3, 6];
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += d[i] * w[i];
+  const ctrl = (sum % 11) % 10;
+  const mm = d[2] * 10 + d[3], dd = d[4] * 10 + d[5];
+  const monthOk = (mm >= 1 && mm <= 12) || (mm >= 21 && mm <= 32) || (mm >= 41 && mm <= 52);
+  if (!monthOk || dd < 1 || dd > 31) return 'цифрите за месец и ден не са възможна дата на раждане';
+  if (ctrl !== d[9]) return 'контролната цифра не съвпада (очаква се ' + ctrl + ')';
+  return '';
+}
+window.egnProblem = egnProblem;
 async function saveReader(id) {
   const d = formData('#readerF');
   if (!d.name.trim()) return toast('Името е задължително.', 'err');
@@ -436,6 +452,26 @@ async function saveReader(id) {
   if (GUARANTOR_CATS.includes(d.category) && !d.parent_consent) {
     return toast('За читател под 14 г. отбележете и съгласието на родител/настойник — '
       + 'съгласието за обработване на лични данни на дете под 14 години се дава от него.', 'err');
+  }
+  /* ЕГН — ЕКРАНЪТ ПРЕДУПРЕЖДАВА ПО-РАНО (v2.4.71, находка Ч11). Правилото е в
+     обработчика (checkEgn в handlers/readers.js): не 10 цифри — отказ. Тук
+     същото се казва преди записа, а неверната контролна цифра (или невъзможна
+     дата в ЕГН-то) се ПИТА: понякога в полето стои ЛНЧ на чужденец. Проверява
+     се само промененото ЕГН — заварено неправилно ЕГН не спира смяната на
+     телефона. */
+  const egnEl = /** @type {HTMLInputElement|null} */ (document.querySelector('#readerF [name=egn]'));
+  if (egnEl && !egnEl.disabled && !egnEl.readOnly && egnEl.value !== egnEl.defaultValue) {
+    const raw = String(egnEl.value || '').trim();
+    const egn = /^[\d\s-]+$/.test(raw) ? raw.replace(/[\s-]/g, '') : raw;
+    if (egn && !/^\d{10}$/.test(egn)) {
+      return toast('ЕГН „' + raw + '“ не е ЕГН — трябва да е точно 10 цифри. Проверете го в личната карта '
+        + 'или оставете полето празно. Читателят не е записан.', 'err');
+    }
+    const prob = egn ? egnProblem(egn) : '';
+    if (prob && !await askConfirm('ЕГН ' + egn + ': ' + prob + '.\n\nАко е ЛНЧ на чужденец или сте сверили ЕГН-то с личната карта, '
+        + 'запишете го въпреки това — в одитната следа ще остане бележка.',
+        { kind: 'warn', title: 'Проверка на ЕГН', okLabel: 'Запиши въпреки това', cancelLabel: 'Поправи' })) return;
+    d.egn = egn;
   }
   d.id = id;
   /* Отпечатъкът от отварянето (v2.4.56) — виж assertUnchanged в

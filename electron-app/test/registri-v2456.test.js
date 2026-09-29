@@ -750,7 +750,9 @@ test('deaccessionActs:findBook носи данните за изгубения �
   // И когато актът бъде съставен, следата назовава изгубените поименно.
   t.audit.length = 0;
   ok(t.ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-04-01', reason_code: 5, reason_text: 'невърнати от ползватели' },
+    act: { no: 1, date: '2026-04-01', reason_code: 5, reason_text: 'невърнати от ползватели',
+      /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+      committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   }), 'акт');
   const trail = t.audit.map(a => a.detail).join(' ');

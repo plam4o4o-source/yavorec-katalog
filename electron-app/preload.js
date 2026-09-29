@@ -194,7 +194,9 @@ contextBridge.exposeInMainWorld('api', {
     update: invoke('readers:update'),
     delete: invoke('readers:delete'),
     clearSuspension: invoke('readers:clearSuspension'),
-    exportCsv: invoke('readers:exportCsv')
+    exportCsv: invoke('readers:exportCsv'),
+    // Чужди книги по МЗС у читателя — за гишето (v2.4.71, находка М8).
+    mzsHeld: invoke('readers:mzsHeld')
   },
   /* Пълен износ на данните (CSV в ZIP) — handlers/export-all.js. Стои като
      отделна група, а не под `settings`, защото не е настройка, а действие върху

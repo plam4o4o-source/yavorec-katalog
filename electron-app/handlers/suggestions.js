@@ -59,28 +59,60 @@ function authorWords(s) {
 /* „Фамилия + инициал“ — по-хлабавият ключ, който хваща „Вазов, И.“ срещу
    „Иван Вазов“. Фамилията е частта пред запетаята, а при липса на запетая —
    последната дума (пак както basisOf в handlers/author-mark.js). */
-function surnameInitial(s) {
+/* Кръг 45, Ф2 — фамилия само по себе си и двойна фамилия с тире.
+
+   (а) Какво ставаше: предложение „Под игото“ от „Вазов“ НЕ се разпознаваше, когато
+   книгата постъпи като „Вазов, Иван“ — въпросът „това ли е предложената книга?“ не
+   излизаше и предложението оставаше „поръчано“. Същото за „Сент-Екзюпери“ срещу
+   „Антоан дьо Сент-Екзюпери“ и „Толкин“ срещу „Толкин, Джон Роналд Руел“
+   (възпроизведено с пробата на тестера sug-match.js: 4 от 7 двойки — „НЕ се
+   предлага“). Две причини: ключът „фамилия + инициал“ искаше инициал И ОТ ДВЕТЕ
+   страни („вазов|“ ≠ „вазов|и“), а normText() режеше тирето и „Сент-Екзюпери“
+   ставаше две думи — фамилия „екзюпери“ и „име“ „сент“.
+   (б) Защо е грешно: читателят на гишето казва точно фамилията — „искам новата на
+   Вазов“; библиотеката знае със сигурност, че той чака книгата, но не му казва, че
+   е дошла, а разделът „Предложения“ се пълни с вечни „поръчано“.
+   (в) Защо точно така: за ИМЕ (не за заглавие) тирето между букви е част от
+   фамилията и се пази; автор от ЕДНА дума се сравнява само с фамилията на другата
+   страна (тя е пред запетаята, а без запетая — последната дума, както в basisOf()).
+   Това е по-хлабаво, но съвпадението само СЕ ПРЕДЛАГА — решението остава на
+   библиотекарката, а заглавието пак трябва да съвпада изцяло. Различни фамилии
+   („Вазов“ срещу „Константинов, Алеко“) продължават да НЕ съвпадат. */
+function normName(s) {
+  return String(s == null ? '' : s)
+    .toLowerCase()
+    .replace(/[„“”"'«»‘’]/g, ' ')
+    .replace(/[.,;:!?()\[\]\/\\–—]/g, ' ')
+    .replace(/(^|\s)-+|-+(?=\s|$)/g, ' ')   // самотно тире не е част от име
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+/** @returns {{ surname: string, rest: string, single: boolean }} */
+function nameParts(s) {
   const raw = firstAuthor(s);
   const c = raw.indexOf(',');
-  let surname, rest;
   if (c > 0) {
-    surname = normText(raw.slice(0, c));
-    rest = normText(raw.slice(c + 1));
-  } else {
-    const w = normText(raw).split(' ').filter(Boolean);
-    if (!w.length) return '';
-    surname = w[w.length - 1];
-    rest = w.slice(0, -1).join(' ');
+    const surname = normName(raw.slice(0, c)), rest = normName(raw.slice(c + 1));
+    return { surname, rest, single: !rest && !surname.includes(' ') };
   }
-  if (!surname) return '';
-  return surname + '|' + (rest ? rest.charAt(0) : '');
+  const w = normName(raw).split(' ').filter(Boolean);
+  if (!w.length) return { surname: '', rest: '', single: false };
+  return { surname: w[w.length - 1], rest: w.slice(0, -1).join(' '), single: w.length === 1 };
+}
+function surnameInitial(s) {
+  const p = nameParts(s);
+  if (!p.surname) return '';
+  return p.surname + '|' + (p.rest ? p.rest.charAt(0) : '');
 }
 function authorsMatch(a, b) {
   const wa = authorWords(a), wb = authorWords(b);
   if (!wa.length || !wb.length) return false;
   if (wa.join(' ') === wb.join(' ')) return true;
   const sa = surnameInitial(a), sb = surnameInitial(b);
-  return !!sa && sa === sb;
+  if (!!sa && sa === sb) return true;
+  // Ф2: едната страна е само фамилия — стига фамилиите да съвпадат.
+  const pa = nameParts(a), pb = nameParts(b);
+  return (pa.single || pb.single) && !!pa.surname && pa.surname === pb.surname;
 }
 /* Връща отворените предложения, които отговарят на постъпилия документ.
    Отворени = всичко, което НЕ е „получено“ или „отказано“: отказаното е
@@ -151,15 +183,31 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id }) =>
+  /* Кръг 45, Ф10: освен acquisition_id се приема и book_id — документът, с
+     чието вписване се затваря предложението (прозорецът след books:create).
+     (а) Дотук оттам идваше само { id, status } и acquisition_id ставаше NULL:
+     разделът „Предложения“ губеше „партида № …“ за книга, вписана по партида.
+     (б) Връзката предложение → партида е следата, че покупката е по желание на
+     читател; без нея тя изчезва точно в най-честия път.
+     (в) Партидата се чете от КНИГАТА тук, в обработчика — не се доверява на
+     прозореца да я преписва; изрично подаден acquisition_id (прозорецът
+     „Получено…“) печели, защото там библиотекарката я е избрала сама. */
+  ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id, book_id }) =>
     run(() => {
       const db = getDb();
       if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
       const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);
       if (!s) throw new Error('Предложението вече не съществува — вероятно е изтрито от друго работно място.');
+      let acq = acquisition_id || null;
+      let viaBook = null;
+      if (status === 'получено' && !acq && book_id != null) {
+        viaBook = db.prepare('SELECT inv_number, acquisition_id FROM books WHERE id = ?').get(book_id) || null;
+        acq = (viaBook && viaBook.acquisition_id) || null;
+      }
       db.prepare('UPDATE suggestions SET status = ?, acquisition_id = ? WHERE id = ?')
-        .run(status, status === 'получено' ? (acquisition_id || null) : null, id);
-      logAudit('Предложение за покупка', s.title + ' → ' + status);
+        .run(status, status === 'получено' ? acq : null, id);
+      logAudit('Предложение за покупка', s.title + ' → ' + status
+        + (viaBook ? ' (с вписването на инв. № ' + (viaBook.inv_number ?? '—') + ')' : ''));
     })
   );
   ipcMain.handle('suggestions:delete', (e, id) =>

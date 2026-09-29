@@ -340,6 +340,10 @@ test('О5/О2 — телефонът: „Добави“ без Enter, инте�
   const man = d.getElementById('manual');
   man.value = '6 102';
   d.getElementById('addBtn').click();
+  /* v2.4.71 (находка И5): полето за пренасяне се попълва при докосване (и при
+     „Копирай“/„Запиши файл“), а не при всяко добавяне — на дълъг списък то беше
+     най-скъпата част от добавянето. Тестът го докосва. Променено нарочно. */
+  d.getElementById('out').dispatchEvent(new d.defaultView.Event('focus'));
   assert.deepEqual(d.getElementById('out').value.split('\n').slice(1), ['6102'], 'добавено без Enter, като един номер');
   assert.match(d.getElementById('manualMsg').textContent, /Добавен е 6102 \(без интервалите\)/);
   man.value = '7,8';

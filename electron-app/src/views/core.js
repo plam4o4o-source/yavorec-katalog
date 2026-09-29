@@ -1232,7 +1232,26 @@ async function setTheme(id) {
   await call(window.api.settings.updateTheme(id));
   markSaved();
   await loadSettingsCache();
-  if (VIEW === 'setup') renderSetup();
+  /* ТЕМАТА НЕ ПРЕЧЕРТАВА ФОРМАТА (v2.4.71, кръг 45, находка С7).
+     (а) Дотук щракването върху тема викаше renderSetup() — цялата страница
+     „Настройки“ се пресъздаваше от базата. Тестер (s10-ekran.js): написано
+     „гр. Нов град (незаписано)“ в „Населено място“, щракване на „Графит“ →
+     полето е старото, без дума.
+     (б) Темата се сменя с едно щракване, често „за проба“ насред попълването —
+     и изтрива всичко незаписано по другите раздели, което после се записва
+     старо с „Запиши настройките“.
+     (в) Самата тема вече е приложена (loadSettingsCache → applyTheme); на
+     страницата остава само отметката ✓ върху избрания бутон — тя се сменя на
+     място. Нищо друго не се пипа. */
+  if (VIEW === 'setup') {
+    /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#view .themeSw[data-theme-id]')).forEach(b => {
+      const on = b.dataset.themeId === String(id);
+      b.classList.toggle('on', on);
+      const t = THEMES.find(x => x.id === b.dataset.themeId);
+      const nm = b.querySelector('.themeSwName');
+      if (nm && t) nm.textContent = t.name + (on ? ' ✓' : '');
+    });
+  }
 }
 window.setTheme = setTheme;
 async function setScanSound(on) {
@@ -1350,6 +1369,23 @@ function shead() {
   return s.logo ? `<div class="pheadRow"><img class="plogo" src="${esc(s.logo)}" alt="">${text}</div>` : text;
 }
 function ssig(names) { return `<div class="psig">${names.map(n => `<div>${n}</div>`).join('')}</div>`; }
+/* „УТВЪРДИЛ“ С ИМЕТО НА РЪКОВОДИТЕЛЯ (v2.4.71, находка И6 от кръг 45).
+   (а) Полето „Ръководител“ в Настройки не се печаташе никъде: актът, протоколът
+       и КДБФ излизаха с „УТВЪРДИЛ, Председател: …………“, а тестерът търси с grep
+       и намира `director` само във формата.
+   (б) Документ по чл. 30 и по чл. 40, който отива в счетоводството, трябва да
+       казва кой го утвърждава — празна линия без име е слаб документ.
+   (в) Името стои под линията за подпис („/Иван Петров/“), както е прието в
+       нашите документи; линията остава за подписа. Името идва от СНИМКАТА в
+       документа (партида, акт, проверка — колона director от миграция 19), а
+       не от живите Настройки: препечатан акт от 2025 г. не бива да носи
+       името на днешния председател. Документите без снимка (стари) остават
+       само с линия. Текущите справки (Дневник, летопис, указател) подават
+       живото име — те са за днес. */
+function approverLine(role, name, prefix) {
+  const n = String(name == null ? '' : name).trim();
+  return (prefix == null ? 'УТВЪРДИЛ, ' : prefix) + esc(role) + ': …………………' + (n ? ' /' + esc(n) + '/' : '');
+}
 /* ПОДПИСИТЕ НА КОМИСИЯТА — ВСЕКИ НА СВОЯ ЛИНИЯ (v2.4.69, находка Е5 от пълния тест).
    Дотук тримата членове подписваха на ЕДНА линия: „Комисия: 1. Мария Иванова
    2. Петър … 3. …“ стоеше в една клетка на .psig, тоест над един ред за подпис —
@@ -1366,6 +1402,75 @@ function commissionSig(names) {
   /* Празно име (стара партида без снимка на комисията) остава „…………“ за ръчно
      попълване — по-добре празно, отколкото чуждо име под чужд документ. */
   return ssig(list.map((n, i) => (i === 0 ? 'Комисия: ' : '') + (i + 1) + '. ' + (n ? esc(n) : '…………')));
+}
+/* ОПАШКАТА НА ДОКУМЕНТА — БЕЛЕЖКАТА И ПОДПИСИТЕ — Е ЕДНО ЦЯЛО С ПОСЛЕДНИТЕ РЕДОВЕ
+   НА ТАБЛИЦАТА (v2.4.71, кръг 45, Р1; регресия на Е5 от кръг 44).
+   (а) Дотук опашката разчиташе на верига от break-*:avoid между СЪСЕДНИ блокове
+       (таблица → бележка → .psig → .psig) в style.css. Chromium не я спазва, щом
+       бележката е многоредова и подписите са два .psig: истински PDF (тестерът,
+       и в Electron 43) — акт за отчисляване при 44 реда: лист 3 започва с
+       „УТВЪРДИЛ, Председател: ……“, при 47 — с „2. Петров, Петър“ (членовете на
+       комисията на два листа); актът за дарение — при 48–56 реда; протоколът по
+       чл. 3, ал. 2 — при 48–54; КДБФ Част № 1 — при 6–8 и 21–25 партиди;
+       инвентарната книга — при 21–24 и 36 вписвания. А където веригата „успява“
+       (акт с 50 реда), последният лист носи бележката и подписите — без нито ред
+       от описа, който заверяват.
+   (б) Подписът удостоверява написаното НАД него. Лист само с подписи (или с
+       подписи и изречение „Актът е съставен в два екземпляра“) може да бъде
+       подменен или прикрепен към друг опис; комисия, разделена на два листа, не
+       личи като една комисия. Актът и протоколът (чл. 30, 33, 40 от Наредба № 3),
+       КДБФ (чл. 13) и инвентарната книга (чл. 26, ал. 2) се подписват и заверяват.
+   (в) Затова опашката вече НЕ е съседен блок, а ПОСЛЕДЕН РЕД НА САМАТА ТАБЛИЦА:
+       една клетка през всички колони, без рамка, в която стоят бележката и
+       подписите (.ptail). Ред на таблица Chromium не цепи (break-inside:avoid), а
+       break-before:avoid МЕЖДУ РЕДОВЕ на една таблица той спазва — за разлика от
+       границата таблица/блок. Правилото в style.css държи с опашката и последните
+       ДВА реда (последния документ и реда ОБЩО), а заглавието на таблицата (thead)
+       Chromium повтаря на новия лист — тоест, ако опашката не се събира, листът
+       с подписите започва със заглавието, последния документ и сбора
+       „ОБЩО N документа, сума“, после бележката и комисията. Където преди
+       подписите няма таблица, в .ptail влизат само подписите и последната бележка.
+       Правилото е тук, върху DOM-а на прегледа и на печата, а не във всеки от
+       шаблоните: така важи наведнъж за акта, дарението, протокола по чл. 3, ал. 2,
+       протокола от инвентаризация, трите части на КДБФ, инвентарната книга,
+       квитанцията, справките — и за всеки нов документ, който завършва с ssig().
+       Прегледът получава същото преобразуване, за да показва каквото ще излезе. */
+function ppKeepTails(root) {
+  if (!root || !root.querySelector('.psig')) return;
+  for (const doc of Array.from(root.querySelectorAll('.pdoc'))) {
+    const kids = Array.from(doc.children);
+    let i = kids.length;
+    while (i > 0 && kids[i - 1].classList.contains('psig')) i--;
+    if (i === kids.length) continue; // документът не завършва с подписи
+    const prev = kids[i - 1];
+    const isTable = (el) => el && el.tagName === 'TABLE' && el.tBodies.length > 0;
+    // Бележките между таблицата и подписите (.pmeta) — всичките, ако над тях има
+    // таблица; иначе само последната, за да не се премести в опашката целият документ.
+    let j = i;
+    while (j > 0 && kids[j - 1].classList.contains('pmeta')) j--;
+    const table = isTable(kids[j - 1]) ? kids[j - 1] : null;
+    const from = table ? j : (prev && prev.classList.contains('pmeta') ? i - 1 : i);
+    const box = doc.ownerDocument.createElement('div');
+    box.className = 'ptail';
+    for (const k of kids.slice(from)) box.appendChild(k);
+    if (!table) { doc.appendChild(box); continue; }
+    let cols = 0;
+    for (const tr of Array.from(table.rows)) {
+      let n = 0;
+      for (const c of Array.from(tr.cells)) n += c.colSpan || 1;
+      cols = Math.max(cols, n);
+    }
+    const body = table.tBodies[table.tBodies.length - 1];
+    const tr = doc.ownerDocument.createElement('tr');
+    tr.className = 'ptailRow';
+    const td = doc.ownerDocument.createElement('td');
+    td.className = 'ptailCell';
+    td.colSpan = Math.max(1, cols);
+    td.appendChild(box);
+    tr.appendChild(td);
+    body.appendChild(tr);
+    table.classList.add('ptailTable');
+  }
 }
 // Името на документа се задава тук, защото всяка разпечатка минава през
 // setPrintPage непосредствено преди doPrint. Така не се променят дванайсетте
@@ -1488,7 +1593,7 @@ let PRINT_HTML = '';
    единственото място, което печатният изглед показва. */
 function ppFillPrintArea() {
   const area = $('#printArea');
-  if (area) area.innerHTML = PRINT_HTML;
+  if (area) { area.innerHTML = PRINT_HTML; ppKeepTails(area); }
 }
 /* Освобождава паметта на двете тежки места. Без това #printArea оставаше пълен
    до затварянето на програмата: измерено СЛЕД ppClose() и връщане на Табло —
@@ -1521,6 +1626,7 @@ function doPrint(html, docName, onConfirmed) {
   if (!st) { st = document.createElement('style'); st.id = 'ppExtraStyle'; document.head.appendChild(st); }
   st.textContent = ppScopeCss(o.extraCss || '');
   sheet.innerHTML = html;
+  ppKeepTails(sheet); // опашката с подписите — както ще излезе на листа (Р1)
   $('#ppTitle').textContent = PRINT_JOB_NAME || 'Преглед преди печат';
   // Прозорецът за печат на Windows не показва визуализация на Electron
   // съдържание — затова подсказката сочи към „Запази PDF…“, а не към
@@ -1741,16 +1847,28 @@ function labelSheetLayout(kind) {
   const border = s.lbl_border == null || +s.lbl_border ? '1px dashed #999' : 'none';
   return { w, h, mt, ml, gx, gy, roll, want, cols, rows, perSheet: roll ? 1 : cols * rows, border };
 }
-async function confirmManyLabels(n, kind, perSheet, nb, per) {
+/* ЛИСТОВЕТЕ СЕ БРОЯТ С ПРАЗНИТЕ ПОЗИЦИИ (v2.4.71, кръг 45, Р5).
+   (а) Дотук въпросът смяташе ceil(n / perSheet) и не знаеше за „Започни от позиция
+       N“: инв. № 1000–1400 на фабричния лист 3 × 8 (24 на лист) от позиция 20 —
+       въпросът казваше „16 листа“, а от принтера излизаха 17 (първите 19 клетки
+       на първия лист остават празни, а партидите вземат цели листове).
+   (б) Библиотекарката слага в тавата толкова готови листа, колкото ѝ е казано —
+       готовият лист етикети е скъп, а липсващият се открива по средата на печата.
+   (в) Затова празните клетки (skip) влизат в сметката: ceil((n + skip) / perSheet),
+       и въпросът казва, че първите skip клетки остават празни. При ролка skip е 0. */
+async function confirmManyLabels(n, kind, perSheet, nb, per, skip) {
   const what = labelNoun(kind, n);
   // При ролка perSheet е 1 — тогава „листа A4" е безсмислица и числото подвежда.
   const roll = perSheet <= 1;
-  const sheets = Math.ceil(n / perSheet);
+  skip = roll ? 0 : Math.max(0, parseInt(skip, 10) || 0);
+  const sheets = Math.ceil((n + skip) / perSheet);
   nb = nb || 1; per = per || n;
   return askConfirm(
     'ПЕЧАТ НА ' + n + ' ' + what.toUpperCase() + '\n\n'
     + (roll ? 'Печатът е на ролка — това са ' + n + ' ' + what + ' един след друг.\n\n'
-            : 'Това са ' + sheets + ' листа A4 при сегашния формат (' + perSheet + ' на лист).\n\n')
+            : 'Това са ' + sheets + ' листа A4 при сегашния формат (' + perSheet + ' на лист)'
+              + (skip ? ', като първите ' + skip + ' ' + (skip === 1 ? 'клетка' : 'клетки')
+                + ' на първия лист остават празни' : '') + '.\n\n')
     + 'Един документ с толкова ' + (kind === 'card' ? 'карти' : 'етикети') + ' не може да се подготви на обикновен '
     + 'компютър: измерено, 1 000 читателски карти искат над минута и 4,7 ГБ памет, 3 000 етикета — '
     + 'почти минута и 4 ГБ, а през това време програмата не отговаря.\n\n'
@@ -1839,7 +1957,7 @@ async function printLabelSheet(cards, kind, opts) {
     i += take;
   }
   if (!batches.length) batches.push([0, 0]);
-  if (batches.length > 1 && !await confirmManyLabels(n, kind, L.perSheet, batches.length, cap)) return false;
+  if (batches.length > 1 && !await confirmManyLabels(n, kind, L.perSheet, batches.length, cap, skip)) return false;
 
   const warns = [];
   if (L.roll) {
@@ -1950,23 +2068,90 @@ window.printLabelSheet = printLabelSheet;
 /* Мащабът на заглавната част и височината на лентите на етикета за фонда (Е3) —
    смятат се ВЕДНЪЖ за целия печат (името на библиотеката е едно и също върху
    всички етикети) и влизат в extraCss като --lfs и --lbh. */
+/* МАЛЪК ЕТИКЕТ: ОТПАДАТ ЦЕЛИ РЕДОВЕ, А НЕВМЕСТИМИЯТ НОМЕР СЕ КАЗВА (v2.4.71, кръг 45, Р3).
+   (а) Дотук, ако заглавието не влезе и с най-дребния шрифт, .lhead (overflow:hidden)
+       го режеше където свари — на готовия лист L7651 (38,1 × 21,2 мм) редът
+       „НЧ „Васил Левски – 1922““ излизаше разрязан хоризонтално по средата на
+       буквите. А при ниските етикети (L7656, 46 × 11,1 мм) не се събират дори
+       баркодът и номерът — номерът излизаше отрязан, докато прегледът твърдеше
+       „Баркодът и номерът не са засегнати“. Единственият предложен изход
+       („съкратете „Организация“ в Настройки“) сменя и главите на актовете и КДБФ.
+   (б) Половин ред на етикета е по-лошо от липсващ ред: изглежда като грешка на
+       принтера, а отрязан номер не може да се прочете от човек, когато четецът
+       не хване баркода. А официалното име на читалището в документите не бива
+       да се съкращава заради размера на етикета.
+   (в) Затова, щом шрифтът не стига, отпадат ЦЕЛИ редове, по реда на важността им:
+       първо свързващото „Библиотека при“, после населеното място, накрая цялата
+       заглавна част — всеки път с пробата в истински размер (lblFitScale). Кое е
+       отпаднало, се казва (нищо мълчаливо). Ако и без заглавна част баркодът и
+       номерът не се събират, предупреждението казва колко висок трябва да е
+       етикетът. Настройките и документите не се пипат. (Отметка „без заглавна
+       част“ в „Формат на печат“ би искала нова колона в settings — докладвано.) */
 function lblFundCss(kind, w, h, border, warns) {
   if (kind !== 'fund') return '';
   const bar = lblBarMm(h);
+  const s = SETTINGS_CACHE || {};
+  const size = String(w).replace('.', ',') + ' × ' + String(h).replace('.', ',') + ' мм';
   // Пробата е с най-дългия обичаен номер (7 цифри); сглобява се от същите части
   // като lblCard(), без да я вика — броят извикани етикети е броят отпечатани.
-  const probeHtml = lblFundHtml(lblHeadHtml(), '1234567').replace('class="lbl lbl-fund"',
+  const probe = (head) => lblFundHtml(head, '1234567').replace('class="lbl lbl-fund"',
     `class="lbl lbl-fund" style="--lbh:${bar}mm"`);
-  const fit = lblFitScale(probeHtml, w, h, border, '--lfs', (el) => {
+  const cut = (html, cls) => html.replace(new RegExp('<div class="' + cls + '">[^<]*</div>'), '');
+  const over = (el) => {
     const head = el.querySelector('.lhead');
-    return overBox(el) || (head && head.scrollHeight > head.clientHeight + 1);
-  });
-  if (!fit.fits) {
-    warns.push('Името на библиотеката не се побира в етикет ' + w + '×' + h + ' мм дори с по-дребен шрифт — '
-      + 'заглавната част ще излезе отрязана. Баркодът и номерът не са засегнати. Съкратете „Организация“ '
-      + 'и „Населено място“ в „Настройки“ или изберете по-голям етикет.');
+    return overBox(el) || !!(head && head.scrollHeight > head.clientHeight + 1);
+  };
+  const full = lblHeadHtml();
+  // Стъпките: цялата заглавна част → без „Библиотека при“ → и без мястото → без нея.
+  const steps = [{ head: full, hide: [], lost: [] }];
+  if (full.indexOf('class="lh1"') >= 0) {
+    const last = steps[steps.length - 1];
+    steps.push({ head: cut(last.head, 'lh1'), hide: ['lh1'], lost: ['„Библиотека при“'] });
   }
-  return `.lbl-fund{--lfs:${fit.scale};--lbh:${bar}mm}`;
+  if (full.indexOf('class="lh3"') >= 0 && full.indexOf('class="lh2"') >= 0) {
+    const last = steps[steps.length - 1];
+    steps.push({ head: cut(last.head, 'lh3'), hide: last.hide.concat('lh3'), lost: last.lost.concat('„' + (s.place || '') + '“') });
+  }
+  if (full) steps.push({ head: '', hide: ['lhead'], lost: ['цялата заглавна част'] });
+  let pick = null, fit = null;
+  for (const st of steps) {
+    fit = lblFitScale(probe(st.head), w, h, border, '--lfs', over);
+    if (fit.fits) { pick = st; break; }
+  }
+  if (!pick) pick = steps[steps.length - 1];
+  const numberFits = fit && fit.fits;
+  if (!numberFits) {
+    const need = lblNeedMm(probe(''), w, border);
+    warns.push('В етикет ' + size + ' не се събират дори баркодът и номерът под него — номерът ще излезе '
+      + 'отрязан' + (need ? ' (нужни са поне ' + String(need).replace('.', ',') + ' мм височина)' : '')
+      + (full ? ', а заглавната част е махната' : '') + '. Изберете по-висок етикет в „Баркод етикети“ → '
+      + '„Формат на печат“.');
+  } else if (pick.hide.indexOf('lhead') >= 0) {
+    warns.push('Етикетът ' + size + ' е твърде малък за името на библиотеката дори на един ред — етикетите '
+      + 'излизат БЕЗ заглавна част, само с баркода и номера (цели). Ако името трябва да личи, изберете по-голям '
+      + 'етикет. Актовете, КДБФ и другите документи не се променят.');
+  } else if (pick.hide.length) {
+    warns.push('Етикетът ' + size + ' е нисък за цялата заглавна част: ' + (pick.lost.length > 1 ? 'отпадат редовете ' : 'отпада редът ')
+      + pick.lost.join(' и ') + ' — името, баркодът и номерът остават цели. Ако редът трябва да личи, '
+      + 'изберете по-висок етикет. Актовете, КДБФ и другите документи не се променят.');
+  }
+  return `.lbl-fund{--lfs:${numberFits ? fit.scale : 1};--lbh:${bar}mm}`
+    + pick.hide.map(c => `.lbl-fund .${c}{display:none}`).join('');
+}
+/* Колко висок трябва да е етикетът, за да събере пробата (мм, закръглено нагоре до
+   0,5). 0 — без истинско оформление (jsdom), тогава числото не се казва. */
+function lblNeedMm(labelHtml, w, border) {
+  const p = lblProbe();
+  p.innerHTML = labelHtml;
+  const el = /** @type {HTMLElement} */ (p.firstElementChild);
+  let mm = 0;
+  if (el) {
+    el.style.width = w + 'mm'; el.style.height = 'auto'; el.style.border = border;
+    const px = el.getBoundingClientRect().height;
+    if (px > 0) mm = Math.ceil(px * 25.4 / 96 * 2) / 2;
+  }
+  p.innerHTML = '';
+  return mm;
 }
 /* Етикет за фонда: наименование на библиотеката, населено място, баркод (Code 39)
    и инвентарният номер под баркода.
@@ -2005,10 +2190,36 @@ function lblHeadHtml() {
   const place = s.place ? `<div class="lh3">${esc(s.place)}</div>` : '';
   return head || place ? `<div class="lhead">${head}${place}</div>` : '';
 }
+/* ШИРИНАТА НА ЛЕНТИТЕ НА ЕТИКЕТА ЗА ФОНДА = МОДУЛИ × МОДУЛ (v2.4.71, кръг 45, Р2).
+   (а) Дотук <svg> беше width:100% (style.css, .lbl svg) и лентите се разтягаха по
+       цялата ширина на етикета, каквато и да е тя: Avery L7160 (63,5 мм), инв. № 1 —
+       модул 1,31 мм, баркод 56,7 мм и само 2 модула празно отстрани (измерено в
+       PDF при 300 dpi); при 40×30 — 2–5 модула.
+   (б) Нормата за Code 39 иска празно поле (тиха зона) от поне 10 модула от всяка
+       страна: иначе ръчният четец „хваща“ ръба на етикета или шарката на
+       корицата като лента. Отделно изрязан етикет се чете, но залепен на тъмна
+       корица и с евтин четец — на ръба. Прекалено широкият модул не помага, само
+       прави баркода по-труден за хващане с четеца.
+   (в) Същата сметка като при читателската карта (readerCardHtml, Е10): полезната
+       ширина е етикетът минус отстъпите на .lbl (2 × 2,5 мм) и рамката; модулът е
+       толкова, че от двете страни да остават поне 10 модула, но не повече от
+       0,5 мм; ширината на лентите = модули × модул (--bw на самия <svg>). */
+function lblFundBarMm(code) {
+  const s = SETTINGS_CACHE || {};
+  const w = labelSize('fund').w;
+  const framed = s.lbl_mode !== 'roll' && (s.lbl_border == null || +s.lbl_border);
+  const avail = w - 5 - (framed ? 0.6 : 0);
+  const units = code ? code39Units(code) : 0;
+  if (!units || !(avail > 0)) return 0;
+  const mod = Math.min(0.5, avail / (units + 20));
+  return Math.floor(units * mod * 100) / 100;
+}
 function lblFundHtml(headHtml, code) {
+  const bw = lblFundBarMm(code);
+  const svg = code39svg(code, 150, 40);
   return `<div class="lbl lbl-fund">
     ${headHtml}
-    ${code39svg(code, 150, 40)}
+    ${bw && svg.startsWith('<svg ') ? svg.replace('<svg ', `<svg style="--bw:${bw}mm" `) : svg}
     <div class="l3">${esc(code)}</div></div>`;
 }
 function lblCard(b) {
