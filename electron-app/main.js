@@ -643,7 +643,7 @@ function initDb() {
    е 8 — тоест последният ред на runMigrations() (изравняването за база, стигнала
    дотук без нито една регистрирана миграция) беше недостижим, а коментарът
    по-горе вече не описваше кода. Държи се изрично равна на последната миграция. */
-const CURRENT_SCHEMA_VERSION = 18;
+const CURRENT_SCHEMA_VERSION = 19;
 const MIGRATIONS = [
   // v2 — колони за защита на ЕГН/№ ЛК на читателите с обща парола (виж
   // "Защита на лични данни" по-долу): pdp_salt (сол за извеждане на ключа) и
@@ -1032,6 +1032,48 @@ const MIGRATIONS = [
     });
     db.exec(`UPDATE settings SET lbl_mt = lbl_margin, lbl_ml = lbl_margin,
       lbl_gx = lbl_gap, lbl_gy = lbl_gap WHERE id = 1`);
+  } },
+  /* v19 (v2.4.71) — основите за поправките от пълния тест на всички модули (кръг 45).
+     1. reader_registrations (находка Д3): историята на записванията и
+        пререгистрациите. Таблицата идва от schema.sql; тук се попълва от онова,
+        което базата знае досега — датата на записване, последната
+        пререгистрация и всяка начислена „годишна такса“ (програмата я начислява
+        при пререгистрация, тоест тя е следата от ПРЕДИШНИТЕ пререгистрации,
+        които re_registered_at вече е загубила). По една дата на година и читател
+        от таксите — ако вече има ред за същата година, не се добавя втори.
+        Числата за минали години така стават поне толкова пълни, колкото са
+        били, когато са били отчетени; нищо не се измисля.
+     2. periodicals.language (находка Д2): заварените издания получават
+        „български“ — досега програмата изобщо не е питала за език, а
+        абонаментите на читалищата са почти само български вестници и списания.
+        Същото отива в заварените годишни комплекти без език (свързани по
+        поредицата = заглавието на изданието). И двете се казват в одитната
+        следа с броя, за да може библиотекарят да поправи чуждоезично списание. */
+  { version: 19, run: () => {
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
+      SELECT id, substr(registered_at, 1, 10), 'записване' FROM readers
+      WHERE registered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`);
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
+      SELECT id, substr(re_registered_at, 1, 10), 'пререгистрация' FROM readers
+      WHERE re_registered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`);
+    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, date, kind)
+      SELECT a.reader_id, MIN(substr(a.date, 1, 10)), 'пререгистрация'
+      FROM account_lines a JOIN readers r ON r.id = a.reader_id
+      WHERE a.kind = 'начисление' AND a.type = 'годишна такса'
+        AND a.date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
+        AND NOT EXISTS (SELECT 1 FROM reader_registrations x
+                        WHERE x.reader_id = a.reader_id AND substr(x.date, 1, 4) = substr(a.date, 1, 4))
+      GROUP BY a.reader_id, substr(a.date, 1, 4)`);
+    ensureColumns('periodicals', { language: 'TEXT' });
+    const perN = db.prepare("UPDATE periodicals SET language = 'български' WHERE language IS NULL OR TRIM(language) = ''").run().changes;
+    const volN = db.prepare(`UPDATE books SET language = 'български'
+      WHERE volume = 'годишен комплект' AND (language IS NULL OR TRIM(language) = '')
+        AND series IN (SELECT title FROM periodicals)`).run().changes;
+    if (perN || volN) {
+      logAudit('Периодика', 'обновяване до v2.4.71: езикът на ' + perN + ' издания и на ' + volN
+        + ' годишни комплекта е попълнен като „български“ (досега програмата не питаше за език и Дневникът '
+        + 'ги броеше в Раздел Б като „други“). Ако някое списание е на друг език — сменете го в картона на изданието.');
+    }
   } }
 ];
 /* Пазач НАПРЕД по версия на схемата (одит v2.4.18, преглед на поправките от

@@ -230,6 +230,29 @@ CREATE TABLE IF NOT EXISTS readers (
   created_at        TEXT DEFAULT (datetime('now'))
 );
 
+/* ИСТОРИЯ НА ЗАПИСВАНИЯТА И ПРЕРЕГИСТРАЦИИТЕ (v2.4.71, находка Д3 от кръг 45).
+   ===========================================================================
+   Дотук „Регистрирани читатели през годината“ се броеше от двете колони на
+   картона — registered_at и re_registered_at. Втората обаче пази САМО
+   ПОСЛЕДНАТА пререгистрация: читател, пререгистриран на 10.02.2025, даваше 1 за
+   2025 г.; щом се пререгистрира на 12.02.2026, колоната се презаписваше и
+   числото за 2025 г. ставаше 0 — тоест отчетът за минала, вече предадена година
+   се променяше със задна дата. Годишният отчет за читалището трябва да излиза
+   еднакъв и след година.
+   Тази таблица е историята: по един ред за всяко записване и всяка
+   пререгистрация, с датата. Нищо не се презаписва; изтриването на читателя
+   изтрива и редовете му (броят за изминалата година така или иначе е бил
+   отчетен), а заличаването по ОРЗД НЕ ги пипа — те не носят нищо лично освен
+   връзката към обезличения картон. */
+CREATE TABLE IF NOT EXISTS reader_registrations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  reader_id  INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+  date       TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'пререгистрация',   -- 'записване' | 'пререгистрация'
+  UNIQUE (reader_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_reader_reg_date ON reader_registrations(date);
+
 CREATE TABLE IF NOT EXISTS loans (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   reader_id   INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
@@ -535,7 +558,12 @@ CREATE TABLE IF NOT EXISTS periodicals (
   publisher   TEXT,
   issn        TEXT,
   department  TEXT,
-  note        TEXT
+  note        TEXT,
+  /* Езикът на изданието (v2.4.71, находка Д2 от кръг 45). Годишният комплект
+     се вписваше в `books` без език и Дневникът го слагаше в Раздел Б под
+     „Език — други“ при всяко заемане на „Труд, 2025“. Езикът се пренася в
+     реда на комплекта при инвентирането. */
+  language    TEXT
 );
 CREATE TABLE IF NOT EXISTS periodical_issues (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
