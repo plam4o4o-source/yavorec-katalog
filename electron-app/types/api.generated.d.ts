@@ -7,190 +7,190 @@ type InvLibInvoke = (...args: any[]) => Promise<any>;
 interface InvLibApi {
   app: {
     /** канал „app:setUser“ */
-    setUser: InvLibInvoke;
+    setUser: IpcMethod<'app:setUser'>;
     /** канал „app:getUser“ */
-    getUser: InvLibInvoke;
+    getUser: IpcMethod<'app:getUser'>;
     /** канал „app:getVersion“ */
-    getVersion: InvLibInvoke;
+    getVersion: IpcMethod<'app:getVersion'>;
     /** канал „app:checkForUpdates“ */
-    checkForUpdates: InvLibInvoke;
+    checkForUpdates: IpcMethod<'app:checkForUpdates'>;
     /** канал „app:installUpdate“ */
-    installUpdate: InvLibInvoke;
+    installUpdate: IpcMethod<'app:installUpdate'>;
     /** канал „app:openLogsFolder“ */
-    openLogsFolder: InvLibInvoke;
+    openLogsFolder: IpcMethod<'app:openLogsFolder'>;
     onUpdateStatus: (...args: any[]) => any;
     onUserChanged: (...args: any[]) => any;
   };
   employees: {
     /** канал „employees:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'employees:list'>;
     /** канал „employees:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'employees:create'>;
     /** канал „employees:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'employees:update'>;
     /** канал „employees:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'employees:delete'>;
   };
   settings: {
     /** канал „settings:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'settings:get'>;
     /** канал „settings:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'settings:update'>;
     /** канал „settings:updateLabelFormat“ */
-    updateLabelFormat: InvLibInvoke;
+    updateLabelFormat: IpcMethod<'settings:updateLabelFormat'>;
     /** канал „settings:updateTheme“ */
-    updateTheme: InvLibInvoke;
+    updateTheme: IpcMethod<'settings:updateTheme'>;
     /** канал „settings:updateScanSound“ */
-    updateScanSound: InvLibInvoke;
+    updateScanSound: IpcMethod<'settings:updateScanSound'>;
     /** канал „settings:chooseLogo“ */
-    chooseLogo: InvLibInvoke;
+    chooseLogo: IpcMethod<'settings:chooseLogo'>;
     /** канал „settings:clearLogo“ */
-    clearLogo: InvLibInvoke;
+    clearLogo: IpcMethod<'settings:clearLogo'>;
     /** канал „settings:updateNotices“ */
-    updateNotices: InvLibInvoke;
+    updateNotices: IpcMethod<'settings:updateNotices'>;
     /** канал „settings:noticeDefaults“ */
-    noticeDefaults: InvLibInvoke;
+    noticeDefaults: IpcMethod<'settings:noticeDefaults'>;
   };
   dbLocation: {
     /** канал „dbLocation:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'dbLocation:get'>;
     /** канал „dbLocation:choose“ */
-    choose: InvLibInvoke;
+    choose: IpcMethod<'dbLocation:choose'>;
     /** канал „dbLocation:resetDefault“ */
-    resetDefault: InvLibInvoke;
+    resetDefault: IpcMethod<'dbLocation:resetDefault'>;
   };
   backup: {
     /** канал „backup:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'backup:list'>;
     /** канал „backup:now“ */
-    now: InvLibInvoke;
+    now: IpcMethod<'backup:now'>;
     /** канал „backup:restoreFromList“ */
-    restoreFromList: InvLibInvoke;
+    restoreFromList: IpcMethod<'backup:restoreFromList'>;
     /** канал „backup:restoreBrowse“ */
-    restoreBrowse: InvLibInvoke;
+    restoreBrowse: IpcMethod<'backup:restoreBrowse'>;
     /** канал „backup:autoStatus“ */
-    autoStatus: InvLibInvoke;
+    autoStatus: IpcMethod<'backup:autoStatus'>;
     /** канал „backup:secondFolder“ */
-    secondFolder: InvLibInvoke;
+    secondFolder: IpcMethod<'backup:secondFolder'>;
     /** канал „backup:chooseSecondFolder“ */
-    chooseSecondFolder: InvLibInvoke;
+    chooseSecondFolder: IpcMethod<'backup:chooseSecondFolder'>;
     /** канал „backup:clearSecondFolder“ */
-    clearSecondFolder: InvLibInvoke;
+    clearSecondFolder: IpcMethod<'backup:clearSecondFolder'>;
     onAutoStatus: (...args: any[]) => any;
   };
   limits: {
     /** канал „limits:usage“ */
-    usage: InvLibInvoke;
+    usage: IpcMethod<'limits:usage'>;
     /** канал „limits:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'limits:update'>;
   };
   authorMark: {
     /** канал „authorMark:status“ */
-    status: InvLibInvoke;
+    status: IpcMethod<'authorMark:status'>;
     /** канал „authorMark:choose“ */
-    choose: InvLibInvoke;
+    choose: IpcMethod<'authorMark:choose'>;
     /** канал „authorMark:confirm“ */
-    confirm: InvLibInvoke;
+    confirm: IpcMethod<'authorMark:confirm'>;
     /** канал „authorMark:clear“ */
-    clear: InvLibInvoke;
+    clear: IpcMethod<'authorMark:clear'>;
     /** канал „authorMark:loadBuiltin“ */
-    loadBuiltin: InvLibInvoke;
+    loadBuiltin: IpcMethod<'authorMark:loadBuiltin'>;
     /** канал „authorMark:suggest“ */
-    suggest: InvLibInvoke;
+    suggest: IpcMethod<'authorMark:suggest'>;
     /** канал „authorMark:audit“ */
-    audit: InvLibInvoke;
+    audit: IpcMethod<'authorMark:audit'>;
     /** канал „authorMark:fillPreview“ */
-    fillPreview: InvLibInvoke;
+    fillPreview: IpcMethod<'authorMark:fillPreview'>;
     /** канал „authorMark:fillApply“ */
-    fillApply: InvLibInvoke;
+    fillApply: IpcMethod<'authorMark:fillApply'>;
   };
   categories: {
     /** канал „categories:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'categories:list'>;
     /** канал „categories:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'categories:create'>;
     /** канал „categories:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'categories:update'>;
     /** канал „categories:usage“ */
-    usage: InvLibInvoke;
+    usage: IpcMethod<'categories:usage'>;
     /** канал „categories:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'categories:delete'>;
   };
   books: {
     /** канал „books:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'books:list'>;
     /** канал „books:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'books:get'>;
     /** канал „books:byBarcode“ */
-    byBarcode: InvLibInvoke;
+    byBarcode: IpcMethod<'books:byBarcode'>;
     /** канал „books:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'books:create'>;
     /** канал „books:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'books:update'>;
     /** канал „books:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'books:delete'>;
     /** канал „books:addCheck“ */
-    addCheck: InvLibInvoke;
+    addCheck: IpcMethod<'books:addCheck'>;
     /** канал „books:checks“ */
-    checks: InvLibInvoke;
+    checks: IpcMethod<'books:checks'>;
     /** канал „books:bulkUpdate“ */
-    bulkUpdate: InvLibInvoke;
+    bulkUpdate: IpcMethod<'books:bulkUpdate'>;
     /** канал „books:findDuplicateBarcodes“ */
-    findDuplicateBarcodes: InvLibInvoke;
+    findDuplicateBarcodes: IpcMethod<'books:findDuplicateBarcodes'>;
     /** канал „books:multiCopyRecords“ */
-    multiCopyRecords: InvLibInvoke;
+    multiCopyRecords: IpcMethod<'books:multiCopyRecords'>;
     /** канал „books:splitCopies“ */
-    splitCopies: InvLibInvoke;
+    splitCopies: IpcMethod<'books:splitCopies'>;
     /** канал „books:splitCopiesBatch“ */
-    splitCopiesBatch: InvLibInvoke;
+    splitCopiesBatch: IpcMethod<'books:splitCopiesBatch'>;
     /** канал „books:setLendable“ */
-    setLendable: InvLibInvoke;
+    setLendable: IpcMethod<'books:setLendable'>;
     /** канал „books:deaccessionedWithoutAct“ */
-    deaccessionedWithoutAct: InvLibInvoke;
+    deaccessionedWithoutAct: IpcMethod<'books:deaccessionedWithoutAct'>;
     /** канал „books:clearOrphanDeaccession“ */
-    clearOrphanDeaccession: InvLibInvoke;
+    clearOrphanDeaccession: IpcMethod<'books:clearOrphanDeaccession'>;
     /** канал „books:byIsbn“ */
-    byIsbn: InvLibInvoke;
+    byIsbn: IpcMethod<'books:byIsbn'>;
     /** канал „books:invGaps“ */
-    invGaps: InvLibInvoke;
+    invGaps: IpcMethod<'books:invGaps'>;
   };
   isbn: {
     /** канал „isbn:lookup“ */
-    lookup: InvLibInvoke;
+    lookup: IpcMethod<'isbn:lookup'>;
   };
   sru: {
     /** канал „sru:lookup“ */
-    lookup: InvLibInvoke;
+    lookup: IpcMethod<'sru:lookup'>;
   };
   authorities: {
     /** канал „authorities:fields“ */
-    fields: InvLibInvoke;
+    fields: IpcMethod<'authorities:fields'>;
     /** канал „authorities:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'authorities:list'>;
     /** канал „authorities:suggest“ */
-    suggest: InvLibInvoke;
+    suggest: IpcMethod<'authorities:suggest'>;
     /** канал „authorities:duplicates“ */
-    duplicates: InvLibInvoke;
+    duplicates: IpcMethod<'authorities:duplicates'>;
     /** канал „authorities:merge“ */
-    merge: InvLibInvoke;
+    merge: IpcMethod<'authorities:merge'>;
   };
   invBook: {
     /** канал „invBook:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'invBook:list'>;
   };
   acquisitions: {
     /** канал „acquisitions:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'acquisitions:list'>;
     /** канал „acquisitions:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'acquisitions:get'>;
     /** канал „acquisitions:nextNo“ */
-    nextNo: InvLibInvoke;
+    nextNo: IpcMethod<'acquisitions:nextNo'>;
     /** канал „acquisitions:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'acquisitions:create'>;
     /** канал „acquisitions:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'acquisitions:update'>;
     /** канал „acquisitions:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'acquisitions:delete'>;
   };
   deaccessionActs: {
     /** канал „deaccessionActs:list“ */
@@ -218,53 +218,53 @@ interface InvLibApi {
   };
   kdbf: {
     /** канал „kdbf:report“ */
-    report: InvLibInvoke;
+    report: IpcMethod<'kdbf:report'>;
   };
   fund: {
     /** канал „fund:check“ */
-    check: InvLibInvoke;
+    check: IpcMethod<'fund:check'>;
     /** канал „fund:checkLogged“ */
-    checkLogged: InvLibInvoke;
+    checkLogged: IpcMethod<'fund:checkLogged'>;
   };
   print: {
     /** канал „print:savePdf“ */
-    savePdf: InvLibInvoke;
+    savePdf: IpcMethod<'print:savePdf'>;
   };
   readers: {
     /** канал „readers:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'readers:list'>;
     /** канал „readers:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'readers:get'>;
     /** канал „readers:byCard“ */
-    byCard: InvLibInvoke;
+    byCard: IpcMethod<'readers:byCard'>;
     /** канал „readers:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'readers:create'>;
     /** канал „readers:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'readers:update'>;
     /** канал „readers:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'readers:delete'>;
     /** канал „readers:clearSuspension“ */
-    clearSuspension: InvLibInvoke;
+    clearSuspension: IpcMethod<'readers:clearSuspension'>;
     /** канал „readers:exportCsv“ */
-    exportCsv: InvLibInvoke;
+    exportCsv: IpcMethod<'readers:exportCsv'>;
     /** канал „readers:mzsHeld“ */
-    mzsHeld: InvLibInvoke;
+    mzsHeld: IpcMethod<'readers:mzsHeld'>;
   };
   exportAll: {
     /** канал „exportAll:run“ */
-    run: InvLibInvoke;
+    run: IpcMethod<'exportAll:run'>;
   };
   pdp: {
     /** канал „pdp:status“ */
-    status: InvLibInvoke;
+    status: IpcMethod<'pdp:status'>;
     /** канал „pdp:setup“ */
-    setup: InvLibInvoke;
+    setup: IpcMethod<'pdp:setup'>;
     /** канал „pdp:unlock“ */
-    unlock: InvLibInvoke;
+    unlock: IpcMethod<'pdp:unlock'>;
     /** канал „pdp:lock“ */
-    lock: InvLibInvoke;
+    lock: IpcMethod<'pdp:lock'>;
     /** канал „pdp:changePassword“ */
-    changePassword: InvLibInvoke;
+    changePassword: IpcMethod<'pdp:changePassword'>;
   };
   account: {
     /** канал „account:get“ */
@@ -278,63 +278,63 @@ interface InvLibApi {
   };
   suggestions: {
     /** канал „suggestions:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'suggestions:list'>;
     /** канал „suggestions:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'suggestions:create'>;
     /** канал „suggestions:setStatus“ */
-    setStatus: InvLibInvoke;
+    setStatus: IpcMethod<'suggestions:setStatus'>;
     /** канал „suggestions:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'suggestions:delete'>;
     /** канал „suggestions:matchBook“ */
-    matchBook: InvLibInvoke;
+    matchBook: IpcMethod<'suggestions:matchBook'>;
   };
   circRules: {
     /** канал „circRules:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'circRules:list'>;
     /** канал „circRules:save“ */
-    save: InvLibInvoke;
+    save: IpcMethod<'circRules:save'>;
     /** канал „circRules:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'circRules:delete'>;
     /** канал „circRules:effective“ */
-    effective: InvLibInvoke;
+    effective: IpcMethod<'circRules:effective'>;
   };
   calendar: {
     /** канал „calendar:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'calendar:get'>;
     /** канал „calendar:saveWorkDays“ */
-    saveWorkDays: InvLibInvoke;
+    saveWorkDays: IpcMethod<'calendar:saveWorkDays'>;
     /** канал „calendar:addClosed“ */
-    addClosed: InvLibInvoke;
+    addClosed: IpcMethod<'calendar:addClosed'>;
     /** канал „calendar:removeClosed“ */
-    removeClosed: InvLibInvoke;
+    removeClosed: IpcMethod<'calendar:removeClosed'>;
   };
   housebound: {
     /** канал „housebound:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'housebound:get'>;
     /** канал „housebound:save“ */
-    save: InvLibInvoke;
+    save: IpcMethod<'housebound:save'>;
     /** канал „housebound:remove“ */
-    remove: InvLibInvoke;
+    remove: IpcMethod<'housebound:remove'>;
     /** канал „housebound:addVisit“ */
-    addVisit: InvLibInvoke;
+    addVisit: IpcMethod<'housebound:addVisit'>;
     /** канал „housebound:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'housebound:list'>;
   };
   gdpr: {
     /** канал „gdpr:candidates“ */
-    candidates: InvLibInvoke;
+    candidates: IpcMethod<'gdpr:candidates'>;
     /** канал „gdpr:anonymize“ */
-    anonymize: InvLibInvoke;
+    anonymize: IpcMethod<'gdpr:anonymize'>;
     /** канал „gdpr:forgetReader“ */
-    forgetReader: InvLibInvoke;
+    forgetReader: IpcMethod<'gdpr:forgetReader'>;
   };
   av: {
     /** канал „av:categories“ */
-    categories: InvLibInvoke;
+    categories: IpcMethod<'av:categories'>;
     /** канал „av:options“ */
-    options: InvLibInvoke;
+    options: IpcMethod<'av:options'>;
     /** канал „av:save“ */
-    save: InvLibInvoke;
+    save: IpcMethod<'av:save'>;
   };
   events: {
     /** канал „events:localuse“ */
@@ -342,7 +342,7 @@ interface InvLibApi {
   };
   notices: {
     /** канал „notices:log“ */
-    log: InvLibInvoke;
+    log: IpcMethod<'notices:log'>;
   };
   loans: {
     /** канал „loans:list“ */
@@ -378,23 +378,23 @@ interface InvLibApi {
     /** канал „loans:lostPolicySave“ */
     lostPolicySave: IpcMethod<'loans:lostPolicySave'>;
     /** канал „loans:reminders“ */
-    reminders: InvLibInvoke;
+    reminders: IpcMethod<'loans:reminders'>;
     /** канал „loans:mailto“ */
-    mailto: InvLibInvoke;
+    mailto: IpcMethod<'loans:mailto'>;
   };
   holds: {
     /** канал „holds:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'holds:list'>;
     /** канал „holds:add“ */
-    add: InvLibInvoke;
+    add: IpcMethod<'holds:add'>;
     /** канал „holds:cancel“ */
-    cancel: InvLibInvoke;
+    cancel: IpcMethod<'holds:cancel'>;
   };
   dashboard: {
     /** канал „dashboard:stats“ */
-    stats: InvLibInvoke;
+    stats: IpcMethod<'dashboard:stats'>;
     /** канал „dashboard:full“ */
-    full: InvLibInvoke;
+    full: IpcMethod<'dashboard:full'>;
   };
   inventorySessions: {
     /** канал „inventorySessions:list“ */
@@ -410,207 +410,207 @@ interface InvLibApi {
     /** канал „inventorySessions:close“ */
     close: IpcMethod<'inventorySessions:close'>;
     /** канал „inventorySessions:importScans“ */
-    importScans: InvLibInvoke;
+    importScans: IpcMethod<'inventorySessions:importScans'>;
   };
   periodicals: {
     /** канал „periodicals:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'periodicals:list'>;
     /** канал „periodicals:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'periodicals:get'>;
     /** канал „periodicals:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'periodicals:create'>;
     /** канал „periodicals:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'periodicals:update'>;
     /** канал „periodicals:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'periodicals:delete'>;
   };
   periodicalIssues: {
     /** канал „periodicalIssues:add“ */
-    add: InvLibInvoke;
+    add: IpcMethod<'periodicalIssues:add'>;
     /** канал „periodicalIssues:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'periodicalIssues:delete'>;
   };
   periodicalVolumes: {
     /** канал „periodicalVolumes:register“ */
-    register: InvLibInvoke;
+    register: IpcMethod<'periodicalVolumes:register'>;
   };
   mzs: {
     /** канал „mzs:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'mzs:list'>;
     /** канал „mzs:nextNo“ */
-    nextNo: InvLibInvoke;
+    nextNo: IpcMethod<'mzs:nextNo'>;
     /** канал „mzs:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'mzs:create'>;
     /** канал „mzs:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'mzs:update'>;
     /** канал „mzs:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'mzs:delete'>;
     /** канал „mzs:overdue“ */
-    overdue: InvLibInvoke;
+    overdue: IpcMethod<'mzs:overdue'>;
   };
   analytics: {
     /** канал „analytics:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'analytics:list'>;
     /** канал „analytics:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'analytics:get'>;
     /** канал „analytics:years“ */
-    years: InvLibInvoke;
+    years: IpcMethod<'analytics:years'>;
     /** канал „analytics:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'analytics:create'>;
     /** канал „analytics:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'analytics:update'>;
     /** канал „analytics:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'analytics:delete'>;
   };
   persons: {
     /** канал „persons:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'persons:list'>;
     /** канал „persons:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'persons:get'>;
     /** канал „persons:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'persons:create'>;
     /** канал „persons:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'persons:update'>;
     /** канал „persons:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'persons:delete'>;
   };
   chronicle: {
     /** канал „chronicle:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'chronicle:list'>;
     /** канал „chronicle:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'chronicle:get'>;
     /** канал „chronicle:years“ */
-    years: InvLibInvoke;
+    years: IpcMethod<'chronicle:years'>;
     /** канал „chronicle:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'chronicle:create'>;
     /** канал „chronicle:update“ */
-    update: InvLibInvoke;
+    update: IpcMethod<'chronicle:update'>;
     /** канал „chronicle:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'chronicle:delete'>;
   };
   links: {
     /** канал „links:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'links:list'>;
     /** канал „links:backlinks“ */
-    backlinks: InvLibInvoke;
+    backlinks: IpcMethod<'links:backlinks'>;
     /** канал „links:add“ */
-    add: InvLibInvoke;
+    add: IpcMethod<'links:add'>;
     /** канал „links:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'links:delete'>;
     /** канал „links:search“ */
-    search: InvLibInvoke;
+    search: IpcMethod<'links:search'>;
   };
   localPhoto: {
     /** канал „localPhoto:choose“ */
-    choose: InvLibInvoke;
+    choose: IpcMethod<'localPhoto:choose'>;
     /** канал „localPhoto:clear“ */
-    clear: InvLibInvoke;
+    clear: IpcMethod<'localPhoto:clear'>;
   };
   importData: {
     /** канал „import:choose“ */
-    choose: InvLibInvoke;
+    choose: IpcMethod<'import:choose'>;
     /** канал „import:load“ */
-    load: InvLibInvoke;
+    load: IpcMethod<'import:load'>;
     /** канал „import:run“ */
-    run: InvLibInvoke;
+    run: IpcMethod<'import:run'>;
     pathOf: (...args: any[]) => any;
   };
   mobile: {
     /** канал „mobile:generate“ */
-    generate: InvLibInvoke;
+    generate: IpcMethod<'mobile:generate'>;
   };
   security: {
     /** канал „security:exclusionInfo“ */
-    exclusionInfo: InvLibInvoke;
+    exclusionInfo: IpcMethod<'security:exclusionInfo'>;
     /** канал „security:writeExclusionScript“ */
-    writeExclusionScript: InvLibInvoke;
+    writeExclusionScript: IpcMethod<'security:writeExclusionScript'>;
   };
   audit: {
     /** канал „audit:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'audit:list'>;
     /** канал „audit:export“ */
-    export: InvLibInvoke;
+    export: IpcMethod<'audit:export'>;
   };
   reset: {
     /** канал „reset:plan“ */
-    plan: InvLibInvoke;
+    plan: IpcMethod<'reset:plan'>;
     /** канал „reset:wipe“ */
-    wipe: InvLibInvoke;
+    wipe: IpcMethod<'reset:wipe'>;
   };
   searchHistory: {
     /** канал „searchHistory:log“ */
-    log: InvLibInvoke;
+    log: IpcMethod<'searchHistory:log'>;
     /** канал „searchHistory:suggest“ */
-    suggest: InvLibInvoke;
+    suggest: IpcMethod<'searchHistory:suggest'>;
   };
   dnevnik: {
     /** канал „dnevnik:getMonth“ */
-    getMonth: InvLibInvoke;
+    getMonth: IpcMethod<'dnevnik:getMonth'>;
     /** канал „dnevnik:saveDay“ */
-    saveDay: InvLibInvoke;
+    saveDay: IpcMethod<'dnevnik:saveDay'>;
     /** канал „dnevnik:suggest“ */
-    suggest: InvLibInvoke;
+    suggest: IpcMethod<'dnevnik:suggest'>;
     /** канал „dnevnik:exportCsv“ */
-    exportCsv: InvLibInvoke;
+    exportCsv: IpcMethod<'dnevnik:exportCsv'>;
   };
   visits: {
     /** канал „visits:add“ */
-    add: InvLibInvoke;
+    add: IpcMethod<'visits:add'>;
     /** канал „visits:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'visits:get'>;
   };
   stats: {
     /** канал „stats:report“ */
-    report: InvLibInvoke;
+    report: IpcMethod<'stats:report'>;
   };
   reports: {
     /** канал „reports:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'reports:list'>;
     /** канал „reports:run“ */
-    run: InvLibInvoke;
+    run: IpcMethod<'reports:run'>;
   };
   shelves: {
     /** канал „shelves:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'shelves:list'>;
     /** канал „shelves:items“ */
-    items: InvLibInvoke;
+    items: IpcMethod<'shelves:items'>;
     /** канал „shelves:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'shelves:create'>;
     /** канал „shelves:rename“ */
-    rename: InvLibInvoke;
+    rename: IpcMethod<'shelves:rename'>;
     /** канал „shelves:delete“ */
-    delete: InvLibInvoke;
+    delete: IpcMethod<'shelves:delete'>;
     /** канал „shelves:addBook“ */
-    addBook: InvLibInvoke;
+    addBook: IpcMethod<'shelves:addBook'>;
     /** канал „shelves:addBooks“ */
-    addBooks: InvLibInvoke;
+    addBooks: IpcMethod<'shelves:addBooks'>;
     /** канал „shelves:removeBook“ */
-    removeBook: InvLibInvoke;
+    removeBook: IpcMethod<'shelves:removeBook'>;
   };
   catalog: {
     /** канал „catalog:status“ */
-    status: InvLibInvoke;
+    status: IpcMethod<'catalog:status'>;
     /** канал „catalog:autoPushStatus“ */
-    autoPushStatus: InvLibInvoke;
+    autoPushStatus: IpcMethod<'catalog:autoPushStatus'>;
     /** канал „catalog:chooseFolder“ */
-    chooseFolder: InvLibInvoke;
+    chooseFolder: IpcMethod<'catalog:chooseFolder'>;
     /** канал „catalog:disconnectFolder“ */
-    disconnectFolder: InvLibInvoke;
+    disconnectFolder: IpcMethod<'catalog:disconnectFolder'>;
     /** канал „catalog:writeNow“ */
-    writeNow: InvLibInvoke;
+    writeNow: IpcMethod<'catalog:writeNow'>;
     /** канал „catalog:export“ */
-    export: InvLibInvoke;
+    export: IpcMethod<'catalog:export'>;
     /** канал „catalog:exportCsv“ */
-    exportCsv: InvLibInvoke;
+    exportCsv: IpcMethod<'catalog:exportCsv'>;
     /** канал „catalog:exportMarc“ */
-    exportMarc: InvLibInvoke;
+    exportMarc: IpcMethod<'catalog:exportMarc'>;
     /** канал „catalog:exportDc“ */
-    exportDc: InvLibInvoke;
+    exportDc: IpcMethod<'catalog:exportDc'>;
     /** канал „catalog:updateGh“ */
-    updateGh: InvLibInvoke;
+    updateGh: IpcMethod<'catalog:updateGh'>;
     /** канал „catalog:gitPublishNow“ */
-    gitPublishNow: InvLibInvoke;
+    gitPublishNow: IpcMethod<'catalog:gitPublishNow'>;
     /** канал „catalog:remoteCheck“ */
-    remoteCheck: InvLibInvoke;
+    remoteCheck: IpcMethod<'catalog:remoteCheck'>;
   };
 }

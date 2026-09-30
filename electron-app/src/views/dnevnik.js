@@ -502,7 +502,7 @@ async function dnevnikDayForm(date) {
      изхвърляше без дума (виж dnevnikSaveCell), а „Печат“ печаташе януари под
      заглавие „декември“. */
   const days = (fresh && fresh.days) || [];
-  const row = days.find(d => d.date === date) || { date };
+  const row = /** @type {Partial<(typeof days)[number]>} */ (days.find(d => d.date === date) || { date });   // ден без запис — празна форма
   modal('Дневник — ' + bg(date), `
     <form id="dnvF" onsubmit="return false">
     <div class="toolbar" style="margin:0 0 10px">

@@ -157,7 +157,7 @@ window.chrYear = chrYear;
 
 async function chronicleForm(id) {
   const c = id ? await call(window.api.chronicle.get(id)) : null;
-  const v = c || { year: String(new Date().getFullYear()), category: 'читалище' };
+  const v = /** @type {Partial<IpcData<'chronicle:get'>>} */ (c || { year: String(new Date().getFullYear()), category: 'читалище' });   // нов запис — само подразбиранията
   modal(id ? 'Редакция на запис' : 'Нов запис в летописа', `
     <form id="chrF" onsubmit="return false">
     <div class="grid g4">

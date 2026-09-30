@@ -7,7 +7,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, syncCurrentUser } = deps;
 
   ipcMain.handle('employees:list', () => run(() => getDb().prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
-  ipcMain.handle('employees:create', (e, name) =>
+  ipcMain.handle('employees:create', /** @param {unknown} e @param {IpcArg<'employees:create'>} name */ (e, name) =>
     run(() => {
       if (!name || !name.trim()) throw new Error('Въведете име на служителя.');
       const info = getDb().prepare('INSERT INTO employees (name) VALUES (?)').run(name.trim());
@@ -15,7 +15,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('employees:update', (e, { id, name, active }) =>
+  ipcMain.handle('employees:update', /** @param {unknown} e @param {IpcArg<'employees:update'>} arg */ (e, { id, name, active }) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
@@ -35,7 +35,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       if (syncCurrentUser && cur.name === syncCurrentUser()) syncCurrentUser(nextActive ? nextName : '');
     })
   );
-  ipcMain.handle('employees:delete', (e, id) =>
+  ipcMain.handle('employees:delete', /** @param {unknown} e @param {IpcArg<'employees:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT name FROM employees WHERE id = ?').get(id);

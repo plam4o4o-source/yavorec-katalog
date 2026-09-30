@@ -1565,7 +1565,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:now', async (e, opts) => {
+  ipcMain.handle('backup:now', /** @param {unknown} e @param {IpcArg<'backup:now'>} opts */ async (e, opts) => {
     try {
       const password = opts && opts.password ? String(opts.password) : '';
       /* ПАРОЛАТА НА РЪЧНОТО КОПИЕ — ПОНЕ 10 ЗНАКА (v2.4.71, кръг 45, С18).
@@ -1938,7 +1938,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     }
   }
 
-  ipcMain.handle('backup:restoreFromList', (e, { path: sourcePath, password }) =>
+  ipcMain.handle('backup:restoreFromList', /** @param {unknown} e @param {IpcArg<'backup:restoreFromList'>} arg */ (e, { path: sourcePath, password }) =>
     run(() => {
       // Пътят идва от renderer-а. Приема се само ако наистина е файл от папката с
       // резервните копия — тоест нещо, което backup:list е показал; всичко друго е
@@ -1954,7 +1954,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:restoreBrowse', async (e, opts) => {
+  ipcMain.handle('backup:restoreBrowse', /** @param {unknown} e @param {IpcArg<'backup:restoreBrowse'>} opts */ async (e, opts) => {
     try {
       let target = opts && opts.path;
       if (target) {

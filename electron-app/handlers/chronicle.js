@@ -123,7 +123,7 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
     return o;
   }
 
-  ipcMain.handle('chronicle:list', /** @param {unknown} e @param {{ q?: string, year?: string | number }} [arg] */ (e, { q, year } = {}) =>
+  ipcMain.handle('chronicle:list', /** @param {unknown} e @param {IpcArg<'chronicle:list'>} [arg] */ (e, { q, year } = {}) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const where = [], args = {};
@@ -164,12 +164,12 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
         ORDER BY yearkey(c.year) DESC, c.year DESC, c.date DESC, c.id DESC`).all(args);
     })
   );
-  ipcMain.handle('chronicle:get', (e, id) => run(() => getDb().prepare('SELECT * FROM chronicle WHERE id = ?').get(id)));
+  ipcMain.handle('chronicle:get', /** @param {unknown} e @param {IpcArg<'chronicle:get'>} id */ (e, id) => run(() => getDb().prepare('SELECT * FROM chronicle WHERE id = ?').get(id)));
   ipcMain.handle('chronicle:years', () =>
     run(() => ensureKraeFunctions(getDb()).prepare(`SELECT year, COUNT(*) AS n FROM chronicle
       GROUP BY year ORDER BY yearkey(year) DESC, year DESC`).all())
   );
-  ipcMain.handle('chronicle:create', (e, d) =>
+  ipcMain.handle('chronicle:create', /** @param {unknown} e @param {IpcArg<'chronicle:create'>} d */ (e, d) =>
     run(() => {
       const o = prepareChronicle(d);
       const info = getDb().prepare(`INSERT INTO chronicle (${CHRONICLE_FIELDS.join(', ')})
@@ -178,7 +178,7 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('chronicle:update', (e, d) =>
+  ipcMain.handle('chronicle:update', /** @param {unknown} e @param {IpcArg<'chronicle:update'>} d */ (e, d) =>
     run(() => {
       /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
          база записът може да е изтрит от другото работно място, а одитната
@@ -197,7 +197,7 @@ module.exports = function registerChronicleHandlers(ipcMain, deps) {
       logAudit('Летопис', 'редакция: ' + (o.title || ''));
     })
   );
-  ipcMain.handle('chronicle:delete', (e, id) =>
+  ipcMain.handle('chronicle:delete', /** @param {unknown} e @param {IpcArg<'chronicle:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const c = db.prepare('SELECT title FROM chronicle WHERE id = ?').get(id);

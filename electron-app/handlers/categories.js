@@ -11,7 +11,7 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
   ipcMain.handle('categories:list', () =>
     run(() => getDb().prepare('SELECT * FROM categories ORDER BY name').all())
   );
-  ipcMain.handle('categories:create', (e, name) =>
+  ipcMain.handle('categories:create', /** @param {unknown} e @param {IpcArg<'categories:create'>} name */ (e, name) =>
     run(() => getDb().prepare('INSERT INTO categories (name) VALUES (?)').run(name.trim()))
   );
   /* Със следа (одит v2.4.25): преименуването преетикетира „Вид документ“ на всяка
@@ -41,7 +41,7 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
     const row = db.prepare('SELECT code FROM categories WHERE id = ?').get(id);
     return row ? row.code : null;
   };
-  ipcMain.handle('categories:update', (e, { id, name }) =>
+  ipcMain.handle('categories:update', /** @param {unknown} e @param {IpcArg<'categories:update'>} arg */ (e, { id, name }) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT name FROM categories WHERE id = ?').get(id);
@@ -75,10 +75,10 @@ module.exports = function registerCategoriesHandlers(ipcMain, deps) {
      а модулът беше регистриран без logAudit, тоест в одитната следа не оставаше
      нищо. Броят засегнати книги се връща предварително (categories:usage), за да
      влезе в питането, а самото изтриване вече се вписва. */
-  ipcMain.handle('categories:usage', (e, id) =>
+  ipcMain.handle('categories:usage', /** @param {unknown} e @param {IpcArg<'categories:usage'>} id */ (e, id) =>
     run(() => getDb().prepare('SELECT COUNT(*) AS n FROM books WHERE category_id = ?').get(id).n)
   );
-  ipcMain.handle('categories:delete', (e, id) =>
+  ipcMain.handle('categories:delete', /** @param {unknown} e @param {IpcArg<'categories:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const c = db.prepare('SELECT name FROM categories WHERE id = ?').get(id);

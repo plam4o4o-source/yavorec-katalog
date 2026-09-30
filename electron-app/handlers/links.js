@@ -187,7 +187,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     return !!db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
   }
 
-  ipcMain.handle('links:list', (e, { fromKind, fromId }) =>
+  ipcMain.handle('links:list', /** @param {unknown} e @param {IpcArg<'links:list'>} arg */ (e, { fromKind, fromId }) =>
     run(() => {
       const rows = getDb().prepare('SELECT * FROM links WHERE from_kind = ? AND from_id = ? ORDER BY to_kind, id')
         .all(fromKind, fromId);
@@ -196,7 +196,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     })
   );
   // Обратната посока: кои персоналии и записи в летописа сочат към даден документ.
-  ipcMain.handle('links:backlinks', (e, { toKind, toId }) =>
+  ipcMain.handle('links:backlinks', /** @param {unknown} e @param {IpcArg<'links:backlinks'>} arg */ (e, { toKind, toId }) =>
     run(() => {
       const rows = getDb().prepare('SELECT * FROM links WHERE to_kind = ? AND to_id = ? ORDER BY from_kind, id')
         .all(toKind, toId);
@@ -228,7 +228,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
       return rows;
     })
   );
-  ipcMain.handle('links:add', (e, { fromKind, fromId, toKind, toId, note }) =>
+  ipcMain.handle('links:add', /** @param {unknown} e @param {IpcArg<'links:add'>} arg */ (e, { fromKind, fromId, toKind, toId, note }) =>
     run(() => {
       const db = getDb();
       if (!LINK_FROM.includes(fromKind) || !LINK_TO.includes(toKind)) throw new Error('Непозната връзка.');
@@ -263,8 +263,10 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         const note = deaccNote(db, toId);
         if (note) {
           throw new Error('Документът е ' + note + ' и вече не е част от фонда — нова връзка към него не се прави. '
-            + 'Ако изданието е ползвано като източник, опишете го в бележката към връзката или в свободния текст '
-            + 'на аналитичното описание.');
+            /* v2.4.73: дотук съветът сочеше и „бележката към връзката“ — поле, което
+               панелът за връзки няма. Остава само пътят, който съществува. */
+            + 'Ако изданието е ползвано като източник, опишете го в свободния текст на записа '
+            + '(аналитичното описание, летописа или картона на персоната).');
         }
       }
       db.prepare('INSERT INTO links (from_kind, from_id, to_kind, to_id, note) VALUES (?, ?, ?, ?, ?)')
@@ -273,7 +275,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         + '“ → ' + toKind + ' „' + linkLabel(toKind, toId) + '“');
     })
   );
-  ipcMain.handle('links:delete', (e, id) =>
+  ipcMain.handle('links:delete', /** @param {unknown} e @param {IpcArg<'links:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const l = db.prepare('SELECT * FROM links WHERE id = ?').get(id);
@@ -286,7 +288,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     })
   );
   // Търсене на записи, към които да се направи връзка.
-  ipcMain.handle('links:search', (e, { kind, q }) =>
+  ipcMain.handle('links:search', /** @param {unknown} e @param {IpcArg<'links:search'>} arg */ (e, { kind, q }) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const raw = String(q == null ? '' : q).trim();

@@ -49,7 +49,20 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
       /* Дробна запетая (С8, v2.4.71): „40,5“ пристигнало като текст (стар екран,
          друг вход) дотук минаваше през parseFloat и ставаше 40 — тихо. Запетаята
          е българският десетичен знак и се чете като точка. */
-      const txt = kind === 'real' && typeof raw === 'string' ? raw.trim().replace(',', '.') : raw;
+      /* ТЕКСТЪТ ТРЯБВА ДА Е ЧИСЛО ЦЯЛ (v2.4.73). parseFloat взимаше първото число
+         от текста и мълчеше за останалото: „5 лв.“ в поле в евро ставаше 5 €, а
+         „1.234,50“ — 1,234. Интервалите (и неразделящият) се махат — „1 000“ е
+         1000, не 1; иначе текст, който не е число, се отказва с името на полето. */
+      let txt = raw;
+      if (typeof raw === 'string') {
+        txt = raw.replace(/[\s\u00a0]/g, '');
+        if (kind === 'real') txt = txt.replace(',', '.');
+        if (txt === '') { out[k] = null; continue; }
+        if (!(kind === 'int' ? /^-?\d+$/ : /^-?\d+(\.\d+)?$/).test(txt)) {
+          throw new Error('„' + (SETTING_LABELS[k] || k) + '“: „' + raw.trim() + '“ не е число. Настройките НЕ са записани — '
+            + 'напишете числото само с цифри' + (kind === 'real' ? ', дробната част със запетая (напр. 2,50).' : '.'));
+        }
+      }
       const n = kind === 'int' ? parseInt(txt, 10) : parseFloat(txt);
       out[k] = Number.isFinite(n) ? n : null;
     }
@@ -74,7 +87,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   };
   const UPDATE_FIELDS = Object.keys(SETTING_LABELS);
 
-  ipcMain.handle('settings:update', (e, s0) =>
+  ipcMain.handle('settings:update', /** @param {unknown} e @param {IpcArg<'settings:update'>} s0 */ (e, s0) =>
     run(() => {
       const s = normalizeNumericSettings(s0);
       /* ФОНД НА СВОБОДЕН ДОСТЪП — ПРОЦЕНТ МЕЖДУ 0 И 100 (v2.4.71, кръг 45, С8).
@@ -136,7 +149,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   // Шаблоните за напомняния — отделен формуляр, за да не се засяга основният
   // (better-sqlite3 изисква всички именувани параметри на UPDATE-а да присъстват
   // в подадения обект). Празен низ = "по подразбиране", виж reminderTexts().
-  ipcMain.handle('settings:updateNotices', (e, o) =>
+  ipcMain.handle('settings:updateNotices', /** @param {unknown} e @param {IpcArg<'settings:updateNotices'>} o */ (e, o) =>
     run(() => {
       o = o || {};
       getDb().prepare('UPDATE settings SET notice_subject=?, notice_body=?, notice_sms=? WHERE id=1')
@@ -172,7 +185,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
     sig_w: ['Ширина на сигнатурния етикет', 10, 100, 25], sig_h: ['Височина на сигнатурния етикет', 10, 120, 35],
     card_w: ['Ширина на картата', 40, 210, 90], card_h: ['Височина на картата', 30, 297, 60]
   };
-  ipcMain.handle('settings:updateLabelFormat', (e, o) =>
+  ipcMain.handle('settings:updateLabelFormat', /** @param {unknown} e @param {IpcArg<'settings:updateLabelFormat'>} o */ (e, o) =>
     run(() => {
       o = Object.assign({}, o || {});
       const has = (k) => o[k] !== undefined && o[k] !== null && String(o[k]).trim() !== '';
@@ -248,11 +261,11 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
       logAudit('Редакция на настройки', 'премахнато лого на организацията');
     })
   );
-  ipcMain.handle('settings:updateTheme', (e, theme) =>
+  ipcMain.handle('settings:updateTheme', /** @param {unknown} e @param {IpcArg<'settings:updateTheme'>} theme */ (e, theme) =>
     run(() => { getDb().prepare('UPDATE settings SET theme=? WHERE id=1').run(String(theme)); })
   );
   // Звуков сигнал при сканиране (v1.69.0) — вижте beep() в src/views/core.js.
-  ipcMain.handle('settings:updateScanSound', (e, on) =>
+  ipcMain.handle('settings:updateScanSound', /** @param {unknown} e @param {IpcArg<'settings:updateScanSound'>} on */ (e, on) =>
     run(() => { getDb().prepare('UPDATE settings SET scan_sound=? WHERE id=1').run(on ? 1 : 0); })
   );
 

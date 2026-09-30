@@ -154,21 +154,26 @@ element does not have, or passes a function the wrong number of arguments.
   type (`noUnusedLocals`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
   `noImplicitThis`).
 - **The screen ↔ handler contract** (`types/ipc-contract.d.ts`) describes the
-  arguments and the result of each channel, module by module — so far loans,
-  the reader account, deaccession acts and inventory sessions. A described
-  channel is exposed on `window.api` with its exact signature, and its handler
-  describes its parameter with the same type:
+  arguments and the result of **every** channel. Each is exposed on
+  `window.api` with its exact signature, and its handler describes its
+  parameter with the same type:
   `ipcMain.handle('loans:return', /** @param {unknown} e @param {IpcArg<'loans:return'>} arg */ (e, { id, date_in }) => …)`.
   A field the screen does not send, or one the handler expects under another
-  name, is then a type error on both sides. When you change what a described
-  channel accepts or returns, change the contract in the same PR and run
-  `npm run gen:api-types`; `test/typecheck-v2472.test.js` checks that every
-  described channel exists in `preload.js` and that its handler carries the
-  contract type. Values read from a form (`formData()`) are cast to the
-  contract type at the call site — such a cast always compiles, so a field
-  removed from the form is **not** caught; only object literals are fully
-  checked. The handler's *return value* is not yet checked against `result`
-  either — keep the two in step by hand.
+  name, is then a type error on both sides.
+  - **A new channel** needs an entry in the contract (each key on its own line,
+    indented by exactly two spaces), the annotation on its handler, and
+    `npm run gen:api-types`. `test/typecheck-v2472.test.js` fails while any
+    channel in `preload.js` has no entry, or a handler lacks its `IpcArg`.
+  - **A result that depends on the arguments** (a window vs. the whole list,
+    labels…) keeps the union in `result` for the handler and adds a `call`
+    signature with one overload per mode, so each screen gets the exact
+    answer for the mode it asks for (see `books:list`, `readers:list`,
+    `invBook:list`).
+  - **What is not checked:** values read from a form (`formData()`,
+    `setupFormData()`) are `any` — the form's HTML is the only thing that knows
+    its fields — so a field removed from a form is **not** caught; objects built
+    in code are fully checked. The handler's *return value* is not checked
+    against `result` either — keep the two in step by hand.
 
 **A new capability or a fix without a new or updated test is not accepted.**
 The convention is one test file per handler — `handlers/x.js` →

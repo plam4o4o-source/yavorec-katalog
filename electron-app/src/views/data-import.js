@@ -50,7 +50,7 @@ document.addEventListener('drop', async e => {
    иначе първата стойност от него, за да не се предлага нещо, което библиотеката
    е извадила. */
 async function importMapModal() {
-  const av = (await call(window.api.av.options())) || {};
+  const av = (await call(window.api.av.options())) || /** @type {IpcData<'av:options'>} */ ({});
   const deptOpts = avSelectOpts(av.department, OTDELI, '');
   const langOpts = avSelectOpts(av.language, EZICI, '');
   const deptVal = deptOpts.includes('за възрастни') ? 'за възрастни' : (deptOpts[0] || '');
@@ -147,6 +147,7 @@ async function importMapModal() {
 
 async function importRun() {
   const d = IMPORT_INFO;
+  /** @type {Record<string, string>} */
   const mapping = {};
   const seen = {};
   for (let i = 0; i < d.headers.length; i++) {

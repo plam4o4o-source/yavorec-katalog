@@ -2136,7 +2136,7 @@ function pctRequired(n) { return n <= 50000 ? 10 : n <= 200000 ? 5 : 2; }
 function naturalLoss(n, freeAccessPct) { return (freeAccessPct > 50 ? n * 10 : n * 5) / 1000; }
 
 /* ---------------- Текущ служител (за одитната следа) ---------------- */
-ipcMain.handle('app:setUser', (e, name) =>
+ipcMain.handle('app:setUser', /** @param {unknown} e @param {IpcArg<'app:setUser'>} name */ (e, name) =>
   run(() => {
     CURRENT_USER = (name || '').trim();
     // Не readConfig()+writeConfig(): при неуспешен прочит това презаписваше

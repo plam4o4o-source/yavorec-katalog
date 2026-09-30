@@ -69,7 +69,7 @@ async function renderKdbf() {
       <div class="note"><b>Приложение № 1 към чл. 13, ал. 3, т. 1</b> — постъпили книги и материали за ${y} г.</div>
       <div class="wrap"><table class="ledger"><thead><tr><th>Дата</th><th>№</th><th>Откъде</th><th>Документ</th>
         <th>Общо</th><th>Инвентирани</th><th>Стойност</th><th>Инв. № от–до</th><th>По вид</th></tr></thead><tbody>
-      ${r.part1.length ? r.part1.map(a => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no}</td>
+      ${r.part1.length ? r.part1.map((/** @type {KdbfAcquisitionRow & { by_kind?: string }} */ a) => `<tr><td class="num">${bg(a.date)}</td><td class="num">${a.no}</td>
         <td>${esc(a.from_source || '')}<div class="hint">${esc(a.how || '')}</div></td>
         <td style="font-size:12px">${[esc(a.doc_type || ''), a.doc_no ? '№ ' + esc(a.doc_no) : ''].filter(Boolean).join(' ')}${
           a.doc_date ? '<br>' + bg(a.doc_date) : ''}</td>

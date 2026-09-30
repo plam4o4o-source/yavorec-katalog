@@ -44,7 +44,7 @@ module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
   }
   const kbDown = (n) => Math.floor(n / 1024);
 
-  ipcMain.handle('localPhoto:choose', async (e, { table, id }) => {
+  ipcMain.handle('localPhoto:choose', /** @param {unknown} e @param {IpcArg<'localPhoto:choose'>} arg */ async (e, { table, id }) => {
     try {
       if (!['persons', 'chronicle'].includes(table)) return { ok: false, error: 'Непозната таблица.' };
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
@@ -130,7 +130,7 @@ module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('localPhoto:clear', (e, { table, id }) =>
+  ipcMain.handle('localPhoto:clear', /** @param {unknown} e @param {IpcArg<'localPhoto:clear'>} arg */ (e, { table, id }) =>
     run(() => {
       if (!['persons', 'chronicle'].includes(table)) throw new Error('Непозната таблица.');
       const info = getDb().prepare(`UPDATE ${table} SET photo = NULL WHERE id = ?`).run(id);

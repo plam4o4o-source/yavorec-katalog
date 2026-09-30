@@ -32,7 +32,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
   const QTYJ = "COALESCE(inv.quantity, 1)";
   const BOOKS_INV = "FROM books b LEFT JOIN inventory inv ON inv.book_id = b.id";
 
-  ipcMain.handle('kdbf:report', (e, year) =>
+  ipcMain.handle('kdbf:report', /** @param {unknown} e @param {IpcArg<'kdbf:report'>} year */ (e, year) =>
     run(() => {
       const db = getDb();
       const y = year || yearOf();

@@ -951,7 +951,13 @@ function fieldValue(el) {
   return el.value;
 }
 window.fieldValue = fieldValue;
+/** Полетата на формата по `name`. Кои са те, знае само HTML-ът на формата —
+    затова отговорът е `any`: договорът (types/ipc-contract.d.ts) проверява
+    обектите, сглобени в кода, но не и полетата на форма (виж CONTRIBUTING).
+    @param {string} sel
+    @returns {any} */
 function formData(sel) {
+  /** @type {Record<string, any>} */
   const out = {};
   $(sel).querySelectorAll('input,select,textarea').forEach(el => {
     if (!el.name) return;

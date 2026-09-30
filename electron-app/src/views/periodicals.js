@@ -60,7 +60,7 @@ async function periodicalForm(id) {
     call(window.api.av.options())
   ]);
   if (id && !p) return;
-  const v = p || { freq: 'месечно', department: 'периодика', language: 'български' };
+  const v = /** @type {Partial<IpcData<'periodicals:get'>>} */ (p || { freq: 'месечно', department: 'периодика', language: 'български' });   // нов запис — само подразбиранията
   /* ПОЛЕ „ЕЗИК“ (v2.4.71, находка Д2). Дотук картонът нямаше език и годишният
      комплект влизаше във фонда без него — Дневникът, Раздел Б, броеше всяко
      заемане на „Труд, 2025“ в „Език — други“. Списъкът е същият като при
@@ -533,6 +533,7 @@ async function volumeForm(periodicalId, year) {
      книгите. Новата минава през СЪЩИЯ канал acquisitions.create, който ползва и
      екранът „Постъпления“: две различни бройни логики за номерата в КДБФ не бива
      да съществуват (чл. 14 — партидите са една поредица за цялата библиотека). */
+  /** @type {Array<{ v: number | string, t: string }>} */
   const acqOpts = (acqs || []).map(a => ({ v: a.id, t: '№ ' + a.no + '/' + a.year + ' — ' + (a.from_source || '') }));
   acqOpts.push({ v: '__new__', t: '➕ нова партида (абонамент) …' });
   modal2('Инвентиране на годишен комплект — ' + p.title + ', ' + year + ' г.', `

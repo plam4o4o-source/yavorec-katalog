@@ -23,7 +23,10 @@ const { startMainApp } = require('./helpers/main-app');
 
 const APP_DIR = path.join(__dirname, '..');
 const TSC = require.resolve('typescript/bin/tsc');
-const MODULES = ['loans.js', 'account.js', 'deaccession-acts.js', 'inventory-sessions.js'];
+/* От v2.4.73 договорът описва ВСИЧКИ канали — обработчиците са във всички
+   handlers/*.js и в main.js. */
+const HANDLER_FILES = ['main.js'].concat(fs.readdirSync(path.join(APP_DIR, 'handlers'))
+  .filter(f => f.endsWith('.js')).map(f => path.join('handlers', f)));
 
 const tmpDirs = [];
 let app;
@@ -37,25 +40,26 @@ const CHANNELS = [...contractChannels()];
 const CONTRACT_SRC = fs.readFileSync(path.join(APP_DIR, 'types', 'ipc-contract.d.ts'), 'utf8');
 
 test('всеки канал от договора е в preload.js и е изложен с точния си подпис', () => {
-  assert.ok(CHANNELS.length >= 38, 'договорът описва четирите модула: ' + CHANNELS.length);
-  for (const g of ['loans:', 'account:', 'deaccessionActs:', 'inventorySessions:']) {
-    assert.ok(CHANNELS.some(c => c.startsWith(g)), 'липсва модулът ' + g);
-  }
   const text = render();
+  /* Всички (v2.4.73): нито един метод на window.api не остава с общия InvLibInvoke. */
+  const preload = fs.readFileSync(path.join(APP_DIR, 'preload.js'), 'utf8');
+  const exposed = new Set([...preload.matchAll(/invoke\('([A-Za-z]+:[A-Za-z]+)'/g)].map(m => m[1]));
+  assert.deepEqual([...exposed].filter(c => !CHANNELS.includes(c)), [], 'канали от preload.js без описание в договора');
+  assert.doesNotMatch(text, /: InvLibInvoke;/, 'метод, изложен без подписа от договора');
   for (const ch of CHANNELS) {
     assert.ok(text.includes(": IpcMethod<'" + ch + "'>;"), ch + ' не е изложен с подписа от договора');
   }
 });
 
 test('обработчикът на всеки описан канал носи IpcArg за същия канал', () => {
-  const src = MODULES.map(f => fs.readFileSync(path.join(APP_DIR, 'handlers', f), 'utf8')).join('\n');
+  const src = HANDLER_FILES.map(f => fs.readFileSync(path.join(APP_DIR, f), 'utf8')).join('\n');
   for (const ch of CHANNELS) {
     const at = src.indexOf("ipcMain.handle('" + ch + "',");
-    assert.ok(at >= 0, ch + ': обработчикът не е в четирите модула');
+    assert.ok(at >= 0, ch + ': обработчикът не е намерен в handlers/ и main.js');
     const head = src.slice(at, src.indexOf('=>', at));
     /* Канал без аргументи няма какво да описва — `() =>`; но тогава и
        договорът трябва да казва `args: []`, иначе аргументът се губи. */
-    if (/,\s*\(\)\s*$/.test(head)) {
+    if (/,\s*(async\s+)?\(\)\s*$/.test(head)) {
       assert.match(CONTRACT_SRC, new RegExp("'" + ch + "': \\{\\s*args: \\[\\];"), ch + ': обработчикът е `() =>`, а договорът чака аргументи');
       continue;
     }

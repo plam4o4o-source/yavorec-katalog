@@ -104,11 +104,13 @@ let READERS_GEN = 0; // поколение на списъка — „Покаж
 /* Броят на всички читатели без отбелязано съгласие — идва с всяка страница от
    readers:list (v2.4.65) и е числото в предупреждението над списъка. */
 let READERS_NO_CONSENT = 0;
+/** Като booksFetch: целият списък (`all`) или прозорец (`rows`, `total`).
+    @returns {Promise<{ all?: ReaderListRow[], rows?: ReaderListRow[], total?: number } | null>} */
 async function readersFetch(offset, limit) {
   const res = await call(window.api.readers.list(READERS_QUERY, null,
     { offset, limit: Math.min(limit || READERS_PAGE_SIZE, 2000), cat: READERS_FILTER_CAT || '',
-      status: READERS_FILTER_STATUS || '', consent: READERS_FILTER_CONSENT || '',
-      rereg: READERS_FILTER_REREG || '' }));
+      status: READERS_FILTER_STATUS || '', consent: /** @type {'' | 'no' | 'yes'} */ (READERS_FILTER_CONSENT || ''),
+      rereg: /** @type {'' | 'due'} */ (READERS_FILTER_REREG || '') }));
   if (!res) return null;
   if (Array.isArray(res)) {
     READERS_WINDOWED = false;
@@ -555,7 +557,7 @@ async function forgetReader(id) {
   if (!res || !res.ok) {
     return toast((res && res.error) || 'Заличаването не бе извършено.', 'err');
   }
-  const d = res.data || {};
+  const d = /** @type {Partial<IpcData<'gdpr:forgetReader'>>} */ (res.data || {});
   closeModal();
   toast('Личните данни на ' + (d.name || who) + ' са заличени'
     + (d.auditCleared ? ' — обезличени ' + d.auditCleared + ' реда в одитната следа' : '') + '.', 'ok');

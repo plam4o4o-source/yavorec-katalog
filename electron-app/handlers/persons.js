@@ -165,7 +165,7 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
      можеше да завежда наново вече свързаното.
      (в) Двете посоки се броят отделно (`links` и `backlinks`), за да може
      картата да каже кое какво е, вместо да събира две различни неща в едно число. */
-  ipcMain.handle('persons:list', (e, q) =>
+  ipcMain.handle('persons:list', /** @param {unknown} e @param {IpcArg<'persons:list'>} q */ (e, q) =>
     run(() => {
       // Броят на свързаните материали се показва в списъка, за да личи кои
       // персоналии вече имат подкрепящи документи във фонда.
@@ -218,8 +218,8 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
     + (same.length === 1 ? 'има картон' : 'има ' + same.length + ' картона')
     + ' (№ ' + same.map(x => x.id).join(', № ') + ') — сведенията и връзките за този човек се водят '
     + 'на повече от едно място и нито една справка не е пълна';
-  ipcMain.handle('persons:get', (e, id) => run(() => getDb().prepare('SELECT * FROM persons WHERE id = ?').get(id)));
-  ipcMain.handle('persons:create', (e, d) =>
+  ipcMain.handle('persons:get', /** @param {unknown} e @param {IpcArg<'persons:get'>} id */ (e, id) => run(() => getDb().prepare('SELECT * FROM persons WHERE id = ?').get(id)));
+  ipcMain.handle('persons:create', /** @param {unknown} e @param {IpcArg<'persons:create'>} d */ (e, d) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const o = preparePerson(d);
@@ -230,7 +230,7 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('persons:update', (e, d) =>
+  ipcMain.handle('persons:update', /** @param {unknown} e @param {IpcArg<'persons:update'>} d */ (e, d) =>
     run(() => {
       const o = preparePerson(d);
       const db = ensureKraeFunctions(getDb());
@@ -252,7 +252,7 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
         + (renamed ? ' (преименувано от „' + prev.name + '“)' : '') + (same.length ? sameNameNote(same) : ''));
     })
   );
-  ipcMain.handle('persons:delete', (e, id) =>
+  ipcMain.handle('persons:delete', /** @param {unknown} e @param {IpcArg<'persons:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const p = db.prepare('SELECT name FROM persons WHERE id = ?').get(id);

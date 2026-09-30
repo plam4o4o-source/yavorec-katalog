@@ -24,7 +24,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
       FROM acquisitions a ORDER BY a.date DESC, a.no DESC
     `).all())
   );
-  ipcMain.handle('acquisitions:get', (e, id) =>
+  ipcMain.handle('acquisitions:get', /** @param {unknown} e @param {IpcArg<'acquisitions:get'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const acq = db.prepare('SELECT * FROM acquisitions WHERE id = ?').get(id);
@@ -232,14 +232,14 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
         + [s.committee1, s.committee2, s.committee3].filter(Boolean).join(', ')
     };
   }
-  ipcMain.handle('acquisitions:nextNo', (e, year) =>
+  ipcMain.handle('acquisitions:nextNo', /** @param {unknown} e @param {IpcArg<'acquisitions:nextNo'>} year */ (e, year) =>
     run(() => {
       const y = year || yearOf();
       const row = getDb().prepare('SELECT MAX(no) AS m FROM acquisitions WHERE year = ?').get(y);
       return (row.m || 0) + 1;
     })
   );
-  ipcMain.handle('acquisitions:create', (e, a0) =>
+  ipcMain.handle('acquisitions:create', /** @param {unknown} e @param {IpcArg<'acquisitions:create'>} a0 */ (e, a0) =>
     run(() => {
       const db = getDb();
       const nd = normalizeNoDoc(a0 || {});
@@ -321,7 +321,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
     sum: 'обявена стойност', donor_address: 'адрес на дарителя', note: 'забележка',
     committee1: 'комисия 1', committee2: 'комисия 2', committee3: 'комисия 3'
   };
-  ipcMain.handle('acquisitions:update', (e, { id, acq }) =>
+  ipcMain.handle('acquisitions:update', /** @param {unknown} e @param {IpcArg<'acquisitions:update'>} arg */ (e, { id, acq }) =>
     run(() => {
       const db = getDb();
       const nd = normalizeNoDoc(acq || {}); // П7 (v2.4.69) — същото правило като при завеждането
@@ -396,7 +396,7 @@ module.exports = function registerAcquisitionsHandlers(ipcMain, deps) {
      • Броенето и изтриването не бяха в транзакция: документ, инвентиран в
        партидата от другото работно място между двете, губи партидата си
        (books.acquisition_id → NULL при ON DELETE SET NULL) и изпада от Част № 1. */
-  ipcMain.handle('acquisitions:delete', (e, id) =>
+  ipcMain.handle('acquisitions:delete', /** @param {unknown} e @param {IpcArg<'acquisitions:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const tx = db.transaction(() => {

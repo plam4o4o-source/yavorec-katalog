@@ -62,7 +62,7 @@ function readersRegisteredIn(db, year) {
 module.exports = function registerStatsHandlers(ipcMain, deps) {
   const { getDb, run, yearOf, dnevnikSumRow } = deps;
 
-  ipcMain.handle('stats:report', (e, year) =>
+  ipcMain.handle('stats:report', /** @param {unknown} e @param {IpcArg<'stats:report'>} year */ (e, year) =>
     run(() => {
       const db = getDb();
       const y = year || yearOf();
@@ -437,7 +437,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
       hint: 'Начислено и събрано по вид (годишна такса, обезщетения) от читателската сметка през годината.' }
   ];
   ipcMain.handle('reports:list', () => run(() => REPORTS_CATALOG));
-  ipcMain.handle('reports:run', (e, { id, year }) =>
+  ipcMain.handle('reports:run', /** @param {unknown} e @param {IpcArg<'reports:run'>} arg */ (e, { id, year }) =>
     run(() => {
       const db = getDb();
       const y = String(year || yearOf());

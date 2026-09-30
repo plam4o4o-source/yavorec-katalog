@@ -55,7 +55,7 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
   }
 
   ipcMain.handle('circRules:list', () => run(() => getDb().prepare('SELECT * FROM circulation_rules ORDER BY category').all()));
-  ipcMain.handle('circRules:save', (e, rule) =>
+  ipcMain.handle('circRules:save', /** @param {unknown} e @param {IpcArg<'circRules:save'>} rule */ (e, rule) =>
     run(() => {
       const category = String((rule && rule.category) || '').trim();
       if (!category) throw new Error('Категорията е задължителна.');
@@ -95,7 +95,7 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
       logAudit('Правила за обслужване', 'категория „' + category + '“');
     })
   );
-  ipcMain.handle('circRules:delete', (e, category) =>
+  ipcMain.handle('circRules:delete', /** @param {unknown} e @param {IpcArg<'circRules:delete'>} category */ (e, category) =>
     run(() => {
       const info = getDb().prepare('DELETE FROM circulation_rules WHERE category = ?').run(category);
       if (!info.changes) throw new Error('Няма правило за категория „' + category + '“.');
@@ -104,7 +104,7 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
   );
   // Ефективното правило (с падналите обратно към глобалните стойности) — за да показва
   // интерфейсът реалния срок/лимит на читателя, а не винаги глобалните настройки.
-  ipcMain.handle('circRules:effective', (e, category) => run(() => circRule(category)));
+  ipcMain.handle('circRules:effective', /** @param {unknown} e @param {IpcArg<'circRules:effective'>} category */ (e, category) => run(() => circRule(category)));
 
   return { circRule, readerCategory };
 };

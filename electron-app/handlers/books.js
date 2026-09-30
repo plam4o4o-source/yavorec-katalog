@@ -392,7 +392,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       };
     })
   );
-  ipcMain.handle('limits:update', (e, { limit_books, limit_readers }) =>
+  ipcMain.handle('limits:update', /** @param {unknown} e @param {IpcArg<'limits:update'>} arg */ (e, { limit_books, limit_readers }) =>
     run(() => {
       getDb().prepare('UPDATE settings SET limit_books=?, limit_readers=? WHERE id=1')
         .run(Math.max(0, parseInt(limit_books, 10) || 0), Math.max(0, parseInt(limit_readers, 10) || 0));
@@ -576,7 +576,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      етикетите открай време искат „същото, което е в списъка, но за диапазон“, а
      един канал за фонда значи и едно място, на което се решава кое е „действащ
      фонд“ (виж labelRows по-горе). */
-  ipcMain.handle('books:list', (e, query, sort, page) =>
+  ipcMain.handle('books:list', /** @param {unknown} e @param {IpcArg<'books:list'>} query @param {IpcArg<'books:list', 1>} [sort] @param {IpcArg<'books:list', 2>} [page] */ (e, query, sort, page) =>
     run(() => {
       const db = getDb();
       if (page && typeof page === 'object' && page.labels) return labelRows(db, page);
@@ -621,12 +621,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   /* `_rev` е отпечатъкът на реда към момента на отварянето (v2.4.56) — формата
      го връща при записа и books:update отказва, ако междувременно друго работно
      място е пипнало същия документ. Виж rowFingerprint в security-utils.js. */
-  ipcMain.handle('books:get', (e, id) => run(() => {
+  ipcMain.handle('books:get', /** @param {unknown} e @param {IpcArg<'books:get'>} id */ (e, id) => run(() => {
     const b = getDb().prepare(`${BOOK_SELECT} WHERE b.id = ?`).get(id);
     if (b) b._rev = rowFingerprint(b, BOOK_FIELDS);
     return b;
   }));
-  ipcMain.handle('books:byBarcode', (e, code) =>
+  ipcMain.handle('books:byBarcode', /** @param {unknown} e @param {IpcArg<'books:byBarcode'>} code */ (e, code) =>
     // CAST-ва се ПАРАМЕТЪРЪТ, не колоната — CAST(b.inv_number AS TEXT) = ? би
     // попречил на SQLite да ползва нито idx_books_barcode, нито уникалния индекс
     // на inv_number, и би прибягнал до пълно сканиране на фонда въпреки индекса
@@ -835,7 +835,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
         + 'описанието (сигнатура, УДК, поредица) се копира и номерът се дава сам.'
     };
   }
-  ipcMain.handle('books:byIsbn', (e, isbn, selfId) =>
+  ipcMain.handle('books:byIsbn', /** @param {unknown} e @param {IpcArg<'books:byIsbn'>} isbn @param {IpcArg<'books:byIsbn', 1>} [selfId] */ (e, isbn, selfId) =>
     run(() => {
       const r = sameIsbn(getDb(), isbn, selfId == null || selfId === '' ? null : Number(selfId));
       return r ? [r] : [];
@@ -1092,7 +1092,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
        • catalogWarning — текстът на предупреждението за онлайн каталога или null.
      Така старите повиквания (и всички тестове, които четат .data) продължават да
      работят непроменени, а прозорецът може да покаже новото, когато го поиска. */
-  ipcMain.handle('books:create', (e, book) => {
+  ipcMain.handle('books:create', /** @param {unknown} e @param {IpcArg<'books:create'>} book */ (e, book) => {
     const res = run(() => {
       const db = getDb();
       checkRecordLimit('books');
@@ -1173,7 +1173,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       acqWarning: res.data.acqWarning, kindWarning: res.data.kindWarning, isbnDuplicate: res.data.isbnDuplicate,
       suggestions, catalogWarning };
   });
-  ipcMain.handle('books:update', (e, book) =>
+  ipcMain.handle('books:update', /** @param {unknown} e @param {IpcArg<'books:update'>} book */ (e, book) =>
     run(() => {
       const db = getDb();
       const tx = db.transaction((b) => {
@@ -1307,7 +1307,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
     pending.set(id, now);
     return false;
   }
-  ipcMain.handle('books:delete', (e, id) =>
+  ipcMain.handle('books:delete', /** @param {unknown} e @param {IpcArg<'books:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE book_id = ? AND date_in IS NULL').get(id).n;
@@ -1446,12 +1446,12 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      Списъкът пак НЕ съдържа „отчислен“ — то си остава само с акт (чл. 30 – 39);
      стойността се взима от самия enum, за да не могат двете да се разминат пак. */
   const BULK_EDIT_STATUS_VALUES = ['наличен', 'липсващ', 'за реставрация', BOOK_STATUS_LOST];
-  ipcMain.handle('books:bulkUpdate', (e, { ids, field, value }) =>
+  ipcMain.handle('books:bulkUpdate', /** @param {unknown} e @param {IpcArg<'books:bulkUpdate'>} arg */ (e, { ids, field, value }) =>
     run(() => {
       const db = getDb();
       if (!BULK_EDIT_FIELDS.includes(field)) throw new Error('Непозволено поле за групова редакция.');
       if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
-      if (field === 'status' && !BULK_EDIT_STATUS_VALUES.includes(value)) {
+      if (field === 'status' && !BULK_EDIT_STATUS_VALUES.includes(/** @type {string} */ (value))) {
         throw new Error('Отчисляването на документи минава само през акт за отчисляване (раздел „Отчисляване“), не и през групова редакция.');
       }
       const v = field === 'category_id' ? (value ? parseInt(value, 10) : null) : (value || null);
@@ -1733,7 +1733,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       + '; останалите ' + (n - k) + ' остават под инв. № ' + (b.inv_number ?? '—'));
     return { created, createdIds, inv_number: b.inv_number, title: b.title };
   }
-  ipcMain.handle('books:splitCopies', (e, id) =>
+  ipcMain.handle('books:splitCopies', /** @param {unknown} e @param {IpcArg<'books:splitCopies'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const out = db.transaction(() => splitOneCopy(db, id)).immediate();
@@ -1760,7 +1760,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
      свършена работа), нищо от партидата не се записва — нито току-що
      разделеното по-рано в същото повикване. Вече разделен запис не спира
      останалите: пропуска се и се връща в `skipped`, за да го каже екранът. */
-  ipcMain.handle('books:splitCopiesBatch', (e, ids) =>
+  ipcMain.handle('books:splitCopiesBatch', /** @param {unknown} e @param {IpcArg<'books:splitCopiesBatch'>} ids */ (e, ids) =>
     run(() => {
       const db = getDb();
       const out = db.transaction(() => {
@@ -1779,7 +1779,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
           }
           const k = item && typeof item === 'object' ? parseInt(item.missing, 10) : NaN;
           if (k >= 1 && k < qty) {
-            results.push(Object.assign({ id, partial: true }, detachMissingCopies(db, id, k, item.date)));
+            results.push(Object.assign({ id, partial: true }, detachMissingCopies(db, id, k, /** @type {{ date?: IsoDate }} */ (item).date)));   // k ≥ 1 — item е обект
             continue;
           }
           /* inheritMissingStatus: тази партида идва САМО от „Проект за акт от
@@ -1796,7 +1796,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
   /* Бройка 0 (стар запис): документът е вписан в инвентарната книга, но не влиза
      в нито един сбор на фонда и не може да се заема. Единствената смислена
      стойност под правилото е 1. */
-  ipcMain.handle('books:setLendable', (e, id) =>
+  ipcMain.handle('books:setLendable', /** @param {unknown} e @param {IpcArg<'books:setLendable'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const b = db.prepare('SELECT inv_number, title FROM books WHERE id = ?').get(id);
@@ -1824,7 +1824,7 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       ORDER BY inv_number
     `).all())
   );
-  ipcMain.handle('books:clearOrphanDeaccession', (e, id) =>
+  ipcMain.handle('books:clearOrphanDeaccession', /** @param {unknown} e @param {IpcArg<'books:clearOrphanDeaccession'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const b = db.prepare('SELECT inv_number, title, status, deaccession_act_id, deaccession_date FROM books WHERE id = ?').get(id);
@@ -1840,10 +1840,10 @@ module.exports = function registerBooksHandlers(ipcMain, deps) {
       scheduleCatalogWrite();
     })
   );
-  ipcMain.handle('books:addCheck', (e, { bookId, date }) =>
+  ipcMain.handle('books:addCheck', /** @param {unknown} e @param {IpcArg<'books:addCheck'>} arg */ (e, { bookId, date }) =>
     run(() => getDb().prepare('INSERT INTO inventory_checks (book_id, date) VALUES (?, ?)').run(bookId, date || today()))
   );
-  ipcMain.handle('books:checks', (e, bookId) =>
+  ipcMain.handle('books:checks', /** @param {unknown} e @param {IpcArg<'books:checks'>} bookId */ (e, bookId) =>
     run(() => getDb().prepare('SELECT date FROM inventory_checks WHERE book_id = ? ORDER BY date').all(bookId))
   );
 

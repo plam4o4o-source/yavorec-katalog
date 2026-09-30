@@ -873,7 +873,8 @@ async function pdpDoUnlock() {
   /* Стара парола (кратка или изведена с предишните, по-евтини параметри) —
      подсказка да бъде сменена. Показва се СЛЕД „Отключено“ и с отделен toast,
      за да не изглежда като грешка: самото отключване е успешно. */
-  if (res.data && res.data.advise) setTimeout(() => toast(res.data.advise), 1200);
+  const advise = res.data && res.data !== true ? res.data.advise : '';   // true — паролата е наред
+  if (advise) setTimeout(() => toast(advise), 1200);
   loadPdpBox();
   loadAutoBackupBox(); // отключването/заключването сменя дали копието се криптира
 }
@@ -1205,7 +1206,7 @@ async function resetAllForm() {
      обработчикът я прекъсва безусловно; екранът го обявява ПРЕДИ
      потвърждението, защото списъкът „Остава / Изчезва“ е мястото, на което
      библиотекарката решава. */
-  const cr = p.catalogReset || {};
+  const cr = /** @type {Partial<ResetPlan['catalogReset']>} */ (p.catalogReset || {});
   const catalogWarn = (p.catalogFolder || cr.any)
     ? `<div class="note w"><b>Онлайн каталогът: връзката се прекъсва, публикуваният файл остава.</b>
         <br><b>Изчезва</b> — връзката на тази програма с папката
@@ -1225,7 +1226,7 @@ async function resetAllForm() {
      маха пробните си записи, а наименованието, организацията и населеното място
      излизат върху всеки акт, протокол и регистър за печат — загубата им е
      по-скъпа от повторното въвеждане. */
-  const ir = p.identityReset || {};
+  const ir = /** @type {Partial<ResetPlan['identityReset']>} */ (p.identityReset || {});
   const identityBox = ir.any
     ? `<div class="note" style="margin-top:10px">
         <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
@@ -1327,10 +1328,13 @@ async function saveLimits() {
   renderSetup();
 }
 window.saveLimits = saveLimits;
-/* Всички полета на settings:update, събрани от всички блокове [data-setup-form]
+/** Всички полета на settings:update, събрани от всички блокове [data-setup-form]
    (v2.4.27): обработчикът изисква ВСИЧКИ именувани параметри наведнъж, а
-   полетата вече стоят в различни раздели, всеки със свой бутон „Запиши“. */
+   полетата вече стоят в различни раздели, всеки със свой бутон „Запиши“.
+   Като formData() — полетата ги знае HTML-ът, затова `any`.
+   @returns {any} */
 function setupFormData() {
+  /** @type {Record<string, any>} */
   const out = {};
   document.querySelectorAll('#view [data-setup-form]').forEach(block => {
     /** @type {NodeListOf<HTMLInputElement>} */ (block.querySelectorAll('input,select,textarea')).forEach(el => {
@@ -1349,6 +1353,13 @@ async function saveSetup() {
   /* П1 (v2.4.69): десетично поле с текст, който не е число („2,5 пъти“), не стига
      до обработчика — settings:update чете с parseFloat и би взел „2“ без дума, а
      „пет“ би станало „по подразбиране“. Отказва се тук, с името на полето. */
+  /* И паричните полета (v2.4.73): „5 лв.“ в поле в евро стигаше до обработчика и
+     се записваше като 5 €. Сега се отказва тук, както в „Книги“ и „Постъпления“. */
+  const лошаСума = badMoneyField(document.querySelector('#view'));
+  if (лошаСума) {
+    return toast('„' + лошаСума.label + '“: „' + лошаСума.value + '“ не е число' + (лошаСума.leva ? ' (сума в лева)' : '')
+      + '. Настройките НЕ са записани. Напишете сумата с цифри, десетичната част със запетая (напр. 2,50).', 'err');
+  }
   const лошо = badDecimalField(document.querySelector('#view'));
   if (лошо) {
     return toast('„' + лошо.label + '“: „' + лошо.value + '“ не е число (или е отрицателно). Настройките НЕ са '

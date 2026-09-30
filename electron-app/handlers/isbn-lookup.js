@@ -231,7 +231,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     return book.title ? book : null;
   }
 
-  ipcMain.handle('sru:lookup', async (e, raw) => {
+  ipcMain.handle('sru:lookup', /** @param {unknown} e @param {IpcArg<'sru:lookup'>} raw */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     const s = getDb().prepare('SELECT sru_endpoint FROM settings WHERE id = 1').get() || {};
@@ -242,7 +242,10 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     let parsed;
     try { parsed = new URL(endpoint); } catch (e) { parsed = null; }
     if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
-      throw new Error('Адресът на библиографския сървър (SRU) в „Настройки“ не е валиден http(s) адрес: ' + endpoint);
+      /* Отговор, не изключение (v2.4.73): изключение извън run() стигаше до екрана
+         като отхвърлено обещание и там излизаше „Няма връзка с интернет“ —
+         библиотекарката търсеше мрежата, а сгрешеното е адресът в настройките. */
+      return { ok: false, error: 'Адресът на библиографския сървър (SRU) в „Настройки“ не е валиден http(s) адрес: ' + endpoint };
     }
     try {
       const data = await sruLookupIsbn(isbn, endpoint);
@@ -253,7 +256,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     }
   });
 
-  ipcMain.handle('isbn:lookup', async (e, raw) => {
+  ipcMain.handle('isbn:lookup', /** @param {unknown} e @param {IpcArg<'isbn:lookup'>} raw */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     // Двете услуги се питат заедно и се допълват: Google Books обикновено дава език и

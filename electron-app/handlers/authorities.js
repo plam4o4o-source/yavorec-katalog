@@ -104,7 +104,7 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
     ).all();
   }
   ipcMain.handle('authorities:fields', () => run(() => AUTHORITY_FIELDS));
-  ipcMain.handle('authorities:list', (e, field) => run(() => authorityValues(field)));
+  ipcMain.handle('authorities:list', /** @param {unknown} e @param {IpcArg<'authorities:list'>} field */ (e, field) => run(() => authorityValues(field)));
   // Стойностите за автодовършване във формата за книга — всички полета наведнъж.
   ipcMain.handle('authorities:suggest', () =>
     run(() => {
@@ -115,7 +115,7 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
   );
   // Групи вероятни дублети. strict=true сравнява само разместени думи, иначе се
   // включват и съкратените имена, което е по-широко и изисква повече внимание.
-  ipcMain.handle('authorities:duplicates', (e, { field, loose }) =>
+  ipcMain.handle('authorities:duplicates', /** @param {unknown} e @param {IpcArg<'authorities:duplicates'>} arg */ (e, { field, loose }) =>
     run(() => {
       const rows = authorityValues(field).filter(r => authKey(r.value));
       let buckets;
@@ -189,7 +189,7 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
         .sort((a, b) => b.total - a.total);
     })
   );
-  ipcMain.handle('authorities:merge', (e, { field, from, to }) =>
+  ipcMain.handle('authorities:merge', /** @param {unknown} e @param {IpcArg<'authorities:merge'>} arg */ (e, { field, from, to }) =>
     run(() => {
       if (!(field in AUTHORITY_FIELDS)) throw new Error('Непознато поле: ' + field);
       const target = String(to || '').trim();

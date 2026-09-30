@@ -22,7 +22,7 @@ module.exports = function registerAvHandlers(ipcMain, deps) {
   ipcMain.handle('av:options', () => run(() => avOptions()));
   // Замества целия списък на една категория наведнъж — редакторът в Настройки подава
   // пълния нов ред на стойностите (ред по ред), затова частични UPDATE-и не са нужни.
-  ipcMain.handle('av:save', (e, { category, values }) =>
+  ipcMain.handle('av:save', /** @param {unknown} e @param {IpcArg<'av:save'>} arg */ (e, { category, values }) =>
     run(() => {
       if (!(category in AV_CATEGORIES)) throw new Error('Непозната номенклатура.');
       const list = (values || [])
