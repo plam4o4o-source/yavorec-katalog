@@ -11,6 +11,59 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.75
+
+**BG:** **„Празно“ вече е отделен тип (strictNullChecks).** Изданието е вътрешно —
+работата на програмата не се променя, версията на базата не се вдига.
+
+Досега проверката на типовете приемаше, че всяка стойност може да бъде и `null`, без
+да го казва. Сега и в главния процес, и в изгледите празната стойност е отделен тип:
+ред от базата носи „може да е празно“ точно там, където колоната го позволява;
+`call()` казва, че при грешка връща `null`; отговорът на канал е или `{ ok: true,
+data }`, или `{ ok: false, error }` — след проверка на `ok` данните са налице, без
+нея — не. Четене без проверка е грешка при CI, а не „Cannot read properties of null“
+пред библиотекаря.
+
+- Включването даде около 400 съобщения; самото описание на отговора като „или
+  успех, или грешка“ махна повече от половината. Останалите ~200 са поправени по
+  едно — в огромната си част липсващо описание на тип (празен списък, стойност,
+  която първо е `null`, после текст) или проверка, която вече я има, но на място,
+  където TypeScript не я вижда.
+- Там, където стойността наистина не може да е празна по причина, която TypeScript
+  не вижда, това е казано изрично с бележка до кода, а не с общо `any`.
+- Заемането по код вече проверява изрично, че има избран читател (полето се вижда
+  само при избран читател, тоест поведението не се променя).
+
+Истински грешки, при които празна стойност стига до кода, не се намериха — това е
+добрата новина на т. 4: досегашните проверки в кода са били на място.
+
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 413 теста в UTC и 2 413 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. Нов `test/nulls-v2475.test.js`: и двете проверки са със strictNullChecks; четене на `data` без проверка на `ok`, на резултата от `call()` без проверка за `null` и на празна колона е грешка, а вярното четене не е; в обработчика — незадължително поле от договора. Независимият преглед на кода не намери промяна в поведението и истинска грешка; по негова бележка едно преобразуване, което твърдеше „число“ за стойност, която може да е празна (отчетната бройка в акта), е заменено с честно описание. Мутационна проверка — **4 мутации, всички уловени** (изключено за изгледите, за главния процес, старото описание на отговора, `call()` без `null`; контролната минава).
+
+**EN:** **"Empty" is now its own type (strictNullChecks).** An internal release — how
+the program works does not change and the database version is not raised.
+
+Until now the type check assumed any value might also be `null` without saying so.
+Now, in both the main process and the views, the empty value is its own type: a
+database row carries "may be empty" exactly where the column allows it; `call()`
+says it returns `null` on error; a channel's answer is either `{ ok: true, data }`
+or `{ ok: false, error }` — after checking `ok` the data is there, without the check
+it is not. Reading without a check is a CI error, not "Cannot read properties of
+null" in front of the librarian.
+
+- Switching it on gave about 400 messages; describing the answer as "success or
+  error" alone removed more than half. The remaining ~200 were fixed one by one —
+  mostly a missing type description (an empty list, a value that is first `null`
+  then text) or a check that already exists where TypeScript cannot see it.
+- Where a value really cannot be empty for a reason TypeScript does not see, this is
+  said explicitly with a comment next to the code, not with a blanket `any`.
+- Checkout by code now explicitly checks that a reader is selected (the field is
+  shown only with a reader selected, so behaviour does not change).
+
+No genuine bugs where an empty value reaches the code were found — the good news of
+item 4: the existing checks in the code were in place.
+
+**Verified:** `npm run test:all` — all 8 checks pass: **2,413 tests in UTC and 2,413 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. New `test/nulls-v2475.test.js`: both checks use strictNullChecks; reading `data` without checking `ok`, the result of `call()` without checking for `null`, and an empty column are errors, while the correct reads are not; in a handler — an optional field from the contract. The independent code review found no change in behaviour and no genuine bug; following its note, one cast that claimed "number" for a value that can be empty (the counted quantity in an act) was replaced with an honest description. Mutation testing — **4 mutants, all killed** (switched off for the views, for the main process, the old answer type, `call()` without `null`; the control passes).
+
 ## v2.4.74
 
 **BG:** **Типовете на редовете идват от схемата на базата, а SQL-ът се проверява
