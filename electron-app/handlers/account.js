@@ -16,6 +16,17 @@ const { LOST_CHARGE_TYPE, LATE_FEE_CHARGE_TYPE } = require('../db/enum-triggers'
    червено. */
 /* Едно закръгляне за цялата програма — виж toCents в db/fund-sql.js (v2.4.67). */
 const { toCents } = require('../db/fund-sql');
+const { isValidIsoDate } = require('../security-utils');
+
+/* ДАТАТА НА РЕДА В СМЕТКАТА СЕ ПРОВЕРЯВА (v2.4.72). Дотук каквото дойде в
+   `date`, влизаше в account_lines — „2026-13-01“ или „утре“ оставаха в
+   касовия дневник и падаха извън всяка година в „Приходи от такси“. Празна
+   дата значи „днес“, както досега. */
+function assertLineDate(date, what) {
+  if (date != null && date !== '' && !isValidIsoDate(date)) {
+    throw new Error('Датата (' + date + ') е невалидна — очаква се ГГГГ-ММ-ДД. ' + what);
+  }
+}
 
 /* НАЧИСЛЕНИЕТО ЗА ИЗГУБЕН ДОКУМЕНТ СЕ ПИШЕ ОТ ТУК, А НЕ ОТ ЗАЕМАНИЯТА (v2.4.56).
    =====================================================================
@@ -141,16 +152,17 @@ function chargeCoverage(db, lineId) {
 module.exports = function registerAccountHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
 
-  ipcMain.handle('account:get', (e, readerId) =>
+  ipcMain.handle('account:get', /** @param {unknown} e @param {IpcArg<'account:get'>} readerId */ (e, readerId) =>
     run(() => {
       const lines = getDb().prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY date DESC, id DESC').all(readerId);
       const balance = toCents(lines.reduce((s, l) => s + Number(l.amount || 0), 0));
       return { lines, balance };
     })
   );
-  ipcMain.handle('account:charge', (e, { reader_id, type, amount, note, date }) =>
+  ipcMain.handle('account:charge', /** @param {unknown} e @param {IpcArg<'account:charge'>} arg */ (e, { reader_id, type, amount, note, date }) =>
     run(() => {
       const db = getDb();
+      assertLineDate(date, 'Нищо не е начислено.');
       /* Math.abs НЕ е излишно: знакът е носителят на смисъла в този дневник
          (плюс = дължи се, минус = платено). Начисление с подадена отрицателна
          сума би влязло като плащане и би намалило дълга — затова сумата се
@@ -192,9 +204,10 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('account:pay', (e, { reader_id, amount, note, date }) =>
+  ipcMain.handle('account:pay', /** @param {unknown} e @param {IpcArg<'account:pay'>} arg */ (e, { reader_id, amount, note, date }) =>
     run(() => {
       const db = getDb();
+      assertLineDate(date, 'Плащането не е записано.');
       const raw = Math.abs(Number(amount) || 0); // виж account:charge за знака
       if (!Number.isFinite(raw)) throw new Error('Сумата трябва да е положителна.');
       /* Одит v2.4.24: проверката гледаше СУРОВАТА сума, а записът — закръглената
@@ -220,7 +233,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
      прозорецът обявяваше „Изтрито.“ за нищо. */
   /* Каналът приема и `{ id, reason }` (v2.4.71, Ч12); голото число остава
      за заварените извиквания. */
-  ipcMain.handle('account:deleteLine', /** @param {unknown} e @param {any} arg */ (e, arg) =>
+  ipcMain.handle('account:deleteLine', /** @param {unknown} e @param {IpcArg<'account:deleteLine'>} arg */ (e, arg) =>
     run(() => {
       const db = getDb();
       const id = arg && typeof arg === 'object' ? arg.id : arg;

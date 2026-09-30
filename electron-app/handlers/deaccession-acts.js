@@ -330,7 +330,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       FROM deaccession_acts a ORDER BY a.date DESC, a.no DESC
     `).all())
   );
-  ipcMain.handle('deaccessionActs:get', (e, id) =>
+  ipcMain.handle('deaccessionActs:get', /** @param {unknown} e @param {IpcArg<'deaccessionActs:get'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       /* Колоните deaccession_act_id/status_before върху holds и shelves_before
@@ -397,7 +397,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return act;
     })
   );
-  ipcMain.handle('deaccessionActs:nextNo', (e, year) =>
+  ipcMain.handle('deaccessionActs:nextNo', /** @param {unknown} e @param {IpcArg<'deaccessionActs:nextNo'>} year */ (e, year) =>
     run(() => {
       const y = year || yearOf();
       const row = getDb().prepare('SELECT MAX(no) AS m FROM deaccession_acts WHERE year = ?').get(y);
@@ -437,7 +437,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       + 'а заявката би останала да сочи към отчислен документ. Когато се върне, отбележете заявката „върнато“ '
       + 'в „МЗС“ и тогава съставете акта.' + (tail || ' Актът НЕ е съставен.');
   }
-  ipcMain.handle('deaccessionActs:findBook', (e, code) => run(() => {
+  ipcMain.handle('deaccessionActs:findBook', /** @param {unknown} e @param {IpcArg<'deaccessionActs:findBook'>} code */ (e, code) => run(() => {
     const c = normalizeScanCode(code);
     const db = getDb();
     /* Одит v2.4.24 — виж resolveScannedBook() в security-utils.js. Тук цената на
@@ -1172,7 +1172,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           + ' Проверете папката за онлайн каталога в „Отчети“ → „Онлайн каталог“.');
       }
   }
-  ipcMain.handle('deaccessionActs:create', (e, { act, bookIds }) =>
+  ipcMain.handle('deaccessionActs:create', /** @param {unknown} e @param {IpcArg<'deaccessionActs:create'>} arg */ (e, { act, bookIds }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1205,7 +1205,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       `).all();
     })
   );
-  ipcMain.handle('deaccessionActs:getDraft', (e, id) =>
+  ipcMain.handle('deaccessionActs:getDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:getDraft'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1221,7 +1221,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return d;
     })
   );
-  ipcMain.handle('deaccessionActs:saveDraft', (e, { id, draft, bookIds }) =>
+  ipcMain.handle('deaccessionActs:saveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:saveDraft'>} arg */ (e, { id, draft, bookIds }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1277,7 +1277,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return draftId;
     })
   );
-  ipcMain.handle('deaccessionActs:deleteDraft', (e, id) =>
+  ipcMain.handle('deaccessionActs:deleteDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:deleteDraft'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1293,7 +1293,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return true;
     })
   );
-  ipcMain.handle('deaccessionActs:approveDraft', (e, { id, no }) =>
+  ipcMain.handle('deaccessionActs:approveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:approveDraft'>} arg */ (e, { id, no }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1332,7 +1332,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return actId;
     })
   );
-  ipcMain.handle('deaccessionActs:revoke', (e, id, opts) =>
+  ipcMain.handle('deaccessionActs:revoke', /** @param {unknown} e @param {IpcArg<'deaccessionActs:revoke'>} id @param {IpcArg<'deaccessionActs:revoke', 1>} [opts] */ (e, id, opts) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);

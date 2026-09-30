@@ -115,4 +115,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { render, OUT };
+module.exports = { render, OUT, contractChannels };

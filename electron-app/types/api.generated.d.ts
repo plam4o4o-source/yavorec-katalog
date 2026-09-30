@@ -194,27 +194,27 @@ interface InvLibApi {
   };
   deaccessionActs: {
     /** канал „deaccessionActs:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'deaccessionActs:list'>;
     /** канал „deaccessionActs:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'deaccessionActs:get'>;
     /** канал „deaccessionActs:nextNo“ */
-    nextNo: InvLibInvoke;
+    nextNo: IpcMethod<'deaccessionActs:nextNo'>;
     /** канал „deaccessionActs:findBook“ */
-    findBook: InvLibInvoke;
+    findBook: IpcMethod<'deaccessionActs:findBook'>;
     /** канал „deaccessionActs:create“ */
-    create: InvLibInvoke;
+    create: IpcMethod<'deaccessionActs:create'>;
     /** канал „deaccessionActs:revoke“ */
-    revoke: InvLibInvoke;
+    revoke: IpcMethod<'deaccessionActs:revoke'>;
     /** канал „deaccessionActs:drafts“ */
-    drafts: InvLibInvoke;
+    drafts: IpcMethod<'deaccessionActs:drafts'>;
     /** канал „deaccessionActs:getDraft“ */
-    getDraft: InvLibInvoke;
+    getDraft: IpcMethod<'deaccessionActs:getDraft'>;
     /** канал „deaccessionActs:saveDraft“ */
-    saveDraft: InvLibInvoke;
+    saveDraft: IpcMethod<'deaccessionActs:saveDraft'>;
     /** канал „deaccessionActs:deleteDraft“ */
-    deleteDraft: InvLibInvoke;
+    deleteDraft: IpcMethod<'deaccessionActs:deleteDraft'>;
     /** канал „deaccessionActs:approveDraft“ */
-    approveDraft: InvLibInvoke;
+    approveDraft: IpcMethod<'deaccessionActs:approveDraft'>;
   };
   kdbf: {
     /** канал „kdbf:report“ */
@@ -268,13 +268,13 @@ interface InvLibApi {
   };
   account: {
     /** канал „account:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'account:get'>;
     /** канал „account:charge“ */
-    charge: InvLibInvoke;
+    charge: IpcMethod<'account:charge'>;
     /** канал „account:pay“ */
-    pay: InvLibInvoke;
+    pay: IpcMethod<'account:pay'>;
     /** канал „account:deleteLine“ */
-    deleteLine: InvLibInvoke;
+    deleteLine: IpcMethod<'account:deleteLine'>;
   };
   suggestions: {
     /** канал „suggestions:list“ */
@@ -338,7 +338,7 @@ interface InvLibApi {
   };
   events: {
     /** канал „events:localuse“ */
-    localuse: InvLibInvoke;
+    localuse: IpcMethod<'events:localuse'>;
   };
   notices: {
     /** канал „notices:log“ */
@@ -346,37 +346,37 @@ interface InvLibApi {
   };
   loans: {
     /** канал „loans:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'loans:list'>;
     /** канал „loans:overdue“ */
-    overdue: InvLibInvoke;
+    overdue: IpcMethod<'loans:overdue'>;
     /** канал „loans:overdueByReader“ */
-    overdueByReader: InvLibInvoke;
+    overdueByReader: IpcMethod<'loans:overdueByReader'>;
     /** канал „loans:byReader“ */
-    byReader: InvLibInvoke;
+    byReader: IpcMethod<'loans:byReader'>;
     /** канал „loans:byBook“ */
-    byBook: InvLibInvoke;
+    byBook: IpcMethod<'loans:byBook'>;
     /** канал „loans:checkout“ */
-    checkout: InvLibInvoke;
+    checkout: IpcMethod<'loans:checkout'>;
     /** канал „loans:checkoutByCode“ */
-    checkoutByCode: InvLibInvoke;
+    checkoutByCode: IpcMethod<'loans:checkoutByCode'>;
     /** канал „loans:return“ */
-    return: InvLibInvoke;
+    return: IpcMethod<'loans:return'>;
     /** канал „loans:returnByCode“ */
-    returnByCode: InvLibInvoke;
+    returnByCode: IpcMethod<'loans:returnByCode'>;
     /** канал „loans:extend“ */
-    extend: InvLibInvoke;
+    extend: IpcMethod<'loans:extend'>;
     /** канал „loans:markLost“ */
-    markLost: InvLibInvoke;
+    markLost: IpcMethod<'loans:markLost'>;
     /** канал „loans:lostQuote“ */
-    lostQuote: InvLibInvoke;
+    lostQuote: IpcMethod<'loans:lostQuote'>;
     /** канал „loans:lost“ */
-    lost: InvLibInvoke;
+    lost: IpcMethod<'loans:lost'>;
     /** канал „loans:found“ */
-    found: InvLibInvoke;
+    found: IpcMethod<'loans:found'>;
     /** канал „loans:lostPolicy“ */
-    lostPolicy: InvLibInvoke;
+    lostPolicy: IpcMethod<'loans:lostPolicy'>;
     /** канал „loans:lostPolicySave“ */
-    lostPolicySave: InvLibInvoke;
+    lostPolicySave: IpcMethod<'loans:lostPolicySave'>;
     /** канал „loans:reminders“ */
     reminders: InvLibInvoke;
     /** канал „loans:mailto“ */
@@ -398,17 +398,17 @@ interface InvLibApi {
   };
   inventorySessions: {
     /** канал „inventorySessions:list“ */
-    list: InvLibInvoke;
+    list: IpcMethod<'inventorySessions:list'>;
     /** канал „inventorySessions:requirement“ */
-    requirement: InvLibInvoke;
+    requirement: IpcMethod<'inventorySessions:requirement'>;
     /** канал „inventorySessions:start“ */
-    start: InvLibInvoke;
+    start: IpcMethod<'inventorySessions:start'>;
     /** канал „inventorySessions:get“ */
-    get: InvLibInvoke;
+    get: IpcMethod<'inventorySessions:get'>;
     /** канал „inventorySessions:scan“ */
-    scan: InvLibInvoke;
+    scan: IpcMethod<'inventorySessions:scan'>;
     /** канал „inventorySessions:close“ */
-    close: InvLibInvoke;
+    close: IpcMethod<'inventorySessions:close'>;
     /** канал „inventorySessions:importScans“ */
     importScans: InvLibInvoke;
   };

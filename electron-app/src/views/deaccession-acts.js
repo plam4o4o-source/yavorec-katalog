@@ -443,7 +443,8 @@ async function saveAct() {
         + 'не се освобождава (чл. 39). Да съставя ли акта с този номер?', { okLabel: 'Да, с този номер' })) return;
     }
   }
-  const act = Object.assign({}, d, { reason_text: p ? p.t : '' });
+  /* Полетата на формата са описани в IpcContract['deaccessionActs:create'] — formData() не ги знае. */
+  const act = /** @type {IpcArg<'deaccessionActs:create'>['act']} */ (Object.assign({}, d, { reason_text: p ? p.t : '' }));
   if (actLegacyBlock()) return;
   const id = await call(window.api.deaccessionActs.create({ act, bookIds: ACT_LIST.map(b => b.id) }));
   if (id) {

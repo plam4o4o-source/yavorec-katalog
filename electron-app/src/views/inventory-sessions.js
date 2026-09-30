@@ -182,7 +182,8 @@ async function startInventForm() {
 }
 window.startInventForm = startInventForm;
 async function beginInvent() {
-  const d = formData('#ivF');
+  /* Полетата на #ivF са описани в IpcContract['inventorySessions:start'] — formData() не ги знае. */
+  const d = /** @type {IpcArg<'inventorySessions:start'>} */ (formData('#ivF'));
   const id = await call(window.api.inventorySessions.start(d));
   if (!id) return;
   markSaved();
@@ -401,7 +402,7 @@ async function closeInvent() {
 window.closeInvent = closeInvent;
 async function doCloseInvent() {
   const sel = /** @type {HTMLInputElement} */ (document.querySelector('[name=ivMode]:checked'));
-  const mode = sel ? sel.value : 'representative';
+  const mode = /** @type {'full' | 'representative'} */ (sel ? sel.value : 'representative');   // стойностите на двете радио-копчета горе
   const res = await window.api.inventorySessions.close({ sessionId: INVENT_SESSION.id, mode });
   if (!res.ok) return toast(res.error, 'err');
   markSaved();
@@ -561,8 +562,8 @@ async function draftFromMissing(sessionId) {
        по-малко N от истинското. Сега или се разделят всички поискани записи,
        или (при истинска грешка по кой да е от тях) нито един — вече разделен
        запис не е грешка, той просто се прескача. */
-    const r = await window.api.books.splitCopiesBatch(legacy.map(p => p.m.book_id)
-      .concat(part.map(p => ({ id: p.m.book_id, missing: p.k, date: s.date }))));
+    const r = await window.api.books.splitCopiesBatch([...legacy.map(p => p.m.book_id),
+      ...part.map(p => ({ id: p.m.book_id, missing: p.k, date: s.date }))]);
     if (!r || !r.ok) return toast((r && r.error) || 'Записите не можаха да бъдат разделени.', 'err');
     for (const res of r.data.results) ids.push(...(res.createdIds || []));
     /* Вече разделен запис (например от „Проверка на данните“ след

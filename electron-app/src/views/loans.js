@@ -509,7 +509,7 @@ async function lostLoanDialog(id) {
   const q = await call(window.api.loans.lostQuote({ id }));
   if (!q) return;
   window._LOST_Q = q;
-  const p = q.policy || {};
+  const p = q.policy;   // loans:lostQuote връща правилото винаги (IpcContract)
   const basisText = q.basis === 'цена'
     ? `${p.multiplier} × цена по инвентарната книга (${mny(q.price)}) = <b>${mny(q.suggested)}</b>`
     : `документът е без вписана цена — предлага се сумата от правилото за такива случаи: <b>${mny(q.suggested)}</b>`;
