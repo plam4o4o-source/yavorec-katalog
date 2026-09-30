@@ -181,7 +181,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { workDays: [...workDaysSet()], closed, from };
     })
   );
-  ipcMain.handle('calendar:saveWorkDays', (e, days) =>
+  ipcMain.handle('calendar:saveWorkDays', /** @param {unknown} e @param {IpcArg<'calendar:saveWorkDays'>} days */ (e, days) =>
     run(() => {
       invalidateCalendarCache();
       const list = (Array.isArray(days) ? days : []).map(n => parseInt(n, 10)).filter(n => n >= 0 && n <= 6);
@@ -202,7 +202,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { moved: moved.length, message: moved.length ? movedText(moved) : null };
     })
   );
-  ipcMain.handle('calendar:addClosed', (e, { date, reason }) =>
+  ipcMain.handle('calendar:addClosed', /** @param {unknown} e @param {IpcArg<'calendar:addClosed'>} arg */ (e, { date, reason }) =>
     run(() => {
       invalidateCalendarCache();
       if (!date) throw new Error('Изберете дата.');
@@ -219,7 +219,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { moved: moved.length, message: moved.length ? movedText(moved) : null };
     })
   );
-  ipcMain.handle('calendar:removeClosed', (e, date) =>
+  ipcMain.handle('calendar:removeClosed', /** @param {unknown} e @param {IpcArg<'calendar:removeClosed'>} date */ (e, date) =>
     run(() => {
       invalidateCalendarCache();
       const info = getDb().prepare('DELETE FROM calendar_closed WHERE date = ?').run(date);

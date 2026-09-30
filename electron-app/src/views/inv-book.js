@@ -127,6 +127,8 @@ function invBookUndatedNote(sum) {
     Поправя се в „Редакция“ на записа → полето „Дата на вписване“.`;
 }
 window.invBookUndatedNote = invBookUndatedNote;
+/** Като booksFetch: целият регистър (`all`) или прозорец (`rows`, `total`, `summary`).
+    @returns {Promise<{ all?: InvBookRow[], rows?: InvBookRow[], total?: number, summary?: InvBookSummary } | null>} */
 async function invBookFetch(offset, limit, withSummary) {
   const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset,
     limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000), summary: !!withSummary }));
@@ -145,7 +147,8 @@ async function renderInvBook() {
   INVBOOK_TOTAL = res.all ? res.all.length : res.total;
   INVBOOK_SUMMARY = sum;
   const activeCopies = sum.activeCopies, value = sum.value, deacc = sum.deacc, checked = sum.checked;
-  const active = { length: sum.activeRows == null ? sum.rows - sum.deacc : sum.activeRows };
+  // Обработчикът не праща activeRows (виж InvBookSummary) — тогава е всичко без отчислените.
+  const active = { length: 'activeRows' in sum && sum.activeRows != null ? sum.activeRows : sum.rows - sum.deacc };
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
     Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>

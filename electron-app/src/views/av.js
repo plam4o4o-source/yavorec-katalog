@@ -10,9 +10,16 @@ async function avScript() {
     Defender и ще разреши програмата през „Защита от рансъмуер“. Прегледайте списъка, преди да
     го запишете:</div>
     <ul class="steps" style="list-style:disc">
-      ${info.dirs.map(d => `<li style="font-family:var(--mono);font-size:12px">${esc(d)}</li>`).join('')}
+      ${info.safe.map(d => `<li style="font-family:var(--mono);font-size:12px">${esc(d)}</li>`).join('')}
       <li style="font-family:var(--mono);font-size:12px">${esc(info.exe)} <span class="hint">(разрешено приложение)</span></li>
     </ul>
+    ${/* Папките, които скриптът НЕ може да добави сам (v2.4.73): дотук екранът
+         показваше всички като добавени, а .bat-ът казваше „имената им са в
+         програмата, в Настройки“ — там ги нямаше. */
+      info.rejected.length ? `<div class="note w"><b>${info.rejected.length === 1 ? 'Тази папка' : 'Тези ' + info.rejected.length + ' папки'}
+      скриптът не може да добави сам</b> (името съдържа знак, който командният ред не пренася безопасно).
+      Добавете ${info.rejected.length === 1 ? 'я' : 'ги'} на ръка: „Защита на Windows“ → „Защита от вируси и заплахи“ → „Изключения“.
+      <ul style="margin:6px 0 0 18px">${info.rejected.map(d => `<li style="font-family:var(--mono);font-size:12px">${esc(d)}</li>`).join('')}</ul></div>` : ''}
     <div class="hint">След записване: намерете файла, десен бутон → <b>„Изпълни като
     администратор“</b>. Прави се веднъж на всеки компютър и важи и за бъдещите обновявания.
     При друга антивирусна (Avast, ESET…) добавете същите папки в нейните настройки.</div>`,

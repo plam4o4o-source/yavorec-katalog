@@ -4,7 +4,7 @@ async function houseboundModal(readerId) {
     call(window.api.readers.get(readerId)), call(window.api.housebound.get(readerId))
   ]);
   if (!r || !hb) return;
-  const p = hb.profile || {};
+  const p = /** @type {Partial<HouseboundProfileRow>} */ (hb.profile || {});
   modal('🏠 Обслужване по домовете — ' + r.name, `
     <div class="note" style="margin-top:0">За читатели, които не могат да идват до библиотеката.
     Всяко вписано посещение влиза автоматично в предложенията за дневника

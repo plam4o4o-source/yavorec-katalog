@@ -259,7 +259,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
   );
   /* Отбелязва, че напомняне е реално минало към читателя (печат/копиране/поща) —
      така се вижда кой на коя степен е и повторните не се дублират на сляпо. */
-  ipcMain.handle('notices:log', (e, { reader_id, level, channel, loans_count }) =>
+  ipcMain.handle('notices:log', /** @param {unknown} e @param {IpcArg<'notices:log'>} arg */ (e, { reader_id, level, channel, loans_count }) =>
     run(() => {
       getDb().prepare('INSERT INTO notice_log (reader_id, level, channel, loans_count) VALUES (?, ?, ?, ?)')
         .run(reader_id, level || 1, channel || null, loans_count || 0);
@@ -292,7 +292,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
          обяснение (другите места, които ползват канала, не губят текста
          мълчаливо). */
   const MAILTO_MAX = 1900;
-  ipcMain.handle('loans:mailto', async (e, { email, subject, body, fallbackBody }) => {
+  ipcMain.handle('loans:mailto', /** @param {unknown} e @param {IpcArg<'loans:mailto'>} arg */ async (e, { email, subject, body, fallbackBody }) => {
     try {
       if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
       if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };

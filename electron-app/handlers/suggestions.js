@@ -156,11 +156,11 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
      документ също трябва да може да попита „някой искал ли е това“ — например
      когато партидата е инвентирана от другото работно място и прозорецът на
      постъплението не е виждал отговора на books:create. */
-  ipcMain.handle('suggestions:matchBook', (e, book) =>
+  ipcMain.handle('suggestions:matchBook', /** @param {unknown} e @param {IpcArg<'suggestions:matchBook'>} book */ (e, book) =>
     run(() => findOpenSuggestionsForBook(getDb(), book || {}))
   );
 
-  ipcMain.handle('suggestions:list', (e, status) =>
+  ipcMain.handle('suggestions:list', /** @param {unknown} e @param {IpcArg<'suggestions:list'>} status */ (e, status) =>
     run(() => {
       const db = getDb();
       const sql = `SELECT s.*, r.name AS reader_name_live, a.no AS acq_no, a.year AS acq_year
@@ -172,7 +172,7 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
       return rows;
     })
   );
-  ipcMain.handle('suggestions:create', (e, sug) =>
+  ipcMain.handle('suggestions:create', /** @param {unknown} e @param {IpcArg<'suggestions:create'>} sug */ (e, sug) =>
     run(() => {
       if (!(sug.title || '').trim()) throw new Error('Заглавието е задължително.');
       const info = getDb().prepare(`
@@ -192,7 +192,7 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
      (в) Партидата се чете от КНИГАТА тук, в обработчика — не се доверява на
      прозореца да я преписва; изрично подаден acquisition_id (прозорецът
      „Получено…“) печели, защото там библиотекарката я е избрала сама. */
-  ipcMain.handle('suggestions:setStatus', (e, { id, status, acquisition_id, book_id }) =>
+  ipcMain.handle('suggestions:setStatus', /** @param {unknown} e @param {IpcArg<'suggestions:setStatus'>} arg */ (e, { id, status, acquisition_id, book_id }) =>
     run(() => {
       const db = getDb();
       if (!SUGGESTION_STATUSES.includes(status)) throw new Error('Непознато състояние.');
@@ -210,7 +210,7 @@ module.exports = function registerSuggestionsHandlers(ipcMain, deps) {
         + (viaBook ? ' (с вписването на инв. № ' + (viaBook.inv_number ?? '—') + ')' : ''));
     })
   );
-  ipcMain.handle('suggestions:delete', (e, id) =>
+  ipcMain.handle('suggestions:delete', /** @param {unknown} e @param {IpcArg<'suggestions:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT title FROM suggestions WHERE id = ?').get(id);

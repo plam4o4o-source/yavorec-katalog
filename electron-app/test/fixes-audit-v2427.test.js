@@ -59,7 +59,8 @@ test('Настройки: шест раздела, лява навигация, 
 
   // Именуваните параметри на UPDATE-а в handlers/settings.js — ВСИЧКИ трябва да са
   // в блоковете [data-setup-form], иначе better-sqlite3 отказва целия запис.
-  const sql = fs.readFileSync(path.join(APP_DIR, 'handlers', 'settings.js'), 'utf8');
+  // Без JSDoc коментарите (от v2.4.73 обработчиците носят `@param {IpcArg<…>}`).
+  const sql = fs.readFileSync(path.join(APP_DIR, 'handlers', 'settings.js'), 'utf8').replace(/\/\*\*[\s\S]*?\*\//g, '');
   const params = [...new Set([...sql.matchAll(/@([a-z_0-9]+)/g)].map(m => m[1]))].filter(p => p !== 'id');
   const sent = window.setupFormData();
   for (const p of params) assert.ok(p in sent, 'полето „' + p + '“ липсва в блоковете [data-setup-form]');

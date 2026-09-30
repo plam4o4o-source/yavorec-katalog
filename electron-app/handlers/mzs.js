@@ -161,7 +161,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
     LEFT JOIN readers r ON r.id = m.reader_id
     LEFT JOIN books b ON b.id = m.book_id`;
   ipcMain.handle('mzs:list', () => run(() => getDb().prepare(`${LIST_SELECT} ORDER BY m.date DESC, m.no DESC`).all()));
-  ipcMain.handle('mzs:nextNo', (e, year) =>
+  ipcMain.handle('mzs:nextNo', /** @param {unknown} e @param {IpcArg<'mzs:nextNo'>} year */ (e, year) =>
     run(() => {
       const y = year || yearOf();
       const row = getDb().prepare('SELECT MAX(no) AS m FROM mzs_requests WHERE year = ?').get(y);
@@ -175,7 +175,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
      due_date, days_over, date_sent, date_received, reader_id, reader_name,
      reader_card, reader_phone, book_id, book_inv, text } — `text` е готовото
      изречение за екрана. */
-  ipcMain.handle('mzs:overdue', (e, arg) =>
+  ipcMain.handle('mzs:overdue', /** @param {unknown} e @param {IpcArg<'mzs:overdue'>} arg */ (e, arg) =>
     run(() => {
       const on = arg && isValidIsoDate(arg.on) ? arg.on : localDate();
       return mzsOverdueRows(getDb(), on);
@@ -320,7 +320,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
     return away(before) !== away(after) || (away(before) && before.book_id !== after.book_id);
   }
 
-  ipcMain.handle('mzs:create', (e, m) =>
+  ipcMain.handle('mzs:create', /** @param {unknown} e @param {IpcArg<'mzs:create'>} m */ (e, m) =>
     run(() => {
       const db = getDb();
       assertMzsDates(m.date, m.due_date);
@@ -375,7 +375,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
      е в транзакция с .immediate(); тук самият ред се изключва от проверката.
      Непратено/празно поле не изтрива стойността, за да продължат да работят и
      частичните извиквания (само статус, само партньор). */
-  ipcMain.handle('mzs:update', (e, m) =>
+  ipcMain.handle('mzs:update', /** @param {unknown} e @param {IpcArg<'mzs:update'>} m */ (e, m) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT * FROM mzs_requests WHERE id = ?').get(m.id);
@@ -454,7 +454,7 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
   );
   /* Регистър с номера (v2.4.29): изтриването се вписва в следата, както при
      партидите (v2.4.24), и не мълчи при несъществуващ ред. */
-  ipcMain.handle('mzs:delete', (e, id) =>
+  ipcMain.handle('mzs:delete', /** @param {unknown} e @param {IpcArg<'mzs:delete'>} id */ (e, id) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT * FROM mzs_requests WHERE id = ?').get(id);

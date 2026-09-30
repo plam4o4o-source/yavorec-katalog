@@ -87,7 +87,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     if (dialogApprovedImports.has(path.resolve(filePath))) return true;
     return IMPORT_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
   }
-  ipcMain.handle('import:load', (e, filePath) => {
+  ipcMain.handle('import:load', /** @param {unknown} e @param {IpcArg<'import:load'>} filePath */ (e, filePath) => {
     try {
       if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Файлът не е намерен.' };
       if (!importSourceAllowed(filePath)) {
@@ -286,7 +286,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     }
     return null;
   }
-  ipcMain.handle('import:run', (e, { mapping, options }) => {
+  ipcMain.handle('import:run', /** @param {unknown} e @param {IpcArg<'import:run'>} arg */ (e, { mapping, options }) => {
     try {
       const db = getDb();
       if (!IMPORT_CACHE) return { ok: false, error: 'Първо изберете файл.' };

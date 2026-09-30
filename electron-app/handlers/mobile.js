@@ -51,7 +51,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
   });
 
   // Внасяне на сканираните с телефона номера в отворена сесия за инвентаризация.
-  ipcMain.handle('inventorySessions:importScans', (e, { sessionId, codes }) =>
+  ipcMain.handle('inventorySessions:importScans', /** @param {unknown} e @param {IpcArg<'inventorySessions:importScans'>} arg */ (e, { sessionId, codes }) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);

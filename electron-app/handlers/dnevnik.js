@@ -164,7 +164,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
     return Object.assign(sum, dnevnikTotals(sum));
   }
 
-  ipcMain.handle('dnevnik:getMonth', (e, { year, month }) =>
+  ipcMain.handle('dnevnik:getMonth', /** @param {unknown} e @param {IpcArg<'dnevnik:getMonth'>} arg */ (e, { year, month }) =>
     run(() => {
       const db = getDb();
       const y = parseInt(year, 10), m = parseInt(month, 10);
@@ -214,7 +214,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
      Празен ред при първо докосване на деня: колоните, които не са изпратени,
      остават NULL и се четат като 0 навсякъде, където се сумират — същото
      поведение като досега. */
-  ipcMain.handle('dnevnik:saveDay', (e, d) =>
+  ipcMain.handle('dnevnik:saveDay', /** @param {unknown} e @param {IpcArg<'dnevnik:saveDay'>} d */ (e, d) =>
     run(() => {
       const db = getDb();
       const cols = DNEVNIK_FIELDS.filter(f => d[f] !== undefined);
@@ -493,7 +493,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
   const DNEVNIK_AGE_MAP = {
     'дете до 14 г.': 'a_age_u14', 'ученик': 'a_age_15_18', 'студент': 'a_age_19_28'
   };
-  ipcMain.handle('dnevnik:suggest', (e, { date }) =>
+  ipcMain.handle('dnevnik:suggest', /** @param {unknown} e @param {IpcArg<'dnevnik:suggest'>} arg */ (e, { date }) =>
     run(() => {
       const db = getDb();
       /* Категорията се чете ЖИВА през книгата (виж DNEVNIK_TYPE_BY_CODE по-горе):
@@ -629,7 +629,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         } };
     })
   );
-  ipcMain.handle('dnevnik:exportCsv', async (e, { year, month }) => {
+  ipcMain.handle('dnevnik:exportCsv', /** @param {unknown} e @param {IpcArg<'dnevnik:exportCsv'>} arg */ async (e, { year, month }) => {
     try {
       const db = getDb();
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {

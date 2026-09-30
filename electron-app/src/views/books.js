@@ -63,6 +63,8 @@ let BOOKS_GEN = 0; // поколение на списъка в паметта �
        таван (RENDER_MAX_ROWS), за да не могат двете места да се разминат пак.
        Същото число получи и обработчикът books:list (handlers/books.js) — той
        също режеше на 2 000 и без него тази промяна нямаше да има ефект. */
+/** Порция от списъка: целият (`all`, стар обработчик без прозорец) или прозорец (`rows`).
+    @returns {Promise<{ all?: BookListRow[], rows?: BookListRow[], total?: number, depts?: string[] } | null>} */
 async function booksFetch(offset, limit) {
   const res = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT,
     { offset, limit: Math.min(limit || BOOKS_PAGE_SIZE, RENDER_MAX_ROWS), dept: BOOKS_FILTER_DEPT || '', cat: BOOKS_FILTER_CAT || '' }));
@@ -520,11 +522,12 @@ async function bookForm(id, presetAcqId, prefill) {
   // Чете се НАЖИВО, не от SETTINGS_CACHE (преглед на кръга): books:create увеличава
   // номера в базата, а снимката в паметта оставаше със стария и втората поред книга
   // получаваше „Този инвентарен номер вече е зает“.
+  /** @type {number | ''} */
   let nextInv = '';
   if (!id && !prefill) { const fresh = await call(window.api.settings.get()); nextInv = (fresh && fresh.next_inv_number) || ''; }
   const v = prefill || b || { inv_number: nextInv, register_date: today(), status: 'наличен', language: 'български',
     department: 'за възрастни', acquisition_id: presetAcqId || '' };
-  const AV = av || {};
+  const AV = av || /** @type {IpcData<'av:options'>} */ ({});
   const catOpts = (cats || []).map(c => ({ v: c.id, t: c.name }));
   /* ВИД „КНИГА“ ПО ПОДРАЗБИРАНЕ ЗА НОВ ЗАПИС (v2.4.69, кръг 44, П9). Дотук новият
      картон стоеше на празен вид и документът излизаше в КДБФ Част № 2 под
@@ -712,6 +715,8 @@ async function bookCopyForm(id) {
   const src = await call(window.api.books.get(id));
   if (!src) return;
   const s = await call(window.api.settings.get());
+  /* Копието носи и „копирано от“ — поле само на формата (books:create го приема). */
+  /** @type {Omit<Partial<typeof src>, 'inv_number'> & { inv_number?: number | '', copied_from?: number | null }} */
   const v = Object.assign({}, src);
   delete v.id;
   v.copied_from = src.inv_number;

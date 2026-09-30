@@ -209,7 +209,7 @@ async function analyticForm(id) {
     call(window.api.periodicals.list()),
     loadAuthSuggest()
   ]);
-  const v = a || { source_kind: 'периодика', is_local: 1, year: String(new Date().getFullYear()) };
+  const v = /** @type {Partial<IpcData<'analytics:get'>>} */ (a || { source_kind: 'периодика', is_local: 1, year: String(new Date().getFullYear()) });   // нов запис — само подразбиранията
   const perOpts = (pers || []).map(p => ({ v: p.id, t: p.title }));
   modal(id ? 'Редакция на описание' : 'Ново аналитично описание', `
     <form id="anlF" onsubmit="return false">

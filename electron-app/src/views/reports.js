@@ -39,8 +39,7 @@ async function renderReports() {
       + 'заета от другото работно място.</div>';
     return;
   }
-  r.title = def ? def.title : '';
-  window._REPORT = r;
+  window._REPORT = Object.assign(r, { title: def ? def.title : '' });   // заглавието за печата — от екрана
   $('#repBody').innerHTML = reportBodyHtml(r);
 }
 /* Прост построител на редове за таблица от чифтове [етикет, число] или [етикет, брой, стойност]. */

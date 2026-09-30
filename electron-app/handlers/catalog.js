@@ -442,7 +442,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      после се задава, е „откога сайтът чете от този адрес и какъв беше преди“.
      Ако нищо не се е променило (екранът записва формата и без промяна), ред не
      се прави — следа от незасегнати записи заглушава истинските. */
-  ipcMain.handle('catalog:updateGh', (e, { gh_user, gh_repo, gh_branch }) =>
+  ipcMain.handle('catalog:updateGh', /** @param {unknown} e @param {IpcArg<'catalog:updateGh'>} arg */ (e, { gh_user, gh_repo, gh_branch }) =>
     run(() => {
       const db = getDb();
       const before = db.prepare('SELECT gh_user, gh_repo, gh_branch FROM settings WHERE id=1').get() || {};
@@ -573,7 +573,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      САМО след „Запиши въпреки това…“ и изричен въпрос с двете числа. Тук остава
      редът в следата — кой брой е заменил кой, — защото това е съзнателно
      свиване на публичния каталог и после се пита „кой и кога го направи“. */
-  ipcMain.handle('catalog:writeNow', (e, opts) =>
+  ipcMain.handle('catalog:writeNow', /** @param {unknown} e @param {IpcArg<'catalog:writeNow'>} opts */ (e, opts) =>
     run(() => {
       const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
       if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');

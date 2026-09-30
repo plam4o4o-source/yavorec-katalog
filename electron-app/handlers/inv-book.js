@@ -20,7 +20,7 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
      показателя над таблицата (вписани, неотчислени екземпляри и стойност,
      отчислени, с отбелязана проверка) по ЦЕЛИЯ регистър, а не по порцията.
      Търсенето е по инв. №, автор, заглавие и сигнатура, както беше в паметта. */
-  ipcMain.handle('invBook:list', (e, page) =>
+  ipcMain.handle('invBook:list', /** @param {unknown} e @param {IpcArg<'invBook:list'>} page */ (e, page) =>
     run(() => {
       const db = getDb();
       if (page && typeof page === 'object') return invBookWindow(db, page);

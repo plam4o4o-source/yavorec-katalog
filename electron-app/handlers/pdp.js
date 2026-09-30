@@ -389,7 +389,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     // плейсхолдър вътре. `stale` е отделно, за да може екранът да обясни защо.
     run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY && !PDP_STALE, stale: PDP_STALE, unreadable: unreadableSeen }))
   );
-  ipcMain.handle('pdp:setup', (e, password) =>
+  ipcMain.handle('pdp:setup', /** @param {unknown} e @param {IpcArg<'pdp:setup'>} password */ (e, password) =>
     run(() => {
       const db = getDb();
       if (!password || String(password).length < PDP_MIN_PASSWORD) {
@@ -411,7 +411,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       return true;
     })
   );
-  ipcMain.handle('pdp:unlock', (e, password) =>
+  ipcMain.handle('pdp:unlock', /** @param {unknown} e @param {IpcArg<'pdp:unlock'>} password */ (e, password) =>
     run(() => {
       const s = pdpSettingsRow();
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
@@ -442,7 +442,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     })
   );
   ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; badLogged = false; pii.clearSession(); }));
-  ipcMain.handle('pdp:changePassword', /** @param {unknown} e @param {{ oldPassword?: string, newPassword?: string }} [arg] */ (e, { oldPassword, newPassword } = {}) =>
+  ipcMain.handle('pdp:changePassword', /** @param {unknown} e @param {Partial<IpcArg<'pdp:changePassword'>>} [arg] */ (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
       const s = pdpSettingsRow();

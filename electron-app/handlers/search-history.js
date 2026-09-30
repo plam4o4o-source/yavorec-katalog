@@ -7,7 +7,7 @@
 module.exports = function registerSearchHistoryHandlers(ipcMain, deps) {
   const { getDb, run, getCurrentUser } = deps;
 
-  ipcMain.handle('searchHistory:log', (e, { kind, query }) =>
+  ipcMain.handle('searchHistory:log', /** @param {unknown} e @param {IpcArg<'searchHistory:log'>} arg */ (e, { kind, query }) =>
     run(() => {
       const db = getDb();
       const q = String(query || '').trim();
@@ -17,7 +17,7 @@ module.exports = function registerSearchHistoryHandlers(ipcMain, deps) {
       db.prepare('INSERT INTO search_history (user, kind, query) VALUES (?, ?, ?)').run(getCurrentUser() || '', kind, q);
     })
   );
-  ipcMain.handle('searchHistory:suggest', (e, kind) =>
+  ipcMain.handle('searchHistory:suggest', /** @param {unknown} e @param {IpcArg<'searchHistory:suggest'>} kind */ (e, kind) =>
     run(() => getDb().prepare(`
       SELECT query FROM search_history WHERE kind = ? GROUP BY query ORDER BY MAX(id) DESC LIMIT 10
     `).all(kind).map(r => r.query))

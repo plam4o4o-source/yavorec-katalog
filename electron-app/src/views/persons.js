@@ -168,7 +168,7 @@ window.printPersons = printPersons;
 
 async function personForm(id) {
   const p = id ? await call(window.api.persons.get(id)) : null;
-  const v = p || {};
+  const v = /** @type {Partial<IpcData<'persons:get'>>} */ (p || {});   // нов запис — само подразбиранията
   modal(id ? 'Редакция — ' + (v.name || '') : 'Нова персоналия', `
     <form id="prsF" onsubmit="return false" data-prev-name="${esc(v.name || '')}">
     <fieldset><legend>Самоличност</legend>

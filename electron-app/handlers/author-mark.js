@@ -545,7 +545,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
 
   /* Предложение за ЕДИН документ — това стои зад копчето „Предложи“ във формата.
      Връща и откъде идва знакът, за да може екранът да го покаже. */
-  ipcMain.handle('authorMark:suggest', (e, book) => run(() => {
+  ipcMain.handle('authorMark:suggest', /** @param {unknown} e @param {IpcArg<'authorMark:suggest'>} book */ (e, book) => run(() => {
     const db = getDb();
     const rows = rowsOf(db);
     if (!rows.length) throw new Error('Няма внесена таблица за авторски знак. Настройки → Фонд → „Авторски знак“.');

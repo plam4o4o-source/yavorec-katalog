@@ -15,7 +15,7 @@ const { isValidIsoDate } = require('../security-utils');
 module.exports = function registerHouseboundHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, logEvent, today } = deps;
 
-  ipcMain.handle('housebound:get', (e, readerId) =>
+  ipcMain.handle('housebound:get', /** @param {unknown} e @param {IpcArg<'housebound:get'>} readerId */ (e, readerId) =>
     run(() => {
       const db = getDb();
       const p = db.prepare('SELECT * FROM housebound_profiles WHERE reader_id = ?').get(readerId) || null;
@@ -23,7 +23,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       return { profile: p, visits };
     })
   );
-  ipcMain.handle('housebound:save', (e, { reader_id, day, frequency, note }) =>
+  ipcMain.handle('housebound:save', /** @param {unknown} e @param {IpcArg<'housebound:save'>} arg */ (e, { reader_id, day, frequency, note }) =>
     run(() => {
       const db = getDb();
       db.prepare(`INSERT INTO housebound_profiles (reader_id, day, frequency, note) VALUES (?, ?, ?, ?)
@@ -33,7 +33,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       logAudit('Обслужване по домовете', 'график за ' + (r ? r.name : reader_id));
     })
   );
-  ipcMain.handle('housebound:remove', (e, readerId) =>
+  ipcMain.handle('housebound:remove', /** @param {unknown} e @param {IpcArg<'housebound:remove'>} readerId */ (e, readerId) =>
     run(() => {
       const db = getDb();
       const del = db.prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId);
@@ -42,7 +42,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       logAudit('Обслужване по домовете', 'спрян график за ' + (r ? r.name : readerId));
     })
   );
-  ipcMain.handle('housebound:addVisit', (e, { reader_id, date, note }) =>
+  ipcMain.handle('housebound:addVisit', /** @param {unknown} e @param {IpcArg<'housebound:addVisit'>} arg */ (e, { reader_id, date, note }) =>
     run(() => {
       const db = getDb();
       const d = date || today();

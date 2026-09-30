@@ -103,7 +103,7 @@ module.exports = function registerAuditHandlers(ipcMain, deps) {
     }
     return db.prepare(`SELECT * FROM audit_log ORDER BY id DESC ${limit}`).all();
   }
-  ipcMain.handle('audit:list', (e, query) => run(() => listAudit(query, false)));
+  ipcMain.handle('audit:list', /** @param {unknown} e @param {IpcArg<'audit:list'>} query */ (e, query) => run(() => listAudit(query, false)));
   /* ИЗНОСЪТ НА СЛЕДАТА СЕ ВПИСВА В САМАТА СЛЕДА (v2.4.65, кръг 42, Б21)
      ==========================================================================
      (а) КАКВО СТАВАШЕ ДОТУК. `audit:export` беше ЕДИНСТВЕНОТО извеждане на
@@ -124,7 +124,7 @@ module.exports = function registerAuditHandlers(ipcMain, deps) {
      са различни файлове и следата трябва да ги различава. Самият ред НЕ влиза
      в изнесения файл (изнася се прочетеното преди него) — така износът не
      документира сам себе си като свое съдържание. */
-  ipcMain.handle('audit:export', (e, query) =>
+  ipcMain.handle('audit:export', /** @param {unknown} e @param {IpcArg<'audit:export'>} query */ (e, query) =>
     run(() => {
       const rows = listAudit(query, true);
       const q = String(query || '').trim();

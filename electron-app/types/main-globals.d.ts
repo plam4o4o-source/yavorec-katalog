@@ -18,3 +18,7 @@ interface DbNewerSchemaError extends Error {
 interface HttpStatusError extends Error {
   httpStatus: number;
 }
+
+/** parseInt превръща аргумента в низ сам (ToString) — числото или Id от договора
+    (number | string) се чете еднакво. Стандартното описание приема само string. */
+declare function parseInt(string: string | number, radix?: number): number;

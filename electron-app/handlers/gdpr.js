@@ -484,10 +484,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
   }
   const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
 
-  ipcMain.handle('gdpr:forgetReader', (e, arg) =>
+  ipcMain.handle('gdpr:forgetReader', /** @param {unknown} e @param {IpcArg<'gdpr:forgetReader'>} arg */ (e, arg) =>
     run(() => {
       const db = getDb();
-      const id = parseInt((arg && typeof arg === 'object') ? arg.id : arg, 10);
+      const id = parseInt(/** @type {Id} */ ((arg && typeof arg === 'object') ? arg.id : arg), 10);
       if (!Number.isFinite(id) || id <= 0) {
         throw new Error('Не е посочен читател. Отворете картона на читателя и повторете действието.');
       }
