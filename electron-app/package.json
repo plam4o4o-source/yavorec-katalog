@@ -15,8 +15,9 @@
     "pack": "electron-builder --dir",
     "test": "node --test",
     "test:all": "node scripts/all-checks.js",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/gen-api-types.js --check",
-    "gen:api-types": "node scripts/gen-api-types.js"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json && node scripts/gen-api-types.js --check && node scripts/gen-db-types.js --check",
+    "gen:api-types": "node scripts/gen-api-types.js",
+    "gen:db-types": "node scripts/gen-db-types.js"
   },
   "engines": {
     "node": ">=22"

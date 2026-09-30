@@ -52,16 +52,7 @@ interface Coverage { charged: number; covered: number; outstanding: number }
 interface HoldBrief { reader_name: string; card_no: string | null; phone: string | null }
 
 /** Ред от loans (l.*). */
-interface LoanColumns {
-  id: number; reader_id: number; book_id: number;
-  date_out: IsoDate; date_due: IsoDate | null; date_in: IsoDate | null;
-  fine: number | null; renewals: number | null; anon_category: string | null;
-  deaccession_act_id: number | null;
-  lost: number | null; lost_date: IsoDate | null; lost_resolution: string | null; lost_amount: number | null;
-  lost_account_line_id: number | null; lost_replacement_book_id: number | null;
-  lost_replacement_note: string | null; lost_note: string | null;
-  deaccession_fine: number | null; deaccession_fine_line_id: number | null;
-}
+interface LoanColumns extends DbLoans {}
 /** LOAN_SELECT в handlers/loans.js — заемането с документа и читателя. */
 interface LoanRow extends LoanColumns {
   title: string; author: string | null; inv_number: number | null;
@@ -74,23 +65,12 @@ interface OverdueRow extends LoanRow {
   fineCredit?: number;
 }
 /** Ред от books (b.*). */
-interface BookColumns {
-  id: number; inv_number: number | null; barcode: string | null; register_date: string | null;
-  title: string; subtitle: string | null; author: string | null; category_id: number | null;
-  year: string | null; volume: string | null; isbn: string | null; pages: string | null; language: string | null;
-  udk: string | null; call_number: string | null; author_mark: string | null; city: string | null;
-  publisher: string | null; series: string | null; series_no: string | null; keywords: string | null;
-  annotation: string | null; cover_url: string | null; department: string | null; status: string | null;
-  status_date: string | null; datelastseen: string | null; permanent_location: string | null; cn_sort: string | null;
-  price: number | null; description: string | null; acquisition_id: number | null;
-  deaccession_act_id: number | null; deaccession_date: string | null; created_at: string | null;
-}
+interface BookColumns extends DbBooks {}
 /** BOOK_SELECT в handlers/books.js — документът с вида и бройките. */
 interface BookSelectRow extends BookColumns { category_name: string | null; quantity: number; available: number }
 /** Ред от читателската сметка. */
-interface AccountLine {
-  id: number; reader_id: number; date: IsoDate; kind: 'начисление' | 'плащане';
-  type: string | null; amount: number; note: string | null; created_at: string | null;
+interface AccountLine extends DbAccountLines {
+  kind: 'начисление' | 'плащане';
 }
 /** Правилото за обезщетение за изгубен документ (loans:lostPolicy). */
 interface LostPolicy {
@@ -98,36 +78,14 @@ interface LostPolicy {
   defaults: { multiplier: number; fallback: number }; resolutions: string[];
 }
 /** Акт за отчисляване (deaccession_acts.*). */
-interface ActRow {
-  id: number; no: number; year: string; date: IsoDate; order_no: string | null;
-  reason_code: number | null; reason_text: string | null; disposal: string | null; attach: string | null;
-  committee1: string | null; committee2: string | null; committee3: string | null;
-  revoked_at: string | null; revoke_reason: string | null; revoked_by: string | null;
-  note: string | null; created_at: string | null; created_by: string | null; director: string | null;
-}
+interface ActRow extends DbDeaccessionActs {}
 /** Отчислен екземпляр в акта — снимката по чл. 35, ал. 2. */
-interface ActItemRow {
-  id: number; act_id: number; book_id: number | null; inv_number: number | null;
-  author: string | null; title: string | null; volume: string | null; year: string | null;
-  price: number | null; udk: string | null; category: string | null; language: string | null;
-  quantity: number | null; status_before: string | null; shelves_before: string | null;
-}
+interface ActItemRow extends DbDeaccessionItems {}
 /** Проект за акт (deaccession_drafts.*). */
-interface DraftRow {
-  id: number; date: string | null; order_no: string | null; reason_code: number | null;
-  reason_text: string | null; disposal: string | null; attach: string | null;
-  committee1: string | null; committee2: string | null; committee3: string | null;
-  note: string | null; created_at: string; updated_at: string;
-}
+interface DraftRow extends DbDeaccessionDrafts {}
 /** Сесия за инвентаризация (inventory_sessions.*). */
-interface SessionRow {
-  id: number; date: IsoDate; scope: string | null; department: string | null;
-  committee1: string | null; committee2: string | null; committee3: string | null;
-  pool_size: number; closed: number; mode: 'full' | 'representative' | null;
-  no: number | null; year: string | null; order_no: string | null;
-  pool_final: number | null; on_loan: number | null; at_binder: number | null; scanned_final: number | null;
-  free_access_pct: number | null; last_book_id: number | null; added_late: number | null; mzs_away: number | null;
-  director: string | null;
+interface SessionRow extends DbInventorySessions {
+  mode: 'full' | 'representative' | null;
 }
 
 /* ---------------- Общи редове (група A) ---------------- */
@@ -227,16 +185,7 @@ interface CatalogRemoteSlug { user: string; repo: string; url: string }
 /* ---------------- Общи редове (група B) ---------------- */
 
 /** Ред от readers (r.*). */
-interface ReaderColumns {
-  id: number; name: string; phone: string | null; address: string | null; address2: string | null;
-  email: string | null; card_no: string | null; egn: string | null; id_card_no: string | null;
-  id_card_date: string | null; id_card_issuer: string | null; birth_date: string | null;
-  category: string | null; registered_at: string | null; re_registered_at: string | null;
-  status: string | null; gdpr_consent: number | null; gdpr_consent_date: string | null;
-  parent_consent: number | null; parent_consent_date: string | null; suspended_until: IsoDate | null;
-  guarantor_name: string | null; guarantor_relation: string | null; guarantor_phone: string | null;
-  note: string | null; alert_note: string | null; created_at: string | null;
-}
+interface ReaderColumns extends DbReaders {}
 /** Читател след maskReaderRow (handlers/pdp.js) — ЕГН/№ ЛК може да са заменени с надпис. */
 interface ReaderRow extends ReaderColumns {
   pii_masked?: true; pii_masked_fields?: string[]; pii_masked_reason?: 'unreadable' | 'stale' | 'locked';
@@ -266,11 +215,9 @@ interface ReaderInput {
 /** Повикан за заделена книга читател (readers:delete, gdpr:forgetReader). */
 interface HoldActivated { name: string; phone: string | null; title: string; inv_number: number | null }
 
-/** Ред от holds (h.*). */
-interface HoldColumns {
-  id: number; book_id: number; reader_id: number; placed_at: string | null;
+/** Ред от holds (h.*) — с колоните, които отчисляването добавя (deaccession_act_id, status_before). */
+interface HoldColumns extends DbHolds {
   status: 'чака' | 'заделена' | 'изпълнена' | 'отказана' | null;
-  ready_at: string | null; resolved_at: string | null; note: string | null;
 }
 /** HOLD_SELECT в handlers/holds.js — резервацията с документа и читателя. */
 interface HoldRow extends HoldColumns {
@@ -279,15 +226,12 @@ interface HoldRow extends HoldColumns {
 }
 
 /** Профил за обслужване по домовете (housebound_profiles.*). */
-interface HouseboundProfileRow { reader_id: number; day: string | null; frequency: string | null; note: string | null }
+interface HouseboundProfileRow extends DbHouseboundProfiles {}
 /** Посещение по домовете (housebound_visits.*). */
-interface HouseboundVisitRow { id: number; reader_id: number; date: IsoDate; note: string | null }
+interface HouseboundVisitRow extends DbHouseboundVisits {}
 
 /** Правило за обслужване по категория (circulation_rules.*); NULL = общата настройка. */
-interface CircRuleRow {
-  category: string; loan_days: number | null; max_books: number | null; extensions_count: number | null;
-  extension_days: number | null; suspend_per_day: number | null; suspend_max: number | null;
-}
+interface CircRuleRow extends DbCirculationRules {}
 /** Ефективното правило (circRule в handlers/circ-rules.js) — сроковете винаги са число. */
 interface CircRuleEffective {
   loan_days: number; extension_days: number; max_books: number | null; extensions_count: number | null;
@@ -300,16 +244,10 @@ interface CalendarClosedRow { date: IsoDate; reason: string | null }
 interface CalendarShift { moved: number; message: string | null }
 
 /** Служител (employees.*). */
-interface EmployeeRow { id: number; name: string; active: number | null; created_at: string | null }
+interface EmployeeRow extends DbEmployees {}
 
 /** Заявка за МЗС (mzs_requests.*). */
-interface MzsRow {
-  id: number; no: number; year: string; date: IsoDate; direction: string; partner: string;
-  author: string | null; title: string; isbn: string | null; requester: string | null;
-  status: string | null; due_date: IsoDate | null; note: string | null;
-  book_id: number | null; reader_id: number | null;
-  date_sent: IsoDate | null; date_received: IsoDate | null; date_returned: IsoDate | null;
-}
+interface MzsRow extends DbMzsRequests {}
 /** Полетата, които mzs:create/update четат. Читателят — по карта (reader_card) или id;
     нашият документ — по инв. №/баркод (book_code) или id. */
 interface MzsInput {
@@ -320,10 +258,7 @@ interface MzsInput {
 }
 
 /** Предложение за покупка (suggestions.*). */
-interface SuggestionRow {
-  id: number; date: IsoDate; reader_id: number | null; reader_name: string | null; author: string | null;
-  title: string; note: string | null; status: string | null; acquisition_id: number | null; created_at: string | null;
-}
+interface SuggestionRow extends DbSuggestions {}
 /** Състоянията на предложението (SUGGESTION_STATUSES в handlers/suggestions.js). */
 type SuggestionStatus = 'заявено' | 'одобрено' | 'поръчано' | 'получено' | 'отказано';
 
@@ -354,12 +289,9 @@ interface ReminderRow {
 /* ---------------- Общи редове (група C) ---------------- */
 
 /** Ред от acquisitions (a.*) — партида в КДБФ Част № 1. */
-interface AcqColumns {
-  id: number; no: number; year: string; date: IsoDate; how: string | null; from_source: string | null;
-  doc_type: string | null; doc_no: string | null; doc_date: IsoDate | null; total_count: number | null;
+interface AcqColumns extends DbAcquisitions {
   /** NULL = стойност не е обявена в първичния документ; 0 = обявена нула. */
-  sum: number | null; donor_address: string | null; note: string | null;
-  committee1: string | null; committee2: string | null; committee3: string | null; director: string | null;
+  sum: number | null;
 }
 /** Полетата на партидата от формата (acquisitions:create / :update) — стойностите идват като низове. */
 interface AcqInput {
@@ -370,10 +302,7 @@ interface AcqInput {
 }
 
 /** Ред от periodicals (p.*) — картон на периодично издание. */
-interface PeriodicalColumns {
-  id: number; title: string; freq: string | null; publisher: string | null; issn: string | null;
-  department: string | null; note: string | null; language: string | null;
-}
+interface PeriodicalColumns extends DbPeriodicals {}
 /** Полетата на картона на изданието от формата (periodicals:create / :update). */
 interface PeriodicalInput {
   title: string; freq?: string | null; publisher?: string | null; issn?: string | null;
@@ -382,10 +311,7 @@ interface PeriodicalInput {
   language?: string | null;
 }
 /** Ред от periodical_issues (i.*) — постъпил брой в кардекса. */
-interface PeriodicalIssueRow {
-  id: number; periodical_id: number; issue_no: string; date: IsoDate | null; price: number | null;
-  note: string | null; volume_year: number | null;
-}
+interface PeriodicalIssueRow extends DbPeriodicalIssues {}
 /** Година в картона на изданието (volumeRows в handlers/periodicals.js) — броеве и инвентиран комплект. */
 interface PeriodicalVolumeRow {
   year: string; issue_count: number; issue_sum: number;
@@ -397,13 +323,7 @@ interface PeriodicalVolumeRow {
 interface PeriodicalInvGap { inv_number: number; from: number; to: number; skipped: number; message: string }
 
 /** Ред от analytics (a.*) — аналитично описание. */
-interface AnalyticColumns {
-  id: number; title: string; subtitle: string | null; author: string | null;
-  source_kind: string | null; periodical_id: number | null; book_id: number | null; source_text: string | null;
-  year: string | null; issue: string | null; issue_date: IsoDate | null; pages: string | null; udk: string | null;
-  keywords: string | null; annotation: string | null; is_local: number | null; note: string | null;
-  created_at: string | null;
-}
+interface AnalyticColumns extends DbAnalytics {}
 /** ANALYTIC_SELECT в handlers/analytics.js — описанието с източника му във фонда. */
 interface AnalyticRow extends AnalyticColumns {
   periodical_title: string | null;
@@ -421,12 +341,9 @@ interface AnalyticInput {
 }
 
 /** Ред от persons без снимката (LIST_COLS в handlers/persons.js). */
-interface PersonColumns {
-  id: number; name: string; alt_names: string | null;
+interface PersonColumns extends Omit<DbPersons, 'photo'> {
   /** Точна дата (ISO) или година като текст — „1890“, „ок. 1890“. */
-  birth_date: string | null; birth_place: string | null; death_date: string | null; death_place: string | null;
-  activity: string | null; bio: string | null; awards: string | null; sources: string | null; note: string | null;
-  created_at: string | null;
+  birth_date: string | null;
 }
 /** Персоналия в списъка (persons:list) — без снимката, с броя на връзките в двете посоки. */
 interface PersonListRow extends PersonColumns { has_photo: number; links: number; backlinks: number }
@@ -442,10 +359,7 @@ interface PersonInput {
 }
 
 /** Ред от chronicle без снимката — запис в летописа. */
-interface ChronicleColumns {
-  id: number; year: string; date: IsoDate | null; title: string; body: string | null; category: string | null;
-  participants: string | null; sources: string | null; note: string | null; created_at: string | null;
-}
+interface ChronicleColumns extends Omit<DbChronicle, 'photo'> {}
 /** Полетата на летописния запис от формата (chronicle:create / :update). */
 interface ChronicleInput {
   /** Може да липсва само при точна дата — тогава се взема от нея. */
@@ -458,10 +372,7 @@ type LinkFromKind = 'персона' | 'летопис';
 /** Към какво сочи краеведска връзка (LINK_TO в handlers/links.js). */
 type LinkToKind = 'книга' | 'статия' | 'летопис' | 'персона' | 'периодика';
 /** Ред от links (l.*) — видовете са текст от базата. */
-interface LinkColumns {
-  id: number; from_kind: string; from_id: number; to_kind: string; to_id: number;
-  note: string | null; created_at: string | null;
-}
+interface LinkColumns extends DbLinks {}
 /** Връзка навън с етикета на целта (links:list). */
 interface LinkRow extends LinkColumns { label: string }
 /** Обратна връзка (links:backlinks): ред от links ИЛИ статия с този документ за източник (source: true, id: null). */
@@ -534,31 +445,15 @@ interface SruRecord {
 /* ---------------- Общи редове (група D) ---------------- */
 
 /** Ред от settings (SELECT * FROM settings WHERE id = 1) — db/schema.sql + ensureColumns/миграции 2 и 6 в main.js. */
-interface SettingsRow {
-  id: number;
-  org: string | null; lib_name: string | null; place: string | null; bulstat: string | null; reg_no: string | null;
-  director: string | null; director_role: string | null; librarian: string | null; cat_url: string | null;
-  loan_days: number | null; max_books: number | null; extensions_count: number | null; extension_days: number | null;
-  fine_per_day: number | null; annual_fee: number | null; free_access_pct: number | null; next_inv_number: number | null;
-  committee1: string | null; committee2: string | null; committee3: string | null;
-  lbl_mode: string | null; lbl_w: number | null; lbl_h: number | null; lbl_cols: number | null;
-  lbl_gap: number | null; lbl_margin: number | null; lbl_border: number | null;
+interface SettingsRow extends DbSettings {
   /** Колоните от миграция 18 (ensureColumns в main.js) — база само от db/schema.sql ги няма; екранът чете lbl_mt ?? lbl_margin. */
-  lbl_mt?: number | null; lbl_ml?: number | null; lbl_gx?: number | null; lbl_gy?: number | null;
-  sig_w: number | null; sig_h: number | null; card_w: number | null; card_h: number | null;
+  lbl_mt?: number | null;
   /** Логото като data URI. */
   logo: string | null;
-  theme: string | null; scan_sound: number | null; catalog_folder: string | null; sru_endpoint: string | null;
-  suspend_per_day: number | null; suspend_max: number | null; remind2_days: number | null; remind3_days: number | null;
-  notice_subject: string | null; notice_body: string | null; notice_sms: string | null;
-  anonymize_years: number | null;
   /** Без DEFAULT: NULL = „по подразбиране“ (3 × цената, 10 €). */
-  lost_price_multiplier: number | null; lost_fallback_amount: number | null;
-  work_days: string | null;
-  gh_user: string | null; gh_repo: string | null; gh_branch: string | null;
-  limit_books: number | null; limit_readers: number | null;
+  lost_price_multiplier: number | null;
   /** Миграция 2 — защитата на личните данни. */
-  pdp_salt: string | null; pdp_verifier: string | null;
+  pdp_salt: string | null;
   /** Миграция 6. */
   holidays_seeded: string | null;
 }
@@ -625,7 +520,7 @@ interface BackupAutoStatus {
 }
 
 /** Ред от audit_log (SELECT *). `diff` е JSON [{field, before, after}] или NULL. */
-interface AuditLogRow { id: number; ts: string | null; user: string | null; action: string; detail: string | null; diff: string | null }
+interface AuditLogRow extends DbAuditLog {}
 
 /** Бързите числа на таблото (dashboard:stats). */
 interface DashboardStats { books: number; readers: number; loansOpen: number; overdue: number }

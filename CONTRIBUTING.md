@@ -174,6 +174,23 @@ element does not have, or passes a function the wrong number of arguments.
     its fields — so a field removed from a form is **not** caught; objects built
     in code are fully checked. The handler's *return value* is not checked
     against `result` either — keep the two in step by hand.
+- **Row types come from the database schema** (`types/db.generated.d.ts`,
+  `interface DbBooks`, `DbLoans`… — one per table). They are generated from the
+  *real* schema: `scripts/gen-db-types.js` starts the program in-process (as
+  the tests do), so `schema.sql`, `ensureColumns()`, the migrations and the
+  columns handlers add on first use are all included. After any schema change
+  run `npm run gen:db-types`; CI fails while the file is stale. A contract row
+  that describes a whole table **extends** it (`interface LoanColumns extends
+  DbLoans {}`) and only narrows a column's type (e.g. `kind: 'начисление' |
+  'плащане'`) — never declares a column the table lacks. A column added by a
+  handler with `ALTER TABLE … ADD COLUMN` must be reachable from one of the
+  channels in `LAZY_SCHEMA_CHANNELS` in the generator, which says so if not.
+- **SQL is checked against the schema.** `test/shema-v2474.test.js` prepares
+  every SQL text in `main.js`, `handlers/` and `db/` that can be read without
+  running the code (plain strings, and templates built from constants of the
+  same file) against the real schema — a misspelt column or table fails there.
+  Templates with a value computed at run time are counted, not checked; the
+  test caps their number so it does not grow unnoticed.
 
 **A new capability or a fix without a new or updated test is not accepted.**
 The convention is one test file per handler — `handlers/x.js` →

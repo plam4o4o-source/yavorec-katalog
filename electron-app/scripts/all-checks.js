@@ -65,6 +65,13 @@ const steps = [
     env: {}
   },
   {
+    name: 'Типовете на редовете отговарят на схемата на базата',
+    cmd: process.execPath,
+    args: ['scripts/gen-db-types.js', '--check'],
+    cwd: APP_DIR,
+    env: {}
+  },
+  {
     name: 'Поредица в UTC',
     cmd: process.execPath,
     args: ['--test'],
