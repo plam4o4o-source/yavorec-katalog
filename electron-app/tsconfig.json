@@ -19,5 +19,5 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitThis": true
   },
-  "include": ["*.js", "handlers/*.js", "db/*.js", "scripts/*.js", "types/main-globals.d.ts", "types/ipc-contract.d.ts"]
+  "include": ["*.js", "handlers/*.js", "db/*.js", "scripts/*.js", "types/main-globals.d.ts", "types/db.generated.d.ts", "types/ipc-contract.d.ts"]
 }

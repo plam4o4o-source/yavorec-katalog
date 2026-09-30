@@ -11,6 +11,57 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.74
+
+**BG:** **Типовете на редовете идват от схемата на базата, а SQL-ът се проверява
+срещу нея.** Изданието е вътрешно — работата на програмата не се променя, версията
+на базата не се вдига.
+
+- **Един източник за колоните.** Нов `scripts/gen-db-types.js` стартира програмата
+  (както тестовете), минава през `schema.sql`, `ensureColumns()`, миграциите и
+  колоните, които обработчиците добавят при първа употреба, и записва по един тип
+  за всяка таблица (`DbBooks`, `DbLoans`…) в `types/db.generated.d.ts`. 24 реда в
+  договора между екраните и базата, досега преписани на ръка, вече **наследяват**
+  таблицата си — нова колона стига до екрана без преписване, а изтрита или
+  преименувана колона, която екранът още чете, е грешка при проверката. CI пада,
+  докато генерираният файл не отговаря на схемата.
+- **SQL срещу схемата.** Нов тест подготвя всеки SQL текст от `main.js`,
+  `handlers/` и `db/`, който може да се прочете без изпълнение — **746 заявки**,
+  включително сглобените от списъци с полета и от общите късове в `db/` — срещу
+  истинската схема. Грешно име на колона или таблица пада там, а не при
+  библиотекаря, когато някой отвори точно този екран. Заявките, които зависят от
+  стойност от изпълнението (54), се броят и имат таван.
+- **Проверката на типовете чете и нашите описания.** Стеснен тип, който противоречи
+  на колоната си, вече е грешка (намери се едно — горното поле на етикета, описано като незадължително, а колоната го има винаги).
+
+Нови грешки в SQL не се намериха — всичките 746 заявки съвпадат със схемата.
+
+**Проверено:** `npm run test:all` — и **8-те** проверки минават (новата: типовете на редовете отговарят на схемата): **2 410 теста в UTC и 2 410 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. Нов `test/shema-v2474.test.js`. Независимият преглед на кода намери, че проверката пропускаше нашите `.d.ts`, че пазачът на генератора не четеше колоните от цикъл и таблиците при първа употреба и че извличането на SQL пропускаше списъците с полета — поправено. Мутационна проверка — **10 мутации, всички уловени** (грешна колона в SQL ×2, в списък с полета, в общ къс от `db/`, в константа; измислена колона в договора, стеснен тип против колоната, ред върнат към ръчно преписване, нова колона в схемата без генериране, изпуснат канал в генератора; контролната минава).
+
+**EN:** **Row types come from the database schema, and SQL is checked against it.**
+An internal release — how the program works does not change and the database
+version is not raised.
+
+- **One source for columns.** A new `scripts/gen-db-types.js` starts the program (as
+  the tests do), runs `schema.sql`, `ensureColumns()`, the migrations and the columns
+  handlers add on first use, and writes one type per table (`DbBooks`, `DbLoans`…) to
+  `types/db.generated.d.ts`. 24 rows in the screen ↔ database contract that were
+  copied by hand now **extend** their table — a new column reaches the screen without
+  copying, and a removed or renamed column the screen still reads is a type error. CI
+  fails while the generated file does not match the schema.
+- **SQL against the schema.** A new test prepares every SQL text in `main.js`,
+  `handlers/` and `db/` that can be read without running the code — **746 queries**,
+  including those built from field lists and the shared fragments in `db/` — against
+  the real schema. A misspelt column or table fails there, not for the librarian who
+  happens to open that screen. Queries that depend on a run-time value (54) are counted
+  and capped.
+- **The type check reads our own descriptions too.** A narrowed type that contradicts
+  its column is now an error (one was found — the label's top margin, described as optional although the column is always there).
+
+No new SQL errors were found — all 746 queries match the schema.
+
+**Verified:** `npm run test:all` — all **8** checks pass (new: row types match the schema): **2,410 tests in UTC and 2,410 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. New `test/shema-v2474.test.js`. The independent code review found that the check skipped our `.d.ts` files, that the generator's guard did not read columns added in a loop or tables created on first use, and that SQL extraction skipped field lists — all fixed. Mutation testing — **10 mutants, all killed** (a wrong column in SQL ×2, in a field list, in a shared `db/` fragment, in a constant; an invented column in the contract, a narrowed type against its column, a row reverted to a hand copy, a new schema column without regenerating, a channel dropped from the generator; the control passes).
+
 ## v2.4.73
 
 **BG:** **Договорът между екраните и базата вече описва всичко — и какво намери
