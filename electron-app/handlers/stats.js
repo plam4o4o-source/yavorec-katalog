@@ -60,7 +60,7 @@ function readersRegisteredIn(db, year) {
 }
 
 module.exports = function registerStatsHandlers(ipcMain, deps) {
-  const { getDb, run, yearOf, value, dnevnikSumRow } = deps;
+  const { getDb, run, yearOf, dnevnikSumRow } = deps;
 
   ipcMain.handle('stats:report', (e, year) =>
     run(() => {

@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const Database = require('better-sqlite3');
-const importers = require('./importers');
 const { ftsQuery, BOOKS_FTS_SETUP_SQL, READERS_FTS_SETUP_SQL } = require('./search-fts');
 const { applyEnumTriggers } = require('./db/enum-triggers');
 const { createDebouncer } = require('./debounce');
@@ -2341,10 +2340,10 @@ require('./handlers/gdpr')(ipcMain, {
 
 /* ---------------- Календар на библиотеката ----------------
    Извадени в handlers/calendar.js (Фаза 4, стъпка 4 от разбиването на
-   монолита main.js на модули по домейн). workDaysSet/isWorkDay/nextWorkDay/
+   монолита main.js на модули по домейн). isWorkDay/nextWorkDay/
    closedDaysBetween се връщат обратно тук, защото ги ползва и домейнът
    "Заемания" по-долу (все още неизваден). */
-const { workDaysSet, isWorkDay, nextWorkDay, closedDaysBetween } =
+const { isWorkDay, nextWorkDay, closedDaysBetween } =
   require('./handlers/calendar')(ipcMain, { getDb: () => db, run, logAudit });
 
 /* ---------------- Правила за обслужване по категория читатели ----------------

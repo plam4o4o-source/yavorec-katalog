@@ -52,8 +52,22 @@ function exposedApi() {
   return { api: exposed.api, channels };
 }
 
+/* ДОГОВОРЪТ ЕКРАН ↔ ОБРАБОТЧИК (v2.4.72). Каналите, описани в
+   types/ipc-contract.d.ts, получават типизирани аргументи и отговор; останалите
+   остават InvLibInvoke, докато не бъдат описани. Тук се четат само ИМЕНАТА на
+   описаните канали — самите типове стоят в договора. */
+const CONTRACT = path.join(APP_DIR, 'types', 'ipc-contract.d.ts');
+function contractChannels() {
+  if (!fs.existsSync(CONTRACT)) return new Set();
+  const src = fs.readFileSync(CONTRACT, 'utf8');
+  const body = src.slice(src.indexOf('interface IpcContract {'));
+  return new Set([...body.matchAll(/^\s{2}'([A-Za-z]+:[A-Za-z]+)':\s*\{/gm)].map(m => m[1]));
+}
+
 function render() {
   const { api, channels } = exposedApi();
+  const typed = contractChannels();
+  const seen = new Set();
   const lines = [
     '// ГЕНЕРИРАН ФАЙЛ — не се пише на ръка. Източник: preload.js.',
     '// Обновяване: npm run gen:api-types (виж scripts/gen-api-types.js).',
@@ -71,13 +85,17 @@ function render() {
       const fn = g[name];
       if (typeof fn !== 'function') throw new Error('api.' + group + '.' + name + ' не е функция');
       const ch = channels.get(fn);
+      if (ch) seen.add(ch);
       lines.push(ch
-        ? '    /** канал „' + ch + '“ */\n    ' + name + ': InvLibInvoke;'
+        ? '    /** канал „' + ch + '“ */\n    ' + name + ': ' + (typed.has(ch) ? "IpcMethod<'" + ch + "'>" : 'InvLibInvoke') + ';'
         : '    ' + name + ': (...args: any[]) => any;');
     }
     lines.push('  };');
   }
   lines.push('}', '');
+  /* Договор за канал, който preload.js не излага, е остаряло описание — спира. */
+  const stale = [...typed].filter(ch => !seen.has(ch));
+  if (stale.length) throw new Error('types/ipc-contract.d.ts описва канали, които preload.js не излага: ' + stale.join(', '));
   return lines.join('\n');
 }
 

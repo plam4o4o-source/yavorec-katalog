@@ -353,6 +353,7 @@ function invBookFilter(q) {
   INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE;
   if (INVBOOK_WINDOWED) return invBookReload();
   paintInvBookRows();
+  return undefined; // и двата пътя казват какво връщат (noImplicitReturns)
 }
 window.invBookFilter = invBookFilter;
 /* ---- Избор на диапазон преди печат (одит v2.4.56) ----------------------------

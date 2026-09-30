@@ -144,6 +144,7 @@ function readersFilterChanged() {
   READERS_RENDER_LIMIT = READERS_PAGE_SIZE;
   if (READERS_WINDOWED) return refreshReadersList();
   renderReadersBody();
+  return undefined; // и двата пътя казват какво връщат (noImplicitReturns)
 }
 window.readersFilterChanged = readersFilterChanged;
 /* Смяната на филтъра по СЪГЛАСИЕ пречертава целия раздел, а не само тялото на

@@ -9,7 +9,13 @@
     "lib": ["es2022", "dom", "dom.iterable"],
     "types": [],
     "skipLibCheck": true,
-    "strict": false
+    "strict": false,
+    // v2.4.72: без шум за този код (измерено) — мъртъв код и функция, която
+    // връща стойност само в някои случаи, спират PR-а.
+    "noUnusedLocals": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitThis": true
   },
-  "include": ["src/udk.js", "src/views/*.js", "types/renderer-globals.d.ts", "types/api.generated.d.ts"]
+  "include": ["src/udk.js", "src/views/*.js", "types/renderer-globals.d.ts", "types/api.generated.d.ts", "types/ipc-contract.d.ts"]
 }

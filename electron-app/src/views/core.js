@@ -762,7 +762,6 @@ function mnyField(label, name, opts) {
   const празно = opts.val === '' || opts.val == null;
   const e = празно ? '' : eur(opts.val);
   const b = празно ? '' : bgn(opts.val);
-  const мин = opts.min != null ? ` min="${esc(String(opts.min))}"` : '';
   return `<div class="field">
     <label for="mf_${name}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
     <div class="mnyPair">
@@ -965,6 +964,13 @@ function formData(sel) {
    го връщат като FILE_DIALOG_CANCELLED, а тук се преглъща без червено известие
    (одит v2.4.29: четири места го показваха като „Отказано от потребителя.“). */
 const FILE_DIALOG_CANCELLED = 'Отказано от потребителя.';
+/** Отговорът на обработчика, без обвивката { ok, data } — или null при грешка
+    (тя вече е казана с toast). Типът на данните идва от договора
+    (types/ipc-contract.d.ts) за описаните канали.
+    @template T
+    @param {Promise<IpcResult<T>>} promise
+    @param {string} [okMsg]
+    @returns {Promise<T | null>} */
 async function call(promise, okMsg) {
   const res = await promise;
   if (!res.ok) { if (res.error !== FILE_DIALOG_CANCELLED) toast(res.error || 'Възникна грешка.', 'err'); return null; }

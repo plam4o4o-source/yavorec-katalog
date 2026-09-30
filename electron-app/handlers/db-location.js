@@ -13,8 +13,8 @@
 module.exports = function registerDbLocationHandlers(ipcMain, deps) {
   const {
     app, dialog, fs, path,
-    getDb, setDb, getMainWindow,
-    run, readConfig, writeConfig, updateConfig, resolveDbDir, resolveDbPath
+    getDb, getMainWindow,
+    run, readConfig, updateConfig, resolveDbDir, resolveDbPath
   } = deps;
 
   /* ==========================================================================
