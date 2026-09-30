@@ -143,7 +143,7 @@ function statsFinesHtml(r, y) {
       <div><span>&nbsp;· забави (чл. 43)</span><b>${mny(late.collected)}</b></div>
       <div><span>&nbsp;· за изгубени и повредени документи</span><b>${mny(loss.collected)}</b></div>
       ${other > 0.004 ? `<div><span>&nbsp;· от събраните — по начисления от други години</span><b>${mny(other)}</b></div>` : ''}
-      ${r.finesOpen ? `<div><span>Забава по незавършени заемания (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
+      ${r.finesOpen ? `<div><span>Забава по незавършени заемания, невписана в сметката (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
     </div>
     <div class="hint" style="margin-top:8px">„Начислени“ — сумите, вписани в сметките на читателите през ${esc(String(y))} г.
       като забава (чл. 43) или обезщетение за изгубен или повреден документ; опростената забава не се брои.

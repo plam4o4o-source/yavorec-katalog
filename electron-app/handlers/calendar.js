@@ -14,6 +14,8 @@
 // функции остават в активна употреба от друг, все още неизваден домейн.
 const { isValidIsoDate } = require('../security-utils');
 
+const { localDate } = require('../local-date');
+
 module.exports = function registerCalendarHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -119,6 +121,13 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
     const db = getDb();
     const cols = db.prepare('PRAGMA table_info(loans)').all().map(c => c.name);
     if (!cols.includes('date_due')) return [];
+    /* Само заемания, чийто ИСТИНСКИ срок (първият работен ден) още не е минал
+       (преглед на кръга, v2.4.71). Падеж 13.10, обявен за затворен на 14.10, се
+       мести (срокът става 14.10 — днес). Но отдавна изтекъл падеж вече стои в
+       писмата по чл. 43, които читателят е получил; смяна на работните дни днес
+       не бива да пренаписва „срок“ в следващото писмо — а забавата по него и без
+       това не брои затворените дни (closedDaysBetween). */
+    const today = localDate();
     const rows = onlyDate
       ? db.prepare('SELECT id, date_due FROM loans WHERE date_in IS NULL AND date_due = ?').all(onlyDate)
       : db.prepare('SELECT id, date_due FROM loans WHERE date_in IS NULL AND date_due IS NOT NULL').all();
@@ -127,7 +136,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
     for (const r of rows) {
       if (isWorkDay(r.date_due)) continue;
       const to = nextWorkDay(r.date_due);
-      if (!to || to <= r.date_due) continue;
+      if (!to || to <= r.date_due || to < today) continue;
       if (upd.run(to, r.id, r.date_due).changes) moved.push({ id: r.id, from: r.date_due, to });
     }
     return moved;
@@ -222,3 +231,20 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
 
   return { workDaysSet, isWorkDay, nextWorkDay, closedDaysBetween, invalidateCalendarCache };
 };
+
+/* ДНИ ЗАБАВА — ЕДНО ПРАВИЛО (преглед на кръга, v2.4.71). Броят се от ПЪРВИЯ
+   РАБОТЕН ДЕН след падежа (Ч4), минус затворените дни до връщането. Дотук
+   правилото стоеше преписано в handlers/loans.js и в handlers/deaccession-acts.js
+   и Ч4 трябваше да се поправи на две места — следващата промяна в едното щеше
+   пак да разминe акта по т. 5 с „Просрочени“ и писмото. `cal` подава
+   nextWorkDay/closedDaysBetween на календара; без тях (самостоятелен тест) се
+   брои от падежа и по календарни дни. */
+function lateDays(dueDate, inDate, cal) {
+  if (!dueDate || !inDate || inDate <= dueDate) return 0;
+  const start = cal && typeof cal.nextWorkDay === 'function' ? (cal.nextWorkDay(dueDate) || dueDate) : dueDate;
+  if (inDate <= start) return 0;
+  const raw = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(start).getTime()) / 864e5));
+  const closed = cal && typeof cal.closedDaysBetween === 'function' ? (Number(cal.closedDaysBetween(start, inDate)) || 0) : 0;
+  return Math.max(0, raw - closed);
+}
+module.exports.lateDays = lateDays;

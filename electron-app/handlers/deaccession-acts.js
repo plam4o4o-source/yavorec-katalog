@@ -48,29 +48,30 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      заемане и трябва да начисли СЪЩОТО число — иначе огледалото отново се
      разминава с „Просрочени“ и писмото. Без календара (самостоятелен тест)
      началото остава падежът. */
+  /* Правилото е ЕДНО — lateDays в handlers/calendar.js (преглед на кръга). Тук
+     остава само специфичното за акта: календарът не бива да спира съставянето
+     му, но мълчаливо различно число е точно болестта, срещу която е бележката
+     по-горе — затова провалът се казва в следата. */
   function effectiveDaysLate(dueDate, inDate) {
-    if (!dueDate || !inDate || inDate <= dueDate) return 0;
-    let start = dueDate;
-    if (typeof nextWorkDay === 'function') {
-      try { start = nextWorkDay(dueDate) || dueDate; }
-      catch (err) {
-        logAudit('Отчисляване', 'ВНИМАНИЕ: първият работен ден след падежа не можа да се прочете от календара ('
-          + err.message + ') — забавата по закритото заемане е смятана от самия падеж.');
-      }
-    }
-    if (inDate <= start) return 0;
-    const raw = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(start).getTime()) / 864e5));
-    let closed = 0;
-    if (typeof closedDaysBetween === 'function') {
-      try { closed = Number(closedDaysBetween(start, inDate)) || 0; }
-      catch (err) {
-        /* Календарът не бива да спира съставянето на акт — но мълчаливо
-           различно число е точно болестта, срещу която е бележката по-горе. */
-        logAudit('Отчисляване', 'ВНИМАНИЕ: затворените дни не можаха да се прочетат от календара ('
-          + err.message + ') — забавата по закритото заемане е смятана по календарни дни.');
-      }
-    }
-    return Math.max(0, raw - closed);
+    const cal = {
+      nextWorkDay: typeof nextWorkDay === 'function' ? (d) => {
+        try { return nextWorkDay(d); }
+        catch (err) {
+          logAudit('Отчисляване', 'ВНИМАНИЕ: първият работен ден след падежа не можа да се прочете от календара ('
+            + err.message + ') — забавата по закритото заемане е смятана от самия падеж.');
+          return d;
+        }
+      } : null,
+      closedDaysBetween: typeof closedDaysBetween === 'function' ? (a, b) => {
+        try { return closedDaysBetween(a, b); }
+        catch (err) {
+          logAudit('Отчисляване', 'ВНИМАНИЕ: затворените дни не можаха да се прочетат от календара ('
+            + err.message + ') — забавата по закритото заемане е смятана по календарни дни.');
+          return 0;
+        }
+      } : null
+    };
+    return require('./calendar').lateDays(dueDate, inDate, cal);
   }
   /* Размерът на обезщетението за НЕВЪРНАТ документ — същото правило, по което го
      предлага и прозорецът „Документът е изгубен“ (handlers/loans.js: lostPolicy +

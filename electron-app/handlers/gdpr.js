@@ -379,6 +379,13 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         WHERE action IN ('Нов читател', 'Редакция на читател') AND detail LIKE 'карта %'`).all();
     const accepted = new Set();
     let firstSeen = r.registered_at ? String(r.registered_at).slice(0, 10) : '';
+    /* ПРОЗОРЕЦ ЗА ВСЯКА КАРТА (преглед на кръга, v2.4.71). Карта, от която
+       читателят е минал на друга, после се дава на ДРУГ читател — редовете
+       „(карта 2)“ след смяната са негови. Затова всяка карта носи от кога е
+       станала на този читател (cardFrom — денят на смяната към нея) и до кога
+       (cardUntil — денят на смяната от нея); текущата карта няма край. */
+    const cardFrom = new Map(), cardUntil = new Map();
+    const current = String(r.card_no == null ? '' : r.card_no).trim();
     for (let round = 0; round < 10; round++) {
       let grew = false;
       for (const row of rows) {
@@ -404,12 +411,18 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         if (dCard) { add(cards, dCard.before); add(cards, dCard.after); }
         if (dPhone) { add(phones, dPhone.before); add(phones, dPhone.after); }
         const day = String(row.ts || '').slice(0, 10);
+        if (dCard && day) {
+          const was = String(dCard.before == null ? '' : dCard.before).trim();
+          const now = String(dCard.after == null ? '' : dCard.after).trim();
+          if (was && was !== current && !(cardUntil.get(was) > day)) cardUntil.set(was, day);
+          if (now && !(cardFrom.get(now) < day)) cardFrom.set(now, day);
+        }
         if (day && (!firstSeen || day < firstSeen)) firstSeen = day;
         if (names.size + cards.size + phones.size > before) grew = true;
       }
       if (!grew) break;
     }
-    return { names, cards, phones, firstSeen };
+    return { names, cards, phones, firstSeen, cardFrom, cardUntil };
   }
   /* Цяло име с граница — като mentionsReader, но за НЯКОЕ от имената, и
      картата след името може да е НЯКОЯ от картите на читателя. */
@@ -438,7 +451,15 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
     if (id.firstSeen && String(ts || '').slice(0, 10) < id.firstSeen) return false;
     const re = /\(карта ([^)]+)\)/g;
     let m;
-    while ((m = re.exec(String(detail || '')))) if (id.cards.has(m[1].trim())) return true;
+    const day = String(ts || '').slice(0, 10);
+    while ((m = re.exec(String(detail || '')))) {
+      const c = m[1].trim();
+      if (!id.cards.has(c)) continue;
+      /* Извън прозореца на картата редът е на друг читател със същата карта. */
+      if (day && id.cardFrom && id.cardFrom.has(c) && day < id.cardFrom.get(c)) continue;
+      if (day && id.cardUntil && id.cardUntil.has(c) && day > id.cardUntil.get(c)) continue;
+      return true;
+    }
     return false;
   }
   /* Заменя всяко цяло срещане на някое от имената с ANON_MARK — за редовете,

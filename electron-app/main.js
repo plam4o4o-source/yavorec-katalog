@@ -1093,14 +1093,16 @@ const MIGRATIONS = [
   } },
   /* v19 (v2.4.71) — основите за поправките от пълния тест на всички модули (кръг 45).
      1. reader_registrations (находка Д3): историята на записванията и
-        пререгистрациите. Таблицата идва от schema.sql; тук се попълва от онова,
-        което базата знае досега — датата на записване, последната
-        пререгистрация и всяка начислена „годишна такса“ (програмата я начислява
-        при пререгистрация, тоест тя е следата от ПРЕДИШНИТЕ пререгистрации,
-        които re_registered_at вече е загубила). По една дата на година и читател
-        от таксите — ако вече има ред за същата година, не се добавя втори.
-        Числата за минали години така стават поне толкова пълни, колкото са
-        били, когато са били отчетени; нищо не се измисля.
+        пререгистрациите. Таблицата идва от schema.sql; тук се попълва САМО от онова,
+        което програмата сама води като регистрация — датата на записване и
+        последната пререгистрация. Тоест след обновяването всяка минала година
+        дава ТОЧНО същото число, което е давала преди него, а оттук нататък
+        историята се трупа ред по ред. (Преглед на кръга, v2.4.71: първата
+        редакция добавяше и по ред за всяка начислена „годишна такса“ като
+        „следа от пререгистрация“. Програмата обаче НЕ начислява таксата при
+        пререгистрация — тя се начислява на ръка от „Сметка“, и то и без
+        пререгистрация. Така обновяването добавяше читатели към вече отчетени
+        години — точно смяната със задна дата, срещу която е самата таблица.)
      2. periodicals.language (находка Д2): заварените издания получават
         „български“ — досега програмата изобщо не е питала за език, а
         абонаментите на читалищата са почти само български вестници и списания.
@@ -1116,14 +1118,6 @@ const MIGRATIONS = [
     db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind)
       SELECT id, 'r' || id, substr(re_registered_at, 1, 10), 'пререгистрация' FROM readers
       WHERE re_registered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'`);
-    db.exec(`INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind)
-      SELECT a.reader_id, 'r' || a.reader_id, MIN(substr(a.date, 1, 10)), 'пререгистрация'
-      FROM account_lines a JOIN readers r ON r.id = a.reader_id
-      WHERE a.kind = 'начисление' AND a.type = 'годишна такса'
-        AND a.date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*'
-        AND NOT EXISTS (SELECT 1 FROM reader_registrations x
-                        WHERE x.reader_id = a.reader_id AND substr(x.date, 1, 4) = substr(a.date, 1, 4))
-      GROUP BY a.reader_id, substr(a.date, 1, 4)`);
     ensureColumns('periodicals', { language: 'TEXT' });
     /* 3. inventory_sessions: last_book_id, added_late, mzs_away (находки И1 и
        М1). Заварените сесии остават с NULL: за тях границата „постъпили след
@@ -2889,6 +2883,8 @@ function catalogPayloadNow() {
        и разбирал отново 4–5 МБ само за да преброи редовете. */
 const CATALOG_SHRINK_RATIO = 0.5;
 const CATALOG_PUBLISHED_COUNT = { file: null, mtimeMs: null, size: null, n: null };
+// Последният текст, записан ОТ ТАЗИ програма в katalog.json (виж writeCatalogIfConfigured).
+const CATALOG_LAST_TEXT = { file: null, hash: null, mtimeMs: null, size: null };
 function publishedCatalogCount(file) {
   let st;
   try { st = fs.statSync(file); }
@@ -3004,9 +3000,27 @@ function writeCatalogIfConfigured(opts) {
        тока, паднал мрежов диск) оставяше пресечен JSON, а публичният каталог на
        сайта тъмнееше до следващата успешна редакция на книга, без нищо на екрана
        да го каже. Преименуването на едно и също устройство е атомарно. */
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, catalogJsonText(payload), 'utf8');
-    fs.renameSync(tmp, file);
+    /* СЪЩИЯТ ТЕКСТ НЕ СЕ ПИШЕ ПАК (преглед на кръга, v2.4.71). При обща база
+       всяко действие на другото работно място (търсене, ред в одитната следа)
+       сменя data_version и таймерът за публикуване сглобяваше и записваше
+       многомегабайтовия файл на всеки 5 минути, без фондът да е мърдал. Ако
+       текстът е точно онзи, който ТУК е записан последно, и файлът оттогава не
+       е пипан (дата и размер), записът се пропуска — резултатът е същият. */
+    const text = catalogJsonText(payload);
+    const hash = require('crypto').createHash('sha1').update(text).digest('hex');
+    const same = (() => {
+      const c = CATALOG_LAST_TEXT;
+      if (c.file !== file || c.hash !== hash) return false;
+      try { const st = fs.statSync(file); return st.mtimeMs === c.mtimeMs && st.size === c.size; }
+      catch (e) { return false; }
+    })();
+    if (!same) {
+      const tmp = file + '.tmp';
+      fs.writeFileSync(tmp, text, 'utf8');
+      fs.renameSync(tmp, file);
+      try { const st = fs.statSync(file); Object.assign(CATALOG_LAST_TEXT, { file, hash, mtimeMs: st.mtimeMs, size: st.size }); }
+      catch (e) { Object.assign(CATALOG_LAST_TEXT, { file: null, hash: null }); }
+    }
     rememberPublishedCount(file, n);
     return noteCatalogWrite({ written: true, published, now: n,
       forced: !!(opts && opts.force) && published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO) }, folder);

@@ -448,7 +448,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       catch (e) { console.error('Остатък от проверката на копието не можа да бъде изтрит:', f, e.message); }
     }
   }
-  function doBackupTo(destPath, password) {
+  function doBackupTo(destPath, password, opts) {
     const staged = stagingPath(destPath);
     try {
       writeRawBackupTo(staged, password);
@@ -463,7 +463,12 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
            което минава същата проверка, денят ИМА здраво копие на общата база —
            това е успех, а не „копието НЕ беше направено“. Нашият временен файл
            тогава е излишен и се чисти по-долу. */
-        if (fs.existsSync(destPath) && !verifyFreshBackup(destPath, password)) {
+        /* САМО ЗА АВТОМАТИЧНИТЕ копия (opts.acceptExisting, v2.4.71 — преглед на
+           кръга): там другото работно място пише СЪЩОТО копие на СЪЩАТА обща база.
+           Ръчното копие е във файл по избор на човека — стар здрав файл там не е
+           „денят има копие“, а е точно онова, което той иска да замени; тогава
+           провалът се казва, а не се отчита успех с данни отпреди седмица. */
+        if (opts && opts.acceptExisting && fs.existsSync(destPath) && !verifyFreshBackup(destPath, password)) {
           try { if (fs.existsSync(staged)) fs.unlinkSync(staged); }
           catch (e) { console.error('Излишен временен файл на копието остана:', staged, e.message); }
           return;
@@ -672,7 +677,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
        некриптираното копие. Тук остава само това, което е специфично за
        дневното копие: некриптираният близнак пада чак след като криптираният е
        на място и е проверен. */
-    doBackupTo(encDest, password); // от живата база — тя е поне толкова нова
+    doBackupTo(encDest, password, { acceptExisting: true }); // от живата база — тя е поне толкова нова
     // Некриптираният близнак пада чак сега — той съдържа личните данни на всички
     // читатели, но докато криптираният не е налице и проверен, е единственото копие.
     if (plainDest && fs.existsSync(plainDest)) {
@@ -751,7 +756,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
             + 'лични данни на читателите в чист текст.');
         }
       }
-      doBackupTo(plainDest, '');
+      doBackupTo(plainDest, '', { acceptExisting: true });
       pruneOldAutoBackups();
       recordAutoBackupSuccess(plainDest, false, today);
       /* Авто-копието съдържа ЦЕЛИЯ фонд от лични данни на читателите — адреси и
@@ -951,7 +956,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
          работата му от последните минути не влизаше в никое копие. Сега копието
          се ПРЕЗАПИСВА с по-новата снимка: базата е обща, тоест по-късната снимка
          съдържа всичко от по-ранната плюс новото; броят файлове не расте. */
-      doBackupTo(dest, password);
+      doBackupTo(dest, password, { acceptExisting: true });
       pruneOldAutoBackups();
       recordAutoBackupSuccess(dest, !!password, today);
       if (password) todayEncryptedWith = { date: today, fp: fingerprint(password) };

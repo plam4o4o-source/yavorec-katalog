@@ -193,7 +193,7 @@ test('С5: чужд временен файл със същото име НЕ с
   assert.equal(countBooks(dest), 20);
 });
 
-test('С5: ако преименуването гърми, а крайният файл вече е здрав — това е успех', () => {
+test('С5: ако преименуването гърми, а крайният файл вече е здрав — за АВТОМАТИЧНОТО копие това е успех, за ръчното — не', () => {
   const s = backupSetup({ books: 20 });
   fs.mkdirSync(s.backupsDir, { recursive: true });
   const dest = path.join(s.backupsDir, 'auto-2026-09-29-1701.db');
@@ -204,7 +204,11 @@ test('С5: ако преименуването гърми, а крайният �
     return orig.apply(this, arguments);
   };
   try {
-    assert.doesNotThrow(() => s.handlers.doBackupTo(dest, ''), 'здраво копие под крайното име = денят има копие');
+    /* Преглед на кръга (v2.4.71): приемането е само за автоматичните копия на
+       обща база ({ acceptExisting: true }); ръчното копие във файл по избор на
+       човека със стар здрав файл под същото име е ПРОВАЛ, не „успех“. */
+    assert.doesNotThrow(() => s.handlers.doBackupTo(dest, '', { acceptExisting: true }), 'здраво копие под крайното име = денят има копие');
+    assert.throws(() => s.handlers.doBackupTo(dest, ''), /EPERM/, 'ръчното копие не минава за записано върху стар файл');
   } finally { fs.renameSync = orig; }
   assert.ok(!names(s.backupsDir).some(f => f.endsWith('.tmp')), 'излишният временен файл е изчистен');
 });
@@ -221,7 +225,7 @@ function raceChild(dbPath, dest, n, startAt) {
       run: (fn) => { try { return { ok: true, data: fn() }; } catch (e) { return { ok: false, error: e.message }; } },
       logAudit() {}, resolveDbDir: () => ${JSON.stringify(path.dirname(dbPath))}, resolveDbPath: () => ${JSON.stringify(dbPath)} });
     const out = { ok: 0, fail: [] };
-    const go = () => { for (let i = 0; i < ${n}; i++) { try { api.doBackupTo(${JSON.stringify(dest)}, ''); out.ok++; } catch (e) { out.fail.push(e.message.slice(0, 120)); } }
+    const go = () => { for (let i = 0; i < ${n}; i++) { try { api.doBackupTo(${JSON.stringify(dest)}, '', { acceptExisting: true }); out.ok++; } catch (e) { out.fail.push(e.message.slice(0, 120)); } }
       process.stdout.write('@@' + JSON.stringify(out) + '\\n'); process.exit(0); };
     setTimeout(go, Math.max(0, ${startAt} - Date.now()));`;
   return new Promise((resolve) => {

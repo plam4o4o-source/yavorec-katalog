@@ -343,8 +343,20 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          види никъде: показва се отделно, вместо да се приписва на година, за която
          базата не пази дата на начисляване. Числото е КЪМ ДНЕС, не за годината —
          затова и се връща само за текущата година. */
+      /* САМО ЗАБАВАТА, КОЯТО НЕ Е В СМЕТКАТА (преглед на кръга, v2.4.71). От
+         v2.4.61 всяко начисление по отворено заемане (при продължение) влиза и в
+         сметката — тоест вече е в „Начислени“ по датата си. Сборът на loans.fine
+         по отворените го показваше ВТОРИ път на отделен ред. Остава заварената
+         част отпреди v2.4.61, която сметката не познава — по читател, като долна
+         граница (loans.fine по отворените минус начисленото в сметката като
+         „забава“), същото правило като в писмото по чл. 43. */
       const finesOpen = String(y) === String(new Date().getFullYear())
-        ? db.prepare('SELECT COALESCE(SUM(fine), 0) AS val FROM loans WHERE date_in IS NULL').get().val
+        ? FUND.toCents(db.prepare(`
+            SELECT COALESCE(SUM(MAX(0, o.s - COALESCE(c.s, 0))), 0) AS val
+            FROM (SELECT reader_id, SUM(fine) AS s FROM loans
+                  WHERE date_in IS NULL AND COALESCE(fine, 0) > 0 GROUP BY reader_id) o
+            LEFT JOIN (SELECT reader_id, SUM(amount) AS s FROM account_lines
+                  WHERE kind = 'начисление' AND type = 'забава' GROUP BY reader_id) c ON c.reader_id = o.reader_id`).get().val)
         : 0;
       /* Одит v2.4.29: „Спазване на сроковете“ броеше само ВЪРНАТИТЕ — библиотека с
          десетки книги, просрочени от месеци, четеше „100 % в срок“, докато „Просрочени“

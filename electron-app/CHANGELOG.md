@@ -30,8 +30,8 @@ Electron 43 — а баркодовете прочетени с два деко�
 > **Споделена база на няколко компютъра:** това издание вдига версията на базата
 > (миграция 19). Обновете **всички** работни места — по-старата версия отказва да
 > отвори вече обновена база, за да не я повреди. Миграцията добавя историята на
-> записванията и пререгистрациите на читателите (попълнена от картоните и от
-> начислените годишни такси), езика на периодичното издание (заварените стават
+> записванията и пререгистрациите на читателите (попълнена от датите в
+> картоните), езика на периодичното издание (заварените стават
 > „български“, казано в одитната следа), името на ръководителя в документите и две
 > числа в инвентаризациите. Вписаното досега не се променя.
 
@@ -158,7 +158,40 @@ PDF: …“ и търсенията по телефон, карта и фами�
 - **Отложени от по-рано:** автоматично попълване на Дневника, отделен имейл на
   родителя в картона на детето и сливане на дублирани читателски картони.
 
-**Проверено:** `npm run test:all` — и 7-те проверки минават: проверката на типовете (главен процес, изгледи, описанието на window.api), **2 386 теста в UTC и 2 386 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа; мутационна проверка — **179 мутации, всички уловени** (поне една за всяка от 87-те находки и за всяка връзка между областите; контролната минава).
+**Преглед на кода след кръга — още девет поправки.** Независимият преглед на
+приложените промени намери места, където новото не беше докрай:
+
+- **Историята на записванията** се попълва при обновяването **само от датите в
+  картоните**. Първата редакция добавяше и по ред за всяка начислена на ръка
+  „годишна такса“ — а таксата се начислява от „Сметка“ и без пререгистрация, тоест
+  обновяването щеше да добави читатели към вече отчетени години. Сега всяка минала
+  година дава след обновяването точно същото число като преди него. **Поправена
+  дата на записване** в картона премества реда, вместо да брои читателя и в двете
+  години.
+- **Ръчно резервно копие** върху стар файл, който не може да бъде заменен (отворен в
+  друга програма), вече е провал с обяснение, а не „успех“ с данни отпреди седмица.
+  Приемането на вече съществуващо здраво копие остава само за автоматичните копия
+  на обща база.
+- **„Забрави (ОРЗД)“**: карта, дадена по-късно на друг читател, вече не заличава
+  неговите редове в одитната следа — всяка карта се води в периода, когато е била
+  на заличавания.
+- **Годишният отчет**: забавата, начислена при продължение на незавършено заемане,
+  не се показва втори път на реда „незавършени заемания“ — там остава само
+  заварената забава, която сметката не познава.
+- **Аналитично описание**: заварено разминаване между годината и датата на броя не
+  спира поправката на анотацията; ново разминаване пак се спира.
+- **Смяна на работните дни** мести падежа само на заемания, чийто срок още не е
+  изтекъл — вече изпратените писма по чл. 43 не получават нов „срок“.
+- **Онлайн каталогът** не се записва наново, когато текстът му е същият (при обща
+  база — на всеки 5 минути по няколко мегабайта).
+- **Дните забава** се смятат от едно място за гишето и за акта по т. 5.
+
+Всяка е закована в `test/pregled-v2471.test.js` (8 теста през истинския
+`main.js`) и в обновения `test/osnovi-v2471.test.js` — деветте падат върху кода
+преди поправката. Остава както е: „7,30“ в часовете на Дневника се записва като
+7:18 по единното правило (запетаята е дроб) и клетката го казва.
+
+**Проверено:** `npm run test:all` — и 7-те проверки минават: проверката на типовете (главен процес, изгледи, описанието на window.api), **2 394 теста в UTC и 2 394 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа; мутационна проверка — **179 мутации, всички уловени** (поне една за всяка от 87-те находки и за всяка връзка между областите; контролната минава).
 Новите тестове на кръга са в десет файла `test/*-v2471*.test.js` (по един за всяка
 област, отделен за подписите в истински PDF и един за сглобяването на областите);
 подписите са проверени и в Electron 43. Нов `test/docs-v2471.test.js` заковава
@@ -180,7 +213,8 @@ two decisions are left to you (see below).
 > **Shared database on several computers:** this release raises the database version
 > (migration 19). Update **all** workstations — an older version refuses to open an
 > already upgraded database so as not to damage it. The migration adds a history of
-> reader registrations and re-registrations, a language for periodicals (existing
+> reader registrations and re-registrations (filled from the dates on the reader
+> cards), a language for periodicals (existing
 > ones become "Bulgarian", noted in the audit trail), the director's name on
 > documents and two stocktaking counters. Nothing already recorded changes.
 
@@ -265,7 +299,40 @@ not blocked (lending still requires consent); no separate "no header" label opti
 the program drops lines itself; still deferred: auto-filling the register, a
 parent's e-mail, merging duplicate reader cards.
 
-**Verified:** `npm run test:all` — all 7 checks pass: type checking (main process, views, the window.api description), **2,386 tests in UTC and 2,386 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check; mutation testing — **179 mutants, all killed** (at least one per finding and per cross-area link; the control passes). The
+**Code review after the round — nine more fixes.** An independent review of the
+applied changes found places where the new work was not complete:
+
+- **Registration history** is filled on upgrade **only from the dates on the reader
+  cards**. The first version also added a row for every manually charged annual fee
+  — but the fee is charged from the account window even without re-registration, so
+  the upgrade would have added readers to already reported years. Every past year now
+  gives exactly the same number after the upgrade as before it. **Correcting a
+  registration date** on the card moves the row instead of counting the reader in
+  both years.
+- **A manual backup** over an old file that cannot be replaced (open in another
+  program) now fails with an explanation instead of "succeeding" with week-old data.
+  Accepting an existing healthy copy remains only for automatic copies on a shared
+  database.
+- **GDPR "forget"**: a card later given to another reader no longer erases that
+  reader's audit rows — each card counts only for the period it belonged to the
+  person being erased.
+- **Annual report**: a late fee charged when an open loan is extended is no longer
+  shown a second time on the "unfinished loans" line — only legacy late fees the
+  account does not know remain there.
+- **Analytic entry**: an existing mismatch between the year and the issue date does
+  not block correcting the annotation; a new mismatch is still refused.
+- **Changing working days** moves the due date only of loans whose deadline has not
+  passed — reminder letters already sent do not get a new "deadline".
+- **The online catalogue** is not rewritten when its text is unchanged (on a shared
+  database — several megabytes every 5 minutes).
+- **Days late** are computed in one place for the desk and for the Art. 30 item 5 act.
+
+Each is pinned in `test/pregled-v2471.test.js` (8 tests through the real `main.js`)
+and in the updated `test/osnovi-v2471.test.js` — all nine fail on the code before the
+fix. Left as is: "7,30" in the diary hours is saved as 7:18 by the single rule (the
+comma is a fraction), and the cell says so.
+
+**Verified:** `npm run test:all` — all 7 checks pass: type checking (main process, views, the window.api description), **2,394 tests in UTC and 2,394 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check; mutation testing — **179 mutants, all killed** (at least one per finding and per cross-area link; the control passes). The
 round's new tests are in ten `test/*-v2471*.test.js` files; signatures were also
 checked in Electron 43. New `test/docs-v2471.test.js` pins the version: package.json
 = manual cover = manual footer (and every PDF page where `pdftotext` exists).

@@ -393,17 +393,33 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          години е в handlers/stats.js. Таблицата се проверява веднъж на база —
          изолиран тест със стара схема не бива да гърми при запис на читател. */
   let regTableDb = null, regTableOk = false;
-  function noteRegistration(db, readerId, date, kind) {
-    if (!readerId || !date || !isValidIsoDate(String(date).slice(0, 10))) return;
+  function regTableReady(db) {
     if (regTableDb !== db) {
       regTableOk = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reader_registrations'").get();
       regTableDb = db;
     }
-    if (!regTableOk) return;
+    return regTableOk;
+  }
+  function noteRegistration(db, readerId, date, kind) {
+    if (!readerId || !date || !isValidIsoDate(String(date).slice(0, 10))) return;
+    if (!regTableReady(db)) return;
     /* reader_key = 'r' + id — остава и след изтриване/заличаване на картона,
        за да не падне броят за вече отчетена година (виж db/schema.sql). */
     db.prepare('INSERT OR IGNORE INTO reader_registrations (reader_id, reader_key, date, kind) VALUES (?, ?, ?, ?)')
       .run(readerId, 'r' + readerId, String(date).slice(0, 10), kind);
+  }
+
+  /* Премества реда „записване“ от старата на новата дата. Връща true, ако е
+     имало такъв ред (виж readers:update). */
+  function moveRegistration(db, readerId, fromDate, toDate) {
+    if (!fromDate || !toDate || !isValidIsoDate(String(toDate).slice(0, 10)) || !regTableReady(db)) return false;
+    const key = 'r' + readerId, to = String(toDate).slice(0, 10), from = String(fromDate).slice(0, 10);
+    if (db.prepare('SELECT 1 FROM reader_registrations WHERE reader_key = ? AND date = ?').get(key, to)) {
+      return db.prepare("DELETE FROM reader_registrations WHERE reader_key = ? AND date = ? AND kind = 'записване'")
+        .run(key, from).changes > 0;
+    }
+    return db.prepare("UPDATE reader_registrations SET date = ? WHERE reader_key = ? AND date = ? AND kind = 'записване'")
+      .run(to, key, from).changes > 0;
   }
 
   /* ЧУЖДА КНИГА ПО МЗС У ЧИТАТЕЛЯ — ЗА ГИШЕТО (v2.4.71, находка М8).
@@ -483,8 +499,13 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         if (payload.re_registered_at && payload.re_registered_at !== prev.re_registered_at) {
           noteRegistration(db, r.id, payload.re_registered_at, 'пререгистрация');
         }
+        /* ПОПРАВЕНАТА дата на записване е поправка, не второ записване (преглед на
+           кръга, v2.4.71): редът се МЕСТИ, иначе сгрешено 10.01.2025 и поправено
+           10.01.2026 броеше читателя и в двете години. */
         if (payload.registered_at && payload.registered_at !== prev.registered_at) {
-          noteRegistration(db, r.id, payload.registered_at, 'записване');
+          if (!moveRegistration(db, r.id, prev.registered_at, payload.registered_at)) {
+            noteRegistration(db, r.id, payload.registered_at, 'записване');
+          }
         }
       }).immediate();
       // ЕГН и номер на документ за самоличност не влизат в диференца на одитната следа —

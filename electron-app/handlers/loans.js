@@ -371,12 +371,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
          не по екраните. Отделно calendar:addClosed вече мести и самите падежи
          на отворените заемания (handlers/calendar.js), за да излизат верни и
          броячите на таблото, които питат направо базата. */
+  // Едно правило за дните забава — lateDays в handlers/calendar.js (v2.4.71).
   function effectiveDaysLate(dueDate, inDate) {
-    if (!dueDate || !inDate || inDate <= dueDate) return 0;
-    const start = typeof nextWorkDay === 'function' ? (nextWorkDay(dueDate) || dueDate) : dueDate;
-    if (inDate <= start) return 0;
-    const rawDaysLate = Math.max(0, Math.round((new Date(inDate).getTime() - new Date(start).getTime()) / 864e5));
-    return Math.max(0, rawDaysLate - closedDaysBetween(start, inDate));
+    return require('./calendar').lateDays(dueDate, inDate, { nextWorkDay, closedDaysBetween });
   }
   /* Прибавяне на дни към дата — изцяло в UTC („T00:00:00Z" + setUTCDate), НЕ през
      new Date(низ) + setDate(). Датите в базата са голи низове „ГГГГ-ММ-ДД": new Date()

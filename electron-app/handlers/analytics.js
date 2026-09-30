@@ -109,7 +109,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
      цифри. Страниците също са свободен текст („12 – 14“, „45 – 61“, „с. 7“),
      затова проверката е най-слабата възможна, но достатъчна: трябва да има
      цифра и да не започва с минус — отрицателна страница няма. */
-  function checkAnalytic(o) {
+  function checkAnalytic(o, prev) {
     if (!String(o.title ?? '').trim()) throw new Error('Заглавието на статията е задължително.');
     const year = String(o.year ?? '').trim();
     if (year && !/(^|\D)\d{3,4}(\D|$)/.test(year)) {
@@ -149,8 +149,14 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     if (o.issue_date) {
       const fromDate = o.issue_date.slice(0, 4);
       const inYear = o.year ? String(o.year).match(/\d{3,4}/g) : null;
+      /* Заварено описание, в което нито годината, нито датата се пипат, не се
+         спира заради тях (преглед на кръга, v2.4.71): иначе поправка на
+         правописна грешка в анотацията се отказваше за разминаване, което
+         библиотекарката изобщо не е докоснала. */
+      const untouched = prev && String(prev.year ?? '') === String(o.year ?? '')
+        && String(prev.issue_date ?? '') === String(o.issue_date ?? '');
       if (!o.year) o.year = fromDate;
-      else if (!inYear || !inYear.includes(fromDate)) {
+      else if ((!inYear || !inYear.includes(fromDate)) && !untouched) {
         throw new Error('Годината „' + o.year + '“ не отговаря на датата на броя '
           + o.issue_date.slice(8) + '.' + o.issue_date.slice(5, 7) + '.' + fromDate + ' г. Статията се води в '
           + 'указателя под годината на броя — поправете едното от двете. Описанието НЕ е записано.');
@@ -186,7 +192,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
      (в) Видът решава: при „книга“ periodical_id се изчиства, при „периодика“ —
      book_id, при „друго“ — и двете (остава свободният текст). Изчистването се
      казва в следата при редакция (виж analytics:update). */
-  function analyticParams(d) {
+  function analyticParams(d, prev) {
     const o = {};
     for (const f of ANALYTIC_FIELDS) o[f] = d[f] ?? null;
     o.is_local = d.is_local ? 1 : 0;
@@ -195,7 +201,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     if (o.source_kind === 'книга') o.periodical_id = null;
     else if (o.source_kind === 'периодика') o.book_id = null;
     else if (o.source_kind === 'друго') { o.periodical_id = null; o.book_id = null; }
-    return checkAnalytic(o);
+    return checkAnalytic(o, prev);
   }
   ipcMain.handle('analytics:list', /** @param {unknown} e @param {{ q?: string, year?: string | number, onlyLocal?: boolean }} [arg] */ (e, { q, year, onlyLocal } = {}) =>
     run(() => {
@@ -332,7 +338,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
          пренасочено към нея“ за книга, която изобщо не е пипала; редакцията
          минаваше само през API с числов book_id, тоест никъде от прозореца.
          Двете страни вече минават през idOrNull() и се сравняват като числа. */
-      const cur = getDb().prepare(`SELECT a.book_id, a.periodical_id, p.title AS periodical_title
+      const cur = getDb().prepare(`SELECT a.book_id, a.periodical_id, a.year, a.issue_date, p.title AS periodical_title
         FROM analytics a LEFT JOIN periodicals p ON p.id = a.periodical_id WHERE a.id = ?`).get(d.id);
       const nextBook = idOrNull(d.book_id);
       if (nextBook && (!cur || idOrNull(cur.book_id) !== nextBook)) {
@@ -345,7 +351,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
          база записът може да е изтрит от другото работно място, а одитната
          следа не бива да твърди редакция, каквато не се е случвала. */
-      const params = analyticParams(d);
+      const params = analyticParams(d, cur);
       const info = getDb().prepare(`UPDATE analytics SET ${ANALYTIC_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
         .run({ ...params, id: d.id });
       if (!info.changes) throw new Error('Описанието не е намерено — вероятно е изтрито от друго работно място.');

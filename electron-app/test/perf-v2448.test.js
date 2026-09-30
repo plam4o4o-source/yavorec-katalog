@@ -271,7 +271,9 @@ test('сглобяването на katalog.json пада обратно към 
   assert.equal(out, JSON.stringify(bad, null, 2), 'при разминаване се пише по стария начин');
   JSON.parse(out);                                    // и той е валиден JSON
 
-  assert.match(src, /fs\.writeFileSync\(tmp, catalogJsonText\(payload\), 'utf8'\)/,
+  /* От v2.4.71 текстът се сглобява веднъж (за да се сравни с последно
+     записания — виж CATALOG_LAST_TEXT) и точно той се записва. */
+  assert.match(src, /const text = catalogJsonText\(payload\);[\s\S]{0,1500}fs\.writeFileSync\(tmp, text, 'utf8'\)/,
     'записът трябва да минава през сглобяването');
   const cat = fs.readFileSync(path.join(APP_DIR, 'handlers', 'catalog.js'), 'utf8');
   assert.match(cat, /fs\.writeFileSync\(filePath, catalogJsonText\(payload\), 'utf8'\)/,
