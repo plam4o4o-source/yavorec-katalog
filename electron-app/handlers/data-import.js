@@ -336,8 +336,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       const existingTitles = new Set(db.prepare('SELECT title, author FROM books').all()
         .map(r => titleKey(r.title, r.author)));
 
-      const report = { added: 0, skipped: 0, errors: [], usedInv: [], warnings: [], skippedRows: [], convertedLeva: 0,
-        priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: null,
+      const report = { added: 0, skipped: 0,
+        errors: /** @type {Array<{line:number, error:string}>} */ ([]),
+        usedInv: /** @type {Array<{line:number, inv:number}>} */ ([]),
+        warnings: /** @type {string[]} */ ([]),
+        skippedRows: /** @type {Array<{line:number, inv:(number|string|null), title:string, reason:string}>} */ ([]),
+        convertedLeva: 0, priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: /** @type {string|null} */ (null),
         // Ф3 (кръг 45): редовете с дата на вписване след днешния ден — виж по-долу.
         futureDated: /** @type {Array<{line:number, inv:(number|null), title:string, date:string}>} */ ([]),
         futureDatedCount: 0, futureDateNote: /** @type {string|null} */ (null) };
@@ -451,6 +455,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       let free = limitBooks > 0 ? Math.max(0, limitBooks - db.prepare('SELECT COUNT(*) AS n FROM books').get().n) : Infinity;
       let overLimit = 0;
       const tx = db.transaction(() => {
+        /** @type {number} */
         let nextInv = (db.prepare('SELECT next_inv_number FROM settings WHERE id = 1').get() || {}).next_inv_number || 1;
         IMPORT_CACHE.body.forEach((row, i) => {
           const lineNo = i + 2; // +1 за заглавния ред, +1 за човешко броене

@@ -23,10 +23,12 @@ function ensureKraeFunctions(db) {
    (същият отпечатък като товара на каталога в main.js). Ключът е personKey от
    handlers/persons.js — едно правило за двата модула. */
 const { personKey } = require('./persons');
+/** @type {{ db: unknown, stamp: string | null, counts: Map<string, number> | null }} */
 let NAMESAKES = { db: null, stamp: null, counts: null };
 function personKeyCounts(db) {
   const stamp = db.prepare('SELECT total_changes() AS n').get().n + '|' + db.pragma('data_version', { simple: true });
-  if (NAMESAKES.db === db && NAMESAKES.stamp === stamp) return NAMESAKES.counts;
+  // counts се записва заедно със stamp — проверката за него е само за tsc.
+  if (NAMESAKES.db === db && NAMESAKES.stamp === stamp && NAMESAKES.counts) return NAMESAKES.counts;
   const counts = new Map();
   for (const r of db.prepare('SELECT name FROM persons').all()) {
     const k = personKey(r.name);

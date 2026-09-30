@@ -142,13 +142,14 @@ async function renderInvBook() {
   const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT, true);
   if (!res) return;
   INVBOOK_GEN++;
-  const rows = res.all || res.rows;
-  const sum = res.all ? invBookSummaryOf(res.all) : res.summary;
-  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+  const rows = res.all || res.rows || [];   // едното е винаги налице
+  // offset 0 и summary: true — обработчикът я праща винаги (handlers/inv-book.js).
+  const sum = /** @type {InvBookSummary & { activeRows?: number }} */ (res.all ? invBookSummaryOf(res.all) : res.summary);
+  INVBOOK_TOTAL = res.all ? res.all.length : res.total || 0;
   INVBOOK_SUMMARY = sum;
   const activeCopies = sum.activeCopies, value = sum.value, deacc = sum.deacc, checked = sum.checked;
   // Обработчикът не праща activeRows (виж InvBookSummary) — тогава е всичко без отчислените.
-  const active = { length: 'activeRows' in sum && sum.activeRows != null ? sum.activeRows : sum.rows - sum.deacc };
+  const active = { length: sum.activeRows != null ? sum.activeRows : sum.rows - sum.deacc };
   $('#view').innerHTML = `
     <div class="note"><b>Приложение № 4 към чл. 16, ал. 1</b> — колоните следват образеца от Наредба № 3.
     Книгата се съхранява безсрочно (чл. 26, ал. 1). Отчислените документи се отбелязват, но не се заличават (чл. 39).</div>
@@ -210,9 +211,9 @@ async function invBookReload() {
   const req = ++INVBOOK_REQ;
   const res = await invBookFetch(0, INVBOOK_RENDER_LIMIT);
   if (!res || req !== INVBOOK_REQ) return;
-  window._INVBOOK_ROWS = res.all || res.rows;
+  window._INVBOOK_ROWS = res.all || res.rows || [];   // едното е винаги налице
   INVBOOK_GEN++;
-  INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+  INVBOOK_TOTAL = res.all ? res.all.length : res.total || 0;
   paintInvBookRows();
 }
 window.invBookReload = invBookReload;
@@ -227,8 +228,8 @@ async function invBookMore() {
     const loaded = (window._INVBOOK_ROWS || []).length;
     const res = await invBookFetch(loaded, INVBOOK_PAGE_SIZE);
     if (!res || gen !== INVBOOK_GEN) return; // междувременно търсене е подменило списъка
-    window._INVBOOK_ROWS = (window._INVBOOK_ROWS || []).concat(res.all ? res.all.slice(loaded) : res.rows);
-    INVBOOK_TOTAL = res.all ? res.all.length : res.total;
+    window._INVBOOK_ROWS = (window._INVBOOK_ROWS || []).concat(res.all ? res.all.slice(loaded) : res.rows || []);
+    INVBOOK_TOTAL = res.all ? res.all.length : res.total || 0;
     INVBOOK_RENDER_LIMIT = window._INVBOOK_ROWS.length;
     paintInvBookRows(true);
   } finally {

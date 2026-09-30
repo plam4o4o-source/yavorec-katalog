@@ -103,8 +103,9 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
     o.death_date = personDate(o.death_date, 'смъртта');
     if (o.birth_date && o.death_date) {
       const bothExact = isValidIsoDate(o.birth_date) && isValidIsoDate(o.death_date);
+      // personDate() пуска само дати с 3–4 цифри за годината — годината винаги се намира.
       const before = bothExact ? o.death_date < o.birth_date
-        : yearOfPersonDate(o.death_date) < yearOfPersonDate(o.birth_date);
+        : /** @type {number} */ (yearOfPersonDate(o.death_date)) < /** @type {number} */ (yearOfPersonDate(o.birth_date));
       if (before) {
         throw new Error('Датата на смъртта (' + o.death_date + ') е преди датата на раждане ('
           + o.birth_date + '). Проверете дали двете дати не са разменени.');

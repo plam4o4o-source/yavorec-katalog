@@ -148,16 +148,16 @@ async function refreshChronicle() {
   if (!drawChronicleList(rows)) renderChronicle();
 }
 window.refreshChronicle = refreshChronicle;
-function chrCancelSearch() { clearTimeout(window._chrT); window._chrT = null; }
+function chrCancelSearch() { clearTimeout(window._chrT || undefined); window._chrT = null; }
 window.chrCancelSearch = chrCancelSearch;
-function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT); window._chrT = setTimeout(refreshChronicle, 300); }
+function chrSearch(v) { CHR_Q = v; clearTimeout(window._chrT || undefined); window._chrT = setTimeout(refreshChronicle, 300); }
 window.chrSearch = chrSearch;
 function chrYear(v) { CHR_YEAR = v; renderChronicle(); }
 window.chrYear = chrYear;
 
 async function chronicleForm(id) {
   const c = id ? await call(window.api.chronicle.get(id)) : null;
-  const v = /** @type {Partial<IpcData<'chronicle:get'>>} */ (c || { year: String(new Date().getFullYear()), category: 'читалище' });   // нов запис — само подразбиранията
+  const v = /** @type {Partial<NonNullable<IpcData<'chronicle:get'>>>} */ (c || { year: String(new Date().getFullYear()), category: 'читалище' });   // нов запис — само подразбиранията
   modal(id ? 'Редакция на запис' : 'Нов запис в летописа', `
     <form id="chrF" onsubmit="return false">
     <div class="grid g4">

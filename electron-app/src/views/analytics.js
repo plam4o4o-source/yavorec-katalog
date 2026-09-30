@@ -131,7 +131,7 @@ async function refreshAnalytics() {
   if (!drawAnalyticsList(rows)) renderAnalytics();
 }
 window.refreshAnalytics = refreshAnalytics;
-function anlCancelSearch() { clearTimeout(window._anlT); window._anlT = null; }
+function anlCancelSearch() { clearTimeout(window._anlT || undefined); window._anlT = null; }
 window.anlCancelSearch = anlCancelSearch;
 function analyticSource(a) {
   if (a.source_kind === 'периодика' && a.periodical_title) {
@@ -143,7 +143,7 @@ function analyticSource(a) {
   }
   return a.source_text || '—';
 }
-function anlSearch(v) { ANL_Q = v; clearTimeout(window._anlT); window._anlT = setTimeout(refreshAnalytics, 300); }
+function anlSearch(v) { ANL_Q = v; clearTimeout(window._anlT || undefined); window._anlT = setTimeout(refreshAnalytics, 300); }
 window.anlSearch = anlSearch;
 function anlYear(v) { ANL_YEAR = v; renderAnalytics(); }
 window.anlYear = anlYear;
@@ -209,7 +209,7 @@ async function analyticForm(id) {
     call(window.api.periodicals.list()),
     loadAuthSuggest()
   ]);
-  const v = /** @type {Partial<IpcData<'analytics:get'>>} */ (a || { source_kind: 'периодика', is_local: 1, year: String(new Date().getFullYear()) });   // нов запис — само подразбиранията
+  const v = /** @type {Partial<NonNullable<IpcData<'analytics:get'>>>} */ (a || { source_kind: 'периодика', is_local: 1, year: String(new Date().getFullYear()) });   // нов запис — само подразбиранията
   const perOpts = (pers || []).map(p => ({ v: p.id, t: p.title }));
   modal(id ? 'Редакция на описание' : 'Ново аналитично описание', `
     <form id="anlF" onsubmit="return false">

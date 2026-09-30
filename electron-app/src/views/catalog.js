@@ -46,7 +46,7 @@ async function renderCatalog() {
     публикува през <b>GitHub</b> — ${s && s.cat_url ? `сайтът <b>${esc(s.cat_url)}</b> чете` : 'сайтът на библиотеката чете'}
     файла на живо от там, без нужда от друг сървър.</div>
 
-    ${rc && rc.mismatch ? `<div class="note" style="border-left-color:var(--red)">
+    ${rc && rc.mismatch && rc.remote ? `<div class="note" style="border-left-color:var(--red)">
       <b style="color:var(--red)">Внимание — папката сочи към чуждо хранилище.</b><br>
       Свързаната папка е работно копие на <b>${esc(rc.remote.user)}/${esc(rc.remote.repo)}</b>, а в настройките
       по-долу е записано <b>${esc(status.ghUser || '—')}/${esc(status.ghRepo || '—')}</b>. Публикуването е спряно,

@@ -25,12 +25,10 @@ type IsoDate = string;
 
 /** Отговорът на всеки канал през run() (handlers → main.js). Някои канали
     връщат и допълнителни полета до `data` (напр. books:create — catalogWarning). */
-interface IpcResult<T> {
-  ok: boolean;
-  data?: T;
-  error?: string;
-  [extra: string]: any;
-}
+type IpcResult<T> = (
+  | { ok: true; data: T; error?: undefined }
+  | { ok: false; error: string; data?: undefined }
+) & { [extra: string]: any };
 
 /** Типът на метод от window.api за описан канал. Канал, чийто отговор зависи от
     аргументите (прозорец или целият списък, етикети…), описва и `call` — отделен

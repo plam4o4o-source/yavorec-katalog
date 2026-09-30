@@ -500,7 +500,8 @@ window.doCloseInvent = doCloseInvent;
 async function draftFromMissing(sessionId) {
   const s = await call(window.api.inventorySessions.get(sessionId));
   if (!s) return;
-  const miss = (s.missing || []).filter(m => m.book_id);
+  // Без book_id — документът е изтрит след проверката (ON DELETE SET NULL); не влиза в акт.
+  const miss = /** @type {Array<NonNullable<typeof s.missing>[number] & { book_id: number }>} */ ((s.missing || []).filter(m => m.book_id));
   if (!miss.length) return toast('В този протокол няма установени липси.', 'err');
   /* СТАРИТЕ ЗАПИСИ С НЯКОЛКО ЕКЗЕМПЛЯРА ПОД ЕДИН НОМЕР (v2.4.62).
      Актът отчислява само екземпляра с номера, записан в него (виж
@@ -781,7 +782,7 @@ async function printInventProtocol(id) {
       <b>Допустими естествени загуби (чл. 41):</b> ${lossFmt(allowed)} документа за фонда в обхвата на проверката
       (${pool} ${pool === 1 ? 'документ' : 'документа'}).<br>
       ${missing === 0 ? 'Липси не са установени.'
-        : over > 0
+        : over != null && over > 0
           ? `Установените липси надвишават норматива с <b>${lossFmt(over)}</b> документа — прилага се редът по чл. 51 – 53.`
           : 'Установените липси са в рамките на допустимите естествени загуби.'}</div>` : ''}
     <div class="pmeta">${zakl}<br>

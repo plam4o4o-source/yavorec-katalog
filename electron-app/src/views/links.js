@@ -124,7 +124,7 @@ async function lnkDel(id, label) {
   await call(window.api.links.delete(id), 'Връзката е премахната.');
   // Опреснява списъка от текущия отворен запис.
   if (window._LINK_CTX) await refreshLinks(window._LINK_CTX.kind, window._LINK_CTX.id);
-  else if (panel) panel.querySelector('#linkList').innerHTML = '<div class="hint">Няма свързани материали.</div>';
+  else if (panel) /** @type {HTMLElement} */ (panel.querySelector('#linkList')).innerHTML = '<div class="hint">Няма свързани материали.</div>';
 }
 window.lnkDel = lnkDel;
 async function refreshLinks(fromKind, fromId) {

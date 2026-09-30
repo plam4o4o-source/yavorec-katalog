@@ -76,7 +76,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const db = getDb();
     const s = db.prepare('SELECT gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
     const chk = await catalogRemoteCheck(folder, s);
-    if (chk.mismatch) {
+    if (chk.mismatch && chk.slug) {   // mismatch е true само при разчетен slug
       return { ok: false, error: 'Спряно: свързаната папка сочи към хранилището ' +
         chk.slug.user + '/' + chk.slug.repo + ', а в настройките е записано ' +
         (s.gh_user || '—') + '/' + (s.gh_repo || '—') +
@@ -134,6 +134,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      не отваря конзоли: изтекъл токен или разместено хранилище спираха публикуването
      завинаги, докато екранът продължаваше да обещава обновяване на всеки 5 минути.
      Онлайн каталогът можеше да остане замръзнал с месеци, без никой да разбере. */
+  /** @type {{ at: string | null, error: string | null, okAt: string | null }} */
   let LAST_AUTO_PUSH = { at: null, error: null, okAt: null };
   function noteAutoPush(error) {
     const now = new Date().toISOString();

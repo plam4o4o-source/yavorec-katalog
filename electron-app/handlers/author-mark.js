@@ -197,7 +197,8 @@ function extractPairs(text, digitsFirst) {
   while ((m = re.exec(text)) !== null) {
     const chunk = digitsFirst ? m[2] : m[1];
     const mark = digitsFirst ? m[1] : m[2];
-    const oneLine = digitsFirst ? chunk.split('\n')[0] : chunk.split('\n').pop();
+    // split() връща поне един елемент — pop() не може да даде undefined.
+    const oneLine = digitsFirst ? chunk.split('\n')[0] : /** @type {string} */ (chunk.split('\n').pop());
     const prefix = rowKeyOf(oneLine.slice(-CHUNK));
     if (!prefix || !mark) continue;
     out.push([prefix, mark]);
@@ -572,7 +573,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
          покрай проверката мълчаливо — нито в mismatched (markLetter излизаше
          null), нито в missing (mark не е празен). */
       const markLetter = ((mark.match(/[А-Яа-я]/) || [''])[0] || '').toUpperCase();
-      if (!markLetter || !key) continue;
+      if (!markLetter || !key || !basis) continue;   // key е непразен само при basis — !basis е за tsc
       /* Й и И се броят за една и съща буква. Й няма собствен раздел в таблиците
          (търси се от И), затова една библиотека подписва Йовков с „Й“, а друга —
          с „И“; и двете са редовни. Проверката е за ГРЕШКИ при въвеждане, а не за

@@ -335,7 +335,9 @@ async function renderCirc() {
           return;
         }
       }
-      const res = await window.api.loans.checkoutByCode({ reader_id: CIRC.readerId, code, date_out: today(), found });
+      const readerId = CIRC.readerId;
+      if (readerId == null) return logLine('warn', 'Изберете читател, преди да заемате.');   // полето е видимо само при избран читател
+      const res = await window.api.loans.checkoutByCode({ reader_id: readerId, code, date_out: today(), found });
       const log = $('#outLog');
       if (!log) return;   // междувременно гишето е пречертано (смяна на читателя)
       if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
@@ -398,7 +400,7 @@ window.selectCircReader = selectCircReader;
 async function printLoanSlip(loan) {
   const r = loan && loan.reader_name
     ? { name: loan.reader_name, card_no: loan.reader_card }
-    : await call(window.api.readers.get(CIRC.readerId));
+    : CIRC.readerId == null ? null : await call(window.api.readers.get(CIRC.readerId));
   if (!r) return;
   setPrintPage({ name: 'Разписка — ' + r.name + ' — инв. № ' + loan.inv_number, landscape: false, margin: '20mm' });
   doPrint(`<div class="pdoc">${shead()}
@@ -762,8 +764,10 @@ async function circTodayPanel() {
   // Следата пази UTC („YYYY-MM-DD HH:MM:SS“) — всеки запис се превежда към местния ден (tsDay/tsTime в core.js).
   const t = today();
   const local = (ts) => (tsLocal(ts) ? { date: tsDay(ts), time: tsTime(ts) } : null);
-  const ops = rows.map(r => ({ ...r, at: local(r.ts) }))
-    .filter(r => r.at && r.at.date === t && (r.action === 'Заемане' || r.action === 'Връщане'));
+  const ops = rows.flatMap(r => {
+    const at = local(r.ts);
+    return at && at.date === t && (r.action === 'Заемане' || r.action === 'Връщане') ? [{ ...r, at }] : [];
+  });
   if (!$('#circToday')) return; // междувременно е избран читател
   const out = ops.filter(r => r.action === 'Заемане').length, back = ops.length - out;
   box.innerHTML = `<h3 style="margin-top:0">${CIRC_TODAY_TITLE}</h3>

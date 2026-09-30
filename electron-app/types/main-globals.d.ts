@@ -21,4 +21,5 @@ interface HttpStatusError extends Error {
 
 /** parseInt превръща аргумента в низ сам (ToString) — числото или Id от договора
     (number | string) се чете еднакво. Стандартното описание приема само string. */
-declare function parseInt(string: string | number, radix?: number): number;
+// null/undefined → NaN (→ „|| подразбиране“ в кода) — точно на това се разчита при липсващо поле.
+declare function parseInt(string: string | number | null | undefined, radix?: number): number;
