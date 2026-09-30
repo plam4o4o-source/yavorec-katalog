@@ -5,7 +5,7 @@
 // състояние тук — не е нужно да излиза навън, ползва се само вътре в тези
 // три handler-а.
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
+  const { getDb, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
   /* `parseBookPrice` е изнесена от handlers/books.js точно за да може вносът да
      мине през СЪЩАТА проверка, която пази формата за книга — виж importPrice

@@ -30,7 +30,10 @@ test('описанието на window.api отговаря на preload.js', ()
   const text = render();
   const preload = fs.readFileSync(path.join(APP_DIR, 'preload.js'), 'utf8');
   const invokes = (preload.match(/:\s*invoke\('/g) || []).length;
-  assert.equal((text.match(/: InvLibInvoke;/g) || []).length, invokes, 'всеки метод през invoke() е описан');
+  /* От v2.4.72 каналите от types/ipc-contract.d.ts са описани с точния си
+     подпис (IpcMethod<'…'>), останалите — с общия InvLibInvoke. */
+  const described = (text.match(/: InvLibInvoke;/g) || []).length + (text.match(/: IpcMethod<'[^']+'>;/g) || []).length;
+  assert.equal(described, invokes, 'всеки метод през invoke() е описан');
 });
 
 /* Изгледите + един допълнителен файл — като истинската проверка, но с проба. */
@@ -51,7 +54,7 @@ function checkRendererWith(probe) {
 
 test('грешно име на метод или група в window.api е грешка; вярното не е', () => {
   const out = checkRendererWith([
-    'async function probeOk() { await window.api.loans.checkout({ reader_id: 1, book_id: 2 }); }',
+    'async function probeOk() { await window.api.loans.checkout({ reader_id: 1, book_id: 2, date_out: \'2026-01-05\' }); }',
     'async function probeTypo() { await window.api.loans.chekout({}); }',
     'async function probeGroup() { await window.api.laons.list(); }',
     'window._UNDECLARED_LIST = [];'

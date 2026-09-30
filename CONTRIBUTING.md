@@ -149,6 +149,26 @@ element does not have, or passes a function the wrong number of arguments.
 - Where TypeScript cannot know the element type, say it with a JSDoc cast —
   `/** @type {HTMLInputElement} */ (document.querySelector('[name=x]'))` —
   rather than changing the code.
+- CI also fails on unused local variables, a function that returns a value on
+  only some paths, a `switch` case that falls through, and `this` of unknown
+  type (`noUnusedLocals`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+  `noImplicitThis`).
+- **The screen ↔ handler contract** (`types/ipc-contract.d.ts`) describes the
+  arguments and the result of each channel, module by module — so far loans,
+  the reader account, deaccession acts and inventory sessions. A described
+  channel is exposed on `window.api` with its exact signature, and its handler
+  describes its parameter with the same type:
+  `ipcMain.handle('loans:return', /** @param {unknown} e @param {IpcArg<'loans:return'>} arg */ (e, { id, date_in }) => …)`.
+  A field the screen does not send, or one the handler expects under another
+  name, is then a type error on both sides. When you change what a described
+  channel accepts or returns, change the contract in the same PR and run
+  `npm run gen:api-types`; `test/typecheck-v2472.test.js` checks that every
+  described channel exists in `preload.js` and that its handler carries the
+  contract type. Values read from a form (`formData()`) are cast to the
+  contract type at the call site — such a cast always compiles, so a field
+  removed from the form is **not** caught; only object literals are fully
+  checked. The handler's *return value* is not yet checked against `result`
+  either — keep the two in step by hand.
 
 **A new capability or a fix without a new or updated test is not accepted.**
 The convention is one test file per handler — `handlers/x.js` →

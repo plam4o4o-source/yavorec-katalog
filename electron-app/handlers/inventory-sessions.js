@@ -187,7 +187,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         naturalLoss: naturalLoss(activeDocs, s.free_access_pct) };
     })
   );
-  ipcMain.handle('inventorySessions:start', (e, s) =>
+  ipcMain.handle('inventorySessions:start', /** @param {unknown} e @param {IpcArg<'inventorySessions:start'>} s */ (e, s) =>
     run(() => {
       /* Датата се проверява като при акта и партидата (одит v2.4.25). Дотук
          изчистено поле пращаше '' — NOT NULL го приема — сесията се записваше без
@@ -275,7 +275,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       return tx.immediate();
     })
   );
-  ipcMain.handle('inventorySessions:get', (e, id, opts) =>
+  ipcMain.handle('inventorySessions:get', /** @param {unknown} e @param {IpcArg<'inventorySessions:get'>} id @param {IpcArg<'inventorySessions:get', 1>} [opts] */ (e, id, opts) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(id);
@@ -397,7 +397,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   );
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
   // обяснението на кирилско/латинско разминаване при баркод четец.
-  ipcMain.handle('inventorySessions:scan', (e, { sessionId, code }) =>
+  ipcMain.handle('inventorySessions:scan', /** @param {unknown} e @param {IpcArg<'inventorySessions:scan'>} arg */ (e, { sessionId, code }) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
@@ -475,7 +475,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
 
      Стойността по подразбиране НЕ е 'full': по-безопасно е приключване без изричен
      избор да не пипа статуси, отколкото да ги презапише масово. */
-  ipcMain.handle('inventorySessions:close', (e, arg) =>
+  ipcMain.handle('inventorySessions:close', /** @param {unknown} e @param {IpcArg<'inventorySessions:close'>} arg */ (e, arg) =>
     run(() => {
       const db = getDb();
       // Приема и голо id (стар подпис), и {sessionId, mode} — за съвместимост.
@@ -817,7 +817,6 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
            проверката, даваше „в обхвата 9 · проверени 6 · липсващи 4“, тоест 10
            от 9 в подписания протокол по чл. 40. Излезлите от обхвата се връщат
            ОТДЕЛНО (outOfScope), за да ги обяви протоколът, вместо да ги скрие. */
-        const poolIds = new Set(pool.map(b => b.id));
         /* Сканираното се брои през ПУЛА, а не през списъка с book_id: така
            бройката на всеки проверен документ идва от същия ред, от който идва
            и бройката в обхвата, и „проверени + липсващи + заети + за

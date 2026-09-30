@@ -194,7 +194,7 @@ window.printCardsAll = printCardsAll;
    на практика нова карта трябва най-често на един новозаписан читател. */
 async function printCardOne(id) {
   const r = await call(window.api.readers.get(id));
-  if (!r) return;
+  if (!r) return false;
   return printLabelSheet(readerCardHtml(r), 'card');
 }
 window.printCardOne = printCardOne;

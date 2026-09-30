@@ -230,6 +230,7 @@ function booksFilterChanged() {
   renderBooksBody();
   updateBulkBar();
   syncChkAll();
+  return undefined; // и двата пътя казват какво връщат (noImplicitReturns)
 }
 window.booksFilterChanged = booksFilterChanged;
 function renderBooksBody(append) {
