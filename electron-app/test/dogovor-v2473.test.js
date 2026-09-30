@@ -65,29 +65,34 @@ test('настройки: „5 лв.“ в паричното поле се от
   await h.go('setup');
   h.type('#stF [name=org]', 'НЧ „Тест“');
   h.type('#view [name=annual_fee]', '5 лв.');
-  const n0 = h.toasts.length;
+  const n0 = h.toasts.length, c0 = h.stats.calls.length;
   await h.clickButton('Запиши настройките', '#view');
   const t = h.toastsSince(n0);
   assert.ok(t.some(x => x.type === 'err' && /Годишна такса/.test(x.msg) && /не е число/.test(x.msg)), JSON.stringify(t));
+  assert.ok(!h.stats.calls.slice(c0).some(c => c.channel === 'settings:update'), 'отказва ЕКРАНЪТ — заявка не тръгва');
   assert.equal(q('SELECT annual_fee AS f FROM settings WHERE id = 1').f, before, 'старата стойност остава');
 });
 
 test('настройки: обработчикът отказва текст в числово поле с името му; „2,50“ и „1 000“ се четат вярно', async () => {
   const s = (await h.api.settings.get()).data;
   const base = Object.assign({}, s);
-  for (const [field, raw, label] of [['annual_fee', '5 лв.', 'Годишна такса'], ['fine_per_day', '1.234,50', 'Обезщетение за забава'],
-    ['loan_days', '14 дни', 'Срок за заемане']]) {
-    const r = await h.api.settings.update(Object.assign({}, base, { [field]: raw }));
-    assert.equal(r.ok, false, field + ' = „' + raw + '“ е записано');
-    assert.match(r.error, new RegExp(label));
-    assert.equal(q('SELECT ' + field + ' AS v FROM settings WHERE id = 1').v, s[field], field + ' е променено');
+  try {
+    for (const [field, raw, label] of [['annual_fee', '5 лв.', 'Годишна такса'], ['fine_per_day', '1.234,50', 'Обезщетение за забава'],
+      ['loan_days', '14 дни', 'Срок за заемане'], ['loan_days', '14,5', 'цяло число']]) {
+      const r = await h.api.settings.update(Object.assign({}, base, { [field]: raw }));
+      assert.equal(r.ok, false, field + ' = „' + raw + '“ е записано');
+      assert.match(r.error, new RegExp(label));
+      assert.equal(q('SELECT ' + field + ' AS v FROM settings WHERE id = 1').v, s[field], field + ' е променено');
+    }
+    const r = await h.api.settings.update(Object.assign({}, base, { annual_fee: '+2,50', remind2_days: '1 000', loan_days: '14.0' }));
+    assert.equal(r.ok, true, r.error);
+    const row = q('SELECT annual_fee AS f, remind2_days AS d, loan_days AS l FROM settings WHERE id = 1');
+    assert.equal(row.f, 2.5, '„+2,50“ минава и на екрана');
+    assert.equal(row.d, 1000, '„1 000“ е хиляда, не 1');
+    assert.equal(row.l, 14, '„14.0“ от числовото поле е 14');
+  } finally {
+    assert.equal((await h.api.settings.update(base)).ok, true);
   }
-  const r = await h.api.settings.update(Object.assign({}, base, { annual_fee: '2,50', remind2_days: '1 000' }));
-  assert.equal(r.ok, true, r.error);
-  const row = q('SELECT annual_fee AS f, remind2_days AS d FROM settings WHERE id = 1');
-  assert.equal(row.f, 2.5);
-  assert.equal(row.d, 1000, '„1 000“ е хиляда, не 1');
-  assert.equal((await h.api.settings.update(base)).ok, true);
 });
 
 test('SRU: невалиден адрес в настройките е отговор с причината, не „няма връзка с интернет“', async () => {

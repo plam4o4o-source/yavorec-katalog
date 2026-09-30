@@ -54,7 +54,9 @@ test('всеки канал от договора е в preload.js и е изл�
 test('обработчикът на всеки описан канал носи IpcArg за същия канал', () => {
   const src = HANDLER_FILES.map(f => fs.readFileSync(path.join(APP_DIR, f), 'utf8')).join('\n');
   for (const ch of CHANNELS) {
-    const at = src.indexOf("ipcMain.handle('" + ch + "',");
+    // Началото на ред — не коментар, който споменава канала (напр. holds.js).
+    const m = new RegExp("^\\s*ipcMain\\.handle\\('" + ch + "',", 'm').exec(src);
+    const at = m ? m.index : -1;
     assert.ok(at >= 0, ch + ': обработчикът не е намерен в handlers/ и main.js');
     const head = src.slice(at, src.indexOf('=>', at));
     /* Канал без аргументи няма какво да описва — `() =>`; но тогава и

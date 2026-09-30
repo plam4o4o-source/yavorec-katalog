@@ -58,9 +58,12 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
         txt = raw.replace(/[\s\u00a0]/g, '');
         if (kind === 'real') txt = txt.replace(',', '.');
         if (txt === '') { out[k] = null; continue; }
-        if (!(kind === 'int' ? /^-?\d+$/ : /^-?\d+(\.\d+)?$/).test(txt)) {
-          throw new Error('„' + (SETTING_LABELS[k] || k) + '“: „' + raw.trim() + '“ не е число. Настройките НЕ са записани — '
-            + 'напишете числото само с цифри' + (kind === 'real' ? ', дробната част със запетая (напр. 2,50).' : '.'));
+        /* Знакът „+“ отпред се приема, както на екрана (MONEY_RE в core.js);
+           „14.0“ в цяло поле е 14 — числовото поле на Chromium го пуска така. */
+        if (!(kind === 'int' ? /^[+-]?\d+(\.0+)?$/ : /^[+-]?\d+(\.\d+)?$/).test(txt)) {
+          throw new Error('„' + (SETTING_LABELS[k] || k) + '“: „' + raw.trim() + '“ не е ' + (kind === 'int' ? 'цяло число' : 'число')
+            + '. Настройките НЕ са записани — напишете числото само с цифри'
+            + (kind === 'real' ? ', дробната част със запетая (напр. 2,50).' : '.'));
         }
       }
       const n = kind === 'int' ? parseInt(txt, 10) : parseFloat(txt);

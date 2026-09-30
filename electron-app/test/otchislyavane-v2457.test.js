@@ -295,7 +295,8 @@ test('links:add към отчислен документ се ОТКАЗВА и 
   const res = ipcMain.invoke('links:add', { fromKind: 'персона', fromId: personId, toKind: 'книга', toId: bookId });
   assert.equal(res.ok, false, 'отказва се');
   assert.match(res.error, /отчислен с акт № 1\/2026/, 'и казва С КОЙ акт е излязъл документът');
-  assert.match(res.error, /опишете го в бележката/i, 'и какво да се направи вместо това');
+  // v2.4.73: „бележката към връзката“ я няма в панела — съветът сочи свободния текст на записа.
+  assert.match(res.error, /опишете го в свободния текст/i, 'и какво да се направи вместо това');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM links').get().n, 0);
 
   ok(ipcMain.invoke('links:add', { fromKind: 'персона', fromId: personId, toKind: 'книга', toId: live }), 'жива книга');
