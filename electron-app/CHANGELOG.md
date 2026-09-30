@@ -11,6 +11,76 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.73
+
+**BG:** **Договорът между екраните и базата вече описва всичко — и какво намери
+описването.** Продължение на v2.4.72: описани са и останалите 209 канала — книги и
+каталог, читатели и резервации, периодика, постъпления, краезнание, Дневник,
+настройки, резервни копия, внос и справки. Всички 247 метода, през които екранът
+говори с базата, вече имат точен подпис. Версията на базата не се вдига.
+
+**Какво се поправя за библиотекаря:**
+
+- **„Настройки“ отказва сума, която не е число.** „5 лв.“, написано в поле в евро,
+  се записваше като 5 € (без дума), а „1.234,50“ — като 1,234. Сега екранът отказва
+  с името на полето, както в „Книги“ и „Постъпления“, а и обработчикът отказва
+  текст, който не е число, във всяко числово поле. „2,50“ и „1 000“ се четат
+  вярно — „1 000“ дотук ставаше 1.
+- **SRU с грешен адрес в „Настройки“** казва, че грешен е адресът — дотук
+  съобщението беше „Няма връзка с интернет“ и библиотекарката търсеше мрежата.
+- **Скриптът за Defender**: папка, която скриптът не може да добави сам (име със
+  знак, който командният ред не пренася безопасно), вече е показана отделно, с
+  пътя за ръчно добавяне. Дотук стоеше в списъка като добавена, а скриптът
+  пращаше да я търсите в „Настройки“, където я нямаше.
+- **Връзка към отчислен документ**: отказът вече не съветва да се пише в
+  „бележката към връзката“ — такова поле панелът няма.
+
+**За кода.** Каналите, чийто отговор зависи от аргументите (списъкът с книги —
+прозорец, етикети или само номера; читателите; инвентарната книга), са описани с
+отделен подпис за всеки режим. Полетата на форма (`formData()`) остават непроверени
+— тях ги знае само HTML-ът на формата; CONTRIBUTING казва кое се проверява и кое не.
+
+Остава отворено: годишен комплект на периодично издание за година **без нито един
+брой в кардекса** и с нулева стойност (дарен подвързан том) не може да бъде вписан
+от екрана — формата предлага само години с броеве. Обработчикът го позволява с
+изрично потвърждение; кой екран да го предлага, е решение за вас.
+
+**Проверено:** `npm run test:all` — и 7-те проверки минават: проверката на типовете (главен процес, изгледи, описанието на window.api), **2 405 теста в UTC и 2 405 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. `test/typecheck-v2472.test.js` вече пази, че **нито един** канал от preload.js не е без описание и че всеки обработчик носи типа си; нов `test/dogovor-v2473.test.js` — режимите на списъците (грешният режим е грешка при проверката) и четирите поправки през истинския екран и `main.js`; и шестте му теста падат върху кода отпреди поправката. Независимият преглед на кода не намери грешка в договора; по негови бележки обработчикът приема и „+2,50“ (както екранът) и „14.0“ в цяло поле, а тестовете доказват, че отказва самият екран. Мутационна проверка — **12 мутации, всички уловени** (отслабена проверка на числата ×3, махната проверка на екрана, SRU, Defender, съветът при връзка, махнат режим на списък ×2, махнато описание на обработчик ×2, махнат канал от договора; контролната минава).
+
+**EN:** **The contract between the screens and the database now covers everything
+— and what describing it found.** Continuing v2.4.72, the remaining 209 channels
+are described — books and catalogue, readers and holds, periodicals, acquisitions,
+local studies, the diary, settings, backups, import and reports. All 247 methods
+the screens use to talk to the database now have an exact signature. The database
+version is not raised.
+
+**What changes for the librarian:**
+
+- **Settings refuses an amount that is not a number.** "5 лв." typed into a euro
+  field was saved as 5 € without a word, and "1.234,50" as 1.234. The screen now
+  refuses with the field's name, as in Books and Acquisitions, and the handler
+  refuses non-numeric text in every numeric field. "2,50" and "1 000" are read
+  correctly — "1 000" used to become 1.
+- **SRU with a wrong address in Settings** now says the address is wrong — until
+  now the message was "No internet connection".
+- **The Defender script**: a folder the script cannot add by itself (a name with a
+  character the command line cannot carry safely) is now shown separately, with
+  the path for adding it by hand. Until now it was listed as added.
+- **Linking to a deaccessioned item**: the refusal no longer advises writing in
+  "the link's note" — the panel has no such field.
+
+**For the code.** Channels whose result depends on the arguments (the book list —
+window, labels or ids only; readers; the inventory book) have a separate signature
+per mode. Form fields (`formData()`) stay unchecked — only the form's HTML knows
+them; CONTRIBUTING says what is and is not checked.
+
+Left open: a periodical's yearly volume for a year with **no issues in the kardex**
+and zero value (a donated bound volume) cannot be registered from the screen — the
+form offers only years with issues. The handler allows it with an explicit
+confirmation; which screen should offer it is your decision.
+
+**Verified:** `npm run test:all` — all 7 checks pass: type checking (main process, views, the window.api description), **2,405 tests in UTC and 2,405 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. `test/typecheck-v2472.test.js` now guards that **no** channel in preload.js is left undescribed and that every handler carries its type; new `test/dogovor-v2473.test.js` — list modes (the wrong mode is a type error) and the four fixes through the real screen and `main.js`; all six of its tests fail on the code before the fix. The independent code review found no error in the contract; following its notes the handler also accepts "+2,50" (as the screen does) and "14.0" in a whole-number field, and the tests prove the screen itself refuses. Mutation testing — **12 mutants, all killed** (a weakened number check ×3, the removed screen check, SRU, Defender, the link advice, a removed list mode ×2, a removed handler description ×2, a channel removed from the contract; the control passes).
+
 ## v2.4.72
 
 **BG:** **По-строга проверка на кода и описан договор между екраните и базата.**
