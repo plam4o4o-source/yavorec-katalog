@@ -66,11 +66,11 @@ test('обработчик: незадължително поле от дого�
   const r = checkWith('tsconfig.json', [
     /* 1 */ "/** @param {IpcArg<'loans:return'>} a */ function ok1(a) { return a.date_in ? a.date_in.length : 0; }",
     /* 2 */ "/** @param {IpcArg<'loans:return'>} a */ function bad2(a) { return a.date_in.length; }",
-    /* 3 */ "/** @type {string | null} */ let x = null; function bad3() { return x.length; }",
+    /* 3 */ "/** @param {DbLoans} l */ function bad3(l) { return l.date_due.length; }",
     'module.exports = { ok1, bad2, bad3 };'
   ].join('\n'));
   assert.deepEqual(r.others, [], 'главният процес минава чисто');
   assert.deepEqual(r.on(1), []);
   assert.ok(r.on(2).length > 0, 'date_in е незадължително');
-  assert.ok(r.on(3).length > 0, 'string | null без проверка');
+  assert.ok(r.on(3).some(l => /null/.test(l)), 'празна колона от генерираните типове (loans.date_due) без проверка');
 });
