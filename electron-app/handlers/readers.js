@@ -513,6 +513,9 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
       const diff = diffFields(prev, payload, READER_FIELDS.filter(f => f !== 'egn' && f !== 'id_card_no'));
       logAudit('Редакция на читател', 'карта ' + (r.card_no || '') + ' — ' + r.name
         + (egnWarn ? '; ВНИМАНИЕ: ЕГН с ' + egnWarn + ' — записано по потвърждение на библиотекаря' : ''), diff);
+      /* v2.4.76: името, картата, категорията или състоянието влизат в снимката
+         за мобилното приложение — само при активиран онлайн достъп (main.js). */
+      if (typeof deps.scheduleOnlineSync === 'function') deps.scheduleOnlineSync();
     })
   );
   // Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
@@ -689,6 +692,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
              идва от main.js (`scheduleCatalogWrite`); проверява се с typeof,
              защото по-стар main.js не я подава. Извън транзакцията — пише файл. */
       if (setAside.length && typeof deps.scheduleCatalogWrite === 'function') deps.scheduleCatalogWrite(CIRCULATION);
+      if (typeof deps.scheduleOnlineSync === 'function') deps.scheduleOnlineSync();   // v2.4.76: отпада от снимката за приложението
       /* ВПИСВАНЕТО Е БЕЗУСЛОВНО (v2.4.65).
          =================================================================
          КАКВО СТАВАШЕ ДОТУК. Този logAudit стоеше ВЪТРЕ в `if (attached.length)`,

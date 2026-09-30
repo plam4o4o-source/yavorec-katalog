@@ -391,6 +391,15 @@ interface AvOption { value: string; opac_label: string | null }
 /** Статус на защитата на ЕГН/№ ЛК (pdp:status). */
 interface PdpStatus { configured: boolean; unlocked: boolean; stale: boolean; unreadable: number }
 
+/** Онлайн достъп за читатели (handlers/online-access.js, v2.4.76). Без код за
+    активация status връща само { activated: false } — екраните не показват нищо. */
+type OnlineStatus =
+  | { activated: false }
+  | {
+    activated: true; lib: string; name: string; exp: IsoDate; bridgeUrl: string; hasUploadKey: boolean;
+    lastSync: string | null; lastError: string | null; consentingReaders: number; pending: boolean;
+  };
+
 /** Колона от Дневника (DNEVNIK_FIELDS в handlers/dnevnik.js) — 30 в Раздел А и 36 в Раздел Б. */
 type DnevnikField =
   | 'a_hours' | 'a_age_u14' | 'a_age_15_18' | 'a_age_19_28' | 'a_age_o28'
@@ -1398,6 +1407,21 @@ interface IpcContract {
   /** Отговорът е data URI на записаната снимка; затворен диалог е { ok:false } с FILE_DIALOG_CANCELLED. */
   'localPhoto:choose': { args: [{ table: 'persons' | 'chronicle'; id: Id }]; result: string };
   'localPhoto:clear': { args: [{ table: 'persons' | 'chronicle'; id: Id }]; result: undefined };
+
+  /* ---- Онлайн достъп за читатели (handlers/online-access.js) ---- */
+  'online:status': { args: []; result: OnlineStatus };
+  'online:activate': { args: [{ token: string }]; result: { lib: string; name: string; exp: IsoDate } };
+  'online:deactivate': { args: []; result: undefined };
+  /** Празен ключ = „не го сменяй“ (записаният никога не се връща към екрана). */
+  'online:updateSettings': { args: [{ online_bridge_url?: string | null; online_upload_key?: string | null }]; result: undefined };
+  'online:setReaderConsent': {
+    args: [{ readerId: Id; consent: boolean | number; date?: IsoDate | null }];
+    result: { online_consent: number; online_consent_date: IsoDate | null };
+  };
+  /** ПИН-ът се връща ЕДИН път; в базата остава само хешът. */
+  'online:issuePin': { args: [{ readerId: Id }]; result: { pin: string; cardNumber: string; setAt: IsoDate } };
+  'online:revokePin': { args: [{ readerId: Id }]; result: undefined };
+  'online:syncNow': { args: []; result: { generated: string | null } };
 
   /* ---- Защита на ЕГН/№ ЛК (handlers/pdp.js) ---- */
   'pdp:status': { args: []; result: PdpStatus };

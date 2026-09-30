@@ -11,6 +11,57 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.76
+
+**BG:** **Подготовка за онлайн достъп за читатели (изключено по подразбиране; включва се
+с код за активация).** За всяка библиотека без такъв код програмата е същата като досега:
+няма нов раздел, няма нови полета в картона на читателя, нищо не се изпраща навън.
+
+- В базата се добавят колони за отделно, датирано съгласие на читателя и за защитен
+  отпечатък (scrypt) на 6-цифрен ПИН, както и настройки за мост, ключ за качване и
+  състояние на последното изпращане. Версията на базата не се вдига — колоните са
+  инертни без активация и по-старите станции към обща мрежова база работят както досега.
+- При въведен и проверен код за активация (подписан от разработчика; носи кода на
+  библиотеката и срок): в „Настройки“ → „Копия и мрежа“ → „Онлайн достъп за читатели“
+  се попълват адрес на моста и ключ за качване; в картона на читателя се появява блок
+  „Онлайн достъп (мобилно приложение)“ със съгласие и „Издай ПИН“ (ПИН-ът се показва
+  веднъж; пази се само хешът; одитната следа записва издаването без самия ПИН).
+- Снимка на съгласилите се читатели (карта, хеш на ПИН, категория, срок на картата,
+  отворените заемания с инв. №, заглавие и автор) се изпраща по HTTPS отложено (около
+  минута след заемане/връщане/продължаване или промяна в картона) и на половин час по
+  таймер. ЕГН, лична карта, адрес, телефон и имейл никога не се изпращат. Грешките
+  отиват в състоянието на екрана и в дневника, не в диалози.
+- Ключът за качване не минава през общата форма на настройките, одитния диференц и
+  „Пълен износ“.
+
+**Проверено:** `npm test` и `npm run typecheck` минават. Нови тестове
+`test/online-access.test.js` (формат и проверка на ПИН хеша, кодът за активация с
+тестова двойка ключове, снимката от база по `schema.sql` без лични данни по чл. 42,
+ал. 3, изпращането с всички отговори на моста и таймаут) и
+`test/handlers-online-access.test.js` (без активация — нито канал, нито насрочване,
+нито ред в следата; съгласие → ПИН → отмяна; запис на последното изпращане/грешка).
+
+**EN:** **Groundwork for online reader access (off by default; enabled with an
+activation code).** For any library without such a code the program is unchanged: no
+new section, no new fields on the reader card, nothing is sent anywhere.
+
+- New columns for a separate, dated reader consent and a scrypt hash of a 6-digit PIN,
+  plus settings for the bridge URL, upload key and last-sync state. The database
+  version is not raised — the columns are inert without activation.
+- With a verified activation code (signed by the developer; carries the library code
+  and an expiry) Settings gains a "Онлайн достъп за читатели" block (bridge URL, upload
+  key, status, "Изпрати сега", "Деактивирай") and the reader card gains a consent +
+  "Издай ПИН" block (the PIN is shown once; only the hash is stored; the audit trail
+  records the issue without the PIN).
+- A snapshot of consenting readers (card, PIN hash, category, card validity, open loans
+  with inventory number, title and author) is sent over HTTPS, debounced about a minute
+  after checkout/return/extension or a reader-card change, and every 30 minutes by
+  timer. EGN, ID card, address, phone and e-mail are never sent. Errors go to the
+  status line and the log, never to dialogs.
+
+**Verified:** `npm test` and `npm run typecheck` pass; new `test/online-access.test.js`
+and `test/handlers-online-access.test.js`.
+
 ## v2.4.75
 
 **BG:** **„Празно“ вече е отделен тип (strictNullChecks).** Изданието е вътрешно —

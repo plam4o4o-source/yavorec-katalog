@@ -304,6 +304,11 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
     firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
     freeCopies, activeHolds
   } = deps;
+  /* v2.4.76: снимката за мобилното приложение на читателите (онлайн достъп)
+     се насрочва наново след всяко заемане, връщане и продължаване. Незадължителна
+     зависимост — отделните тестове на модула не я подават; без активиран онлайн
+     достъп main.js я прави празна. */
+  const scheduleOnlineSync = typeof deps.scheduleOnlineSync === 'function' ? deps.scheduleOnlineSync : () => {};
   /* ГИШЕТО ИМА СВОЙ, ПО-БАВЕН ОТЛОЖЕН ЗАПИС НА КАТАЛОГА (v2.4.64).
      =====================================================================
      Всяко заемане и връщане сменя само наличността в публичния каталог, но
@@ -761,6 +766,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const id = tx.immediate();
       scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
+      scheduleOnlineSync();
       return id;
     })
   );
@@ -906,6 +912,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
          „Забава 4 дни · обезщетение 0,60 €“ при 4 × 0,10 €. */
       // Извън транзакцията: пише файл, не база — не бива да я държи отворена.
       scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
+      scheduleOnlineSync();
       return {
         hold: hold ? { reader_name: hold.reader_name, card_no: hold.card_no, phone: hold.phone } : null,
         suspendedUntil, daysLate, fine, fineNow, fineBefore: toCents(fine - fineNow)
@@ -1375,6 +1382,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const r = tx.immediate();
       scheduleCatalogWrite(CIRCULATION); // документът вече не е „наличен“ — пише файл, не база
+      scheduleOnlineSync();
       return r;
     })
   );
@@ -1612,6 +1620,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const r = tx.immediate();
       scheduleCatalogWrite(CIRCULATION); // документът пак е наличен — пише файл, не база
+      scheduleOnlineSync();
       return r;
     })
   );
@@ -1699,6 +1708,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const result = tx.immediate();
       scheduleCatalogWrite(CIRCULATION);   // наличността може да изостане с минута — вж. коментара горе
+      scheduleOnlineSync();
       return result;
     })
   );
@@ -1806,6 +1816,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       });
       const r = tx.immediate();
       scheduleCatalogWrite(CIRCULATION); // пише файл, не база — извън транзакцията
+      scheduleOnlineSync();
       return {
         title: r.title, inv_number: r.inv_number, reader_name: r.reader_name,
         daysLate: r.daysLate, fine: r.fine, fineNow: r.fineNow, fineBefore: toCents(r.fine - r.fineNow),
