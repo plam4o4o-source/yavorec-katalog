@@ -27,7 +27,16 @@ const APP_DIR = path.join(__dirname, '..');
 const TSC = require.resolve('typescript/bin/tsc');
 const tmpDirs = [];
 let app, schema;
+/* Таблиците и колоните от генерирания файл — за всички тестове по-долу. */
+function readGenerated() {
+  const out = {};
+  for (const m of fs.readFileSync(gen.OUT, 'utf8').matchAll(/interface (Db\w+) \{\n([\s\S]*?)\n\}/g)) {
+    out[m[1]] = new Set([...m[2].matchAll(/^ {2}(\w+):/gm)].map(x => x[1]));
+  }
+  return out;
+}
 test.before(async () => {
+  schema = readGenerated();
   app = startMainApp();
   await app.ready();
 });
@@ -39,28 +48,39 @@ test.after(() => {
 test('types/db.generated.d.ts е точно схемата на базата', () => {
   const r = spawnSync(process.execPath, [path.join(APP_DIR, 'scripts', 'gen-db-types.js'), '--check'], { encoding: 'utf8', cwd: APP_DIR });
   assert.equal(r.status, 0, (r.stderr || '') + (r.stdout || ''));
-  const text = fs.readFileSync(gen.OUT, 'utf8');
-  schema = {};
-  for (const m of text.matchAll(/interface (Db\w+) \{\n([\s\S]*?)\n\}/g)) {
-    schema[m[1]] = new Set([...m[2].matchAll(/^ {2}(\w+):/gm)].map(x => x[1]));
-  }
   assert.ok(Object.keys(schema).length >= 40, 'таблиците: ' + Object.keys(schema).length);
   assert.ok(schema.DbLoans.has('deaccession_fine_line_id') && schema.DbHolds.has('status_before'),
     'колоните, които кодът добавя при първа употреба, са в типовете');
+  /* Пазачът на генератора чете и цикъла по Object.entries (ensureLostSchema),
+     ensureColumns() и таблиците, създавани при първа употреба. */
+  const lazy = gen.lazyColumnsInCode();
+  assert.ok(lazy.some(x => x.table === 'loans' && x.col === 'lost_note'), 'цикълът в ensureLostSchema');
+  assert.ok(lazy.some(x => x.file === 'main.js' && x.table === 'settings'), 'ensureColumns в main.js');
+  assert.ok(lazy.some(x => x.table === 'periodical_volumes' && x.col == null), 'CREATE TABLE при първа употреба');
+  for (const x of lazy) {
+    assert.ok(x.col == null ? schema['Db' + x.table.split('_').map(p => p[0].toUpperCase() + p.slice(1)).join('')] : true, x.table);
+  }
 });
 
 test('редовете в договора, които описват таблица, я наследяват и не си измислят колони', () => {
   const src = fs.readFileSync(path.join(APP_DIR, 'types', 'ipc-contract.d.ts'), 'utf8');
   const found = [];
   // Тялото е `{}` на същия ред или редове до `}` в началото на ред.
-  for (const m of src.matchAll(/^interface (\w+) extends (?:Omit<)?(Db\w+)(?:, '[^']+'>)? \{(\}|\n[\s\S]*?\n\})/gm)) {
+  for (const m of src.matchAll(/^interface (\w+) extends (?:Omit<)?(Db\w+)(?:, [^>]+>)? \{(\}|\n[\s\S]*?\n\})/gm)) {
     const [, name, db, body] = m;
     assert.ok(schema[db], name + ' наследява ' + db + ', а такава таблица няма');
-    const own = [...body.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/^ {2}(\w+)\??:/gm)].map(x => x[1]);
+    // Всички полета — и няколко на един ред („a: …; b: …;“).
+    const own = [...body.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(?:^|;|\{)\s*(\w+)\??\s*:/gm)].map(x => x[1]);
     for (const f of own) assert.ok(schema[db].has(f), name + '.' + f + ' — колона, която ' + db + ' няма');
     found.push(name);
   }
-  for (const n of ['LoanColumns', 'BookColumns', 'ReaderColumns', 'SettingsRow', 'ActRow', 'SessionRow', 'HoldColumns', 'AccountLine']) {
+  /* Всичките 24 от v2.4.74 — ред, върнат към ръчно преписване, се забелязва.
+     (Стеснен тип, който противоречи на колоната, е грешка на самия tsc —
+     tsconfig.renderer.json проверява и нашите .d.ts.) */
+  for (const n of ['LoanColumns', 'BookColumns', 'AccountLine', 'ActRow', 'ActItemRow', 'DraftRow', 'SessionRow',
+    'ReaderColumns', 'HoldColumns', 'HouseboundProfileRow', 'HouseboundVisitRow', 'CircRuleRow', 'EmployeeRow', 'MzsRow',
+    'SuggestionRow', 'AcqColumns', 'PeriodicalColumns', 'PeriodicalIssueRow', 'AnalyticColumns', 'PersonColumns',
+    'ChronicleColumns', 'LinkColumns', 'SettingsRow', 'AuditLogRow']) {
     assert.ok(found.includes(n), n + ' вече не наследява таблицата си — пак ли е преписана на ръка?');
   }
 });
@@ -79,7 +99,10 @@ test('на екрана: колона, която таблицата няма, �
     include: base.include.map(p => path.join(APP_DIR, p)).concat(path.join(dir, 'probe.js'))
   }));
   const r = spawnSync(process.execPath, [TSC, '-p', path.join(dir, 'tsconfig.json')], { encoding: 'utf8' });
-  const lines = ((r.stdout || '') + (r.stderr || '')).split('\n').filter(l => l.includes('probe.js'));
+  const all = ((r.stdout || '') + (r.stderr || '')).split('\n');
+  const lines = all.filter(l => l.includes('probe.js'));
+  // Самите изгледи и .d.ts минават чисто — и стеснен тип, който противоречи на колоната си (TS2430).
+  assert.deepEqual(all.filter(l => /error TS/.test(l) && !l.includes('probe.js')), []);
   const on = (n) => lines.filter(l => l.includes('probe.js(' + n + ','));
   assert.deepEqual(on(1), [], 'истинските колони');
   assert.ok(on(2).some(l => /date_end/.test(l)), 'loans.date_end:\n' + lines.join('\n'));
@@ -111,9 +134,10 @@ test('всеки SQL текст, който може да се прочете, �
       }
     }
     assert.deepEqual(bad, [], 'SQL, който схемата не приема:\n' + bad.join('\n'));
-    assert.ok(checked >= 650, 'проверени заявки: ' + checked + ' — извличането спря да вижда част от тях?');
-    /* Таванът на непроверимите: нов шаблон със стойност от изпълнението е
-       позволен, но нека е решение, а не навик — вдигнете числото съзнателно. */
-    assert.ok(skipped <= 130, 'непроверими заявки: ' + skipped + ' (таван 130)');
+    assert.ok(checked >= 730, 'проверени заявки: ' + checked + ' — извличането спря да вижда част от тях?');
+    /* Таванът на непроверимите (54 при v2.4.74): нов шаблон със стойност от
+       изпълнението е позволен, но нека е решение, а не навик — вдигнете
+       числото съзнателно. */
+    assert.ok(skipped <= 60, 'непроверими заявки: ' + skipped + ' (таван 60)');
   } finally { db.close(); }
 });

@@ -77,14 +77,44 @@ async function readSchema() {
   } finally { app.stop(); Object.assign(console, saved); }
 }
 
-/* Всяка колона, която кодът добавя с ALTER TABLE, трябва да е в схемата,
-   която генераторът вижда — иначе е добавена от канал извън списъка горе. */
+/* Всичко, което кодът добавя към схемата извън schema.sql, трябва да е в
+   схемата, която генераторът вижда — иначе е добавено от канал извън
+   LAZY_SCHEMA_CHANNELS и типът би го пропуснал тихо. Чете се:
+     • ALTER TABLE t ADD COLUMN c — с буквално име;
+     • ALTER TABLE t ADD COLUMN ${name} в цикъл по Object.entries(ОБЕКТ) —
+       ключовете на обекта (handlers/loans.js, ensureLostSchema);
+     • ensureColumns('t', { c: …, … }) — ключовете (main.js);
+     • CREATE TABLE IF NOT EXISTS t — таблицата.
+   ADD COLUMN с име, което не може да се прочете така, е грешка на генератора,
+   не тихо разминаване. */
+function objectKeysAt(src, at) {
+  let d = 0, i = at, body = '';
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === '{') { d++; if (d === 1) continue; }
+    if (c === '}') { d--; if (d === 0) break; }
+    if (d >= 1) body += d === 1 ? c : ' ';
+  }
+  return [...body.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(?:^|,)\s*([a-z_][a-z0-9_]*)\s*:/gim)].map(m => m[1]);
+}
 function lazyColumnsInCode() {
   const files = ['main.js'].concat(fs.readdirSync(path.join(APP_DIR, 'handlers')).filter(f => f.endsWith('.js')).map(f => path.join('handlers', f)));
   const out = [];
   for (const f of files) {
     const src = fs.readFileSync(path.join(APP_DIR, f), 'utf8');
     for (const m of src.matchAll(/ALTER TABLE\s+([a-z_0-9]+)\s+ADD COLUMN\s+([a-z_0-9]+)/gi)) out.push({ file: f, table: m[1], col: m[2] });
+    for (const m of src.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_0-9]+)/gi)) out.push({ file: f, table: m[1], col: null });
+    for (const m of src.matchAll(/ensureColumns\('([a-z_0-9]+)',\s*\{/g)) {
+      for (const col of objectKeysAt(src, m.index + m[0].length - 1)) out.push({ file: f, table: m[1], col });
+    }
+    for (const m of src.matchAll(/ALTER TABLE\s+(\$\{\w+\}|[a-z_0-9]+)\s+ADD COLUMN\s+\$\{/g)) {
+      if (m[1].startsWith('${')) continue;   // самата ensureColumns() — ключовете ѝ са прочетени по-горе
+      const before = src.slice(0, m.index);
+      const ent = [...before.matchAll(/Object\.entries\((\w+)\)/g)].pop();
+      const decl = ent && [...before.matchAll(new RegExp('const ' + ent[1] + '\\s*=\\s*\\{', 'g'))].pop();
+      if (!decl) throw new Error('gen-db-types: ' + f + ': ALTER TABLE ' + m[1] + ' ADD COLUMN ${…} — не мога да прочета имената на колоните');
+      for (const col of objectKeysAt(src, decl.index + decl[0].length - 1)) out.push({ file: f, table: m[1], col });
+    }
   }
   return out;
 }
@@ -112,10 +142,11 @@ async function main() {
   const schema = await readSchema();
   const have = new Set();
   for (const t of schema) for (const c of t.cols) have.add(t.name + '.' + c.name);
-  const missing = lazyColumnsInCode().filter(x => !have.has(x.table + '.' + x.col));
+  const tables = new Set(schema.map(t => t.name));
+  const missing = lazyColumnsInCode().filter(x => x.col == null ? !tables.has(x.table) : !have.has(x.table + '.' + x.col));
   if (missing.length) {
     throw new Error('gen-db-types: колони, добавяни от кода, които генераторът не вижда — добавете канала, '
-      + 'който ги създава, в LAZY_SCHEMA_CHANNELS:\n' + missing.map(x => '  ' + x.table + '.' + x.col + ' (' + x.file + ')').join('\n'));
+      + 'който ги създава, в LAZY_SCHEMA_CHANNELS:\n' + missing.map(x => '  ' + x.table + (x.col ? '.' + x.col : ' (таблица)') + ' (' + x.file + ')').join('\n'));
   }
   const text = render(schema);
   if (process.argv.includes('--check')) {

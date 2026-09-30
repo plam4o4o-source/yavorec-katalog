@@ -182,14 +182,23 @@ element does not have, or passes a function the wrong number of arguments.
   run `npm run gen:db-types`; CI fails while the file is stale. A contract row
   that describes a whole table **extends** it (`interface LoanColumns extends
   DbLoans {}`) and only narrows a column's type (e.g. `kind: 'начисление' |
-  'плащане'`) — never declares a column the table lacks. A column added by a
-  handler with `ALTER TABLE … ADD COLUMN` must be reachable from one of the
-  channels in `LAZY_SCHEMA_CHANNELS` in the generator, which says so if not.
+  'плащане'`) — never declares a column the table lacks; a narrowed type that
+  contradicts its column is a type error (`tsconfig.renderer.json` checks our
+  own `.d.ts` files too). A column or table the code adds outside
+  `schema.sql` (`ALTER TABLE … ADD COLUMN`, including the loop over an object
+  of columns; `ensureColumns()`; `CREATE TABLE IF NOT EXISTS` in a handler)
+  must be reachable from one of the channels in `LAZY_SCHEMA_CHANNELS` in the
+  generator, which fails and names it if not. Because the generator starts
+  the program, `npm run typecheck` needs `better-sqlite3` built for Node — the
+  same as `npm test` (`npm rebuild better-sqlite3` after an Electron rebuild).
 - **SQL is checked against the schema.** `test/shema-v2474.test.js` prepares
   every SQL text in `main.js`, `handlers/` and `db/` that can be read without
-  running the code (plain strings, and templates built from constants of the
-  same file) against the real schema — a misspelt column or table fails there.
-  Templates with a value computed at run time are counted, not checked; the
+  running the code against the real schema — a misspelt column or table fails
+  there. Readable means: a string, strings joined with `+`, a constant passed
+  by name, or a template whose `${…}` uses only constants declared above it
+  (evaluated in an empty `vm` context — `${FIELDS.join(', ')}`,
+  `${F.QTY_JOIN}` from `db/`, `${LOAN_SELECT}`). Comments are skipped. Queries
+  that depend on a value computed at run time are counted, not checked; the
   test caps their number so it does not grow unnoticed.
 
 **A new capability or a fix without a new or updated test is not accepted.**

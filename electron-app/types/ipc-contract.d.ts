@@ -446,8 +446,6 @@ interface SruRecord {
 
 /** Ред от settings (SELECT * FROM settings WHERE id = 1) — db/schema.sql + ensureColumns/миграции 2 и 6 в main.js. */
 interface SettingsRow extends DbSettings {
-  /** Колоните от миграция 18 (ensureColumns в main.js) — база само от db/schema.sql ги няма; екранът чете lbl_mt ?? lbl_margin. */
-  lbl_mt?: number | null;
   /** Логото като data URI. */
   logo: string | null;
   /** Без DEFAULT: NULL = „по подразбиране“ (3 × цената, 10 €). */
