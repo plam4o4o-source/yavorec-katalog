@@ -60,7 +60,7 @@ async function periodicalForm(id) {
     call(window.api.av.options())
   ]);
   if (id && !p) return;
-  const v = /** @type {Partial<IpcData<'periodicals:get'>>} */ (p || { freq: 'месечно', department: 'периодика', language: 'български' });   // нов запис — само подразбиранията
+  const v = /** @type {Partial<NonNullable<IpcData<'periodicals:get'>>>} */ (p || { freq: 'месечно', department: 'периодика', language: 'български' });   // нов запис — само подразбиранията
   /* ПОЛЕ „ЕЗИК“ (v2.4.71, находка Д2). Дотук картонът нямаше език и годишният
      комплект влизаше във фонда без него — Дневникът, Раздел Б, броеше всяко
      заемане на „Труд, 2025“ в „Език — други“. Списъкът е същият като при
@@ -875,7 +875,7 @@ async function printPeriodikaYear() {
            е по-голям от вписаната в инвентарната книга стойност на комплекта,
            разликата са броеве, вписани след инвентирането — те не са във фонда.
            Дотук листът показваше 6,00 € срещу инвентирани 4,80 € без обяснение. */''}
-     ${rows.some(r => r.after) ? `<div class="pmeta">${rows.filter(r => r.after).map(r => '„' + esc(r.title) + '“: комплектът е подвързан с '
+     ${rows.some(r => r.after) ? `<div class="pmeta">${rows.flatMap(r => (r.after && r.vol ? [{ ...r, after: r.after, vol: r.vol }] : [])).map(r => '„' + esc(r.title) + '“: комплектът е подвързан с '
          + r.vol.registered_issue_count + ' бр. за ' + mny(r.vol.volume_price) + '; ' + r.after.n + ' бр. за ' + mny(r.after.sum)
          + ' ' + (r.after.n === 1 ? 'е вписан' : 'са вписани') + ' в кардекса след инвентирането и не ' + (r.after.n === 1 ? 'влиза' : 'влизат') + ' във фонда.').join('<br>')}</div>` : ''}
      ${ssig(['Библиотекар: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Ръководител') + ': …………………'])}</div>`);

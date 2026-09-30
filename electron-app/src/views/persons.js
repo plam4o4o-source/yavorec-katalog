@@ -104,7 +104,7 @@ async function refreshPersons() {
   if (!drawPersonsList(rows)) renderPersons();
 }
 window.refreshPersons = refreshPersons;
-function prsCancelSearch() { clearTimeout(window._prsT); window._prsT = null; }
+function prsCancelSearch() { clearTimeout(window._prsT || undefined); window._prsT = null; }
 window.prsCancelSearch = prsCancelSearch;
 /* Датите на персоналията са точна дата (ISO) ИЛИ година като текст („1890“,
    „ок. 1890“ — v2.4.69, Л9). bg() се ползва само за точната дата. */
@@ -120,7 +120,7 @@ function personDates(p) {
   if (d) return 'п. ' + d;
   return '';
 }
-function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT); window._prsT = setTimeout(refreshPersons, 300); }
+function prsSearch(v) { PRS_Q = v; clearTimeout(window._prsT || undefined); window._prsT = setTimeout(refreshPersons, 300); }
 window.prsSearch = prsSearch;
 
 async function printPersons() {
@@ -168,7 +168,7 @@ window.printPersons = printPersons;
 
 async function personForm(id) {
   const p = id ? await call(window.api.persons.get(id)) : null;
-  const v = /** @type {Partial<IpcData<'persons:get'>>} */ (p || {});   // нов запис — само подразбиранията
+  const v = /** @type {Partial<NonNullable<IpcData<'persons:get'>>>} */ (p || {});   // нов запис — само подразбиранията
   modal(id ? 'Редакция — ' + (v.name || '') : 'Нова персоналия', `
     <form id="prsF" onsubmit="return false" data-prev-name="${esc(v.name || '')}">
     <fieldset><legend>Самоличност</legend>

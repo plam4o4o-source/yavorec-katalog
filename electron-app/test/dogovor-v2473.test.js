@@ -49,7 +49,7 @@ const onLine = (lines, n) => lines.filter(l => new RegExp('probe\\.js\\(' + n + 
 
 test('режимите на списъците: екранът получава точния отговор, а грешният режим е грешка', () => {
   const r = checkRendererWith([
-    /* 1 */ "async function ok1() { const a = await call(window.api.books.list('', 'inv', { labels: true, from: 1, to: 9 })); if (a) a[0].inv_number.toFixed(0); const w = await call(window.api.readers.list('', null, { offset: 0 })); if (w) w.noConsent.toFixed(0); const l = await call(window.api.readers.list('Ив', 20)); if (l) l.slice(0, 1); const ib = await call(window.api.invBook.list()); if (ib) ib.length.toFixed(0); }",
+    /* 1 */ "async function ok1() { const a = await call(window.api.books.list('', 'inv', { labels: true, from: 1, to: 9 })); if (a) (a[0].inv_number ?? 0).toFixed(0); const w = await call(window.api.readers.list('', null, { offset: 0 })); if (w) w.noConsent.toFixed(0); const l = await call(window.api.readers.list('Ив', 20)); if (l) l.slice(0, 1); const ib = await call(window.api.invBook.list()); if (ib) ib.length.toFixed(0); }",
     /* 2 */ "async function bad2() { const a = await call(window.api.books.list('', 'inv', { labels: true })); if (a) a.rows; }",
     /* 3 */ "async function bad3() { const l = await call(window.api.readers.list('Ив', 20)); if (l) l.rows; }",
     /* 4 */ "async function bad4() { const w = await call(window.api.invBook.list({ offset: 0 })); if (w) w.length.toFixed(0); }",

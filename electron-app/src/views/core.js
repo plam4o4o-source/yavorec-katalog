@@ -210,9 +210,9 @@ function toast(msg, type) {
   el.innerHTML = `<span class="tico" data-kind="${type || 'info'}">${ico}</span><div class="tmsg"></div>` +
     `<span class="tcount" style="display:none"></span>` +
     `<button class="tx" title="Затвори" aria-label="Затвори">&times;</button><i class="tprog"></i>`;
-  el.querySelector('.tmsg').textContent = msg;
+  /** @type {HTMLElement} */ (el.querySelector('.tmsg')).textContent = msg;   // току-що сглобено горе
   const rec = { el, total, remaining: total, started: 0, timer: null, count: 1 };
-  el.querySelector('.tx').addEventListener('click', () => toastClose(key, rec));
+  /** @type {HTMLElement} */ (el.querySelector('.tx')).addEventListener('click', () => toastClose(key, rec));
   /* ТАЙМЕРЪТ СПИРА САМО ВЪРХУ ×, НЕ ВЪРХУ ЦЯЛОТО ИЗВЕСТИЕ (v2.4.69, кръг 44, Х1).
      Дотук посочването на известието го задържаше на екрана — а известието долу
      вдясно стоеше точно върху „Запази PDF…“/„Печат…“ на прегледа и върху
@@ -221,7 +221,7 @@ function toast(msg, type) {
      „Запази PDF…“ известието още стои). Сега тялото на известието не хваща мишката
      (style.css, .toast{pointer-events:none}) — щракването стига до бутона отдолу, а
      задържането за четене остава за онзи, който нарочно посочи ×. */
-  const tx = el.querySelector('.tx');
+  const tx = /** @type {HTMLElement} */ (el.querySelector('.tx'));
   tx.addEventListener('mouseenter', () => {
     if (!rec.timer) return;
     clearTimeout(rec.timer); rec.timer = null;
@@ -975,7 +975,7 @@ const FILE_DIALOG_CANCELLED = 'Отказано от потребителя.';
     (types/ipc-contract.d.ts) за описаните канали.
     @template T
     @param {Promise<IpcResult<T>>} promise
-    @param {string} [okMsg]
+    @param {string | null} [okMsg]   null — без съобщение за успех
     @returns {Promise<T | null>} */
 async function call(promise, okMsg) {
   const res = await promise;
@@ -1951,7 +1951,7 @@ async function printLabelSheet(cards, kind, opts) {
   const { w, h } = L;
   const docName = (LABEL_DOC_NAME[kind] || 'Етикети') + ' — ' + bg(today());
   const lazy = !!(cards && typeof cards === 'object' && Array.isArray(cards.rows) && typeof cards.card === 'function');
-  let items = null; // при готов низ — отделните етикети
+  let items = /** @type {string[]} */ ([]); // при готов низ — отделните етикети
   if (!lazy) {
     const t = document.createElement('template');
     t.innerHTML = String(cards || '');
@@ -2115,6 +2115,7 @@ function lblFundCss(kind, w, h, border, warns) {
   };
   const full = lblHeadHtml();
   // Стъпките: цялата заглавна част → без „Библиотека при“ → и без мястото → без нея.
+  /** @type {Array<{ head: string, hide: string[], lost: string[] }>} */
   const steps = [{ head: full, hide: [], lost: [] }];
   if (full.indexOf('class="lh1"') >= 0) {
     const last = steps[steps.length - 1];
@@ -2147,7 +2148,7 @@ function lblFundCss(kind, w, h, border, warns) {
       + pick.lost.join(' и ') + ' — името, баркодът и номерът остават цели. Ако редът трябва да личи, '
       + 'изберете по-висок етикет. Актовете, КДБФ и другите документи не се променят.');
   }
-  return `.lbl-fund{--lfs:${numberFits ? fit.scale : 1};--lbh:${bar}mm}`
+  return `.lbl-fund{--lfs:${numberFits && fit ? fit.scale : 1};--lbh:${bar}mm}`
     + pick.hide.map(c => `.lbl-fund .${c}{display:none}`).join('');
 }
 /* Колко висок трябва да е етикетът, за да събере пробата (мм, закръглено нагоре до

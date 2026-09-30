@@ -93,7 +93,7 @@ async function booksMore() {
     const res = await booksFetch(loaded, BOOKS_PAGE_SIZE);
     // Междувременно търсене/филтър е подменил списъка — тази порция е от стария резултат.
     if (!res || gen !== BOOKS_GEN) return;
-    window._BOOKS_LIST = (window._BOOKS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    window._BOOKS_LIST = (window._BOOKS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows || []);
     BOOKS_RENDER_LIMIT = Math.max(BOOKS_RENDER_LIMIT, window._BOOKS_LIST.length);
     renderBooksBody(true);
   } finally {
@@ -281,7 +281,7 @@ async function refreshBooksList() {
   const req = ++BOOKS_REQ;
   const res = await booksFetch(0, BOOKS_RENDER_LIMIT);
   if (!res || req !== BOOKS_REQ) return;
-  const books = res.all || res.rows;
+  const books = res.all || res.rows || [];   // едното е винаги налице
   booksSetList(books);
   if (!BOOKS_WINDOWED) {
     const visibleIds = new Set(books.map(b => b.id));
@@ -301,7 +301,7 @@ async function renderBooks() {
     call(window.api.searchHistory.suggest('books'))
   ]);
   if (!res) return;
-  const books = res.all || res.rows;
+  const books = res.all || res.rows || [];   // едното е винаги налице
   window._CATS = cats || [];
   booksSetList(books);
   if (!BOOKS_WINDOWED) {
@@ -716,8 +716,7 @@ async function bookCopyForm(id) {
   if (!src) return;
   const s = await call(window.api.settings.get());
   /* Копието носи и „копирано от“ — поле само на формата (books:create го приема). */
-  /** @type {Omit<Partial<typeof src>, 'inv_number'> & { inv_number?: number | '', copied_from?: number | null }} */
-  const v = Object.assign({}, src);
+  const v = /** @type {Omit<Partial<typeof src>, 'inv_number'> & { inv_number?: number | '', copied_from?: number | null }} */ (Object.assign({}, src));
   delete v.id;
   v.copied_from = src.inv_number;
   v.inv_number = (s && s.next_inv_number) || '';
@@ -908,7 +907,7 @@ function udkFilter() {
   all.forEach(n => { n.style.display = 'none'; });
   let hits = 0;
   all.forEach(n => {
-    if (!n.dataset.find.includes(q)) return;
+    if (!(n.dataset.find || '').includes(q)) return;
     hits++;
     n.style.display = '';
     n.classList.add('udkHit');

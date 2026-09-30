@@ -250,7 +250,9 @@ function dnevnikPrintPages(cols, groups, max) {
   // Разминаване между групите и колоните: не се гадае — печата се на един лист,
   // както досега (групиращият ред и без това не се строи в този случай).
   if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return [{ cols, groups: null }];
+  /** @type {Array<{ cols: any[], groups: any[] | null }>} */
   const pages = [];
+  /** @type {{ cols: any[], groups: any[] }} */
   let cur = { cols: [], groups: [] }, at = 0;
   for (const [label, n] of g) {
     if (cur.cols.length && cur.cols.length + n > limit) { pages.push(cur); cur = { cols: [], groups: [] }; }
@@ -407,7 +409,8 @@ async function dnevnikSaveCell(el) {
     el.value = hhmm(row ? row[field] : 0);
     return toast(dnevnikHoursHelp(raw) + ' Нищо не е записано — клетката е върната на ' + el.value + '.', 'err');
   }
-  const val = hours ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0);
+  // Невалидните часове са върнати по-горе — тук parseHhmm дава число.
+  const val = /** @type {number} */ (hours ? parseHhmm(el.value) : (parseInt(el.value, 10) || 0));
   const hoursNote = hours ? dnevnikHoursNote(el.value, val) : '';
   /* v2.4.29: отрицателно число не се записва — клетката се връща на старата стойност. */
   if (val < 0) {

@@ -134,7 +134,7 @@ async function readersMore() {
     const loaded = (window._READERS_LIST || []).length;
     const res = await readersFetch(loaded, READERS_PAGE_SIZE);
     if (!res || gen !== READERS_GEN) return; // междувременно търсене/филтър е подменил списъка
-    window._READERS_LIST = (window._READERS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows);
+    window._READERS_LIST = (window._READERS_LIST || []).concat(res.all ? res.all.slice(loaded) : res.rows || []);
     READERS_RENDER_LIMIT = Math.max(READERS_RENDER_LIMIT, window._READERS_LIST.length);
     renderReadersBody(true);
   } finally {
@@ -190,7 +190,7 @@ async function refreshReadersList() {
   const req = ++READERS_REQ;
   const res = await readersFetch(0, READERS_RENDER_LIMIT);
   if (!res || req !== READERS_REQ) return;
-  window._READERS_LIST = res.all || res.rows;
+  window._READERS_LIST = res.all || res.rows || [];   // едното е винаги налице
   READERS_GEN++;
   renderReadersBody();
 }
@@ -201,7 +201,7 @@ async function renderReaders() {
     readersFetch(0, READERS_RENDER_LIMIT), call(window.api.searchHistory.suggest('readers'))
   ]);
   if (!res) return;
-  const readers = res.all || res.rows;
+  const readers = res.all || res.rows || [];   // едното е винаги налице
   window._READERS_LIST = readers;
   READERS_GEN++;
   const filtered = READERS_WINDOWED ? readers : readers.filter(readersFilterMatch);
@@ -298,8 +298,8 @@ async function readerForm(id) {
     id ? call(window.api.readers.get(id)) : Promise.resolve(null),
     call(window.api.pdp.status())
   ]);
-  const v = r || { registered_at: today(), category: 'възрастен', status: 'активен' };
-  const needsGuarantor = GUARANTOR_CATS.includes(v.category);
+  const v = /** @type {Partial<NonNullable<typeof r>>} */ (r || { registered_at: today(), category: 'възрастен', status: 'активен' });   // нов читател — подразбиранията
+  const needsGuarantor = GUARANTOR_CATS.includes(v.category || '');
   // ЕГН/№ ЛК се показват само за четене, докато защитата е зададена, но
   // заключена в тази сесия — самата стойност идва вече като „Защитени данни“
   // от readers:get. Важи само при РЕДАКЦИЯ на съществуващ читател: при нов
@@ -557,7 +557,7 @@ async function forgetReader(id) {
   if (!res || !res.ok) {
     return toast((res && res.error) || 'Заличаването не бе извършено.', 'err');
   }
-  const d = /** @type {Partial<IpcData<'gdpr:forgetReader'>>} */ (res.data || {});
+  const d = /** @type {Partial<NonNullable<IpcData<'gdpr:forgetReader'>>>} */ (res.data || {});
   closeModal();
   toast('Личните данни на ' + (d.name || who) + ' са заличени'
     + (d.auditCleared ? ' — обезличени ' + d.auditCleared + ' реда в одитната следа' : '') + '.', 'ok');
