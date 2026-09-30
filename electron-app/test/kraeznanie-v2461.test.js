@@ -188,12 +188,20 @@ test('book_id и periodical_id се записват като числа, а н�
   const { ipcMain, db } = setup();
   const bookId = db.prepare("INSERT INTO books (title) VALUES ('Кн.')").run().lastInsertRowid;
   const perId = db.prepare("INSERT INTO periodicals (title) VALUES ('Родна реч')").run().lastInsertRowid;
+  /* v2.4.71 (Д12, кръг 45): описанието вече има ЕДИН източник — при вид „книга“
+     изданието се изчиства, при „периодика“ — книгата (дотук статия, пренасочена
+     към книга, пазеше и старото издание). Затова двете id-та се проверяват в две
+     описания, всяко със своя вид; проверката остава същата — числа, не текст. */
   const id = ok(await ipcMain.invoke('analytics:create', {
     title: 'Статия', source_kind: 'книга', book_id: String(bookId), periodical_id: String(perId)
   }), 'създаване с текстови id-та');
-  const row = db.prepare('SELECT typeof(book_id) AS tb, typeof(periodical_id) AS tp FROM analytics WHERE id = ?').get(id);
+  const id2 = ok(await ipcMain.invoke('analytics:create', {
+    title: 'Статия 2', source_kind: 'периодика', periodical_id: String(perId)
+  }), 'създаване с текстово id на изданието');
+  const row = db.prepare('SELECT typeof(book_id) AS tb FROM analytics WHERE id = ?').get(id);
+  const row2 = db.prepare('SELECT typeof(periodical_id) AS tp FROM analytics WHERE id = ?').get(id2);
   assert.equal(row.tb, 'integer', 'book_id е число в базата');
-  assert.equal(row.tp, 'integer', 'periodical_id е число в базата');
+  assert.equal(row2.tp, 'integer', 'periodical_id е число в базата');
 });
 
 /* ==================================================================

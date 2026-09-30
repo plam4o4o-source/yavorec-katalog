@@ -380,7 +380,7 @@ async function toggleBookSelAll(checked) {
   // базата (books:list с idsOnly — само числа, не редове); в стария — от списъка в паметта.
   let ids;
   if (BOOKS_WINDOWED) {
-    if (!checked) { BOOKS_SELECTED.clear(); renderBooksBody(); updateBulkBar(); return; }
+    if (!checked) { BOOKS_SELECTED.clear(); syncBookChecks(); updateBulkBar(); return; }
     const r = await call(window.api.books.list(BOOKS_QUERY, BOOKS_SORT,
       { idsOnly: true, dept: BOOKS_FILTER_DEPT || '', cat: BOOKS_FILTER_CAT || '' }));
     ids = (r && r.ids) || [];
@@ -389,10 +389,32 @@ async function toggleBookSelAll(checked) {
   }
   if (checked) ids.forEach(id => BOOKS_SELECTED.add(id));
   else ids.forEach(id => BOOKS_SELECTED.delete(id));
-  renderBooksBody();
+  syncBookChecks();
   updateBulkBar();
 }
 window.toggleBookSelAll = toggleBookSelAll;
+/* Кръг 45, Ф6 — „Избери всички“ БЕЗ пречертаване на таблицата.
+   (а) Какво ставаше: отметката викаше renderBooksBody() — целият <tbody> се
+   сглобяваше наново като низ и се подменяше: 3 000 разгърнати реда × 11 клетки,
+   с парсване и нова подредба на страницата. Тестерът измери 3,8 s при 15 001
+   книги (7,2 s при бавен процесор); на тази машина пробата
+   /tmp/r45/fix-fond/f6-izberi.js дава ~1,4 s за едно щракване.
+   (б) Защо е грешно: през тези секунди прозорецът е замръзнал — библиотекарката
+   щраква пак („не стана“) и така СНЕМА избора, който току-що е направила, после
+   прави групова редакция върху грешен набор или изобщо не я прави.
+   (в) Защо точно така: от реда се променя само едно нещо — състоянието на
+   отметката. Затова се обхождат вече изчертаните отметки и им се слага .checked
+   според BOOKS_SELECTED; редовете, лентата „Покажи още“ и броят изчертани
+   (BOOKS_PAINTED) остават непокътнати. Изборът извън изчертаните редове и без
+   това живее само в BOOKS_SELECTED (виж горе — ids от базата). */
+function syncBookChecks() {
+  const boxes = /** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('#bBody input.bkChk'));
+  for (const c of boxes) {
+    const on = BOOKS_SELECTED.has(Number(c.dataset.id));
+    if (c.checked !== on) c.checked = on;
+  }
+  syncChkAll();
+}
 function updateBulkBar() {
   const n = BOOKS_SELECTED.size;
   const c = $('#bulkCount'), b = $('#bulkBtn'), sb = $('#bulkShelfBtn');
@@ -404,25 +426,44 @@ function updateBulkBar() {
    огледално следват падащите менюта от формата за книга (bookForm), с два изключения:
    „Състояние“ никога не предлага „отчислен“ (отчисляването минава само през формален
    акт, вж. main.js) и всяко поле показва само собствените си опции. */
+/* Кръг 45, Ф5 — отдел и език идват от „Номенклатури“, не от твърдия списък.
+   (а) Какво ставаше: тук стояха OTDELI и EZICI от core.js. Библиотекарка, която
+   добави в „Настройки“ → „Номенклатури“ отдел „музикален“ или език „испански“,
+   ги виждаше във формата за книга (bookForm → avSelectOpts), но НЕ и в груповата
+   редакция — точно там, където се пренасят 200 документа наведнъж.
+   (б) Защо е грешно: номенклатурата е единственият списък, който библиотеката
+   сама поддържа; когато едно място го пренебрегва, същият отдел се изписва по
+   два начина или изобщо не може да се зададе групово, а справките по отдел
+   (КДБФ, инвентаризация по отдел) се разцепват.
+   (в) Защо точно така: опциите се вземат при отваряне на прозореца от
+   av:options — със същото правило avSelectOpts(), което ползва формата за
+   книга (празна номенклатура → твърдият списък като резерва). null в третата
+   клетка означава „изчислява се при отваряне“ — както категорията. */
+let BULK_AV = /** @type {Record<string, Array<{value:string}>>} */ ({});
 const BULK_EDIT_FIELDS = [
-  ['department', 'Отдел / местонахождение', OTDELI.map(v => ({ v, t: v }))],
+  ['department', 'Отдел / местонахождение', null],
   /* „изгубен“ (v2.4.56) — статусът, който слага приключването на заемане като
      изгубен документ. Без него библиотекарят вижда документа като изгубен, но не
      може да го върне на „наличен“, ако книгата се намери в дъното на рафта —
      а точно това се случва достатъчно често, за да има значение. */
   ['status', 'Състояние', ['наличен', 'липсващ', 'изгубен', 'за реставрация'].map(v => ({ v, t: v }))],
-  ['language', 'Език', EZICI.map(v => ({ v, t: v }))],
+  ['language', 'Език', null],
   ['category_id', 'Вид документ (категория)', null] // опциите се вземат от window._CATS при отваряне
 ];
 function bulkEditValueField(field) {
   const def = BULK_EDIT_FIELDS.find(([f]) => f === field);
   if (!def) return '';
-  const opts = field === 'category_id' ? (window._CATS || []).map(c => ({ v: c.id, t: c.name })) : def[2];
+  const opts = field === 'category_id' ? (window._CATS || []).map(c => ({ v: c.id, t: c.name }))
+    : field === 'department' ? avSelectOpts(BULK_AV.department, OTDELI, '').map(v => ({ v, t: v }))
+    : field === 'language' ? avSelectOpts(BULK_AV.language, EZICI, '').map(v => ({ v, t: v }))
+    : def[2];
   return fld('Нова стойност', 'bulkValue', { type: 'select', opts, allowEmpty: false });
 }
-function openBulkEdit() {
+async function openBulkEdit() {
   const n = BOOKS_SELECTED.size;
   if (!n) return;
+  // Ф5: номенклатурите се четат наживо — може да са сменени от друго работно място.
+  BULK_AV = (await call(window.api.av.options())) || {};
   modal('Групова редакция — ' + n + ' избрани документа', `
     <div class="note" style="margin-top:0">Избраното поле се записва с една и съща стойност във всички
     ${n} маркирани документа. Действието не може да се отмени с бутон „Назад“ — прегледайте избора
@@ -1183,13 +1224,26 @@ async function bookAftermath(res, bookId) {
      този, който вижда дали това е СЪЩАТА книга. */
   for (const p of sug) {
     const who = p.reader_name || 'читател';
+    /* author_match:false идва от suggestions.js само когато ЕДНАТА страна е без
+       автор (различни автори изобщо не се предлагат) — затова изречението казва
+       това, а не „авторът е друг“ (кръг 45, покрай Ф2). */
     const ok = await askConfirm(who + ' е поискал(а) „' + (p.title || '') + '“ на ' + bg(p.date) + ' г.'
-      + (p.author_match === false ? ' (съвпада само заглавието — авторът в предложението е друг)' : '')
+      + (p.author_match === false ? ' (съвпада само заглавието — в предложението или в документа няма автор)' : '')
       + '. Да отбележа ли предложението като получено?',
       { kind: 'ask', title: 'Предложение за покупка', okLabel: 'Да, отбележи' });
     if (ok) {
-      await call(window.api.suggestions.setStatus({ id: p.id, status: 'получено' }));
-      toast('Предложението на ' + who + ' е отбелязано като получено — обадете му се.', 'ok');
+      /* Кръг 45, Ф10 — партидата на книгата остава и в предложението.
+         (а) Дотук се пращаше само { id, status }: обработчикът записваше
+         acquisition_id = NULL и разделът „Предложения“ после не казваше „партида
+         № …“ — макар че книгата току-що е вписана точно по партида.
+         (б) Следата „предложено → купено с тази фактура“ е единственото, което
+         показва, че покупките следват желанията на читателите; прозорецът
+         „Получено…“ в „Предложения“ я пита изрично, а този път я губеше.
+         (в) Подава се book_id — обработчикът (suggestions:setStatus) сам взима
+         партидата на книгата от базата; така правилото е на едно място и важи
+         и когато партидата е сменена в последния момент. */
+      const r = await call(window.api.suggestions.setStatus({ id: p.id, status: 'получено', book_id: bookId }));
+      if (r !== null) toast('Предложението на ' + who + ' е отбелязано като получено — обадете му се.', 'ok');
     }
   }
 }

@@ -218,16 +218,120 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
      се възстанови (точно рискът, заради който handlers/readers.js спира изтриването
      на читател с движения по сметката). Липсващият ред пък се връщаше с ok:true и
      прозорецът обявяваше „Изтрито.“ за нищо. */
-  ipcMain.handle('account:deleteLine', (e, id) =>
+  /* Каналът приема и `{ id, reason }` (v2.4.71, Ч12); голото число остава
+     за заварените извиквания. */
+  ipcMain.handle('account:deleteLine', /** @param {unknown} e @param {any} arg */ (e, arg) =>
     run(() => {
       const db = getDb();
-      const l = db.prepare('SELECT reader_id, date, kind, type, amount, note FROM account_lines WHERE id = ?').get(id);
+      const id = arg && typeof arg === 'object' ? arg.id : arg;
+      const reason = arg && typeof arg === 'object' ? String(arg.reason || '').trim() : '';
+      const l = db.prepare('SELECT id, reader_id, date, kind, type, amount, note FROM account_lines WHERE id = ?').get(id);
       if (!l) throw new Error('Записът вече не съществува — вероятно е изтрит от друго работно място.');
-      db.prepare('DELETE FROM account_lines WHERE id = ?').run(id);
+      /* ПЛАЩАНЕ С ИЗДАДЕНА КВИТАНЦИЯ СЕ АНУЛИРА С ПРИЧИНА (v2.4.71, находка Ч12).
+         (а) КАКВО СТАВАШЕ ДОТУК. „✕“ на ред „плащане“ питаше само „Изтриване на
+             записа от сметката?“ и го махаше; в следата оставаше „Иван Петров —
+             2026-10-29, плащане 1.25 €“ — без дума защо. А всяко плащане на
+             гишето веднага отпечатва квитанция (savePayment в
+             src/views/account.js) и тя е у читателя, с номера на този ред.
+         (б) ЗАЩО Е ГРЕШНО. Квитанцията е касов документ: читателят държи
+             подписан лист, че е платил 1,25 €, а сметката вече казва, че не е.
+             При проверка на касата единственото, което обяснява разликата, е
+             причината за анулирането — а тя не се пазеше никъде.
+         (в) ЗАЩО ТОЧНО ТАКА. Причината е ЗАДЪЛЖИТЕЛНА за ред „плащане“ и влиза
+             в следата заедно с номера на анулираната квитанция. Сторниращ ред
+             („плащане“ с обратен знак) нарочно НЕ се пише: справките в
+             handlers/stats.js и handlers/loans.js четат плащанията по абсолютна
+             стойност и такъв ред би се преброил за второ плащане — тоест
+             годишният отчет би показал пари, които никой не е дал. Анулирането
+             е изтриване на реда + следа с причината и номера на квитанцията;
+             екранът казва на библиотекарката да поиска квитанцията обратно. */
+      const isPayment = l.kind === 'плащане';
+      if (isPayment && !reason) {
+        throw new Error('Плащането има издадена квитанция № ' + l.id + ' — анулирането ѝ изисква причина '
+          + '(напр. „сгрешена сума, вписана наново“). Впишете причината и повторете. Нищо не е изтрито.');
+      }
+      /* ОПРОСТЕНАТА ЗАБАВА НЕ СЕ ВРЪЩА В ПИСМОТО (v2.4.71, находка Ч2).
+         (а) КАКВО СТАВАШЕ ДОТУК. „✕“ на ред „забава“ махаше само реда от сметката,
+             а сумата по заемането (loans.fine) оставаше. „Просрочени“, писмото по
+             чл. 43 и SMS-ът смятат заварената забава като разлика между loans.fine
+             и начисленото в сметката (overdueForRows в handlers/loans.js) — и
+             изтритите 0,20 € изскачаха като „заварени“. Възпроизведено (тестер,
+             den45): опростена забава 0,20 € при продължение, сметката е 0, нова
+             забава 0,40 € — писмото иска 0,60 €. Същата сума влизаше и в
+             журнала при връщане, и в „Начислени обезщетения“ на годишния отчет
+             (handlers/stats.js сумира loans.fine на върнатите заемания).
+         (б) ЗАЩО Е ГРЕШНО. Писмото по чл. 43 е подписан документ с искане за
+             пари — не може да иска сума, която библиотеката сама е опростила.
+         (в) ЗАЩО ТОЧНО ТАКА. Опрощаването е едно решение и се отразява на ДВЕТЕ
+             места, които пазят забавата: редът изчезва от сметката И сумата по
+             заемането намалява със същото, в една транзакция. Така всички
+             потребители на loans.fine (Просрочени, писмото, SMS-ът, журналът,
+             годишният отчет) виждат вярното число, без никой от тях да се
+             променя. Редът не носи номер на заемане, затова заемането се търси:
+             първо по точната връзка от акта по чл. 30, т. 5
+             (deaccession_fine_line_id), после по инвентарния номер от бележката
+             („… по инв. № N — …“), читателя, датите и достатъчната сума. Ако не се
+             намери — редът пак се изтрива, но това се КАЗВА (на екрана и в
+             следата), за да не остане тихо разминаване. */
+      /** @type {{ loan_id: number, inv_number: any, title: string, before: number, after: number } | null} */
+      let loanFix = null;
+      let loanMiss = false;
+      const tx = db.transaction(() => {
+        if (l.kind === 'начисление' && l.type === LATE_FEE_CHARGE_TYPE) {
+          const amt = toCents(Math.abs(Number(l.amount) || 0));
+          const loanCols = db.prepare('PRAGMA table_info(loans)').all().map(c => c.name);
+          let loan = null;
+          if (loanCols.includes('deaccession_fine_line_id')) {
+            loan = db.prepare(`SELECT l.id, l.fine, l.deaccession_fine, b.inv_number, b.title FROM loans l
+              JOIN books b ON b.id = l.book_id WHERE l.deaccession_fine_line_id = ?`).get(l.id) || null;
+            if (loan) {
+              db.prepare('UPDATE loans SET deaccession_fine_line_id = NULL, deaccession_fine = ? WHERE id = ?')
+                .run(toCents(Math.max(0, (Number(loan.deaccession_fine) || 0) - amt)), loan.id);
+            }
+          }
+          const m = !loan && /инв\. № ([^\s;—]+)/.exec(String(l.note || ''));
+          if (m && m[1] !== '—') {
+            loan = db.prepare(`SELECT l.id, l.fine, b.inv_number, b.title FROM loans l JOIN books b ON b.id = l.book_id
+              WHERE l.reader_id = ? AND CAST(b.inv_number AS TEXT) = ?
+                AND COALESCE(l.fine, 0) >= ? - 0.005
+                AND l.date_out <= ? AND (l.date_in IS NULL OR l.date_in >= ?)
+              ORDER BY (CASE WHEN l.date_in = ? THEN 0 WHEN l.date_in IS NULL THEN 1 ELSE 2 END), l.id DESC
+              LIMIT 1`).get(l.reader_id, m[1], amt, l.date, l.date, l.date) || null;
+          }
+          if (loan) {
+            const before = toCents(Number(loan.fine) || 0);
+            const after = toCents(Math.max(0, before - amt));
+            db.prepare('UPDATE loans SET fine = ? WHERE id = ?').run(after, loan.id);
+            loanFix = { loan_id: loan.id, inv_number: loan.inv_number, title: loan.title, before, after };
+          } else {
+            loanMiss = true;
+          }
+        }
+        db.prepare('DELETE FROM account_lines WHERE id = ?').run(id);
+      });
+      tx.immediate();
       const r = db.prepare('SELECT name FROM readers WHERE id = ?').get(l.reader_id);
+      /* Действието остава „Изтрит ред от сметката“ и за плащането: по това име
+         заличаването по чл. 17 (handlers/gdpr.js, MONEY_ACTIONS) обезличава
+         името в следата — ново име на действието би оставило името на читателя
+         там завинаги. Анулирането се познава по „анулирана квитанция № …“. */
       logAudit('Изтрит ред от сметката', (r ? r.name : 'читател № ' + l.reader_id)
         + ' — ' + l.date + ', ' + (l.type || l.kind) + ' ' + Math.abs(Number(l.amount) || 0).toFixed(2) + ' €'
-        + (l.note ? ' (' + l.note + ')' : ''));
+        + (l.note ? ' (' + l.note + ')' : '')
+        + (isPayment ? '; анулирана квитанция № ' + l.id : '')
+        + (reason ? '; причина: ' + reason : '')
+        + (loanFix ? '; забавата по заемането на инв. № ' + (loanFix.inv_number ?? '—') + ' е намалена от '
+          + loanFix.before.toFixed(2) + ' € на ' + loanFix.after.toFixed(2) + ' €' : '')
+        + (loanMiss ? '; ВНИМАНИЕ: заемането, по което е начислена тази забава, не е намерено — сумата по него не е пипната' : ''));
+      return {
+        receipt: isPayment ? l.id : null,
+        loan: loanFix,
+        warning: loanMiss
+          ? 'Редът е изтрит, но заемането, по което е начислена забавата, не беше намерено (бележката не сочи инвентарен номер '
+            + 'или заемането е изтрито) — сумата по заемането не е намалена. Ако писмото по чл. 43 продължава да иска тази сума, '
+            + 'съобщете на поддръжката.'
+          : null
+      };
     })
   );
 };

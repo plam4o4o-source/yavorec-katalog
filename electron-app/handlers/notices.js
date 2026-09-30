@@ -11,6 +11,7 @@
    две места, е давало две различни суми за едно задължение (виж бележките при
    loans:reminders по-долу — тъкмо това поправиха v2.4.24 и v2.4.25). */
 const { overdueForRows, spreadUnpaidFine } = require('./loans');
+const { authorTitleText } = require('../security-utils'); // Ф7 (v2.4.71) — без двойна точка след инициал
 
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
   const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
@@ -122,7 +123,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
   function reminderTexts(r, s) {
     const lib = s.lib_name || s.org || 'библиотеката';
     const list = (r.loans || []).map(l =>
-      `• ${[l.author, l.title].filter(Boolean).join('. ')} (инв. № ${l.inv_number ?? '—'}), срок ${bgDate(l.date_due)}`
+      `• ${authorTitleText(l.author, l.title)} (инв. № ${l.inv_number ?? '—'}), срок ${bgDate(l.date_due)}`
     ).join('\n');
     const fine = Number(r.fine || 0);
     /* НАЧИСЛЕНО, ПЛАТЕНО, ОСТАВА (v2.4.65). {fine} вече е ОСТАТЪКЪТ — виж
@@ -272,19 +273,46 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
   // пази от подаване на съвсем несвързан низ от читателската картотека към
   // shell.openExternal, а не само от техническа коректност на адреса (виж
   // security-utils.js за isValidEmail).
-  ipcMain.handle('loans:mailto', async (e, { email, subject, body }) => {
+  /* „ОТВОРИ В ПОЩАТА“ ОТВАРЯ ПИСМОТО И КОГАТО ТЕКСТЪТ Е ДЪЛЪГ (v2.4.71, находка Ч9).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ ДОТУК. Кирилицата се кодира в адреса mailto: по 6 знака на
+         буква, тоест писмото по подразбиране излиза 1 975 – 2 698 знака дори за
+         ЕДИН просрочен документ (тестер, den45) при таван 1 900. Каналът
+         отказваше, екранът опитваше да копира текста и — ако буферът не се
+         дадеше — оставаше само червено съобщение: пощата не се отваряше никога.
+     (б) ЗАЩО Е ГРЕШНО. Бутон, който не прави онова, което пише на него, при
+         всяко натискане, учи библиотекарката да не го ползва; а таванът е
+         истински (обработчиците на mailto: под Windows режат около 2 000 знака)
+         и не може просто да се вдигне — писмото би стигнало отрязано.
+     (в) ЗАЩО ТОЧНО ТАКА. Екранът подава и кратък текст (`fallbackBody`) — „текстът
+         е копиран, поставете го с Ctrl+V“ или „копирайте го от програмата“.
+         Когато пълното писмо не се побира, каналът отваря пощата с адресата,
+         темата и този кратък текст и КАЗВА това в отговора (`shortened`), вместо
+         да откаже. Без `fallbackBody` поведението е досегашното — отказ с
+         обяснение (другите места, които ползват канала, не губят текста
+         мълчаливо). */
+  const MAILTO_MAX = 1900;
+  ipcMain.handle('loans:mailto', async (e, { email, subject, body, fallbackBody }) => {
     try {
       if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
       if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };
-      const url = 'mailto:' + encodeURIComponent(email) +
+      const build = (b) => 'mailto:' + encodeURIComponent(email) +
         '?subject=' + encodeURIComponent(subject || '') +
-        '&body=' + encodeURIComponent(body || '');
+        '&body=' + encodeURIComponent(b || '');
+      const url = build(body);
+      if (url.length > MAILTO_MAX && fallbackBody) {
+        const short = build(fallbackBody);
+        if (short.length <= MAILTO_MAX) {
+          await shell.openExternal(short);
+          return { ok: true, data: { shortened: true, length: url.length } };
+        }
+      }
       /* Дължината се проверява ПРЕДИ отварянето. Кирилицата се кодира по 6 знака
          на буква, тоест третото напомняне с десетина заглавия стига до ~6000 знака,
          а обработчиците на mailto: под Windows режат около 2000 — списъкът с
          документи излизаше отрязан по средата, а напомнянето се вписваше като
          изпратено. По-добре е библиотекарят да разбере и да го копира. */
-      if (url.length > 1900) {
+      if (url.length > MAILTO_MAX) {
         return { ok: false, error: 'Писмото е твърде дълго за пощенския клиент (' + url.length
           + ' знака при около 2000 допустими) и би стигнало отрязано. Ползвайте „Копирай текста“ '
           + 'и го поставете в пощата си.' };

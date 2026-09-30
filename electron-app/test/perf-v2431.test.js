@@ -211,7 +211,12 @@ test('stats:report — фонд, постъпили, разбивки, заем�
     assert.equal(rep.returnedOnTime, returned.filter(l => l.date_due && l.date_in <= l.date_due).length, y + ': в срок');
     assert.equal(rep.returnedLate, returned.filter(l => l.date_due && l.date_in > l.date_due).length, y + ': със забава');
     assert.ok(rep.returnedOnTime + rep.returnedLate > 0, y + ': предпоставка — има върнати');
-    near(rep.finesCharged, q('SELECT COALESCE(SUM(fine),0) AS v FROM loans WHERE date_in IS NOT NULL AND substr(date_in,1,4) = ?', y).v, y + ': начислени');
+    /* v2.4.71 (Ч3, кръг 45): „Начислени обезщетения“ вече не се чете от
+       loans.fine (без дата на начисляване, без вид, с опростените забави), а от
+       читателската сметка — по същите видове, по които се брои и „Събрани“:
+       забава, обезщетение, обезщетение за изгубен документ, с дата в годината. */
+    near(rep.finesCharged, q(`SELECT COALESCE(SUM(amount),0) AS v FROM account_lines WHERE kind = 'начисление'
+      AND type IN ('забава', 'обезщетение', 'обезщетение за изгубен документ') AND substr(date,1,4) = ?`, y).v, y + ': начислени');
     // Най-търсени — по заглавие и автор, събрани от всички екземпляри
     const m = {};
     all('SELECT b.title, COALESCE(b.author, \'\') AS a FROM loans l JOIN books b ON b.id = l.book_id WHERE substr(l.date_out,1,4) = ?', y)

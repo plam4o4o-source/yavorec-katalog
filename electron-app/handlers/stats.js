@@ -15,6 +15,50 @@ const FUND = require('../db/fund-sql');
 // библиотеката") и getDb/run/yearOf.
 const { ANON_READER_NAME } = require('../security-utils');
 
+/* „РЕГИСТРИРАНИ ЧИТАТЕЛИ ПРЕЗ ГОДИНАТА“ — ОТ ИСТОРИЯТА НА ЗАПИСВАНИЯТА (v2.4.71, находка Д3).
+   ===========================================================================
+   (а) ДОТУК числото се броеше от картона: регистриран или ПРЕрегистриран през
+   годината по `registered_at` / `re_registered_at`. Картонът обаче пази само
+   ПОСЛЕДНАТА пререгистрация. Тестерът (a5b-chitateli.js): Иван Иванов,
+   пререгистриран на 10.02.2025 — „Статистика 2025“ дава 1; на 12.02.2026 той се
+   пререгистрира отново — и „Статистика 2025“ вече дава 0. Числото за минала
+   година се променяше със задна дата при всяка пререгистрация.
+   (б) Годишният отчет за 2025 г. е подписан и подаден; програма, която след
+   година показва друго число под същото заглавие, прави отчета непроверим.
+   (в) Броят се РАЗЛИЧНИТЕ читатели с ред в историята `reader_registrations`
+   (миграция 19: всяко записване и пререгистрация, с датата си, нищо не се
+   презаписва) през годината. Към тях се добавят и читателите с ДАТА НА
+   ЗАПИСВАНЕ (`registered_at`) в годината — тя е първият ред от същата история
+   и не се мести с пререгистрацията; така читател, влязъл по път, който още не
+   пише в историята (внос от стара база), не изпада. `re_registered_at` НЕ се
+   чете — точно той беше причината. Служебният запис на ОРЗД („— анонимизирани
+   заемания —“) не е читател и не се брои (виж ANON_READER_NAME). Ако таблицата
+   липсва (база отпреди миграция 19 при изолиран тест), се пада на старото
+   броене, вместо отчетът да гърми. Ползва се и от таблото (handlers/dashboard.js),
+   за да казват двата екрана едно и също число. */
+function readersRegisteredIn(db, year) {
+  const y = String(year);
+  const hasHistory = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reader_registrations'").get();
+  if (!hasHistory) {
+    return db.prepare(`SELECT COUNT(*) AS n FROM readers WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?)
+      AND name != ?`).get(y, y, ANON_READER_NAME).n;
+  }
+  /* Броят се различните КЛЮЧОВЕ ('r' + номер на картона), не редовете от
+     `readers`: изтрит или заличен по ОРЗД читател е изчезнал от `readers`, но
+     редът му в историята остава (reader_id = NULL, ключът — същият) и числото
+     за отчетената година не пада. Служебният запис на ОРЗД се изключва по
+     номера си. Виж бележката при таблицата в db/schema.sql. */
+  return db.prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT rr.reader_key AS k FROM reader_registrations rr
+      WHERE rr.date >= @from AND rr.date < @next
+        AND (rr.reader_id IS NULL OR rr.reader_id NOT IN (SELECT id FROM readers WHERE name = @anon))
+      UNION
+      SELECT 'r' || r.id FROM readers r WHERE substr(r.registered_at, 1, 4) = @y AND r.name != @anon
+    )
+  `).get({ from: y + '-01-01', next: (parseInt(y, 10) + 1) + '-01-01', y, anon: ANON_READER_NAME }).n;
+}
+
 module.exports = function registerStatsHandlers(ipcMain, deps) {
   const { getDb, run, yearOf, value, dnevnikSumRow } = deps;
 
@@ -79,8 +123,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          защото е изгубена. Без филтъра всяко такова заемане влиза в
          `returnedLate` и сваля показателя „спазени срокове“ без причина. */
       /* Едно минаване по върнатите през годината (idx_loans_open): в срок / със
-         забава / начислени обезщетения. finesCharged брои и затворените от акт
-         (както досега — сумата им е начислена при затварянето). */
+         забава. (Начислените обезщетения вече не се четат оттук, а от сметката —
+         виж бележката за Ч3, v2.4.71, по-долу.) */
       /* COALESCE(lost,0) = 0 (v2.4.56) — точно същата мярка като при
          deaccession_act_id: заемане, приключено като ИЗГУБЕНО, се затваря с
          date_in (иначе документът виси зает завинаги), но книгата никога не се е
@@ -100,17 +144,13 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         SELECT SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0) = 0
                          AND date_due IS NOT NULL AND date_in <= date_due THEN 1 ELSE 0 END) AS onTime,
                SUM(CASE WHEN deaccession_act_id IS NULL AND COALESCE(lost,0) = 0
-                         AND date_due IS NOT NULL AND date_in > date_due THEN 1 ELSE 0 END) AS late,
-               COALESCE(SUM(fine), 0) AS finesCharged
+                         AND date_due IS NOT NULL AND date_in > date_due THEN 1 ELSE 0 END) AS late
         FROM loans WHERE date_in BETWEEN ? AND ?
       `).get(y + '-01-01', end);
       /* Служебният запис на GDPR се вписва с ДНЕШНА дата на регистрация и без
          него годишните броячи го включват в „нови читатели“ — виж бележката при
          ANON_READER_NAME в security-utils.js. */
-      const readersYearCount = db.prepare(`
-        SELECT COUNT(*) AS n FROM readers WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?)
-          AND name != ?
-      `).get(y, y, ANON_READER_NAME).n;
+      const readersYearCount = readersRegisteredIn(db, y); // Д3 — виж readersRegisteredIn() горе
       const visitsYear = db.prepare(`SELECT COALESCE(SUM(count),0) AS n FROM visits WHERE substr(date,1,4) = ?`).get(y).n;
       /* СЪГЛАСУВАНЕ НА ДВЕТЕ МЕСТА ЗА ПОСЕЩЕНИЯ (одит v2.4.65, находка Б18).
          =====================================================================
@@ -200,11 +240,49 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         SELECT reader_id, date, kind, type, amount FROM account_lines
         ORDER BY reader_id, date, (CASE kind WHEN 'начисление' THEN 0 ELSE 1 END), id
       `).all();
-      let finesCollected = 0;
-      /* „забава“ — отделен вид от v2.4.69 (преди се пишеше като „обезщетение“);
-         за справката „Събрани обезщетения и забави“ и трите са едно и също:
-         пари, събрани по чл. 43. */
-      const isFine = (t) => t === 'обезщетение' || t === 'обезщетение за изгубен документ' || t === 'забава';
+      /* НАЧИСЛЕНИ И СЪБРАНИ — ОТ ЕДНО МЯСТО, ПО ЕДНИ И СЪЩИ ВИДОВЕ (v2.4.71, находка Ч3 от кръг 45).
+         =====================================================================
+         (а) ДОТУК „Начислени обезщетения“ идваше от loans.fine на върнатите през
+         годината заемания (само ЗАБАВИТЕ, заедно с опростените), а „Събрани
+         обезщетения“ — от сметката, по ТРИТЕ вида: забава, обезщетение (повреда)
+         и обезщетение за изгубен документ. Тестерът на гишето (den45.test.js,
+         сценарий 8): начислени 4,30 €, събрани 5,50 € — събраното по-голямо от
+         начисленото, защото 1,20 € са за изгубена книга, която изобщо не е в
+         първото число.
+         (б) Два реда един под друг в годишния отчет, от които вторият е по-голям
+         от първия, четат се като грешка в касата — проверяващият пита къде са
+         парите, а отговорът е „числата мерят различни неща“.
+         (в) И двете числа вече идват от ЧИТАТЕЛСКАТА СМЕТКА (account_lines) и по
+         ЕДНИТЕ И СЪЩИ видове, в две групи, всяка с начислено и събрано:
+           • забави по чл. 43 — вид „забава“;
+           • за изгубени и повредени документи — „обезщетение за изгубен документ“
+             и „обезщетение“ (повредена корица, изгубен картон…).
+         „Начислено през Y“ — редовете „начисление“ с дата в Y. Опростената с „✕“
+         забава е изтрита от сметката и вече не се брои (след поправката на Ч2 тя
+         намалява и loans.fine — но отчетът не разчита на loans.fine изобщо,
+         защото там няма дата на начисляване и няма вид). „Събрано през Y“ —
+         плащанията с дата в Y, разнесени по реда на задълженията (както досега —
+         виж по-долу). Събраното може законно да надхвърли начисленото САМО когато
+         се плаща стар дълг (начислен в друга година) — затова тази част се брои
+         отделно (`otherYears`) и екранът я назовава. Годишните такси не влизат
+         нито в едното, нито в другото. */
+      const FINE_GROUP = { 'забава': 'late', 'обезщетение за изгубен документ': 'loss', 'обезщетение': 'loss' };
+      const isFine = (t) => Object.prototype.hasOwnProperty.call(FINE_GROUP, t);
+      const fines = {
+        late: { charged: 0, collected: 0, otherYears: 0 },
+        loss: { charged: 0, collected: 0, otherYears: 0 }
+      };
+      for (const r of db.prepare(`SELECT type, COALESCE(SUM(amount), 0) AS v FROM account_lines
+          WHERE kind = 'начисление' AND date >= ? AND date < ? GROUP BY type`).all(y + '-01-01', (parseInt(y, 10) + 1) + '-01-01')) {
+        if (isFine(r.type)) fines[FINE_GROUP[r.type]].charged += Number(r.v) || 0;
+      }
+      /* Събраното по вид: `used` пари, платени през годината, отиват към
+         задължение от вид `type`, начислено през `chargeYear`. */
+      const collect = (type, chargeYear, used) => {
+        const g = fines[FINE_GROUP[type]];
+        g.collected += used;
+        if (String(chargeYear) !== String(y)) g.otherYears += used;
+      };
       const outstanding = new Map(); // reader_id → [{type, left}] по реда на възникване
       /* Заварената забава (само в loans.fine, отпреди v2.4.61) НЕ се засява тук,
          макар писмото по чл. 43 да я засява (handlers/loans.js). Тя няма дата и се
@@ -220,12 +298,12 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         if (!outstanding.has(l.reader_id)) outstanding.set(l.reader_id, []);
         const q = outstanding.get(l.reader_id);
         if (l.kind === 'начисление') {
-          const item = { type: l.type || 'друго', left: Number(l.amount) || 0 };
+          const item = { type: l.type || 'друго', left: Number(l.amount) || 0, year: String(l.date || '').slice(0, 4) };
           const cr = credits.get(l.reader_id) || [];
           while (item.left > 0.0001 && cr.length) {
             const c = cr[0];
             const used = Math.min(c.left, item.left);
-            if (c.inYear && isFine(item.type)) finesCollected += used;
+            if (c.inYear && isFine(item.type)) collect(item.type, item.year, used);
             c.left -= used; item.left -= used;
             if (c.left <= 0.0001) cr.shift();
           }
@@ -241,7 +319,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
                то също е обезщетение по чл. 43 и събраното по него е приход на
                библиотеката. Дотук сравнението беше буквално с една стойност и
                новият вид просто нямаше да се появи в „Събрани обезщетения“. */
-            if (inYear && isFine(head.type)) finesCollected += used;
+            if (inYear && isFine(head.type)) collect(head.type, head.year, used);
             head.left -= used;
             money -= used;
             if (head.left <= 0.0001) q.shift();
@@ -253,8 +331,11 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
           }
         }
       }
-      finesCollected = Math.round(finesCollected * 100) / 100;
-      const finesCharged = returned.finesCharged;
+      for (const g of Object.values(fines)) {
+        g.charged = FUND.toCents(g.charged); g.collected = FUND.toCents(g.collected); g.otherYears = FUND.toCents(g.otherYears);
+      }
+      const finesCollected = FUND.toCents(fines.late.collected + fines.loss.collected);
+      const finesCharged = FUND.toCents(fines.late.charged + fines.loss.charged);
       /* Начислено по ОЩЕ НЕВЪРНАТИ заемания (v2.4.24). От този кръг loans:extend
          начислява при продължение на просрочено заемане, тоест сумата стои върху
          отворен ред, а finesCharged по построение брои затворените (годината се
@@ -262,8 +343,20 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
          види никъде: показва се отделно, вместо да се приписва на година, за която
          базата не пази дата на начисляване. Числото е КЪМ ДНЕС, не за годината —
          затова и се връща само за текущата година. */
+      /* САМО ЗАБАВАТА, КОЯТО НЕ Е В СМЕТКАТА (преглед на кръга, v2.4.71). От
+         v2.4.61 всяко начисление по отворено заемане (при продължение) влиза и в
+         сметката — тоест вече е в „Начислени“ по датата си. Сборът на loans.fine
+         по отворените го показваше ВТОРИ път на отделен ред. Остава заварената
+         част отпреди v2.4.61, която сметката не познава — по читател, като долна
+         граница (loans.fine по отворените минус начисленото в сметката като
+         „забава“), същото правило като в писмото по чл. 43. */
       const finesOpen = String(y) === String(new Date().getFullYear())
-        ? db.prepare('SELECT COALESCE(SUM(fine), 0) AS val FROM loans WHERE date_in IS NULL').get().val
+        ? FUND.toCents(db.prepare(`
+            SELECT COALESCE(SUM(MAX(0, o.s - COALESCE(c.s, 0))), 0) AS val
+            FROM (SELECT reader_id, SUM(fine) AS s FROM loans
+                  WHERE date_in IS NULL AND COALESCE(fine, 0) > 0 GROUP BY reader_id) o
+            LEFT JOIN (SELECT reader_id, SUM(amount) AS s FROM account_lines
+                  WHERE kind = 'начисление' AND type = 'забава' GROUP BY reader_id) c ON c.reader_id = o.reader_id`).get().val)
         : 0;
       /* Одит v2.4.29: „Спазване на сроковете“ броеше само ВЪРНАТИТЕ — библиотека с
          десетки книги, просрочени от месеци, четеше „100 % в срок“, докато „Просрочени“
@@ -312,6 +405,7 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
         returnedOnTime: returned.onTime || 0,
         returnedLate: returned.late || 0,
         finesCollected, finesCharged, finesOpen, openOverdue,
+        fines, // Ч3 (v2.4.71): { late, loss } — { charged, collected, otherYears }
         fundByLanguage: fundGroups('language'),
         fundByDepartment: fundGroups('department'),
         fundByCategory,
@@ -545,3 +639,4 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
     })
   );
 };
+module.exports.readersRegisteredIn = readersRegisteredIn;

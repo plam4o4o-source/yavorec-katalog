@@ -75,7 +75,10 @@ test('periodicals:create inserts a row and logs an audit entry', async () => {
   assert.equal(result.ok, true);
   assert.ok(result.data > 0);
   assert.equal(auditLog.length, 1);
-  assert.equal(auditLog[0].detail, 'Списание Х');
+  /* v2.4.71 (Д2, кръг 45): картонът вече носи език (по подразбиране „български“ —
+     без него годишният комплект влизаше в Дневника като „Език — други“). Тук
+     езикът не е подаден, затова следата казва, че е сложено подразбирането. */
+  assert.equal(auditLog[0].detail, 'Списание Х (език по подразбиране: български)');
 });
 
 test('periodicals:list includes issue_count aggregated from periodical_issues', async () => {

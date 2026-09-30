@@ -38,7 +38,7 @@ function mzsRowsHtml(rows) {
     const od = late[m.id];
     const who = m.reader_name ? m.reader_name + (m.reader_card ? ' (карта ' + m.reader_card + ')' : '') : (m.requester || '');
     return `<tr${od ? ' class="overdue"' : ''}><td class="num">${m.no} / ${esc(m.year || '')}</td><td class="num">${bg(m.date)}</td>
-      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc([m.author, m.title].filter(Boolean).join('. '))}${m.book_inv != null ? ' <span class="muted">· наш инв. № ' + esc(m.book_inv) + '</span>' : ''}</td>
+      <td>${esc(m.direction)}</td><td>${esc(m.partner)}</td><td>${esc(authorTitleText(m.author, m.title))}${m.book_inv != null ? ' <span class="muted">· наш инв. № ' + esc(m.book_inv) + '</span>' : ''}</td>
       <td>${esc(who)}</td><td><span class="badge ${mzsBadgeClass(m.status)}">${esc(m.status)}</span>${od
         ? ` <span class="badge warn" title="${esc(od.text)}">просрочена ${od.days_over === 1 ? '1 ден' : od.days_over + ' дни'} (срок ${bg(od.due_date)})</span>` : ''}</td>
       <td><button class="btn sm" onclick="openMzs(${m.id})">Отвори</button></td></tr>`;
@@ -203,7 +203,7 @@ function printMzsDoc(id) {
          <b>постъпила от</b> ${esc(m.partner)}. Не представлява заявка от страна на ${esc(s.org || 'библиотеката')}.<br>
          <b>Заявяваща библиотека:</b> ${esc(m.partner)}<br>`
       : `<b>До:</b> ${esc(m.partner)}<br>`}
-    <b>${inc ? 'Заявен документ' : 'Търсен документ'}:</b> ${esc([m.author, m.title].filter(Boolean).join('. '))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
+    <b>${inc ? 'Заявен документ' : 'Търсен документ'}:</b> ${esc(authorTitleText(m.author, m.title))}${m.isbn ? ' · ISBN/ISSN ' + esc(m.isbn) : ''}<br>
     ${m.requester || m.reader_name ? `<b>${inc ? 'Читател при заявяващата библиотека' : 'Заявител (читател)'}:</b> `
       + esc(m.requester || (m.reader_name + (m.reader_card ? ' (карта ' + m.reader_card + ')' : ''))) + '<br>' : ''}
     ${m.book_inv != null ? `<b>Наш документ:</b> инв. № ${esc(m.book_inv)}<br>` : ''}
@@ -247,8 +247,52 @@ async function openMzs(id) {
   if (m) mzsForm(m);
 }
 window.openMzs = openMzs;
+/* ВЪПРОСЪТ ПРИ ИЗТРИВАНЕ НАЗОВАВА ДОКУМЕНТА И ПОСЛЕДИЦАТА (v2.4.71, кръг 45, М10).
+   (а) Дотук и за заявка „изпратено“ въпросът беше само „Изтриване на
+       заявката?“. А изтриването на входяща заявка, по която НАШ документ е при
+       партньора, сваля единственото, което го държи „зает“: тестерът изтри
+       заявка за „Железният светилник“ (инв. № 5) и книгата веднага стана
+       „налична“ — и в katalog.json, и на гишето, — макар да е в чуждата
+       библиотека. При изходяща „получено“ изчезва срокът на чуждата книга,
+       която стои у наш читател, и просрочието ѝ вече не се следи никъде.
+   (б) Читател идва за книга, която сайтът обещава, а тя е в друг град; гишето
+       я „заема“ по инв. №, без да я има. Регистърът по МЗС е и единственото
+       доказателство, че документът от фонда е тръгнал навън — без него при
+       инвентаризацията той е просто „липсващ“.
+   (в) Правилото („при партньора → не се заема, зает онлайн“) живее в
+       обработчика (mzsBlockForBook, touchesCatalog в handlers/mzs.js); екранът
+       само казва ПРЕДИ изтриването какво ще се случи — с номера, заглавието,
+       инв. № и партньора, — и предлага правилния път: „върнато“, когато
+       книгата се върне. Текстът се сглобява от реда, който формата вече
+       показва (window._MZS_ROWS), без нова обиколка по IPC. */
+function mzsDeleteQuestion(m) {
+  if (!m) return 'Изтриване на заявката?';
+  const ref = 'заявка № ' + m.no + '/' + m.year;
+  const doc = '„' + authorTitleText(m.author, m.title) + '“';
+  const away = m.status === 'изпратено' || m.status === 'получено';
+  if (m.direction === 'входящо' && away && m.book_id != null) {
+    return 'Изтриване на ' + ref + ' — документът е при партньора\n\n'
+      + 'Нашият документ' + (m.book_inv != null ? ' инв. № ' + m.book_inv : '') + ' ' + doc + ' е „' + m.status
+      + '“ по тази заявка и физически е при ' + m.partner + '. Ако изтриете заявката, книгата ще стане налична '
+      + 'в каталога и на гишето, макар да е при партньора — читател може да я запази онлайн, а гишето ще я заеме, '
+      + 'без да я има.\n\nКогато книгата се върне, отбележете заявката „върнато“ вместо да я изтривате. '
+      + 'Изтриване въпреки това?';
+  }
+  if (m.direction === 'изходящо' && m.status === 'получено') {
+    const who = m.reader_name ? ' у читателя ' + m.reader_name + (m.reader_card ? ' (карта ' + m.reader_card + ')' : '') : '';
+    return 'Изтриване на ' + ref + ' — чуждата книга още не е върната\n\n'
+      + 'Книгата ' + doc + ' от ' + m.partner + ' е получена по тази заявка' + (who ? ' и е' + who : '')
+      + (m.due_date ? ', срок за връщане ' + bg(m.due_date) : '') + '. Ако изтриете заявката, срокът ѝ вече няма да '
+      + 'се следи — нито в регистъра, нито на таблото, — а задължението към партньора остава.\n\n'
+      + 'Когато книгата бъде върната на партньора, отбележете заявката „върнато“ вместо да я изтривате. '
+      + 'Изтриване въпреки това?';
+  }
+  return 'Изтриване на ' + ref + ' за ' + doc + ' (' + m.direction + ', ' + m.partner + ')?';
+}
+window.mzsDeleteQuestion = mzsDeleteQuestion;
 async function delMzs(id) {
-  if (!await askConfirm('Изтриване на заявката?')) return;
+  const m = (window._MZS_ROWS || []).find(x => x.id === id);
+  if (!await askConfirm(mzsDeleteQuestion(m))) return;
   // Одит v2.4.16: резултатът не се проверяваше — при провал излизаха ДВЕ
   // съобщения („database is locked“ и „Изтрито.“), а редът си оставаше в
   // регистъра. Всички съседни изтривания го правят правилно.

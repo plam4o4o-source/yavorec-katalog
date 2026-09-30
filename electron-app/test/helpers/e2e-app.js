@@ -308,10 +308,15 @@ function closedDaysBetween(db, a, b) {
   }
   return n;
 }
+/* Огледало на effectiveDaysLate() от handlers/loans.js. От v2.4.71 (находка Ч4)
+   забавата се брои от ПЪРВИЯ РАБОТЕН ДЕН след падежа — падеж, който е станал
+   затворен ден, не носи ден забава. */
 function effectiveDaysLate(db, dueDate, inDate) {
   if (!dueDate || !inDate || inDate <= dueDate) return 0;
-  const raw = Math.max(0, Math.round((new Date(inDate) - new Date(dueDate)) / 864e5));
-  return Math.max(0, raw - closedDaysBetween(db, dueDate, inDate));
+  const start = nextWorkDay(db, dueDate);
+  if (inDate <= start) return 0;
+  const raw = Math.max(0, Math.round((new Date(inDate) - new Date(start)) / 864e5));
+  return Math.max(0, raw - closedDaysBetween(db, start, inDate));
 }
 const { localToday: today } = require('./local-day'); // местната дата, както в програмата (v2.4.67)
 const bgDate = (d) => d ? d.split('-').reverse().join('.') : '';

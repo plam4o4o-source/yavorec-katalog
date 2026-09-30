@@ -154,6 +154,17 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
      колона, добавена със `*`. */
   const LIST_COLS = ['id', 'name', 'alt_names', 'birth_date', 'birth_place', 'death_date', 'death_place',
     'activity', 'bio', 'awards', 'sources', 'note', 'created_at'].map(c => 'p.' + c).join(', ');
+  /* СОЧАТ И КЪМ НЕЯ (v2.4.71, находка Д10 от кръг 45).
+     =====================================================================
+     (а) ДОТУК списъкът броеше само връзките НАВЪН (`from_kind = 'персона'`):
+     картата на „Вълчев, Стефан“ казваше „няма свързани материали“, макар
+     записът в летописа за 1972 г. и друга персоналия да сочат към него — а
+     картонът му (от v2.4.69, Л6) вече ги показва в „Сочат към този запис“.
+     (б) Списъкът и картонът си противоречаха; краеведът, който преглежда кои
+     персоналии още нямат нищо около себе си, получаваше грешен отговор и
+     можеше да завежда наново вече свързаното.
+     (в) Двете посоки се броят отделно (`links` и `backlinks`), за да може
+     картата да каже кое какво е, вместо да събира две различни неща в едно число. */
   ipcMain.handle('persons:list', (e, q) =>
     run(() => {
       // Броят на свързаните материали се показва в списъка, за да личи кои
@@ -167,7 +178,8 @@ module.exports = function registerPersonsHandlers(ipcMain, deps) {
       }
       const sql = `
         SELECT ${LIST_COLS}, (p.photo IS NOT NULL AND p.photo <> '') AS has_photo,
-               (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'персона' AND l.from_id = p.id) AS links
+               (SELECT COUNT(*) FROM links l WHERE l.from_kind = 'персона' AND l.from_id = p.id) AS links,
+               (SELECT COUNT(*) FROM links l WHERE l.to_kind = 'персона' AND l.to_id = p.id) AS backlinks
         FROM persons p ${q ? `WHERE bglower(p.name) LIKE @q ESCAPE '\\' OR bglower(p.alt_names) LIKE @q ESCAPE '\\'
           OR bglower(p.activity) LIKE @q ESCAPE '\\' OR bglower(p.bio) LIKE @q ESCAPE '\\'` : ''}
         ORDER BY p.name`;

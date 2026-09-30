@@ -155,7 +155,10 @@ test('прегледът преди печат държи фокуса при с
   await settle();
   window.accountModal(7);
   await settle();
-  [...d.querySelectorAll('#modal button')].find(b => b.textContent.trim() === 'Квитанция').click();
+  /* v2.4.71 (находка Ч8): редът тук е начисление — бутонът му е „Известие“
+     (квитанция се печата само за плащане). Тестът проверява фокуса в прегледа
+     за печат и не зависи от вида на документа. */
+  [...d.querySelectorAll('#modal button')].find(b => b.textContent.trim() === 'Известие').click();
   await settle();
   const pp = d.getElementById('printPreview');
   assert.ok(pp.classList.contains('on'), 'прегледът трябва да е отворен');

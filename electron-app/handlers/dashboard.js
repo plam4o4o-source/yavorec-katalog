@@ -16,6 +16,7 @@ const FUND = require('../db/fund-sql');
 // не се чупят по-стари/директни извиквания на регистратора без тази зависимост
 // (напр. по-стари тестове, извикващи регистратора без нея).
 const { ANON_READER_NAME } = require('../security-utils');
+const { readersRegisteredIn } = require('./stats'); // Д3 (v2.4.71) — едно броене за таблото и „Статистика“
 
 module.exports = function registerDashboardHandlers(ipcMain, deps) {
   const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
@@ -81,8 +82,10 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       `).get(y).n;
       // BETWEEN по idx_loans_date_out вместо substr() — пълно сканиране на 100 000 реда при всяко отваряне на таблото (v2.4.31).
       const loansYear = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE date_out BETWEEN ? AND ?').get(y + '-01-01', y + '-12-31').n;
-      const readersYear = db.prepare(`SELECT COUNT(*) AS n FROM readers
-        WHERE (substr(registered_at,1,4) = ? OR substr(re_registered_at,1,4) = ?) AND name != ?`).get(y, y, ANON_READER_NAME).n;
+      /* v2.4.71 (Д3): от историята на записванията — същото число като
+         „Статистика“, и то не се мени със задна дата при следваща пререгистрация.
+         Дълга бележка — при readersRegisteredIn в handlers/stats.js. */
+      const readersYear = readersRegisteredIn(db, y);
       /* Целта по чл. 40 се смята от ЗАГЛАВИЯТА (редовете), не от бройките — умишлено
          различно от `fund.n` точно над него. Инвентаризацията се проверява чрез
          сканиране, а инвентарният номер в тази схема е един на ред в books; затова

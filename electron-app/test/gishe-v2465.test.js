@@ -266,7 +266,9 @@ test('А4 — вече отчисленият с акт документ НЕ м
   ok(await h.api.loans.markLost({ id: lid, resolution: 'обезщетение', amount: quote.suggested, date: T }), 'изгубен');
   const no = ok(await h.api.deaccessionActs.nextNo(2026), 'номер');
   ok(await h.api.deaccessionActs.create({
-    act: { no, date: T, reason_code: 5, reason_text: 'повредени или невърнати от ползватели', commission: 'Комисия', note: '' },
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no, date: T, reason_code: 5, reason_text: 'повредени или невърнати от ползватели', commission: 'Комисия', note: '', committee1: 'А', committee3: 'В' },
     bookIds: [b]
   }), 'акт');
 

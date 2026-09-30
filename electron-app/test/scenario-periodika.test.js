@@ -771,7 +771,12 @@ test('9. комплект без нито един брой; вписан пре
    ================================================================== */
 test('10. брой, добавен/изтрит след инвентирането; второто работно място инвентира първо', async () => {
   // Нов брой към вече инвентирана година → живият брой 3 срещу снимката 2.
-  ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '3', date: Y + '-03-12', price: 3.5 }), 'бр. 3');
+  /* v2.4.71 (Д4, кръг 45): такъв брой вече се ОТКАЗВА без изричното
+     `outside_volume: true` — дотук влизаше мълчаливо и не отиваше в нито един
+     комплект. Сценарият проверява точно разминаването, затова го вписва изрично
+     „само в кардекса“ (екранът пита за същото); отказът е заключен в
+     kraeved-v2471.test.js. */
+  ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '3', date: Y + '-03-12', price: 3.5, outside_volume: true }), 'бр. 3');
   const p = ok(await h.api.periodicals.get(ids.chit), 'get');
   const v = p.volumes.find(x => String(x.year) === Y);
   assert.equal(v.issue_count, 3, 'живият брой');
@@ -953,7 +958,11 @@ test('12. заемане на комплекта през „Заемане и �
   const sug = ok(await h.api.dnevnik.suggest({ date: T }), 'предложение');
   assert.equal(sug.suggestions.b_type_period, 1);
   assert.equal(sug.suggestions.b_type_books, undefined);
-  assert.equal(sug.suggestions.b_lang_other, 1, 'комплектът няма език → „други“');
+  /* v2.4.71 (Д2, кръг 45): дотук тук стоеше заковано „комплектът няма език →
+     „други“ — точно находката. Сега картонът на изданието носи език (по
+     подразбиране „български“) и той се пренася в комплекта при инвентирането. */
+  assert.equal(sug.suggestions.b_lang_bg, 1, 'комплектът е на езика на изданието — български');
+  assert.equal(sug.suggestions.b_lang_other, undefined, 'нищо в „Език — други“');
   /* v2.4.61 (поправката на находка 13): заетата периодика вече не влиза в
      `unclassified` („книги без УДК, допълнете ги ръчно“), а се брои отделно —
      тя е напълно отчетена по ВИД и по съдържание не се класира по природа. */

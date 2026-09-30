@@ -109,7 +109,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
      цифри. Страниците също са свободен текст („12 – 14“, „45 – 61“, „с. 7“),
      затова проверката е най-слабата възможна, но достатъчна: трябва да има
      цифра и да не започва с минус — отрицателна страница няма. */
-  function checkAnalytic(o) {
+  function checkAnalytic(o, prev) {
     if (!String(o.title ?? '').trim()) throw new Error('Заглавието на статията е задължително.');
     const year = String(o.year ?? '').trim();
     if (year && !/(^|\D)\d{3,4}(\D|$)/.test(year)) {
@@ -129,6 +129,39 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
         + 'година (напр. 27.05.2022) или оставете полето празно.');
     }
     o.issue_date = issueDate || null;
+    /* ГОДИНАТА СЛЕДВА ДАТАТА НА БРОЯ (v2.4.71, находка Д1 от кръг 45).
+       =====================================================================
+       (а) ДОТУК годината и датата на броя бяха две независими полета, а формата
+       предлага в „Година“ текущата година. Статия от „Труд“, бр. от 31.12.2025,
+       вписана през 2026 г., влизаше с година 2026 — под 2026 г. в указателя, във
+       филтъра по години и на разпечатката (тестер, a2-kraeved.js).
+       (б) Указателят на статиите е по години; статия в чужда година е загубена
+       за читателя, който търси по година, а разпечатката, която се праща на
+       регионалната библиотека, лъже за годината на публикацията.
+       (в) Правилото е същото като в летописа (handlers/chronicle.js,
+       prepareChronicle): точната дата е по-силна от текста в полето. Празна
+       година се взема от датата; година, която НЕ съдържа годината на датата
+       (2026 срещу брой от 2025 г.), се ОТКАЗВА — само човекът знае кое от двете
+       е грешно, затова не се поправя мълчаливо. Свободният текст с годината на
+       датата („ок. 2025“) минава. Екранът (src/views/analytics.js) води
+       годината след датата, докато човекът не я е пипал, тоест обичайният случай
+       не стига до отказа. */
+    if (o.issue_date) {
+      const fromDate = o.issue_date.slice(0, 4);
+      const inYear = o.year ? String(o.year).match(/\d{3,4}/g) : null;
+      /* Заварено описание, в което нито годината, нито датата се пипат, не се
+         спира заради тях (преглед на кръга, v2.4.71): иначе поправка на
+         правописна грешка в анотацията се отказваше за разминаване, което
+         библиотекарката изобщо не е докоснала. */
+      const untouched = prev && String(prev.year ?? '') === String(o.year ?? '')
+        && String(prev.issue_date ?? '') === String(o.issue_date ?? '');
+      if (!o.year) o.year = fromDate;
+      else if ((!inYear || !inYear.includes(fromDate)) && !untouched) {
+        throw new Error('Годината „' + o.year + '“ не отговаря на датата на броя '
+          + o.issue_date.slice(8) + '.' + o.issue_date.slice(5, 7) + '.' + fromDate + ' г. Статията се води в '
+          + 'указателя под годината на броя — поправете едното от двете. Описанието НЕ е записано.');
+      }
+    }
     /* ИЗТОЧНИКЪТ Е ЗАДЪЛЖИТЕЛЕН (v2.4.61). Описание с вид „книга“, но без
        избрана книга (и без свободен текст) се записваше и в указателя, и на
        хартия излизаше с източник „—“. Аналитичното описание описва статия В
@@ -147,13 +180,28 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     }
     return o;
   }
-  function analyticParams(d) {
+  /* ИЗТОЧНИКЪТ Е ЕДИН (v2.4.71, находка Д12 от кръг 45).
+     =====================================================================
+     (а) ДОТУК при смяна на „Вид източник“ от „периодика“ на „книга“ старото
+     издание оставаше в periodical_id (формата праща и двете полета, а селектът
+     за изданието не се чисти). Статията, пренасочена към книга, продължаваше да
+     се води към „Труд“: картонът на „Труд“ я показваше като своя статия, а
+     изтриването на „Труд“ се отказваше заради описание, което вече не е негово.
+     (б) Аналитичното описание описва статия в ЕДИН източник; две връзки към
+     фонда правят библиографския запис двусмислен.
+     (в) Видът решава: при „книга“ periodical_id се изчиства, при „периодика“ —
+     book_id, при „друго“ — и двете (остава свободният текст). Изчистването се
+     казва в следата при редакция (виж analytics:update). */
+  function analyticParams(d, prev) {
     const o = {};
     for (const f of ANALYTIC_FIELDS) o[f] = d[f] ?? null;
     o.is_local = d.is_local ? 1 : 0;
     o.periodical_id = idOrNull(d.periodical_id);
     o.book_id = idOrNull(d.book_id);
-    return checkAnalytic(o);
+    if (o.source_kind === 'книга') o.periodical_id = null;
+    else if (o.source_kind === 'периодика') o.book_id = null;
+    else if (o.source_kind === 'друго') { o.periodical_id = null; o.book_id = null; }
+    return checkAnalytic(o, prev);
   }
   ipcMain.handle('analytics:list', /** @param {unknown} e @param {{ q?: string, year?: string | number, onlyLocal?: boolean }} [arg] */ (e, { q, year, onlyLocal } = {}) =>
     run(() => {
@@ -290,7 +338,8 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
          пренасочено към нея“ за книга, която изобщо не е пипала; редакцията
          минаваше само през API с числов book_id, тоест никъде от прозореца.
          Двете страни вече минават през idOrNull() и се сравняват като числа. */
-      const cur = getDb().prepare('SELECT book_id FROM analytics WHERE id = ?').get(d.id);
+      const cur = getDb().prepare(`SELECT a.book_id, a.periodical_id, a.year, a.issue_date, p.title AS periodical_title
+        FROM analytics a LEFT JOIN periodicals p ON p.id = a.periodical_id WHERE a.id = ?`).get(d.id);
       const nextBook = idOrNull(d.book_id);
       if (nextBook && (!cur || idOrNull(cur.book_id) !== nextBook)) {
         const note = deaccNote(getDb(), nextBook);
@@ -302,10 +351,14 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       /* Липсващият ред е ОТКАЗ, а не тиха успешна редакция: при обща мрежова
          база записът може да е изтрит от другото работно място, а одитната
          следа не бива да твърди редакция, каквато не се е случвала. */
+      const params = analyticParams(d, cur);
       const info = getDb().prepare(`UPDATE analytics SET ${ANALYTIC_FIELDS.map(f => f + ' = @' + f).join(', ')} WHERE id = @id`)
-        .run({ ...analyticParams(d), id: d.id });
+        .run({ ...params, id: d.id });
       if (!info.changes) throw new Error('Описанието не е намерено — вероятно е изтрито от друго работно място.');
-      logAudit('Аналитично описание', 'редакция: ' + (d.title || ''));
+      // Д12: изчистеният стар източник се казва в следата.
+      const dropped = cur && cur.periodical_id && !params.periodical_id
+        ? ' (източникът вече не е „' + (cur.periodical_title || '№ ' + cur.periodical_id) + '“ — вид „' + params.source_kind + '“)' : '';
+      logAudit('Аналитично описание', 'редакция: ' + (d.title || '') + dropped);
     })
   );
   ipcMain.handle('analytics:delete', (e, id) =>

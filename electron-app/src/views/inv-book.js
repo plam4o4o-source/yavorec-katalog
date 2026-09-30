@@ -17,6 +17,26 @@
    библиотекарят пише. Печатът (printInvBookDoc) продължава да ползва целия
    списък от window._INVBOOK_ROWS — разпечатката е меродавният документ по
    чл. 26 и не бива да зависи от това какво се вижда на екрана. */
+/* Кръг 45, Ф7 — „Автор. Заглавие“ без двойна точка.
+   (а) Какво ставаше: колоната „Автор и заглавие“ се сглобяваше с
+   [автор, заглавие].join('. '). Авторът по правило завършва с инициал —
+   „Иванов, И.“ — и в инвентарната книга, в акта за дарение и в протокола за
+   покупка излизаше „Иванов, И.. Първа книга“.
+   (б) Защо е грешно: това са документите по Наредба № 3, които се подписват от
+   комисията и се пазят с години; двойната точка изглежда като печатна грешка в
+   официален регистър и кара проверяващия да се съмнява и в останалото.
+   (в) Защо точно така: разделителят „. “ по ISBD остава, но ако авторът вече
+   завършва на точка (инициал, „и др.“), се слага само интервал. Една функция за
+   петте места — екранът и печатът на инвентарната книга и трите разпечатки на
+   партидата (src/views/acquisitions.js). */
+function authorTitleText(author, title) {
+  const a = String(author == null ? '' : author).trim();
+  const t = String(title == null ? '' : title).trim();
+  if (!a) return t;
+  if (!t) return a;
+  return a + (/[.!?…]$/.test(a) ? ' ' : '. ') + t;
+}
+window.authorTitleText = authorTitleText;
 const INVBOOK_PAGE_SIZE = RENDER_PAGE_SIZE; // общият размер на порцията (core.js)
 let INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE;
 /* v2.4.31 (производителност): порциите идват от БАЗАТА (invBook:list с
@@ -231,7 +251,7 @@ function invBookRowsHtml(rows) {
           + (c.total > c.dates.length
             ? ` <span class="hint" title="Показани са последните ${INVBOOK_CHECKS_SHOWN} отметки от ${c.total}">(общо ${c.total})</span>` : '');
       })()}</td>
-      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
+      <td>${esc(authorTitleText(r.author, r.title))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
       <td class="num">${esc(r.year || '')}</td><td class="num">${mnyCell(r.price)}</td>
       <td class="num" style="font-size:11px">${r.acq_no ? '№ ' + r.acq_no + '<br>' + bg(r.acq_date) : ''}</td>
       ${/* П4 (v2.4.69): сигнатурата по ЕДНОТО правило — полето „Сигнатура“, а ако
@@ -269,7 +289,7 @@ function invBookRowsHtml(rows) {
 async function invBookEdit(id) {
   let r = (window._INVBOOK_ROWS || []).find(x => x.id === id);
   if (!r) r = (await call(window.api.books.get(id))) || {};
-  const what = [r.author, r.title].filter(Boolean).join('. ') || 'този запис';
+  const what = authorTitleText(r.author, r.title) || 'този запис';
   if (!await askConfirm('РЕДАКЦИЯ НА ЗАПИС В ИНВЕНТАРНАТА КНИГА\n\n'
     + '„' + what + '“ (инв. № ' + (r.inv_number ?? '—') + ')\n\n'
     + 'Инвентарната книга е официалният регистър на библиотечния фонд по '
@@ -542,7 +562,7 @@ function invBookPrintRow(r) {
   const qtyOf = (x) => (x.quantity == null ? 1 : Number(x.quantity) || 0);
   return `<tr><td>${bg(r.register_date) || '—'}</td><td>${r.inv_number ?? ''}</td>
       <td>${invBookChecksText(r.checks)}</td>
-      <td>${esc([r.author, r.title].filter(Boolean).join('. '))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
+      <td>${esc(authorTitleText(r.author, r.title))}${r.volume ? ', т. ' + esc(r.volume) : ''}</td>
       <td>${esc(r.year || '')}</td><td>${qtyOf(r)}</td><td>${mny(r.price)}</td>
       <td>${r.acq_no ? '№ ' + r.acq_no + ' / ' + bg(r.acq_date) : ''}</td><td>${esc(effectiveCallNumber(r))}</td>
       <td>${r.act_no ? '№ ' + r.act_no + ' / ' + bg(r.act_date) : ''}</td>

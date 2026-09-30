@@ -11,6 +11,333 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.71
+
+**BG:** **Втори пълен тест на всички модули и всичките 87 находки от него.** Седем
+области минаха отново като истински работен ден — от празна библиотека до фонд от
+15 000 документа: фонд и вписване, гише и сметки, отчисляване и инвентаризация (и с
+телефон), печат, онлайн каталог и МЗС, краезнание, периодика и Дневник, копия и
+защита на данните. Разпечатките бяха отпечатани в истински PDF — и в Chromium, и в
+Electron 43 — а баркодовете прочетени с два декодера. Находките от v2.4.69 не са се
+върнали, с изключение на самотните подписи (виж „Печат“); две бяха поправени
+наполовина — картата на читател в полето „Връщане“ и обратните връзки в
+краезнанието — и сега са докрай. Новото пак беше по
+краищата: там, където две правила се срещат (затворен ден точно на падежа, книга,
+вписана по време на пълна проверка, документ, изпратен по МЗС), или където
+програмата казваше едно, а правеше друго. Всичките 87 са поправени и заковани с
+тестове; две решения остават за вас (виж най-долу).
+
+> **Споделена база на няколко компютъра:** това издание вдига версията на базата
+> (миграция 19). Обновете **всички** работни места — по-старата версия отказва да
+> отвори вече обновена база, за да не я повреди. Миграцията добавя историята на
+> записванията и пререгистрациите на читателите (попълнена от датите в
+> картоните), езика на периодичното издание (заварените стават
+> „български“, казано в одитната следа), името на ръководителя в документите и две
+> числа в инвентаризациите. Вписаното досега не се променя.
+
+**Гишето и сметката.** Читателска карта, сканирана по навик в полето **„Връщане“**,
+вече **не връща чужда книга**: при карти и книги, номерирани 1, 2, 3…, карта № 5 на
+следващия читател приемаше обратно инв. № 5 от предишния — зелено, а книгата си
+оставаше у него. Сега само карта не връща нищо и предлага „Заемане за …“, а код,
+който е и карта, и документ, пита. **Опростената забава** (изтрита с „✕“ от
+сметката) намалява и сумата по заемането — дотук писмото по чл. 43, SMS-ът,
+„Просрочени“, журналът и годишният отчет я искаха отново. **Забавата се брои от
+първия работен ден след падежа**: затворен ден, обявен точно на падежа, вече не
+носи 1 ден забава, а новият затворен ден или смяната на работните дни местят
+напред падежите на невърнатите книги — „Настройки“ казват кои. Актът по чл. 30,
+т. 5 брои по същото правило. Известието при връщане казва поотделно забавата за
+днес и общото по заемането (дотук „4 дни · 0,60 €“ при 4 × 0,10 €), а „Приеми“ на
+просрочена книга с резервация казва и заделянето, и забавата. На ред-начисление
+бутонът вече е **„Известие“**, не „Квитанция“ — квитанция се печата само за
+получени пари, а **анулирането на плащане иска причина**, която влиза в следата с
+номера на квитанцията. **ЕГН**, което не е 10 цифри, се отказва; грешна контролна
+цифра само предупреждава (може да е ЛНЧ). Резервация за **прекратен** читател се
+отказва, а резервация на **изгубен** документ сочи към „Документът се намери“,
+вместо да казва „свободен е“. Читател, у когото е **чужда книга по МЗС**, се вижда
+на гишето („📌 Държи чужда книга по МЗС № …, срок …“ — просрочената в червено).
+„Отвори в пощата“ най-сетне отваря писмото: дългият текст се копира, а пощата се
+отваря с адресата и темата и бележка откъде да се постави. Затворените дни се
+виждат от началото на годината (или от най-стария падеж на невърната книга), а не
+само 30 дни назад; сумите по заемане се закръгляват до стотинка; когато всички
+служители са деактивирани, програмата го казва.
+
+**Инвентаризация, отчисляване и телефон.** Книга, вписана **по време на пълна
+проверка**, вече не става „липсващ“ — протоколът има ред „Постъпили след началото на
+проверката“, а прозорецът брои като приключването. Документ, който е **при друга
+библиотека по МЗС**, също не е липса — отделен ред в протокола — и **не може да се
+отчисли или изтрие**, докато заявката не е „върнато“. Акт **не се утвърждава без
+член 1 (библиотекар) и член 3 (счетоводител)** на комисията — проект може и без тях,
+а празните полета вече не изтриват комисията от „Настройки“. „Нова инвентаризация“
+предлага комисията от „Настройки“, а протоколът за отдел пише „отдел „…““. Името на
+ръководителя стои до **„УТВЪРДИЛ“** (например „………… /Иван Петров/“) — в актовете,
+протоколите, акта за дарение и КДБФ; всеки документ пази името от деня на
+съставянето си. Страницата за телефон не забавя при дълъг списък (1 250 номера: от
+301 на 29 ms на добавяне) и показва последните 100 с „Покажи всички“.
+
+**Печат.** Самотните подписи от v2.4.69 се бяха върнали при определени размери
+(акт с 44 или 47 реда, КДБФ с 6 – 8 партиди, инвентарна книга с 21 – 24 вписвания):
+последният лист носеше само „3. Георгиева“ и „УТВЪРДИЛ“. Сега бележката и подписите
+са едно цяло с последните редове — листът с подписите винаги има главата на
+таблицата, последните редове и „ОБЩО“, а комисията и „УТВЪРДИЛ“ никога не се делят;
+проверено с истински PDF в Chromium и в Electron 43 за всички размери, при които се
+чупеше. **Баркодът на етикета за фонда** вече не се разтяга на цялата ширина — модул
+до 0,5 мм и поне 10 модула празно отстрани (на Avery L7160 модулът беше 1,31 мм).
+На **малки етикети** отпадат цели редове от заглавната част (програмата казва кои), а
+ако номерът не се събира — казва нужната височина. Грешка при „Запази PDF…“ (файлът
+е отворен в Adobe Reader, няма права, няма папка, няма място) се казва на български,
+с изход. Броят листове при печат на партиди брои и празните позиции. Без двойна
+точка след инициал („Иванов, И. Книга“) — в инвентарната книга, актовете, протоколите,
+МЗС и писмото по чл. 43. Версията в колонтитула на наръчника идва от едно място.
+
+**Фонд и вписване.** Книга с двама автори от търсене по ISBN вече получава авторски
+знак по **фамилията на първия** (В-14, не И-18). Предложение на читател с автор само
+по фамилия („Вазов“, „Сент-Екзюпери“) се разпознава, когато книгата дойде. Ред от
+внос с бъдеща дата на вписване се приема, но отчетът го изброява поименно в жълта
+кутия. „Проверка на данните“ сравнява и **стойността**, не само броя. Новите
+стойности от „Номенклатури“ се предлагат в груповата редакция и при внос; „Избери
+всички“ при 15 000 книги — от ~1,5 s на ~0,35 s; годишен комплект с партида „без
+документ“ заключва номера и датата; повторно сканиране във витрина казва „вече е във
+витрината“; прегледът при внос от Excel показва датите като ДД.ММ.ГГГГ.
+
+**Онлайн каталог, МЗС и износ.** Пълният износ при заключена защита скрива
+търсенията в „Читатели“ (там се търси по телефон и фамилия), а PROCHETI-ME казва
+истината. Изтриване или заличаване на читател със заделена книга, груповото
+попълване на авторски знак и промени от **друго работно място** вече стигат до
+`katalog.json`. UNIMARC 995$k и колоната „Сигнатура“ в CSV носят УДК + авторски
+знак. Изтриването на МЗС заявка „изпратено“/„получено“ назовава документа,
+партньора и последицата. Съобщенията при неуспешен запис на каталога сочат
+„Отчети → Онлайн каталог“.
+
+**Периодика, краезнание, Дневник и отчети.** Периодичното издание има поле
+**„Език“**, което се пренася в годишния комплект — Дневникът, Раздел Б, вече не го
+брои в „Други“. Брой, вписан в **вече подвързан** комплект, получава предложение за
+следващата година или „само в кардекса“, а значката и абонаментният списък казват
+истината; изборът „Годишен комплект“ остава какъвто сте го направили при смяна на
+датата. Статия от стар брой получава годината на броя. „Регистрирани читатели през
+годината“ се брои от историята на записванията и **не се променя със задна дата**.
+В годишния отчет начислените и събраните обезщетения идват от сметката по еднакви
+видове, в две групи (забави; изгубени и повредени), а платеното по стари задължения е
+отделно — дотук „Събрани“ можеше да е повече от „Начислени“. Дневникът, „Впиши
+посещения“ и посещенията по домовете отказват **бъдеща дата**. Часовете: запетаята е
+дроб от часа („7,25“ = 7:15), двоеточието и точката отделят минутите, и програмата
+казва как е разчела; второто ⚡ за деня обновява своите числа, а различното от
+регистрите изрежда с бутон „Обнови ги от регистрите“; „деца до 14 г.“ над „в заемна
+за дома“ се предупреждава и от клетката. Файл, който не е снимка, вече не заменя
+истинската снимка. „Сочат към този запис“ има и в картона на статия и на периодично
+издание (и не се показва, когато няма връзки), картата на персоналия брои и
+връзките към нея, а търсачката за връзки намира летопис по година.
+
+**Копия, настройки и лични данни.** При **изчезнала или празна база** и налични
+копия програмата пита при старта „Базата не е намерена — да възстановя ли копие?“,
+вместо тихо да тръгне като ново читалище, а празната база вече не става най-новото
+копие. Аварийното възстановяване работи и при повредена база, неуспешното
+възстановяване (файлът е зает) отваря базата наново, а диалогът при **недостъпна
+мрежова папка** казва коя локална база ще отвори — старата, с дата и брой документи,
+или нова празна. „Забрави (ОРЗД)“ обезличава и старите имена, „(карта N)“, „Запазен
+PDF: …“ и търсенията по телефон, карта и фамилия. Копия от две работни места в една
+минута вече не се провалят; работата преди отключване на защитата влиза в копие;
+отваряне и затваряне без работа не прави ново копие, а до копията не остават
+`-shm`/`-wal`. Паролата на ръчното копие е поне 10 знака. „Фонд на свободен достъп
+(%)“ приема запетая („40,5“ ставаше 405) и граница 0 – 100. Незаписаното в
+„Настройки“ не изчезва при обновяване или смяна на тема. „Редакция на настройки“ в
+одитната следа казва „преди → след“, износът ѝ има колона „Преди/след“, а търсенето
+намира по видимата дата („29.09“). Преди „Инсталирай и рестартирай“ се прави копие и
+се записва каталогът.
+
+**Автоматичните тестове.** `scenario-zaemane` вече не пада във вторник, сряда и
+неделя, а тестът за скорост на УДК мери процесорното време и не пада на натоварена
+машина.
+
+**Решения, оставени на вас.**
+
+- **Съгласие по чл. 47 и резервация.** Резервацията за читател без отбелязано
+  съгласие не се спира — съгласието може да се даде при взимането на книгата (заемането
+  продължава да го иска). Ако искате да се иска още при резервацията, кажете.
+- **Етикет без заглавна част.** Отделна отметка „без заглавна част“ за етикета не е
+  добавена — програмата сама маха цели редове, когато етикетът е малък, и казва кои.
+- **Отложени от по-рано:** автоматично попълване на Дневника, отделен имейл на
+  родителя в картона на детето и сливане на дублирани читателски картони.
+
+**Преглед на кода след кръга — още девет поправки.** Независимият преглед на
+приложените промени намери места, където новото не беше докрай:
+
+- **Историята на записванията** се попълва при обновяването **само от датите в
+  картоните**. Първата редакция добавяше и по ред за всяка начислена на ръка
+  „годишна такса“ — а таксата се начислява от „Сметка“ и без пререгистрация, тоест
+  обновяването щеше да добави читатели към вече отчетени години. Сега всяка минала
+  година дава след обновяването точно същото число като преди него. **Поправена
+  дата на записване** в картона премества реда, вместо да брои читателя и в двете
+  години.
+- **Ръчно резервно копие** върху стар файл, който не може да бъде заменен (отворен в
+  друга програма), вече е провал с обяснение, а не „успех“ с данни отпреди седмица.
+  Приемането на вече съществуващо здраво копие остава само за автоматичните копия
+  на обща база.
+- **„Забрави (ОРЗД)“**: карта, дадена по-късно на друг читател, вече не заличава
+  неговите редове в одитната следа — всяка карта се води в периода, когато е била
+  на заличавания.
+- **Годишният отчет**: забавата, начислена при продължение на незавършено заемане,
+  не се показва втори път на реда „незавършени заемания“ — там остава само
+  заварената забава, която сметката не познава.
+- **Аналитично описание**: заварено разминаване между годината и датата на броя не
+  спира поправката на анотацията; ново разминаване пак се спира.
+- **Смяна на работните дни** мести падежа само на заемания, чийто срок още не е
+  изтекъл — вече изпратените писма по чл. 43 не получават нов „срок“.
+- **Онлайн каталогът** не се записва наново, когато текстът му е същият (при обща
+  база — на всеки 5 минути по няколко мегабайта).
+- **Дните забава** се смятат от едно място за гишето и за акта по т. 5.
+
+Всяка е закована в `test/pregled-v2471.test.js` (8 теста през истинския
+`main.js`) и в обновения `test/osnovi-v2471.test.js` — деветте падат върху кода
+преди поправката. Остава както е: „7,30“ в часовете на Дневника се записва като
+7:18 по единното правило (запетаята е дроб) и клетката го казва.
+
+**Проверено:** `npm run test:all` — и 7-те проверки минават: проверката на типовете (главен процес, изгледи, описанието на window.api), **2 394 теста в UTC и 2 394 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа; мутационна проверка — **179 мутации, всички уловени** (поне една за всяка от 87-те находки и за всяка връзка между областите; контролната минава).
+Новите тестове на кръга са в десет файла `test/*-v2471*.test.js` (по един за всяка
+област, отделен за подписите в истински PDF и един за сглобяването на областите);
+подписите са проверени и в Electron 43. Нов `test/docs-v2471.test.js` заковава
+версията: package.json = корицата = колонтитулът на наръчника (и на всяка страница на
+PDF-а, където има `pdftotext`). Схемата е 19.
+
+**EN:** **A second full test of every module and all 87 findings from it.** Seven
+areas were again run as a real working day — from an empty library to a
+15 000-document collection: cataloguing, the desk and accounts, deaccession and
+stocktaking (including by phone), printing, the online catalogue and interlibrary
+loan, local studies, periodicals and the daily register, backups and data
+protection. Printouts were rendered to real PDF in Chromium and Electron 43 and
+barcodes read by two decoders. The v2.4.69 findings had not come back except lone
+signatures (see Printing); two had been fixed only halfway — a reader card in the
+Return field and back-links in local studies — and are now complete. All 87 are
+fixed and pinned by tests;
+two decisions are left to you (see below).
+
+> **Shared database on several computers:** this release raises the database version
+> (migration 19). Update **all** workstations — an older version refuses to open an
+> already upgraded database so as not to damage it. The migration adds a history of
+> reader registrations and re-registrations (filled from the dates on the reader
+> cards), a language for periodicals (existing
+> ones become "Bulgarian", noted in the audit trail), the director's name on
+> documents and two stocktaking counters. Nothing already recorded changes.
+
+**The desk and accounts.** A reader card scanned out of habit into the **Return**
+field no longer **returns someone else's book** (card 5 used to check in inventory
+no. 5 from the previous reader); a card alone offers "Lend to …", a code that is
+both asks. A **waived late fee** also reduces the loan's amount, so the art. 43
+letter, SMS, Overdue list, log and annual report stop asking for it. **Late days
+count from the first working day after the due date**; a new closed day or a change
+of working days moves open loans' due dates forward, and Settings says which. The
+art. 30 (5) act counts the same way. The return notice separates today's fee from
+the loan total; "Receive" on an overdue reserved book shows both the hold and the
+fee. A charge line has a **"Notice"** button — receipts only for money received —
+and **voiding a payment requires a reason**, logged with the receipt number. An
+**EGN** that is not 10 digits is refused; a bad check digit only warns. Holds for a
+**terminated** reader are refused; a hold on a **lost** document points to
+"Document found". A reader holding **another library's book** is shown at the desk.
+"Open in mail" finally opens the message (long text is copied). Closed days are
+listed from the start of the year, amounts are rounded to the cent, and "all
+employees deactivated" is said as such.
+
+**Stocktaking, deaccession and the phone.** A book entered **during a full check**
+no longer goes "missing" — it gets its own protocol line; a document **away on
+interlibrary loan** is not a loss either and **cannot be deaccessioned or
+deleted**. An act **cannot be approved without committee members 1 (librarian) and
+3 (accountant)**; empty fields no longer wipe the committee in Settings. New
+stocktaking offers the committee from Settings; a department protocol says
+"department …". The director's name stands next to **"APPROVED"**, as recorded
+when the document was drawn up. The phone page stays fast with long lists
+(1 250 numbers: 301 → 29 ms per add).
+
+**Printing.** Lone signatures were back at certain sizes; the note and signatures
+are now one block with the last rows and the total — checked on real PDFs in
+Chromium and Electron 43 for every size that broke. The **stock label barcode** no
+longer stretches (module ≤ 0.5 mm, ≥ 10 modules quiet zone; L7160 was 1.31 mm).
+**Small labels** drop whole header lines (and say which) or state the height needed.
+"Save PDF…" errors are in Bulgarian with a way out; batch sheet counts include empty
+positions; no double dot after an initial; the manual's footer version comes from one
+place.
+
+**Cataloguing.** Two-author ISBN results get the author mark from the **first
+author's surname**; reader suggestions with a surname only are recognised;
+future-dated import rows are listed by name; the data check compares **value** too;
+nomenclatures reach bulk edit and import; "Select all" on 15 000 books ~1.5 → ~0.35 s;
+smaller fixes to periodical batches, showcases and the Excel import preview.
+
+**Online catalogue, ILL and export.** Full export with protection locked hides
+Readers searches; deleting/erasing a reader with a reserved book, bulk author marks
+and changes from **another workstation** now reach `katalog.json`; UNIMARC 995$k and
+the CSV call number carry UDC + author mark; deleting a sent/received ILL request
+names the document, partner and consequence.
+
+**Periodicals, local studies, register and reports.** Periodicals have a
+**Language** carried into the annual volume (register section B counts it right);
+an issue for an already bound volume is offered the next year or "kardex only";
+articles take the issue's year; "Readers registered in the year" comes from history
+and **does not change retroactively**; the annual report's charged and collected
+fees come from the account by the same types, in two groups, with old-debt payments
+apart. The register, visits and home visits refuse **future dates**; hours read the
+comma as a fraction ("7,25" = 7:15) and say how they were read; a second ⚡ updates
+its own numbers; a non-image file no longer replaces a photo; "Pointing here" also on
+articles and periodicals.
+
+**Backups, settings and personal data.** A **missing or empty database** with
+backups present asks at startup whether to restore one; the empty database no longer
+becomes the newest backup. Emergency restore works on a corrupt database; a failed
+restore reopens the database; the **unreachable network folder** dialog says which
+local database it will open. GDPR "Forget" also covers old names, "(card N)", "Saved
+PDF" and phone/card/surname searches. Two workstations backing up in the same minute
+no longer fail; work before unlocking protection is backed up; idle open/close makes
+no new backup; no `-shm`/`-wal` leftovers. Manual backup passwords need 10
+characters. "Open-access collection (%)" accepts a comma and 0 – 100. Unsaved
+Settings survive an update event or theme change. Settings edits in the audit trail
+show "before → after" (and a CSV column); search finds the visible date. A backup
+and catalogue write happen before "Install and restart".
+
+**Automated tests.** `scenario-zaemane` no longer fails on Tuesdays, Wednesdays and
+Sundays; the UDC speed test measures CPU time.
+
+**Decisions left to you.** A hold for a reader without recorded art. 47 consent is
+not blocked (lending still requires consent); no separate "no header" label option —
+the program drops lines itself; still deferred: auto-filling the register, a
+parent's e-mail, merging duplicate reader cards.
+
+**Code review after the round — nine more fixes.** An independent review of the
+applied changes found places where the new work was not complete:
+
+- **Registration history** is filled on upgrade **only from the dates on the reader
+  cards**. The first version also added a row for every manually charged annual fee
+  — but the fee is charged from the account window even without re-registration, so
+  the upgrade would have added readers to already reported years. Every past year now
+  gives exactly the same number after the upgrade as before it. **Correcting a
+  registration date** on the card moves the row instead of counting the reader in
+  both years.
+- **A manual backup** over an old file that cannot be replaced (open in another
+  program) now fails with an explanation instead of "succeeding" with week-old data.
+  Accepting an existing healthy copy remains only for automatic copies on a shared
+  database.
+- **GDPR "forget"**: a card later given to another reader no longer erases that
+  reader's audit rows — each card counts only for the period it belonged to the
+  person being erased.
+- **Annual report**: a late fee charged when an open loan is extended is no longer
+  shown a second time on the "unfinished loans" line — only legacy late fees the
+  account does not know remain there.
+- **Analytic entry**: an existing mismatch between the year and the issue date does
+  not block correcting the annotation; a new mismatch is still refused.
+- **Changing working days** moves the due date only of loans whose deadline has not
+  passed — reminder letters already sent do not get a new "deadline".
+- **The online catalogue** is not rewritten when its text is unchanged (on a shared
+  database — several megabytes every 5 minutes).
+- **Days late** are computed in one place for the desk and for the Art. 30 item 5 act.
+
+Each is pinned in `test/pregled-v2471.test.js` (8 tests through the real `main.js`)
+and in the updated `test/osnovi-v2471.test.js` — all nine fail on the code before the
+fix. Left as is: "7,30" in the diary hours is saved as 7:18 by the single rule (the
+comma is a fraction), and the cell says so.
+
+**Verified:** `npm run test:all` — all 7 checks pass: type checking (main process, views, the window.api description), **2,394 tests in UTC and 2,394 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check; mutation testing — **179 mutants, all killed** (at least one per finding and per cross-area link; the control passes). The
+round's new tests are in ten `test/*-v2471*.test.js` files; signatures were also
+checked in Electron 43. New `test/docs-v2471.test.js` pins the version: package.json
+= manual cover = manual footer (and every PDF page where `pdftotext` exists).
+Schema 19.
+
 ## v2.4.70
 
 **BG:** **Знакът на разработчика.** Монограмът „ПХ“ на Пламен Христов - Пачо стои

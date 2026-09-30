@@ -545,7 +545,11 @@ test('находка 12 (екран): кардексът казва, когат�
   const row = () => Array.from(h.document.querySelectorAll('#modal fieldset table.ledger tbody tr'))
     .find(tr => tr.firstElementChild.textContent.trim() === YY1);
   assert.doesNotMatch(h.text(row()), /разминаване/, 'докато числата съвпадат, няма какво да се казва');
-  await h.api.periodicalIssues.add({ periodical_id: view.trud, issue_no: 'м5', date: YY1 + '-04-05', price: 0.85 });
+  /* v2.4.71 (Д4, кръг 45): брой за вече инвентирана година се отказва без
+     изричното „само в кардекса“ (outside_volume) — дотук влизаше мълчаливо и
+     не отиваше в нито един комплект. Тази проверка е за РАЗМИНАВАНЕТО, затова
+     броят се вписва изрично извън подвързания том; вписването се проверява. */
+  ok(await h.api.periodicalIssues.add({ periodical_id: view.trud, issue_no: 'м5', date: YY1 + '-04-05', price: 0.85, outside_volume: true }), 'бр. м5');
   await openTrud();
   assert.match(h.text(row()), /разминаване: подвързан с 4 бр\. при инвентирането, в кардекса 5/);
   await h.clickButton('Затвори', '#modal footer');

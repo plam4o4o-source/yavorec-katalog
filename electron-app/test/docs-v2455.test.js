@@ -139,7 +139,9 @@ test('резервацията се отказва правилно дори к�
   db.prepare(`INSERT INTO holds (book_id, reader_id, status, placed_at) VALUES (?,?,'чака',datetime('now'))`).run(bid, rid);
 
   const created = ipc.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели' },
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no: 1, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
     bookIds: [bid]
   });
   assert.ok(created.ok, created.error);

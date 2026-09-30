@@ -215,10 +215,17 @@ test('гишето (и само то) минава по дългия срок �
        заделена резервация освобождават книгата онлайн (находка К4 от пълния тест)
        и минават по същия дълъг срок като заемането и връщането, по същата причина:
        промяна от гишето, не по фонда. */
-    if (f === 'holds.js') {
+    /* v2.4.71 (кръг 45, М4): „Забрави (ОРЗД)“ (gdpr.js) отказва заделената
+       резервация на заличавания читател и освобождава книгата — същото като
+       отказа на резервация в holds.js, тоест промяна от гишето, и минава по
+       същия срок. Дотук gdpr.js изобщо не викаше записа и сайтът показваше
+       книгата „заета“. */
+    /* v2.4.71 (кръг 45, М4): изтриването на читател (readers.js) освобождава
+       заделената му книга по същия път — също промяна от гишето. */
+    if (f === 'holds.js' || f === 'gdpr.js' || f === 'readers.js') {
       const hs = fs.readFileSync(path.join(APP_DIR, 'handlers', f), 'utf8');
       for (const c of hs.match(/scheduleCatalogWrite\([^)]*\)/g) || []) {
-        assert.equal(c, 'scheduleCatalogWrite(CIRCULATION)', 'holds.js: ' + c);
+        assert.equal(c, 'scheduleCatalogWrite(CIRCULATION)', f + ': ' + c);
       }
       assert.match(hs, /const CIRCULATION = 'circulation';/);
       continue;

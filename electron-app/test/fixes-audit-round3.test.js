@@ -161,7 +161,9 @@ test('отчисляване на документ с изрично 0 брой�
     BOOK_SELECT, scheduleCatalogWrite: () => {}, flushCatalogWrite: () => ({}), normalizeScanCode, logEvent: () => {}
   });
   const res = acts.invoke('deaccessionActs:create', {
-    act: { no: 1, year: '2026', date: '2026-06-01', reason_code: 1, reason_text: 'амортизация' },
+    /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+       отказва по чл. 35 — затова актовете в този файл носят комисия. */
+    act: { no: 1, year: '2026', date: '2026-06-01', reason_code: 1, reason_text: 'амортизация', committee1: 'А', committee3: 'В' },
     bookIds: [bookId, noInv]
   });
   assert.equal(res.ok, true, res.error);

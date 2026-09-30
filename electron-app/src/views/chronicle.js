@@ -321,6 +321,6 @@ async function printChronicle() {
         ${c.sources ? `<div style="font-size:10pt"><i>Източници: ${esc(c.sources)}</i></div>` : ''}
       </div>`).join('')}
       <div style="font-size:10pt;margin:2px 0 8px"><b>Общо за ${esc(y)} г.: ${zapisa(byYear[y].length)}.</b></div>`).join('')}
-    ${ssig(['Летописец: …………………', esc((SETTINGS_CACHE || {}).director_role || 'Председател') + ': …………………'])}</div>`);
+    ${ssig(['Летописец: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Председател', (SETTINGS_CACHE || {}).director, '')])}</div>`);
 }
 window.printChronicle = printChronicle;

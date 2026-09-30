@@ -94,13 +94,15 @@ test('акт без причина се отказва — вместо да с�
   const b = book(db, 5);
   for (const bad of [{ reason_code: '', reason_text: '' }, { reason_code: '9', reason_text: 'x' }, { reason_code: 'abc', reason_text: 'x' }]) {
     const res = await ipcMain.invoke('deaccessionActs:create',
-      { act: Object.assign({ no: 1, date: '2026-09-03', committee1: 'А' }, bad), bookIds: [b] });
+      /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+         отказва по чл. 35 — затова актовете в този файл носят комисия. */
+      { act: Object.assign({ no: 1, date: '2026-09-03', committee1: 'А', committee3: 'В' }, bad), bookIds: [b] });
     assert.equal(res.ok, false, JSON.stringify(bad));
     assert.match(res.error, /Причината за отчисляване/);
   }
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM deaccession_acts').get().n, 0);
   const ok = await ipcMain.invoke('deaccessionActs:create',
-    { act: { no: 1, date: '2026-09-03', committee1: 'А', reason_code: '4', reason_text: 'Физически изхабени' }, bookIds: [b] });
+    { act: { no: 1, date: '2026-09-03', committee1: 'А', committee3: 'В', reason_code: '4', reason_text: 'Физически изхабени' }, bookIds: [b] });
   assert.equal(ok.ok, true, ok.error);
   assert.equal(db.prepare('SELECT reason_code FROM deaccession_acts').get().reason_code, 4);
 });
@@ -123,7 +125,7 @@ test('„отчислен“ БЕЗ акт (внесен стар ред) мож
   assert.equal(found.ok, true);
   assert.ok(found.data && found.data.id === orphan, 'сканирането го намира');
   const res = await ipcMain.invoke('deaccessionActs:create',
-    { act: { no: 1, date: '2026-09-03', committee1: 'А', reason_code: '6', reason_text: 'липсващи' }, bookIds: [orphan] });
+    { act: { no: 1, date: '2026-09-03', committee1: 'А', committee3: 'В', reason_code: '6', reason_text: 'липсващи' }, bookIds: [orphan] });
   assert.equal(res.ok, true, res.error);
   const row = db.prepare('SELECT deaccession_act_id, deaccession_date FROM books WHERE id = ?').get(orphan);
   assert.ok(row.deaccession_act_id && row.deaccession_date, 'вече е отчислен С акт');

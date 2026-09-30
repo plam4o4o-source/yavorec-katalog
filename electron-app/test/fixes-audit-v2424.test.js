@@ -355,7 +355,9 @@ function actsSetup(prefix) {
   });
   return { db, ipcMain, auditLog };
 }
-const ACT = { no: 1, date: '2026-09-03', reason_code: 6, reason_text: 'липсващи', committee1: 'А' };
+/* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
+   отказва по чл. 35 — затова всеки утвърден акт в този файл носи комисия. */
+const ACT = { no: 1, date: '2026-09-03', reason_code: 6, reason_text: 'липсващи', committee1: 'А', committee3: 'В' };
 
 test('един и същ инв. № не влиза във втори акт — КДБФ не отчита два пъти една книга', async () => {
   const { db, ipcMain } = actsSetup('v2424-act-twice-');
@@ -599,14 +601,20 @@ test('изтриването на ред от сметката оставя сл
   assert.equal(line.ok, true, line.error);
   auditLog.length = 0;
 
-  const del = await ipcMain.invoke('account:deleteLine', line.data);
+  /* ПРОМЕНЕНО ПОВЕДЕНИЕ (v2.4.71, находка Ч12): плащането има издадена
+     квитанция, затова анулирането му вече изисква причина — без нея се отказва
+     (виж account:deleteLine в handlers/account.js). Следата пак носи името,
+     датата и сумата, които този тест заковава. */
+  assert.equal((await ipcMain.invoke('account:deleteLine', line.data)).ok, false, 'плащане без причина не се анулира');
+  auditLog.length = 0;
+  const del = await ipcMain.invoke('account:deleteLine', { id: line.data, reason: 'сгрешена сума' });
   assert.equal(del.ok, true, del.error);
   assert.equal(auditLog.length, 1);
   assert.match(auditLog[0].detail, /Иванка/);
   assert.match(auditLog[0].detail, /2025-03-11/);
   assert.match(auditLog[0].detail, /12\.00 €/);
 
-  const again = await ipcMain.invoke('account:deleteLine', line.data);
+  const again = await ipcMain.invoke('account:deleteLine', { id: line.data, reason: 'сгрешена сума' });
   assert.equal(again.ok, false, 'изтрит ред не се „изтрива“ втори път с ok:true');
   assert.match(again.error, /вече не съществува/, 'и то с обяснение, а не със сурова техническа грешка');
 });

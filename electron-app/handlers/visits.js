@@ -2,8 +2,13 @@
 // Единствен handler. Зависи от getDb, run, logAudit.
 const { isValidIsoDate } = require('../security-utils');
 
+const bgDate = (d) => String(d).slice(8, 10) + '.' + String(d).slice(5, 7) + '.' + String(d).slice(0, 4);
+
 module.exports = function registerVisitsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
+  /* „Днес“ (v2.4.71, Д5): main.js не подава `today` на този модул; дотогава —
+     местната дата от local-date.js, от която идва и неговият today(). */
+  const today = typeof deps.today === 'function' ? deps.today : () => require('../local-date').localDate();
 
   /* Одит v2.4.25. Дотук: (1) празна дата минаваше — visits.date е NOT NULL UNIQUE,
      но '' го удовлетворява — и всяко вписване с изчистена дата се НАТРУПВАШЕ в един
@@ -17,6 +22,16 @@ module.exports = function registerVisitsHandlers(ipcMain, deps) {
   ipcMain.handle('visits:add', (e, { date, count, replace }) =>
     run(() => {
       if (!isValidIsoDate(date)) throw new Error('Датата на посещенията липсва или е невалидна.');
+      /* БЪДЕЩ ДЕН — ОТКАЗ (v2.4.71, находка Д5 от кръг 45).
+         (а) ДОТУК „Впиши посещения“ приемаше 30 посещения за 15.12.2026 (тестер,
+         a3b-badeshte.js) и „Статистика 2026“ веднага ги броеше в показателя по
+         БДС ISO 2789. (б) Посещение, което още не е станало, е измислено число в
+         годишния отчет. (в) Същият отказ като в Дневника и при броевете
+         периодика: вписват се днешният и минали дни. */
+      if (String(date) > today()) {
+        throw new Error('Денят ' + bgDate(date) + ' още не е настъпил — посещения се вписват за днес ('
+          + bgDate(today()) + ') или за минал ден. Нищо не е записано; проверете датата.');
+      }
       // v2.4.29: parseInt('2.5') = 2 и parseInt('3abc') = 3 минаваха проверката мълчаливо.
       const n = /^\s*\d+\s*$/.test(String(count ?? '')) ? parseInt(count, 10) : NaN;
       if (!Number.isInteger(n) || n < 0 || String(count).trim() === '') {

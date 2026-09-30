@@ -97,16 +97,13 @@ async function renderStats() {
           <div class="statRows" style="margin-top:12px">
             <div><span>Върнати в срок</span><b style="color:var(--green)">${r.returnedOnTime}</b></div>
             <div><span>Върнати със забава</span><b style="color:var(--red)">${r.returnedLate}</b></div>
-            <div><span>Начислени обезщетения</span><b>${mny(r.finesCharged || 0)}</b></div>
-            <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
             ${r.openOverdue ? `<div><span>Просрочени в момента (към днес, незавършени)</span><b style="color:var(--red)"><a href="#over">${r.openOverdue}</a></b></div>` : ''}
-            ${r.finesOpen ? `<div><span>Начислени по незавършени заемания (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
           </div>
           <div class="hint" style="margin-top:8px">Броят се връщанията <b>през</b> отчетната
-          година, независимо кога е заета книгата. „Начислени“ е сумата, начислена при
-          връщането; „събрани“ — реално платеното от читателя на касата.</div>`
+          година, независимо кога е заета книгата.</div>`
         : `<span class="hint">Няма върнати документи през периода.</span>${r.openOverdue
           ? `<div class="statRows" style="margin-top:10px"><div><span>Просрочени в момента (към днес)</span><b style="color:var(--red)"><a href="#over">${r.openOverdue}</a></b></div></div>` : ''}`}
+        ${statsFinesHtml(r, y)}
       </div>
 
       <div class="card"><h3 style="margin-top:0">Най-търсени документи</h3>
@@ -117,6 +114,42 @@ async function renderStats() {
         : '<span class="hint">няма данни</span>'}
       </div>
     </div>`;
+}
+/* ОБЕЗЩЕТЕНИЯТА — НАЧИСЛЕНИ И СЪБРАНИ ПО ЕДНИ И СЪЩИ ВИДОВЕ (v2.4.71, находка Ч3).
+   =====================================================================
+   (а) ДОТУК двата реда стояха един под друг и мереха различни неща:
+   „Начислени“ — само забавите от заеманията (loans.fine, с опростените),
+   „Събрани“ — всичко платено по забави И по изгубени/повредени книги.
+   Резултат от гишето: начислени 4,30 €, събрани 5,50 €; подсказката пък
+   казваше „начислена при връщането“, а обезщетение за изгубена книга не се
+   начислява при връщане. (б) Събрано повече от начисленото, без нито дума,
+   на лист, който отива в годишния отчет. (в) И двата реда идват от
+   читателската сметка (handlers/stats.js) и се показват ПО ВИДОВЕ — забави и
+   за изгубени/повредени документи, — всеки с начислено и събрано. Ако е събран
+   стар дълг, начислен в друга година, това е единственият законен случай
+   събраното да е повече — и се назовава. Карето стои и в година без нито едно
+   връщане: обезщетението за изгубена книга няма връщане. */
+function statsFinesHtml(r, y) {
+  const f = r.fines;
+  const late = (f && f.late) || { charged: 0, collected: 0, otherYears: 0 };
+  const loss = (f && f.loss) || { charged: 0, collected: 0, otherYears: 0 };
+  const other = (late.otherYears || 0) + (loss.otherYears || 0);
+  if (!r.finesCharged && !r.finesCollected && !r.finesOpen) return '';
+  return `<div class="statRows" style="margin-top:12px">
+      <div><span>Начислени обезщетения</span><b>${mny(r.finesCharged || 0)}</b></div>
+      <div><span>&nbsp;· забави (чл. 43)</span><b>${mny(late.charged)}</b></div>
+      <div><span>&nbsp;· за изгубени и повредени документи</span><b>${mny(loss.charged)}</b></div>
+      <div><span>Събрани обезщетения</span><b>${mny(r.finesCollected || 0)}</b></div>
+      <div><span>&nbsp;· забави (чл. 43)</span><b>${mny(late.collected)}</b></div>
+      <div><span>&nbsp;· за изгубени и повредени документи</span><b>${mny(loss.collected)}</b></div>
+      ${other > 0.004 ? `<div><span>&nbsp;· от събраните — по начисления от други години</span><b>${mny(other)}</b></div>` : ''}
+      ${r.finesOpen ? `<div><span>Забава по незавършени заемания, невписана в сметката (към днес)</span><b>${mny(r.finesOpen)}</b></div>` : ''}
+    </div>
+    <div class="hint" style="margin-top:8px">„Начислени“ — сумите, вписани в сметките на читателите през ${esc(String(y))} г.
+      като забава (чл. 43) или обезщетение за изгубен или повреден документ; опростената забава не се брои.
+      „Събрани“ — платеното на касата през ${esc(String(y))} г. по същите видове (плащането покрива първо
+      най-старото задължение на читателя). Годишните такси не влизат в нито едното.${other > 0.004
+        ? ' Събраното надхвърля начисленото с плащания по стари задължения от други години.' : ''}</div>`;
 }
 /* СЪГЛАСУВАНЕ НА ДВАТА ДНЕВНИКА ЗА ПОСЕЩЕНИЯ (одит v2.4.65, находка Б18).
    =====================================================================
@@ -182,8 +215,15 @@ function addVisits() {
   modal('Вписване на посещения', `
     <form id="vsF" onsubmit="return false">
       ${fld('Дата', 'date', { val: today(), type: 'date', req: 1, onchange: 'visitsDayHint()' })}
-      ${fld('Брой посещения', 'count', { type: 'number', min: 0, req: 1,
-        hint: 'добавя се към вече вписаното за деня' })}
+      ${/* Бъдещ ден се отказва в handlers/visits.js (Д5, v2.4.71) — отказът
+            идва като известие и формата остава попълнена. */''}
+      ${/* ТЕКСТОВО ПОЛЕ, НЕ type="number" (v2.4.71, находка Д18). В истинския
+            прозорец „2,5“ (десетичната запетая на българската клавиатура) в
+            числово поле ставаше 25 — известието казваше „общо … 25“ и в базата
+            влизаха 25 посещения. Същият капан, заради който клетките на
+            Дневника станаха текстови (Б17). Написаното остава каквото е, а
+            saveVisits() и обработчикът отказват всичко, което не е цяло число. */''}
+      ${fld('Брой посещения', 'count', { req: 1, hint: 'добавя се към вече вписаното за деня · цяло число' })}
       <label class="chk"><input type="checkbox" name="replace"> Замени вписаното за деня с това число (поправка)</label>
     </form>
     <div class="hint" id="vsDayHint"></div>
@@ -206,6 +246,10 @@ async function saveVisits() {
   const d = formData('#vsF');
   if (!d.date) return toast('Изберете дата.', 'err');
   if (d.count === '' || d.count == null) return toast('Въведете брой посещения.', 'err');
+  if (!/^\s*\d+\s*$/.test(String(d.count))) {
+    return toast('„' + String(d.count).trim() + '“ не е брой посещения — посещенията се броят с цяло число (напр. 3). '
+      + 'Нищо не е вписано.', 'err');
+  }
   // Затваря се само при успех (v2.2.0) — при отказан запис въведените дата и
   // брой остават на екрана.
   const r = await call(window.api.visits.add(d));

@@ -28,18 +28,52 @@ async function renderCirc() {
     el.addEventListener('keydown', async e => {
       if (e.key !== 'Enter') return; e.preventDefault();
       const code = el.value.trim(); el.value = ''; if (!code) return;
+      /* КАРТА НА ЧИТАТЕЛ В ПОЛЕТО „ВРЪЩАНЕ“ (v2.4.71, находка Ч1).
+         (а) КАКВО СТАВАШЕ ДОТУК. Кодът отиваше направо във връщането. „Първи
+             Читател“ държи инв. № 5; „Пети Читател“ подава карта № 5 и тя се
+             сканира тук по навик — „Книга 5 — върната от Първи Читател“, зелено.
+             Книгата остава у читателя, а регистърът я води на рафта. Същото като
+             находка Г1 от v2.4.69, но в другото поле.
+         (б) ЗАЩО Е ГРЕШНО. Заемане, приключено без книгата да е върната, изчезва
+             от „Просрочени“ и от писмата по чл. 43 — документът се губи тихо, а
+             следващият читател го търси на рафта.
+         (в) ЗАЩО ТОЧНО ТАКА. Същата проверка „карта или документ?“ като при
+             заемането (двата канала на таблото). Само карта — нищо не се връща и
+             гишето предлага да мине към заемане за този читател. И карта, и
+             документ — пита, с фокус на „Отказ“, за да не потвърди следващото
+             сканиране по инерция; при отказ нищо не се записва. */
+      const [rdRes, bkRes] = await Promise.all([window.api.readers.byCard(code), window.api.books.byBarcode(code)]);
+      const rd = rdRes && rdRes.ok ? rdRes.data : null;
+      const bk = bkRes && bkRes.ok ? bkRes.data : null;
+      const inLog = (cls, html) => { const lg = $('#inLog'); if (lg) lg.insertAdjacentHTML('afterbegin', `<div class="scanlog ${cls}">${html}</div>`); };
+      if (rd && !bk) {
+        beep('err');
+        inLog('warn', `Кодът <b>${esc(code)}</b> е читателската карта на <b>${esc(rd.name)}</b>, не документ — нищо не е върнато.
+          Сканирайте баркода на документа.
+          <button class="btn sm" style="margin-left:8px" onclick="selectCircReader(${rd.id})">Заемане за ${esc(rd.name)}</button>`);
+        return;
+      }
+      if (rd && bk && !await askConfirm('Кодът „' + code + '“ е едновременно читателската карта на ' + rd.name
+          + ' и инв. № ' + (bk.inv_number ?? '—') + ' („' + (bk.title || '') + '“).\n\nДа приема ли връщането на ДОКУМЕНТА? '
+          + 'Ако това е картата на читателя, откажете — нищо няма да се запише.',
+          { kind: 'warn', title: 'Карта или документ?', okLabel: 'Приеми документа', cancelLabel: 'Не — това е карта' })) {
+        beep('err');
+        inLog('warn', `Кодът <b>${esc(code)}</b> — картата на ${esc(rd.name)}; нищо не е върнато.`);
+        return;
+      }
       const res = await window.api.loans.returnByCode({ code, date_in: today() });
       const log = $('#inLog');
+      if (!log) return;   // междувременно екранът е сменен
       if (!res.ok) { beep('err'); log.insertAdjacentHTML('afterbegin', `<div class="scanlog err">${esc(res.error)}</div>`); return; }
       const r = res.data;
       // Двоен нисък тон и при „заделена“/забава — очите са върху книгата, не върху
       // екрана, а точно тези два случая изискват действие (не се връща на рафта /
       // има обезщетение). Обикновеното успешно връщане дава кратък висок тон.
       beep(r.hold || r.daysLate ? 'err' : 'ok');
+      const fp = returnFineParts(r);
       log.insertAdjacentHTML('afterbegin', `<div class="scanlog ${r.daysLate ? 'warn' : 'ok'}">
         <b>${esc(r.title)}</b> (инв. ${r.inv_number}) — върната от ${esc(r.reader_name)}
-        ${r.daysLate ? `<br>Забава <b>${r.daysLate}</b> ${r.daysLate === 1 ? 'ден' : 'дни'} · обезщетение <b>${mny(r.fine)}</b>`
-          : r.fine ? `<br>Дължимо обезщетение по това заемане: <b>${mny(r.fine)}</b>` : ''}</div>`);
+        ${fp.html ? '<br>' + fp.html : ''}</div>`);
       if (r.suspendedUntil) {
         log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">⛔ Наложено наказание: заемането за
           <b>${esc(r.reader_name)}</b> е преустановено до <b>${bg(r.suspendedUntil)}</b>.</div>`);
@@ -48,15 +82,16 @@ async function renderCirc() {
         log.insertAdjacentHTML('afterbegin', `<div class="scanlog warn">📌 <b>НЕ връщайте на рафта</b> — заделена за
           <b>${esc(r.hold.reader_name)}</b> (карта ${esc(r.hold.card_no || '—')}${r.hold.phone ? ', тел. ' + esc(r.hold.phone) : ''})</div>`);
         toast('📌 Заделена за ' + r.hold.reader_name + ' — не се връща на рафта!', 'err');
-      } else {
-        /* Сумата се показва по ПАРИТЕ, не по дните (втори преглед на кръга v2.4.24):
-           след продължение на просрочено заемане забавата спрямо новия падеж е 0, а
-           начисленото от продължението си стои — екранът казваше „Приета обратно“ и
-           не споменаваше дължимите 1.80 лв. */
-        toast(r.daysLate ? 'Върната със забава ' + dni(r.daysLate) + ' (' + mny(r.fine) + ')'
-          : r.fine ? 'Приета обратно: инв. № ' + r.inv_number + ' — дължимо обезщетение ' + mny(r.fine)
-          : 'Приета обратно: инв. № ' + r.inv_number, (r.daysLate || r.fine) ? 'err' : 'ok');
       }
+      /* Сумата се показва по ПАРИТЕ, не по дните (втори преглед на кръга v2.4.24):
+         след продължение на просрочено заемане забавата спрямо новия падеж е 0, а
+         начисленото от продължението си стои — екранът казваше „Приета обратно“ и
+         не споменаваше дължимите 1.80 лв.
+         И ЗАЕДНО СЪС „ЗАДЕЛЕНА“ (v2.4.71, Ч5): дотук при резервация се казваше
+         само „📌 Заделена…“, а начислената забава оставаше само в журнала. */
+      if (fp.late) toast(fp.late, 'err');
+      else if (fp.owed) toast('Приета обратно: инв. № ' + r.inv_number + ' — дължимо обезщетение ' + mny(fp.owed), 'err');
+      else if (!r.hold) toast('Приета обратно: инв. № ' + r.inv_number, 'ok');
       markSaved();
     });
     return;
@@ -73,9 +108,11 @@ async function renderCirc() {
     ]);
     if (!r) { CIRC.readerId = null; return renderCirc(); }
     // v2.4.31: трите четения са независими — успоредно, не едно след друго (три обиколки по IPC → една).
-    const [rule0, myLoans0, holdsAll] = await Promise.all([
-      call(window.api.circRules.effective(r.category)), call(window.api.loans.byReader(CIRC.readerId)), call(window.api.holds.list())
+    const [rule0, myLoans0, holdsAll, mzs0] = await Promise.all([
+      call(window.api.circRules.effective(r.category)), call(window.api.loans.byReader(CIRC.readerId)), call(window.api.holds.list()),
+      window.api.readers.mzsHeld ? call(window.api.readers.mzsHeld(CIRC.readerId)) : Promise.resolve([])
     ]);
+    const mzsHeld = mzs0 || [];
     const rule = rule0 || s;
     const myLoans = myLoans0 || [];
     const openMine = myLoans.filter(l => !l.date_in);
@@ -130,7 +167,20 @@ async function renderCirc() {
         пререгистрирайте читателя: впишете днешната дата в полето „Пререгистрация“ в картона.
         <button class="btn sm" style="margin-left:8px" onclick="readerForm(${r.id})">Отвори картона</button></div>` : ''}
       ${acc && acc.balance > 0 ? `<div class="hint">💰 Дължи по сметка: <b style="color:var(--red)">${mny(acc.balance)}</b></div>` : ''}
-      ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}`;
+      ${openMine.some(l => l.date_due && l.date_due < today()) ? '<div class="note w">Читателят има просрочени документи.</div>' : ''}
+      ${/* ЧУЖДА КНИГА ПО МЗС У ЧИТАТЕЛЯ (v2.4.71, находка М8).
+            (а) Дотук гишето казваше „заети: 0 / 5“ за читател, у когото е книга
+                на ДРУГА библиотека (изходяща заявка „получено“), дори просрочена —
+                таблото и регистърът я показват, гишето не.
+            (б) Точно тук, с читателя отсреща, е моментът да се поиска обратно:
+                чуждата книга е задължение на библиотеката към партньора.
+            (в) По един ред за всяка заявка (readers:mzsHeld): номер, партньор,
+                срок; изтеклият срок — в червено. Броят „заети“ не се пипа — той е
+                за нашия фонд и за лимита по правилата. */''}
+      ${mzsHeld.map(m => `<div class="note w" data-mzs-held="${m.id}"${m.overdue ? ' style="border-left-color:var(--red)"' : ''}>📌 Държи чужда книга по МЗС
+        № ${esc(String(m.no))}/${esc(String(m.year))}: <b>${esc(authorTitleText(m.author, m.title))}</b>
+        от ${esc(m.partner || '—')}${m.due_date ? ', срок <b' + (m.overdue ? ' style="color:var(--red)"' : '') + '>' + bg(m.due_date) + '</b>' : ', без срок'}${
+        m.overdue ? ' — <b style="color:var(--red)">срокът е изтекъл</b>, поискайте я обратно' : ''}</div>`).join('')}`;
     const myHolds = (holdsAll || []).filter(h => h.reader_id === CIRC.readerId);
     const maxRenew = rule.extensions_count == null ? 2 : rule.extensions_count;
     col2 = `<input id="bScan" class="scan" placeholder="Сканирай баркод на документа…" autocomplete="off">
@@ -360,23 +410,68 @@ async function printLoanSlip(loan) {
     ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
 }
 window.printLoanSlip = printLoanSlip;
+/* ЗАБАВАТА ПРИ ВРЪЩАНЕ — ТРИТЕ ЧИСЛА ПООТДЕЛНО (v2.4.71, находка Ч6).
+   (а) КАКВО СТАВАШЕ ДОТУК. Журналът и известието казваха „Забава 4 дни ·
+       обезщетение 0,60 €“ при 4 × 0,10 €: сумата беше ЦЯЛОТО начислено по
+       заемането, включително 0,20 €, начислени (и може би платени) при
+       продължението.
+   (б) ЗАЩО Е ГРЕШНО. Библиотекарката чете „4 дни, 0,60 €“ и или смята, че
+       ставката е сгрешена, или иска от читателя повече, отколкото дължи за днес.
+   (в) ЗАЩО ТОЧНО ТАКА. Обработчикът връща начисленото СЕГА (fineNow), общото по
+       заемането (fine) и начисленото по-рано (fineBefore); тук се казват
+       поотделно: „Забава 4 дни · обезщетение 0,40 € (начислени сега); общо по
+       заемането 0,60 €, от тях 0,20 € начислени по-рано (при продължение)“.
+       Колко от това е платено, показва „Сметка“ — гишето го казва отделно
+       („Дължи по сметка“). Без по-ранно начисление изречението е дословно
+       досегашното. Връща { html, late, owed } — едно и също за журнала и за
+       известието. */
+function returnFineParts(r) {
+  if (!r) return { html: '', late: '', owed: 0 };
+  const total = Number(r.fine) || 0;
+  const now = r.fineNow != null ? Number(r.fineNow) || 0 : total;
+  const before = r.fineBefore != null ? Number(r.fineBefore) || 0 : Math.max(0, Math.round((total - now) * 100) / 100);
+  if (r.daysLate) {
+    // Без по-ранно начисление изречението остава дословно досегашното.
+    if (!(before > 0)) {
+      return {
+        html: `Забава <b>${r.daysLate}</b> ${r.daysLate === 1 ? 'ден' : 'дни'} · обезщетение <b>${mny(total)}</b>`,
+        late: 'Върната със забава ' + dni(r.daysLate) + ' (' + mny(total) + ')', owed: 0
+      };
+    }
+    return {
+      html: `Забава <b>${r.daysLate}</b> ${r.daysLate === 1 ? 'ден' : 'дни'} · обезщетение <b>${mny(now)}</b> (начислени сега);`
+        + ` общо по заемането <b>${mny(total)}</b>, от тях <b>${mny(before)}</b> начислени по-рано (при продължение)`,
+      late: 'Върната със забава ' + dni(r.daysLate) + ' (' + mny(now) + ' начислени сега; общо по заемането '
+        + mny(total) + ', от тях ' + mny(before) + ' начислени по-рано, при продължение)',
+      owed: 0
+    };
+  }
+  if (total > 0) return { html: `Дължимо обезщетение по това заемане: <b>${mny(total)}</b>`, late: '', owed: total };
+  return { html: '', late: '', owed: 0 };
+}
+window.returnFineParts = returnFineParts;
 async function returnBook(id) {
   const res = await window.api.loans.return({ id, date_in: today() });
   if (!res.ok) return toast(res.error, 'err');
   if (res.data && res.data.hold) {
     const h = res.data.hold;
     toast('📌 Заделена за ' + h.reader_name + (h.phone ? ' (тел. ' + h.phone + ')' : '') + ' — не се връща на рафта!', 'err');
-  } else if (res.data && res.data.daysLate) {
-    // v1.70.0: преди тук нямаше никакво съобщение за забава/глоба — само
-    // сканираното връщане ("returnByCode") показваше тази информация.
-    toast('Върната със забава ' + dni(res.data.daysLate) + ' (' + mny(res.data.fine) + ').', 'err');
-  } else if (res.data && res.data.fine) {
-    // Виж бележката при сканирането по-горе: начисленото при продължение остава
-    // дължимо, макар спрямо новия падеж да няма забава.
-    toast('Книгата е върната. Дължимо обезщетение по това заемане: ' + mny(res.data.fine) + '.', 'err');
-  } else {
-    toast('Книгата е върната.', 'ok');
   }
+  /* ЗАБАВАТА СЕ КАЗВА И КОГАТО КНИГАТА Е ЗАДЕЛЕНА (v2.4.71, находка Ч5).
+     (а) Дотук веригата беше `if (hold) … else if (daysLate)`: при резервация се
+         показваше само „📌 Заделена за …“, а в сметката на читателя вече имаше
+         1,20 € (тестер, den45) — библиотекарката го пускаше, без да ги поиска.
+     (б) Обезщетението по чл. 43 се иска на гишето, докато читателят е там.
+     (в) Двете известия излизат едно след друго — едното е за книгата, другото
+         за парите; нито едно не отменя другото. Текстът е от returnFineParts
+         (Ч6). */
+  const fp = returnFineParts(res.data);
+  // v1.70.0: преди тук нямаше никакво съобщение за забава/глоба — само
+  // сканираното връщане ("returnByCode") показваше тази информация.
+  if (fp.late) toast(fp.late + '.', 'err');
+  // Начисленото при продължение остава дължимо, макар спрямо новия падеж да няма забава.
+  else if (fp.owed) toast('Книгата е върната. Дължимо обезщетение по това заемане: ' + mny(fp.owed) + '.', 'err');
+  else if (!(res.data && res.data.hold)) toast('Книгата е върната.', 'ok');
   if (res.data && res.data.suspendedUntil) {
     toast('⛔ Наложено наказание: заемането е преустановено до ' + bg(res.data.suspendedUntil) + '.', 'err');
   }

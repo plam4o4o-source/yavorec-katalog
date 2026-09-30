@@ -42,6 +42,39 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
     }
     return await res.json();
   }
+  /* Кръг 45, Ф1 — авторите от Google Books и Open Library.
+
+     (а) Какво ставаше: двете услуги връщат имената в ЕСТЕСТВЕН ред („Иван Вазов“),
+     а програмата ги слепваше със запетая: книга с двама автори влизаше с автор
+     „Иван Вазов, Алеко Константинов“. Навсякъде другаде в програмата полето
+     „Автор“ се чете като „Фамилия, Име; Фамилия, Име“ — авторският знак
+     (author-mark.js basisOf), проверката на знаците и авторитетните записи вземат
+     частта ПРЕДИ първата запетая за фамилия. Тестерът получи знак „И-18“ (по
+     „Иван Вазов“) вместо „В-14“ (по „Вазов“).
+     (б) Защо е грешно: знакът отива на етикета и на рафта — книгата се нарежда
+     под „И“ вместо под „В“ и читателят не я намира; по Наредба № 3 описанието на
+     документа (и мястото му във фонда) трябва да е вярно, а сгрешеният знак
+     се хваща едва при проверката на знаците, ако изобщо.
+     (в) Защо точно така: всеки автор се обръща поотделно във „Фамилия, Име“ по
+     СЪЩОТО правило, което вече ползват basisOf() и splitName() в catalog.js —
+     фамилията е последната дума; име, което вече съдържа запетая, се оставя
+     както е. Авторите се съединяват с „; “ — разделителят, по който basisOf()
+     намира ПЪРВИЯ автор. Псевдоним от две думи („Елин Пелин“ → „Пелин, Елин“)
+     остава неразпознат, но библиотекарката вижда полето попълнено и го поправя;
+     предложението за знак и без това казва по коя дума е строено.
+     SRU е проверен: там авторът идва от MARC 100$a/700$a, който по правило вече е
+     „Фамилия, Име“ — виж marcToBook() по-долу. */
+  function invertName(name) {
+    const s = String(name || '').replace(/\s+/g, ' ').trim();
+    if (!s || s.includes(',')) return s;
+    const w = s.split(' ');
+    if (w.length < 2) return s;
+    return w[w.length - 1] + ', ' + w.slice(0, -1).join(' ');
+  }
+  /** @param {Array<string|null|undefined>|undefined} names */
+  function joinAuthors(names) {
+    return (names || []).map(invertName).filter(Boolean).join('; ');
+  }
   async function lookupGoogleBooks(isbn) {
     const d = await fetchJson(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
     const v = d && d.items && d.items[0] && d.items[0].volumeInfo;
@@ -51,7 +84,7 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
       source: 'Google Books',
       title: v.title || '',
       subtitle: v.subtitle || '',
-      author: (v.authors || []).join(', '),
+      author: joinAuthors(v.authors),  // Ф1: „Фамилия, Име; Фамилия, Име“
       publisher: v.publisher || '',
       year: (v.publishedDate || '').slice(0, 4),
       pages: v.pageCount ? String(v.pageCount) : '',
@@ -72,7 +105,7 @@ module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
       source: 'Open Library',
       title: v.title || '',
       subtitle: v.subtitle || '',
-      author: (v.authors || []).map(a => a.name).join(', '),
+      author: joinAuthors((v.authors || []).map(a => a && a.name)),  // Ф1
       publisher: (v.publishers || []).map(p => p.name).join(', '),
       year: String(v.publish_date || '').match(/\d{4}/)?.[0] || '',
       pages: v.number_of_pages ? String(v.number_of_pages) : '',
@@ -146,7 +179,14 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     const title = trimMarcPunct(subVal(f245, 'a'));
     const subtitle = trimMarcPunct(subVal(f245, 'b'));
     const authorSubs = (fields['100'] || [])[0] || (fields['700'] || [])[0] || [];
-    const author = trimMarcPunct(subVal(authorSubs, 'a'));
+    /* Кръг 45, Ф1 (проверка на SRU): 100$a е „Фамилия, Име,“ — редът вече е
+       правилният за авторския знак. Но trimMarcPunct() махаше и точката на
+       инициал: „Вазов, И.“ ставаше „Вазов, И“ — а така изписан инициал
+       авторитетните записи не сливат с „Вазов, И.“ от ръчно въведените книги.
+       Точката след единична буква е част от името, не ISBD пунктуация. */
+    const rawAuthor = subVal(authorSubs, 'a');
+    const author = /(^|[\s,.])[A-Za-zА-Яа-яЁё]\.\s*$/.test(rawAuthor.trim())
+      ? rawAuthor.trim() : trimMarcPunct(rawAuthor);
     const fPub = (fields['264'] || [])[0] || (fields['260'] || [])[0] || [];
     const city = trimMarcPunct(subVal(fPub, 'a'));
     const publisher = trimMarcPunct(subVal(fPub, 'b'));

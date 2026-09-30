@@ -153,7 +153,9 @@ test('акт за много документи се съставя и анул�
 
   const t0 = Date.now();
   const cr = await app.invoke('deaccessionActs:create', {
-    act: { date: dayOff(0), reason_code: 1, reason_text: 'морално остарели', no: 1, year: dayOff(0).slice(0, 4) },
+    act: { date: dayOff(0), reason_code: 1, reason_text: 'морално остарели', no: 1, year: dayOff(0).slice(0, 4),
+      /* v2.4.71 (И2): актът иска член 1 и член 3 на комисията (чл. 35). */
+      committee1: 'А', committee3: 'В' },
     bookIds: ids
   });
   const msCreate = Date.now() - t0;
@@ -269,7 +271,9 @@ test('сглобяването на katalog.json пада обратно към 
   assert.equal(out, JSON.stringify(bad, null, 2), 'при разминаване се пише по стария начин');
   JSON.parse(out);                                    // и той е валиден JSON
 
-  assert.match(src, /fs\.writeFileSync\(tmp, catalogJsonText\(payload\), 'utf8'\)/,
+  /* От v2.4.71 текстът се сглобява веднъж (за да се сравни с последно
+     записания — виж CATALOG_LAST_TEXT) и точно той се записва. */
+  assert.match(src, /const text = catalogJsonText\(payload\);[\s\S]{0,1500}fs\.writeFileSync\(tmp, text, 'utf8'\)/,
     'записът трябва да минава през сглобяването');
   const cat = fs.readFileSync(path.join(APP_DIR, 'handlers', 'catalog.js'), 'utf8');
   assert.match(cat, /fs\.writeFileSync\(filePath, catalogJsonText\(payload\), 'utf8'\)/,

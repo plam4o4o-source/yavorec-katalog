@@ -201,4 +201,21 @@ function assertUnchanged(prev, rev, fields, what) {
     + 'Записът е спрян, за да не заличи чуждата промяна. Затворете формата, отворете я отново '
     + 'и нанесете своите промени върху текущите данни.');
 }
-module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, parseRegisterNo, resolveScannedBook, ANON_READER_NAME, rowFingerprint, assertUnchanged };
+/* „АВТОР. ЗАГЛАВИЕ“ БЕЗ ДВОЙНА ТОЧКА (v2.4.71, находка Ф7 от кръг 45).
+   Навсякъде се сглобяваше [автор, заглавие].join('. '). Авторът по правило
+   завършва с инициал („Иванов, И.“) и излизаше „Иванов, И.. Първа книга“ — в
+   инвентарната книга, актовете, протокола, писмото по чл. 43 и МЗС. Ако авторът
+   вече завършва с препинателен знак, се слага само интервал. Същото правило има
+   и екранът (authorTitleText в src/views/inv-book.js); тук е за обработчиците
+   (текстът на писмото, одитната следа, търсачката за връзки). Стои в този
+   модул, защото той вече е общото място за малки текстови правила (csvCell,
+   normalizeScanCode) и е в пакета на програмата. */
+function authorTitleText(author, title) {
+  const a = String(author == null ? '' : author).trim();
+  const t = String(title == null ? '' : title).trim();
+  if (!a) return t;
+  if (!t) return a;
+  return a + (/[.!?…]$/.test(a) ? ' ' : '. ') + t;
+}
+
+module.exports = { csvCell, isValidEmail, normalizeScanCode, isValidIsoDate, parseRegisterNo, resolveScannedBook, ANON_READER_NAME, rowFingerprint, assertUnchanged, authorTitleText };

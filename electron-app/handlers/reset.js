@@ -68,6 +68,10 @@ const WIPE = [
   ['inventory', 'Фонд'],
   ['deaccession_items', 'Отчисляване'],
   ['account_lines', 'Читатели'],
+  /* Историята на записванията (миграция 19, v2.4.71) — данни за читателите,
+     каскадно зависими от readers, тоест си отиват с тях. Без този ред тестът
+     „всяка таблица е или в изтриване, или в оставени“ (nachisto-v2464) пада. */
+  ['reader_registrations', 'Читатели'],
   ['holds', 'Читатели'],
   ['housebound_visits', 'Читатели'],
   ['housebound_profiles', 'Читатели'],
@@ -216,6 +220,7 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
   } = deps;
   const { encryptBackupFile, decryptBackupBuffer } = require('../backup-crypto');
   const pii = require('../pii-crypto');
+  const { localDate } = require('../local-date'); // С13 — местната дата в името на копието
 
   /* --------------------------------------------------------------------------
      РЕЗЕРВНОТО КОПИЕ ПРЕДИ ИЗТРИВАНЕТО
@@ -260,8 +265,19 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
+  /* МЕСТНОТО ВРЕМЕ В ИМЕТО (v2.4.71, кръг 45, находка С13).
+     (а) Името беше от toISOString() — Гринуич. Копие, направено в 14:30 в
+     София, излизаше „before-reset-2026-09-29-11-30-00.db“, а в 01:30 след
+     полунощ — с ВЧЕРАШНАТА дата. Всички останали копия (backup.js,
+     backupTimestamp — от v2.4.67) носят местното време.
+     (б) Това е ЕДИНСТВЕНОТО копие на цялата стара библиотека след „Започване на
+     чисто“. Библиотекарката го търси в списъка по часа, в който е натиснала
+     бутона — и вижда час, който не познава, или друга дата.
+     (в) Същият вид като при ръчните копия: местна дата (local-date.js) и
+     местен час ЧЧ-ММ-СС. */
   function backupTimestamp() {
-    return new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    return localDate(d) + '-' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
   }
   /* Същото правило като autoBackupPassword() в handlers/backup.js: празен низ
      значи „копието остава некриптирано“, не „грешка“. Стара база без колоните
@@ -373,6 +389,46 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
     }
     return { byTable, byGroup, total };
   }
+  /* ЧИСЛОТО НА ГРУПАТА Е ЧИСЛОТО НА НЕЩАТА, НЕ НА РЕДОВЕТЕ (v2.4.71, кръг 45, С15).
+     (а) Групата „Фонд“ сумираше редовете на books И на inventory (по един ред
+     наличност на всеки документ) и на acquisitions. Прозорецът за изтриване
+     пишеше „Фонд — 60 записа“ при 30 книги; „Читатели“ — сбор от читатели,
+     сметки, резервации и напомняния.
+     (б) Това е прозорецът, в който библиотекарката решава дали да изтрие
+     ВСИЧКО, и го сверява с това, което знае („имаме 30 книги“). Двойно число
+     изглежда като грешка в програмата точно преди необратимо действие — или
+     кара да се мисли, че има скрити записи.
+     (в) За всяка група, която има ясно „главно нещо“, се казва неговият брой с
+     думата за него („30 документа“), а сборът на редовете остава в скоби само
+     ако е различен („общо 60 реда в базата, заедно със свързаните записи“).
+     Групите без едно главно нещо (краезнание, дневник) остават с броя редове.
+     `rows` в отговора не се мени — по него се подреждат групите и се пише
+     общото число. */
+  const GROUP_HEAD = {
+    'Фонд': ['books', 'документ', 'документа'],
+    'Читатели': ['readers', 'читател', 'читатели'],
+    'Заемания': ['loans', 'заемане', 'заемания'],
+    'Периодика': ['periodicals', 'заглавие на периодично издание', 'заглавия на периодични издания'],
+    'Отчисляване': ['deaccession_acts', 'акт за отчисляване', 'акта за отчисляване'],
+    'Инвентаризации': ['inventory_sessions', 'инвентаризация', 'инвентаризации'],
+    'Междубиблиотечно заемане': ['mzs_requests', 'заявка', 'заявки'],
+    'Онлайн каталог': ['catalog_shelves', 'витрина', 'витрини'],
+    'Одитна следа': ['audit_log', 'запис', 'записа']
+  };
+  function groupSummary(counts) {
+    return Object.entries(counts.byGroup)
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([group, n]) => {
+        const head = GROUP_HEAD[group];
+        const hn = head && counts.byTable[head[0]] != null ? counts.byTable[head[0]] : null;
+        const text = hn != null
+          ? hn.toLocaleString('bg-BG') + ' ' + (hn === 1 ? head[1] : head[2])
+            + (n !== hn ? ' (общо ' + n.toLocaleString('bg-BG') + ' реда в базата, заедно със свързаните записи)' : '')
+          : n.toLocaleString('bg-BG') + (n === 1 ? ' запис' : ' записа');
+        return { group, rows: n, main: hn, text };
+      });
+  }
 
   ipcMain.handle('reset:plan', () =>
     run(() => {
@@ -385,10 +441,7 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
       return {
         word: CONFIRM_WORD,
         counts: counts.byTable,
-        groups: Object.entries(counts.byGroup)
-          .filter(([, n]) => n > 0)
-          .sort((a, b) => b[1] - a[1])
-          .map(([group, n]) => ({ group, rows: n })),
+        groups: groupSummary(counts), // С15 — { group, rows, main, text }
         totalRows: counts.total,
         keep: KEEP.map(([table, label, why]) => ({ table, label, why })),
         library: { name: s.lib_name || s.org || '', employees: emp, authorMarks: marks },
@@ -459,11 +512,8 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
       const counts = countRows(db);
       const stats = { byTable: counts.byTable, byGroup: counts.byGroup, total: counts.total };
       const who = (typeof getCurrentUser === 'function' ? getCurrentUser() : '') || '(без избран служител)';
-      const groupsText = Object.entries(counts.byGroup)
-        .filter(([, n]) => n > 0)
-        .sort((a, b) => b[1] - a[1])
-        .map(([g, n]) => g + ' — ' + n)
-        .join('; ') || 'нямаше нито един ред';
+      // С15: същите думи като на екрана — „Фонд — 30 документа (общо 60 реда …)“.
+      const groupsText = groupSummary(counts).map(g => g.group + ' — ' + g.text).join('; ') || 'нямаше нито един ред';
       /* ИЗТИЧАНЕТО, КОЕТО ИЗТРИВАНЕТО НЕ ПОПРАВЯ, влиза и в следата, не само в
          съобщението на екрана: екранът се чете веднъж и се забравя, а следата е
          това, което после обяснява пред проверяващ защо публичният каталог е

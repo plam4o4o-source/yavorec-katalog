@@ -38,7 +38,17 @@ async function accountModal(readerId) {
         <td>${esc(l.type || l.kind)}</td>
         <td class="num" style="color:${l.amount > 0 ? 'var(--red)' : 'var(--green)'}">${l.amount > 0 ? '+' : ''}${mny(l.amount)}</td>
         <td style="font-size:12px">${esc(l.note || '')}</td>
-        <td><button class="btn sm" onclick="printReceiptLine(${l.id})">Квитанция</button>
+        <td>${/* КВИТАНЦИЯ САМО ЗА ПОЛУЧЕНИ ПАРИ (v2.4.71, находка Ч8).
+              (а) Бутонът „Квитанция“ стоеше и на ред-начисление и печаташе
+                  „КВИТАНЦИЯ № … Начислена сума … Получил: ………“ — касов документ
+                  за пари, които никой не е давал.
+              (б) Квитанцията удостоверява получено плащане; подписана за
+                  начисление, тя е невярен касов документ.
+              (в) На плащането — „Квитанция“; на начислението — „Известие“:
+                  документ „ИЗВЕСТИЕ ЗА НАЧИСЛЕНИЕ“, с „Дължима сума“ и подпис
+                  „Запознат(а)“ вместо „Получил“. */''}${l.kind === 'плащане'
+          ? `<button class="btn sm" onclick="printReceiptLine(${l.id})">Квитанция</button>`
+          : `<button class="btn sm" onclick="printReceiptLine(${l.id})" title="Известие до читателя за начислената сума — не е квитанция">Известие</button>`}
             <button class="btn sm dgr" onclick="deleteAccountLine(${readerId},${l.id})">✕</button></td></tr>`).join('')
         : '<tr><td colspan="5" class="empty">Няма движения.</td></tr>'}
     </tbody></table></div>`,
@@ -109,10 +119,38 @@ async function savePayment(readerId) {
   if (id != null) { closeModal2(); markSaved(); await accountModal(readerId); printReceiptLine(id); }
 }
 window.savePayment = savePayment;
+/* ✕ НА РЕД ОТ СМЕТКАТА (v2.4.71, находки Ч12 и Ч2).
+   Плащане: квитанцията вече е у читателя (печата се при записа), затова се пита
+   ПРИЧИНА — без нея обработчикът отказва (account:deleteLine) — и после се казва
+   да се поиска квитанцията обратно. Забава: обработчикът намалява и сумата по
+   заемането, за да не я поиска пак писмото по чл. 43; екранът казва какво е
+   станало (или че заемането не е намерено). */
 async function deleteAccountLine(readerId, id) {
-  if (!await askConfirm('Изтриване на записа от сметката?')) return;
-  const ok = await call(window.api.account.deleteLine(id), 'Изтрито.');
-  if (ok !== null) { markSaved(); accountModal(readerId); }
+  const line = (window._ACC_LINES || []).find(l => l.id === id);
+  const isPayment = !!(line && line.kind === 'плащане');
+  let reason = '';
+  if (isPayment) {
+    const t = await askText('Анулиране на плащане — квитанция № ' + id, {
+      label: 'Причина за анулирането', okLabel: 'Анулирай',
+      hint: 'напр. „сгрешена сума, вписана наново“ — влиза в одитната следа',
+      note: 'Квитанция № ' + id + ' за ' + mny(Math.abs(Number(line.amount) || 0)) + ' вече е издадена на читателя. '
+        + 'Анулирането маха плащането от сметката; поискайте квитанцията обратно.'
+    });
+    if (t == null) return;
+    reason = String(t).trim();
+    if (!reason) return toast('Впишете причина за анулирането — плащането има издадена квитанция. Нищо не е изтрито.', 'err');
+  } else if (!await askConfirm(line && line.type === 'забава'
+    ? 'Изтриване (опрощаване) на забавата ' + mny(Math.abs(Number(line.amount) || 0)) + '? Сумата се маха и от заемането — писмото по чл. 43 вече няма да я иска.'
+    : 'Изтриване на записа от сметката?')) return;
+  const res = await call(window.api.account.deleteLine(isPayment ? { id, reason } : id));
+  if (res === null) return;
+  toast(isPayment ? 'Плащането е анулирано (квитанция № ' + id + ') — поискайте квитанцията обратно от читателя.' : 'Изтрито.', 'ok');
+  if (res && res.loan) {
+    toast('Забавата по заемането на инв. № ' + (res.loan.inv_number ?? '—') + ' е намалена от ' + mny(res.loan.before)
+      + ' на ' + mny(res.loan.after) + '.', 'ok');
+  }
+  if (res && res.warning) toast(res.warning, 'err');
+  markSaved(); accountModal(readerId);
 }
 window.deleteAccountLine = deleteAccountLine;
 function printReceiptLine(lineId) {
@@ -121,12 +159,15 @@ function printReceiptLine(lineId) {
   if (!line || !r) return;
   const bal = Number(window._ACC_BALANCE);
   const hasBal = Number.isFinite(bal);
-  setPrintPage({ name: 'Квитанция № ' + line.id + ' — ' + r.name + ' — ' + bg(line.date), landscape: false, margin: '20mm' });
+  // Квитанция — само за плащане; за начисление — известие (v2.4.71, Ч8, виж бележката в таблицата).
+  const isPay = line.kind === 'плащане';
+  const docName = isPay ? 'КВИТАНЦИЯ' : 'ИЗВЕСТИЕ ЗА НАЧИСЛЕНИЕ';
+  setPrintPage({ name: (isPay ? 'Квитанция' : 'Известие за начисление') + ' № ' + line.id + ' — ' + r.name + ' — ' + bg(line.date), landscape: false, margin: '20mm' });
   doPrint(`<div class="pdoc">${shead()}
-    <h2 style="font-size:16pt">КВИТАНЦИЯ № ${line.id} / ${bg(line.date)}</h2>
+    <h2 style="font-size:16pt">${docName} № ${line.id} / ${bg(line.date)}</h2>
     <div class="pmeta">Дата: <b>${bg(line.date)}</b><br>
     Читател: <b>${esc(r.name)}</b>${r.card_no ? ' (карта ' + esc(r.card_no) + ')' : ''}<br>
-    ${line.kind === 'плащане' ? 'Платена сума' : 'Начислена сума'}: <b>${mny(Math.abs(line.amount))}</b><br>
+    ${isPay ? 'Платена сума' : 'Дължима сума'}: <b>${mny(Math.abs(line.amount))}</b><br>
     Основание: <b>${esc(line.type || line.kind)}</b>${line.note ? '<br>Бележка: ' + esc(line.note) : ''}
     ${/* Дотук квитанцията носеше само сумата на едно движение и нищо повече:
           читател, платил част от глобата си, си тръгваше с документ, от който не
@@ -135,8 +176,10 @@ function printReceiptLine(lineId) {
     ${hasBal ? `<br><br>Състояние на сметката към ${bg(today())} г.: <b>${
       bal > 0 ? 'дължими ' + mny(bal) : bal < 0 ? 'надплатени ' + mny(-bal) : 'няма задължение (0.00 €)'
     }</b>` : ''}</div>
-    <div class="pmeta" style="font-size:9pt">Квитанцията отразява едно движение по сметката на читателя.
-    Номерът ѝ е поредният номер на движението в регистъра на сметките.</div>
-    ${ssig(['Получил: …………………', 'Библиотекар: …………………'])}</div>`);
+    <div class="pmeta" style="font-size:9pt">${isPay
+      ? 'Квитанцията отразява едно движение по сметката на читателя. Номерът ѝ е поредният номер на движението в регистъра на сметките.'
+      : 'Известието уведомява читателя за начислена сума по сметката му. То НЕ е квитанция и не удостоверява плащане. '
+        + 'Номерът му е поредният номер на движението в регистъра на сметките.'}</div>
+    ${ssig(isPay ? ['Получил: …………………', 'Библиотекар: …………………'] : ['Запознат(а): …………………', 'Библиотекар: …………………'])}</div>`);
 }
 window.printReceiptLine = printReceiptLine;

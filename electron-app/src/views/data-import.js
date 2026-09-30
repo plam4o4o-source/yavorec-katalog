@@ -8,7 +8,7 @@ async function importChoose() {
   const res = await window.api.importData.choose();
   if (!res.ok) return res.error === 'Отказано от потребителя.' ? null : toast(res.error, 'err');
   IMPORT_INFO = res.data;
-  importMapModal();
+  await importMapModal();
 }
 window.importChoose = importChoose;
 
@@ -34,10 +34,27 @@ document.addEventListener('drop', async e => {
   const res = await window.api.importData.load(p);
   if (!res.ok) return toast(res.error, 'err');
   IMPORT_INFO = res.data;
-  importMapModal();
+  await importMapModal();
 });
 
-function importMapModal() {
+/* Кръг 45, Ф5 — „Отдел/Език по подразбиране“ от „Номенклатури“.
+   (а) Дотук падащите менюта бяха твърдите OTDELI/EZICI от core.js: отдел
+   „музикален“, добавен в „Настройки“ → „Номенклатури“, го имаше във формата за
+   книга, но не и тук — а тук се решава отделът на стотици внесени документа.
+   (б) Внос, пуснат с отдел извън номенклатурата, разцепва справките по отдел
+   (КДБФ, инвентаризация по отдел) и после трябва да се поправя документ по
+   документ.
+   (в) Опциите се четат при отваряне от av:options със същото правило като формата
+   за книга (avSelectOpts в books.js; празна номенклатура → твърдият списък).
+   Подразбирането остава „за възрастни“/„български“, ако ги има в списъка —
+   иначе първата стойност от него, за да не се предлага нещо, което библиотеката
+   е извадила. */
+async function importMapModal() {
+  const av = (await call(window.api.av.options())) || {};
+  const deptOpts = avSelectOpts(av.department, OTDELI, '');
+  const langOpts = avSelectOpts(av.language, EZICI, '');
+  const deptVal = deptOpts.includes('за възрастни') ? 'за възрастни' : (deptOpts[0] || '');
+  const langVal = langOpts.includes('български') ? 'български' : (langOpts[0] || '');
   const d = IMPORT_INFO;
   const fieldOpts = Object.entries(d.fields).map(([v, t]) => ({ v, t }));
   modal('Въвеждане на данни — съответствие на колоните', `
@@ -53,8 +70,14 @@ function importMapModal() {
       <table class="ledger"><thead><tr>
         ${d.headers.map((h, i) => `<th>${esc(h || 'колона ' + (i + 1))}</th>`).join('')}
       </tr></thead><tbody>
-        ${d.preview.map(r => `<tr>${d.headers.map((_, i) =>
-          `<td>${esc(String(r[i] ?? '').slice(0, 40))}</td>`).join('')}</tr>`).join('')}
+        ${/* Кръг 45, Ф11: колоната „Дата на вписване“ идва от главния процес вече
+              разчетена (ISO, същият parseDate() като вноса) — тук само се
+              показва като ДД.ММ.ГГГГ, а не като Excel-ското число 37755. */''}
+        ${d.preview.map(r => `<tr>${d.headers.map((_, i) => {
+          const v = String(r[i] ?? '');
+          const shown = (d.previewDateCols || []).includes(i) && /^\d{4}-\d{2}-\d{2}$/.test(v) ? bg(v) : v;
+          return `<td>${esc(shown.slice(0, 40))}</td>`;
+        }).join('')}</tr>`).join('')}
       </tbody></table>
     </div>
     <div class="hint" style="margin:4px 0 12px">Първите ${d.preview.length} реда от файла.</div>
@@ -72,9 +95,9 @@ function importMapModal() {
         <label class="chk"><input type="checkbox" name="skipDuplicates" checked>
           <span>Пропускай вече съществуващите (по инвентарен номер, а при липса — по ISBN)</span></label>
         <div class="grid g3" style="margin-top:8px">
-          ${fld('Отдел по подразбиране', 'defaultDepartment', { type: 'select', opts: OTDELI,
-            val: 'за възрастни', allowEmpty: false })}
-          ${fld('Език по подразбиране', 'defaultLanguage', { type: 'select', opts: EZICI, val: 'български' })}
+          ${fld('Отдел по подразбиране', 'defaultDepartment', { type: 'select', opts: deptOpts,
+            val: deptVal, allowEmpty: false })}
+          ${fld('Език по подразбиране', 'defaultLanguage', { type: 'select', opts: langOpts, val: langVal })}
           ${fld('Вид документ по подразбиране', 'defaultCategory', { val: 'книга' })}
         </div>
         <div class="hint">Ползват се само за редовете, в които съответната колона липсва или е празна.</div>
@@ -201,6 +224,19 @@ async function importRun() {
             ${r.registerDateDefaulted} по-малка от действителната. Ако това е стар фонд, върнете резервното копие
             отпреди вноса и повторете вноса с попълнено поле „Дата на вписване по подразбиране“, или поправете
             датите от „Инвентарна книга“ → „Редакция“.</div>`}
+    </div>` : ''}
+    ${/* Кръг 45, Ф3: редовете с дата на вписване в бъдещето — поименно. Дотук
+          влизаха без дума, а разликата табло ↔ КДБФ лъсваше едва в „Проверка на
+          данните“. Изречението е от главния процес (report.futureDateNote); тук е
+          само списъкът — ред, номер, заглавие, дата — за да се знае КОИ да се
+          поправят. */''}
+    ${r.futureDateNote ? `<div class="note w" style="margin-top:12px">
+      <b>Дата на вписване в бъдещето: ${r.futureDatedCount}
+        ${r.futureDatedCount === 1 ? 'ред' : 'реда'}</b>
+      <div style="margin-top:6px">${esc(r.futureDateNote)}</div>
+      <div class="hint" style="margin-top:6px">${(r.futureDated || []).slice(0, 15).map(f =>
+        `ред ${f.line}${f.inv ? ' (№ ' + esc(String(f.inv)) + ')' : ''}${f.title ? ' — „' + esc(String(f.title).slice(0, 60)) + '“' : ''}: ${bg(f.date)}`
+      ).join('<br>')}${r.futureDatedCount > 15 ? '<br>… и още ' + (r.futureDatedCount - 15) : ''}</div>
     </div>` : ''}
     ${(r.deaccessionedToNote || r.statusToNote) ? `<div class="note" style="margin-top:12px">
       <b>Състояния, които не са пренесени като състояние</b>

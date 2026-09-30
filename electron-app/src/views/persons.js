@@ -45,9 +45,17 @@ function personsRowsHtml(rows) {
           <div class="prsName">${esc(p.name)}</div>
           <div class="prsDates">${esc(personDates(p))}</div>
           ${p.activity ? `<div class="prsAct">${esc(p.activity)}</div>` : ''}
-          <div class="prsLinks">${p.links ? p.links + ' свързани материала' : 'няма свързани материали'}</div>
+          <div class="prsLinks">${personsLinksText(p)}</div>
         </div>
       </div>`).join('');
+}
+/* Връзките в двете посоки (v2.4.71, Д10): „няма свързани материали“ само когато
+   наистина няма нито връзка навън, нито запис, който сочи към персоналията. */
+function personsLinksText(p) {
+  const out = Number(p.links) || 0, back = Number(p.backlinks) || 0;
+  if (!out && !back) return 'няма свързани материали';
+  return [out ? (out === 1 ? '1 свързан материал' : out + ' свързани материала') : '',
+    back ? (back === 1 ? '1 запис сочи към нея' : back + ' записа сочат към нея') : ''].filter(Boolean).join(' · ');
 }
 /* Броячът се пририсува заедно с картите и казва „показани са N от M“ — скъсена
    картотека, която изглежда пълна, кара краеведа да мисли, че записите му ги няма. */

@@ -3,7 +3,7 @@
 // (незадължително) от scheduleCatalogWrite — вж. „МЗС Е СВЪРЗАНО С ФОНДА И
 // ГИШЕТО“ по-долу.
 const { localDate } = require('../local-date');
-const { parseRegisterNo, isValidIsoDate, normalizeScanCode, resolveScannedBook } = require('../security-utils');
+const { parseRegisterNo, isValidIsoDate, normalizeScanCode, resolveScannedBook, authorTitleText } = require('../security-utils');
 
 const bgDate = (d) => (d ? String(d).split('-').reverse().join('.') : '—');
 
@@ -132,7 +132,7 @@ function mzsOverdueRows(db, on) {
         OR (m.direction = 'входящо' AND m.status IN ('изпратено', 'получено')))
     ORDER BY m.due_date, m.year, m.no`).all(on).map(r => {
     const days = daysBetween(r.due_date, on);
-    const doc = '„' + [r.author, r.title].filter(Boolean).join('. ') + '“';
+    const doc = '„' + authorTitleText(r.author, r.title) + '“';
     const ref = 'МЗС № ' + r.no + '/' + r.year;
     const late = 'срокът за връщане изтече на ' + bgDate(r.due_date) + ' (' + (days === 1 ? 'преди 1 ден' : 'преди ' + days + ' дни') + ')';
     const text = r.direction === 'изходящо'
@@ -460,9 +460,22 @@ module.exports = function registerMzsHandlers(ipcMain, deps) {
       const cur = db.prepare('SELECT * FROM mzs_requests WHERE id = ?').get(id);
       if (!cur) throw new Error('Заявката вече не съществува — вероятно е изтрита от друго работно място.');
       db.prepare('DELETE FROM mzs_requests WHERE id = ?').run(id);
-      logAudit('Изтрита МЗС заявка', '№ ' + cur.no + '/' + cur.year + ' — ' + cur.title + ' (' + cur.direction + ')');
+      /* СЛЕДАТА КАЗВА И ПОСЛЕДИЦАТА (v2.4.71, кръг 45, М10). Екранът вече пита с
+         инв. № и партньора (mzsDeleteQuestion в src/views/mzs.js); тук остава
+         редът за проверката: изтрита заявка „изпратено“/„получено“ за наш
+         документ го прави отново наличен за гишето и онлайн, без той да се е
+         върнал — после въпросът е точно „кога и кой го освободи“. */
+      const released = touchesCatalog(cur, {});
+      let inv = null;
+      if (released) {
+        const b = db.prepare('SELECT inv_number FROM books WHERE id = ?').get(cur.book_id);
+        inv = b ? b.inv_number : null;
+      }
+      logAudit('Изтрита МЗС заявка', '№ ' + cur.no + '/' + cur.year + ' — ' + cur.title + ' (' + cur.direction + ')'
+        + (released ? '; заявката беше „' + cur.status + '“ — нашият документ' + (inv != null ? ' инв. № ' + inv : '')
+          + ' отново е наличен за гишето и в онлайн каталога, макар да не е отбелязан „върнато“ от ' + cur.partner : ''));
       // Изтрита заявка за наш документ „при партньора“ го връща „наличен“ онлайн.
-      if (scheduleCatalogWrite && touchesCatalog(cur, {})) scheduleCatalogWrite();
+      if (scheduleCatalogWrite && released) scheduleCatalogWrite();
     })
   );
 };

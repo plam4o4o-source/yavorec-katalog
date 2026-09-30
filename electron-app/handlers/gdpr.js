@@ -6,6 +6,10 @@
 // изчезва. Настройка anonymize_years = 0 изключва всичко. Необратимо е —
 // затова е ръчен бутон.
 const { ANON_READER_NAME } = require('../security-utils');
+/* Видът на промяната за онлайн каталога — същата стойност като
+   CATALOG_WRITE_CIRCULATION в main.js и CIRCULATION в loans.js/holds.js: отказът
+   на заделена резервация при заличаване е промяна от гишето (М4, v2.4.71). */
+const CIRCULATION = 'circulation';
 
 module.exports = function registerGdprHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
@@ -339,6 +343,147 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       return true;
     }
   }
+  /* ВСИЧКИ ИМЕНА, КАРТИ И ТЕЛЕФОНИ, С КОИТО ЧИТАТЕЛЯТ Е МИНАЛ ПРЕЗ СЛЕДАТА
+     (v2.4.71, кръг 45, находка С3).
+     (а) КАКВО СТАВАШЕ ДОТУК. Заличаването търсеше в следата САМО текущото пълно
+     име. Тестерите (s6-gdpr.js и сценарият на каталога) заличиха „Мария
+     Петрова“ (карта 2), която доскоро беше „Мария Иванова“ (брак — „Редакция на
+     читател“). Останаха: „карта 2 — Мария Иванова“ (редът „Нов читател“),
+     „…; читател Мария Иванова (карта 2); срок …“ (заемането отпреди смяната),
+     „Запазен PDF: …/Читателски картон — Мария Петрова.pdf“, и търсенията в
+     „Читатели“ по старото име, по фамилията и по телефона. Отговорът казваше
+     „обезличени 4 реда“ — числото на пипнатото, не на останалото.
+     (б) ЗАЩО Е ГРЕШНО. Чл. 17 ОРЗД иска заличаване на данните на ЧОВЕКА, не на
+     един правопис на името му. Старото име е точно личната информация, която
+     най-лесно води до човека (моминското име); файлът на картона в следата
+     назовава и него. Библиотекарката отговаря писмено „заличено“ по числото на
+     екрана.
+     (в) ЗАЩО ТОЧНО ТАКА. Самоличността се събира от следата на самата програма:
+     редовете „Нов читател“/„Редакция на читател“ са „карта N — Име“, а `diff`
+     на редакцията пази преди/след за името, картата и телефона. Ред се приема
+     за ред на ТОЗИ читател, когато картата в него е негова И името в него (или
+     в diff-а му) вече е познато — така от „Мария Петрова, карта 2“ се стига до
+     „Мария Иванова“, а от смяна на картата — до старата карта. Повтаря се,
+     докато нищо ново не се появи (верига от няколко смени). Чужд читател, държал
+     същата карта преди, не влиза: името му не е в познатите. Началото на
+     самоличността (първият приет ред или датата на записване) ограничава и
+     правилото „(карта N)“, по което се хващат редовете със СТАРО име, което не
+     е минало през редакция (напр. сгрешено и поправено на гишето). */
+  function readerIdentity(db, r) {
+    const names = new Set();
+    const cards = new Set();
+    const phones = new Set();
+    const add = (set, v) => { const s = v == null ? '' : String(v).trim(); if (s) set.add(s); };
+    add(names, r.name); add(cards, r.card_no); add(phones, r.phone);
+    const rows = db.prepare(`SELECT id, ts, detail, diff FROM audit_log
+        WHERE action IN ('Нов читател', 'Редакция на читател') AND detail LIKE 'карта %'`).all();
+    const accepted = new Set();
+    let firstSeen = r.registered_at ? String(r.registered_at).slice(0, 10) : '';
+    /* ПРОЗОРЕЦ ЗА ВСЯКА КАРТА (преглед на кръга, v2.4.71). Карта, от която
+       читателят е минал на друга, после се дава на ДРУГ читател — редовете
+       „(карта 2)“ след смяната са негови. Затова всяка карта носи от кога е
+       станала на този читател (cardFrom — денят на смяната към нея) и до кога
+       (cardUntil — денят на смяната от нея); текущата карта няма край. */
+    const cardFrom = new Map(), cardUntil = new Map();
+    const current = String(r.card_no == null ? '' : r.card_no).trim();
+    for (let round = 0; round < 10; round++) {
+      let grew = false;
+      for (const row of rows) {
+        if (accepted.has(row.id)) continue;
+        const m = /^карта (.*?) — (.+)$/.exec(String(row.detail || ''));
+        if (!m) continue;
+        /* „Нов читател“ може да носи и „; ВНИМАНИЕ: ЕГН …“ след името (Ч11) —
+           името свършва на първото „; “. */
+        const card = m[1].trim(), nm = m[2].split('; ')[0].trim();
+        let diff = [];
+        try { diff = row.diff ? JSON.parse(row.diff) : []; } catch (e) { diff = []; }
+        if (!Array.isArray(diff)) diff = [];
+        const f = (field) => diff.find(d => d && d.field === field) || null;
+        const dName = f('name'), dCard = f('card_no'), dPhone = f('phone');
+        const cardOurs = card ? cards.has(card) || (dCard && [dCard.before, dCard.after].some(v => cards.has(String(v == null ? '' : v).trim())))
+          : cards.size === 0;
+        const nameOurs = names.has(nm) || (dName && [dName.before, dName.after].some(v => names.has(String(v == null ? '' : v).trim())));
+        if (!cardOurs || !nameOurs) continue;
+        accepted.add(row.id);
+        const before = names.size + cards.size + phones.size;
+        add(names, nm); add(cards, card);
+        if (dName) { add(names, dName.before); add(names, dName.after); }
+        if (dCard) { add(cards, dCard.before); add(cards, dCard.after); }
+        if (dPhone) { add(phones, dPhone.before); add(phones, dPhone.after); }
+        const day = String(row.ts || '').slice(0, 10);
+        if (dCard && day) {
+          const was = String(dCard.before == null ? '' : dCard.before).trim();
+          const now = String(dCard.after == null ? '' : dCard.after).trim();
+          if (was && was !== current && !(cardUntil.get(was) > day)) cardUntil.set(was, day);
+          if (now && !(cardFrom.get(now) < day)) cardFrom.set(now, day);
+        }
+        if (day && (!firstSeen || day < firstSeen)) firstSeen = day;
+        if (names.size + cards.size + phones.size > before) grew = true;
+      }
+      if (!grew) break;
+    }
+    return { names, cards, phones, firstSeen, cardFrom, cardUntil };
+  }
+  /* Цяло име с граница — като mentionsReader, но за НЯКОЕ от имената, и
+     картата след името може да е НЯКОЯ от картите на читателя. */
+  function mentionsIdentity(detail, id) {
+    for (const nm of id.names) {
+      const s = String(detail || '');
+      let from = 0;
+      for (;;) {
+        const at = s.indexOf(nm, from);
+        if (at < 0) break;
+        from = at + 1;
+        const before = at > 0 ? s[at - 1] : '';
+        const after = s[at + nm.length] || '';
+        if (before && NAME_CHAR.test(before)) continue;
+        if (after && NAME_CHAR.test(after)) continue;
+        const card = /^ \(карта ([^)]+)\)/.exec(s.slice(at + nm.length));
+        if (card && id.cards.size && !id.cards.has(card[1].trim())) continue;
+        return true;
+      }
+    }
+    return false;
+  }
+  /* „(карта N)“ с карта на читателя, в ред отпосле началото на самоличността. */
+  function mentionsCard(detail, ts, id) {
+    if (!id.cards.size) return false;
+    if (id.firstSeen && String(ts || '').slice(0, 10) < id.firstSeen) return false;
+    const re = /\(карта ([^)]+)\)/g;
+    let m;
+    const day = String(ts || '').slice(0, 10);
+    while ((m = re.exec(String(detail || '')))) {
+      const c = m[1].trim();
+      if (!id.cards.has(c)) continue;
+      /* Извън прозореца на картата редът е на друг читател със същата карта. */
+      if (day && id.cardFrom && id.cardFrom.has(c) && day < id.cardFrom.get(c)) continue;
+      if (day && id.cardUntil && id.cardUntil.has(c) && day > id.cardUntil.get(c)) continue;
+      return true;
+    }
+    return false;
+  }
+  /* Заменя всяко цяло срещане на някое от имената с ANON_MARK — за редовете,
+     в които името е ЧАСТ от иначе нужен текст (пътят на запазения PDF). */
+  function replaceNames(detail, id) {
+    let s = String(detail || '');
+    const list = [...id.names].sort((a, b) => b.length - a.length); // първо по-дългите
+    for (const nm of list) {
+      let out = '', from = 0;
+      for (;;) {
+        const at = s.indexOf(nm, from);
+        if (at < 0) { out += s.slice(from); break; }
+        const before = at > 0 ? s[at - 1] : '';
+        const after = s[at + nm.length] || '';
+        const whole = !(before && NAME_CHAR.test(before)) && !(after && NAME_CHAR.test(after));
+        out += s.slice(from, at) + (whole ? ANON_MARK : nm);
+        from = at + nm.length;
+      }
+      s = out;
+    }
+    return s;
+  }
+  const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+
   ipcMain.handle('gdpr:forgetReader', (e, arg) =>
     run(() => {
       const db = getDb();
@@ -346,7 +491,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       if (!Number.isFinite(id) || id <= 0) {
         throw new Error('Не е посочен читател. Отворете картона на читателя и повторете действието.');
       }
-      const r = db.prepare('SELECT id, name, card_no FROM readers WHERE id = ?').get(id);
+      const r = db.prepare('SELECT id, name, card_no, phone, registered_at FROM readers WHERE id = ?').get(id);
       if (!r) throw new Error('Такъв читател няма в базата — може вече да е изтрит.');
       if (r.name === ANON_READER_NAME) {
         throw new Error('Това не е читател, а служебният запис, под който се пазят анонимизираните заемания. '
@@ -393,6 +538,9 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       const namesakes = name
         ? db.prepare('SELECT COUNT(*) AS n FROM readers WHERE name = ? AND id != ?').get(name, id).n
         : 0;
+      /* С3: самоличността се събира ПРЕДИ транзакцията — тя трие diff-овете,
+         от които старите имена и карти се четат. */
+      const ident = readerIdentity(db, r);
 
       const tx = db.transaction(() => {
         /* 1) ЗАЕМАНИЯТА — както в gdpr:anonymize, само без условието за срок и
@@ -510,17 +658,25 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         /* 4) ОДИТНАТА СЛЕДА — трите замени от gdpr:anonymize, приложени ред по
               ред само върху редовете, в които стои името на този човек. */
         let auditCleared = 0;
-        if (name) {
-          /* instr само стеснява кандидатите; дали редът наистина е за ТОЗИ
-             читател, решава mentionsReader() — цяло име и същата карта. */
-          const rows = db.prepare(`SELECT id, action, detail FROM audit_log
-             WHERE detail IS NOT NULL AND instr(detail, ?) > 0 AND (${FORGET_ACTIONS_SQL})`).all(name)
-            .filter(row => mentionsReader(row.detail, name, r.card_no));
+        if (ident.names.size || ident.cards.size) {
+          /* С3: всяко име от самоличността (текущото и старите), и „(карта N)“
+             с негова карта. Дали редът наистина е за ТОЗИ читател, решават
+             mentionsIdentity()/mentionsCard() — цяло име и негова карта.
+             „Запазен PDF“ (handlers/print.js) влиза тук за първи път: пътят на
+             файла носи името („Читателски картон — Мария Петрова.pdf“). В него
+             се заменя само името — видът на документа и папката остават, защото
+             следата документира КАКВО е изнесено. */
+          const rows = db.prepare(`SELECT id, ts, action, detail FROM audit_log
+             WHERE detail IS NOT NULL AND ((${FORGET_ACTIONS_SQL}) OR action = 'Запазен PDF')`).all()
+            .filter(row => mentionsIdentity(row.detail, ident)
+              || (row.action !== 'Запазен PDF' && mentionsCard(row.detail, row.ts, ident)));
           const setDetail = db.prepare('UPDATE audit_log SET detail = ?, diff = NULL WHERE id = ?');
           const MONEY = new Set(['Начисление', 'Плащане', 'Изтрит ред от сметката']);
           for (const row of rows) {
             let next;
-            if (LOAN_ACTION_SET.has(row.action)) {
+            if (row.action === 'Запазен PDF') {
+              next = replaceNames(row.detail, ident);
+            } else if (LOAN_ACTION_SET.has(row.action)) {
               next = stripReaderSegment(row.detail);
             } else if (MONEY.has(row.action)) {
               const at = row.detail.indexOf(' — ');
@@ -538,21 +694,58 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         /* Същото правило за цяло име: търсене „Иван Петрова“ е търсене на
            друг човек и не бива да отпада заради заличаването на „Иван Петров“.
            Търсенията не носят карта, затова решава само границата на името. */
+        /* С3: и търсенията в „Читатели“ по ТЕЛЕФОНА (поне 6 цифри, с или без
+           интервали), по КАРТАТА (точно номерът) и по ФАМИЛИЯТА (цяла дума, без
+           значение от главни/малки букви) — по всяко от познатите имена и
+           телефони, не само по текущото. Тези три правила важат само за вида
+           „readers“: „Петрова“, търсено в „Книги“, е автор, не читател. Цялото
+           име се хваща във всеки вид търсене, както досега. Посоката е
+           безопасната — отпада ред от историята на търсенията, не данни. */
         let searchCleared = 0;
-        if (name) {
+        if (ident.names.size) {
           const delSearch = db.prepare('DELETE FROM search_history WHERE id = ?');
-          for (const s of db.prepare("SELECT id, query FROM search_history WHERE instr(COALESCE(query, ''), ?) > 0")
-            .all(name)) {
-            if (mentionsReader(s.query, name, null)) searchCleared += delSearch.run(s.id).changes;
+          const lower = (x) => String(x || '').toLocaleLowerCase('bg');
+          const surnames = new Set([...ident.names].map(n => lower(n.split(/\s+/).filter(Boolean).pop()))
+            .filter(w => w.length >= 3));
+          const phoneDigits = [...ident.phones].map(digitsOf).filter(d => d.length >= 6);
+          for (const s of db.prepare('SELECT id, kind, query FROM search_history').all()) {
+            const q = String(s.query || '').trim();
+            if (!q) continue;
+            let hit = mentionsIdentity(q, { names: ident.names, cards: new Set() });
+            if (!hit && s.kind === 'readers') {
+              const qd = digitsOf(q);
+              if (qd.length >= 6 && qd.length >= q.replace(/[\s()+\-./]/g, '').length
+                && phoneDigits.some(pd => pd.includes(qd) || qd.includes(pd))) hit = true;
+              else if (ident.cards.has(q)) hit = true;
+              else if (q.split(/[\s,;]+/).some(w => surnames.has(lower(w)))) hit = true;
+            }
+            if (hit) searchCleared += delSearch.run(s.id).changes;
           }
         }
 
         const readerCleared = readerGone + loansMoved + accountMoved + eventsCleared + holdsMoved
           + visitsMoved + noticesGone + suggCleared + suggByName + mzsCleared;
         return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled,
-          promoted: promoted.length, holdsActivated: promoted, mzsCleared, mzsSimilar };
+          promoted: promoted.length, holdsActivated: promoted, mzsCleared, mzsSimilar,
+          setAside: setAsideBooks.length };
       });
       const res = tx.immediate();
+      /* ОСВОБОДЕНАТА КНИГА СТИГА ДО САЙТА (v2.4.71, кръг 45, находка М4).
+         (а) Отказът на заделената резервация сменя наличността на документа
+         („заета“ за читателя → свободна или заделена за следващия), а
+         онлайн каталогът (katalog.json) я показваше „заета“ до следващата
+         случайна промяна във фонда — зависимостта scheduleCatalogWrite беше
+         подадена на модула от main.js, но никой не я викаше (сценарият на
+         тестера: чакане 97 s, файлът не се променя).
+         (б) Читателите на сайта виждат книгата недостъпна и не идват за нея.
+         (в) Записът се насрочва СЛЕД транзакцията (промяната вече е в базата) и
+         само ако наистина е имало заделена книга; видът е 'circulation' — същият,
+         който ползват заеманията и резервациите. Незадължителна зависимост:
+         отделните тестове на модула може да я пропуснат. */
+      if (res.setAside && typeof deps.scheduleCatalogWrite === 'function') {
+        try { deps.scheduleCatalogWrite(CIRCULATION); }
+        catch (err) { console.error('Онлайн каталогът не можа да бъде насрочен за запис след заличаването:', err.message); }
+      }
 
       /* Редът в следата — БЕЗ името и БЕЗ номера на картата. Действието, което
          заличава самоличността, не бива да я вписва обратно на последния ред;

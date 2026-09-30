@@ -7,6 +7,7 @@
    защо е така и защо не е FTS5 стои в handlers/chronicle.js (v2.4.61). Тук
    тежи двойно: links:search е търсачката, с която се ЗАКАЧАТ връзките, и
    „%“ в полето върнеше целия фонд като предложение за свързване. */
+const { authorTitleText } = require('../security-utils'); // Ф7 (v2.4.71) — без двойна точка след инициал
 const KRAE_FN_READY = new WeakSet();
 function ensureKraeFunctions(db) {
   if (KRAE_FN_READY.has(db)) return db;
@@ -144,10 +145,10 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         ? (r.act_no != null ? ` (отчислен с акт № ${r.act_no}/${r.act_year})` : ' (отчислен)')
         : '';
       const inv = (r.inv_number == null || r.inv_number === '') ? '' : `инв. № ${r.inv_number} · `;
-      return `${inv}${[r.author, r.title].filter(Boolean).join('. ')}${mark}`;
+      return `${inv}${authorTitleText(r.author, r.title)}${mark}`;
     }
     if (kind === 'статия') {
-      return `${[r.author, r.title].filter(Boolean).join('. ')}${r.year ? ' (' + r.year + ')' : ''}`;
+      return `${authorTitleText(r.author, r.title)}${r.year ? ' (' + r.year + ')' : ''}`;
     }
     if (kind === 'летопис') return `${r.year} — ${r.title}`;
     /* СЪИМЕННИЦИТЕ СЕ РАЗЛИЧАВАТ (v2.4.69, Л10).
@@ -329,10 +330,21 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
           WHERE bglower(a.title) LIKE ? ESCAPE '\\' OR bglower(a.author) LIKE ? ESCAPE '\\'
           ORDER BY a.year DESC, a.title LIMIT 40`).all(like, like).map(r => ({ id: r.id, label: labelOf('статия', r) }));
       }
+      /* ЛЕТОПИСЪТ СЕ НАМИРА И ПО ГОДИНА (v2.4.71, находка Д16 от кръг 45).
+         (а) ДОТУК търсачката „Свързани материали“ търсеше записите в летописа
+         само по заглавие и текст — „1930“ не намираше „1930 — Построена е
+         сградата…“, макар годината да стои първа в етикета, който полето
+         показва. (б) Летописът е хронология и краеведът мисли по години: да
+         свърже персоналия със „събитието от 1930 г.“ е точно питането, което не
+         минаваше. (в) Годината (и датата — „24.05.1922“ се пише и така) влиза в
+         търсенето; подредбата остава по година. */
       if (kind === 'летопис') {
+        const bgDate = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(raw);
+        const iso = bgDate ? bgDate[3] + '-' + bgDate[2].padStart(2, '0') + '-' + bgDate[1].padStart(2, '0') : null;
         return db.prepare(`${ROW_SQL['летопис']}
           WHERE bglower(c.title) LIKE ? ESCAPE '\\' OR bglower(c.body) LIKE ? ESCAPE '\\'
-          ORDER BY c.year DESC LIMIT 40`).all(like, like).map(r => ({ id: r.id, label: labelOf('летопис', r) }));
+             OR bglower(c.year) LIKE ? ESCAPE '\\' OR c.date LIKE ? ESCAPE '\\' OR c.date = ?
+          ORDER BY c.year DESC LIMIT 40`).all(like, like, like, like, iso).map(r => ({ id: r.id, label: labelOf('летопис', r) }));
       }
       if (kind === 'персона') {
         return db.prepare(`${ROW_SQL['персона']}

@@ -112,7 +112,8 @@ async function notifySuggestionReceived(id) {
   if (!reader || !reader.email) return;
   if (!await askConfirm('Да отворя ли писмо до ' + reader.name + ' за пристигналата книга „' + s.title + '“?', { okLabel: 'Отвори писмо' })) return;
   const subject = 'Пристигна предложената от Вас книга';
-  const body = 'Здравейте, ' + reader.name + ',\n\nКнигата „' + (s.author ? s.author + '. ' : '') + s.title +
+  // Кръг 45, Ф7: „Вазов, И.. Под игото“ — същото сглобяване като в инвентарната книга.
+  const body = 'Здравейте, ' + reader.name + ',\n\nКнигата „' + authorTitleText(s.author, s.title) +
     '“, която предложихте, вече е налична в библиотеката.\n\nПоздрави!';
   const res = await window.api.loans.mailto({ email: reader.email, subject, body });
   if (!res.ok) toast(res.error, 'err');

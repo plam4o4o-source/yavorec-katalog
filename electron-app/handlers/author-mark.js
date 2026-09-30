@@ -380,6 +380,8 @@ function detectSeparator(values) {
 
 module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, importers } = deps;
+  /* Незадължителна (v2.4.71, М6) — виж authorMark:fillApply. */
+  const scheduleCatalogWrite = typeof deps.scheduleCatalogWrite === 'function' ? deps.scheduleCatalogWrite : null;
 
   const rowsOf = (db) => db.prepare('SELECT prefix, mark FROM author_table ORDER BY prefix').all();
   /* Разделителят се извежда от авторския знак, а където той е празен — от
@@ -618,6 +620,22 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
       }
     }).immediate();
     logAudit('Авторски знак', 'групово попълнени ' + n + (n === 1 ? ' празен знак' : ' празни знака') + ' по таблицата');
+    /* ГРУПОВОТО ПОПЪЛВАНЕ ОБНОВЯВА И ОНЛАЙН КАТАЛОГА (v2.4.71, кръг 45, М6).
+       (а) Дотук тук нямаше запис на katalog.json. А сигнатурата в каталога (поле
+           `g`) е effectiveCallNumber(): при празна „Сигнатура“ тя е УДК +
+           авторски знак. Групово попълване на стотици знаци сменя адреса на
+           рафта на стотици документи — етикетът вече казва „821.163.2-31 В 14“,
+           а сайтът продължаваше да показва само „821.163.2-31“ (тестерът чака
+           97 s: katalog.json не се пипна) до следващата случайна промяна във фонда.
+       (б) Читателят, дошъл с телефона пред рафта, търси по адреса от сайта;
+           онлайн каталогът не бива да казва друго освен етикета и инвентарната
+           книга (чл. 16, ал. 1 — сигнатурата е реквизит на книгата).
+       (в) Записът се насрочва по бързата пътека (това е промяна в описанието,
+           не циркулация) и само когато наистина е попълнен поне един знак —
+           празно действие не пренаписва многомегабайтния файл. Зависимостта е
+           незадължителна (както в handlers/mzs.js): main.js трябва да я подаде;
+           по-стара обвръзка без нея продължава да работи както досега. */
+    if (n > 0 && scheduleCatalogWrite) scheduleCatalogWrite();
     return n;
   }));
 

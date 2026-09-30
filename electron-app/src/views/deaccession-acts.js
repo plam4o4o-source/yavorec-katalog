@@ -121,10 +121,16 @@ async function actForm(draft, asDraft) {
         </div>
         <div id="actList"></div>
       </fieldset>
+      ${/* ЧЛЕН 1 И ЧЛЕН 3 СА ЗАДЪЛЖИТЕЛНИ ЗА АКТА (v2.4.71, находка И2) — чл. 35:
+            комисия с библиотекар и счетоводител. Отказът е в обработчика
+            (createActCore); тук полетата само се отбелязват като задължителни, за
+            да го научи библиотекарката преди „Утвърди“. Проектът ги оставя
+            незадължителни — той е работен лист. Етикетите са същите като в
+            „Настройки“, откъдето идват предложените имена. */''}
       <div class="grid g3">
-        ${fld('Член на комисия 1', 'committee1', { val: v.committee1 || (s ? s.committee1 || '' : '') })}
+        ${fld('Член на комисия 1 (библиотекар)', 'committee1', { val: v.committee1 || (s ? s.committee1 || '' : ''), req: isDraft ? 0 : 1 })}
         ${fld('Член на комисия 2', 'committee2', { val: v.committee2 || (s ? s.committee2 || '' : '') })}
-        ${fld('Член на комисия 3 (счетоводител)', 'committee3', { val: v.committee3 || (s ? s.committee3 || '' : '') })}
+        ${fld('Член на комисия 3 (счетоводител)', 'committee3', { val: v.committee3 || (s ? s.committee3 || '' : ''), req: isDraft ? 0 : 1 })}
       </div>
     </form>`,
     isDraft
@@ -320,7 +326,7 @@ function drawActList() {
   el.innerHTML = `<div class="wrap" style="max-height:220px"><table class="ledger"><thead><tr>
     <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th></th></tr></thead><tbody>
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
-    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${actLegacyCopies(l) > 1
+    <td>${esc(authorTitleText(l.author, l.title))}${actLegacyCopies(l) > 1
       ? `<br><span class="badge warn">${actLegacyCopies(l)} екземпляра под един номер</span>
          <button type="button" class="btn sm" onclick="actSplitLine(${n})">Раздели — отчисли само този</button>` : ''}${l.lost
       ? `<br><span class="badge warn">изгубен</span> <span class="hint">${esc(l.lost.reader_name || 'читател')} · ${
@@ -357,7 +363,7 @@ function actHoldLine(h) {
   return `<li><b>${esc(h.reader_name || 'читател')}</b>${h.card_no ? ' · карта № ' + esc(h.card_no) : ''}${
     h.phone ? ' · тел. ' + esc(h.phone) : ' · <span class="hint">без телефон в картона</span>'}
     <div class="hint">чакал${h.status_before === 'заделена' ? 'а (книгата е била ЗАДЕЛЕНА за него)' : 'а'} —
-    инв. № ${esc(String(h.inv_number ?? '—'))} · ${esc([h.author, h.title].filter(Boolean).join('. '))}</div></li>`;
+    инв. № ${esc(String(h.inv_number ?? '—'))} · ${esc(authorTitleText(h.author, h.title))}</div></li>`;
 }
 /* Заемането, закрито от акта по чл. 30, т. 5 — с числата (v2.4.61). На читателя
    се начислява обезщетение за документ, който няма да се върне; това не бива да
@@ -365,7 +371,7 @@ function actHoldLine(h) {
 function actLoanLine(l) {
   return `<li><b>${esc(l.reader_name || 'читател')}</b>${l.card_no ? ' · карта № ' + esc(l.card_no) : ''}${
     l.phone ? ' · тел. ' + esc(l.phone) : ''}
-    <div class="hint">инв. № ${esc(String(l.inv_number ?? '—'))} · ${esc([l.author, l.title].filter(Boolean).join('. '))}
+    <div class="hint">инв. № ${esc(String(l.inv_number ?? '—'))} · ${esc(authorTitleText(l.author, l.title))}
     — заемането е закрито като НЕвърнато${l.deaccession_fine ? ', забава ' + mny(l.deaccession_fine) : ''}${
       l.lost_amount ? ', начислено обезщетение ' + mny(l.lost_amount) : ''}</div></li>`;
 }
@@ -488,6 +494,14 @@ async function approveActDraft() {
   if (!d.date) return toast('Датата на акта е задължителна при утвърждаване.', 'err');
   if (!d.reason_code) return toast('Причината по чл. 30 е задължителна при утвърждаване.', 'err');
   if (!ACT_LIST.length) return toast('Добавете поне един документ в списъка.', 'err');
+  /* Комисията — преди въпроса „Да продължа?“, а не след него (v2.4.71, И2):
+     обработчикът така или иначе отказва акт без член 1 и член 3. */
+  const noCm = [!String(d.committee1 || '').trim() ? 'член 1 (библиотекар)' : '',
+    !String(d.committee3 || '').trim() ? 'член 3 (счетоводител)' : ''].filter(Boolean);
+  if (noCm.length) {
+    return toast('Актът не може да се утвърди без ' + noCm.join(' и ') + ' на комисията (чл. 35). '
+      + 'Впишете ' + (noCm.length === 1 ? 'името' : 'имената') + ' — проектът може да се запише и без тях.', 'err');
+  }
   if (actLegacyBlock()) return;
   const p = PRICHINI.find(x => x.k == d.reason_code);
   // Първо се записва това, което е на екрана — иначе утвърденото е старата снимка.
@@ -533,7 +547,7 @@ async function openAct(id) {
           + ' в ' + esc(tsTime(a.created_at)) + ' ч.' : ''}${
           a.created_by ? ' от ' + esc(a.created_by) : ''}</span>` : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th></tr></thead><tbody>
-    ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc([l.author, l.title].filter(Boolean).join('. '))}</td>
+    ${a.items.map(l => `<tr><td class="num">${l.inv_number}</td><td>${esc(authorTitleText(l.author, l.title))}</td>
     <td class="num">${esc(l.year || '')}</td><td class="num">${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
     <tr style="background:var(--paper3);font-weight:700"><td colspan="3">ОБЩО ${actCount(a.items)}${
       actHasMultiples(a.items) ? ` (${actTitles(a.items.length)})` : ''}</td>
@@ -598,7 +612,7 @@ async function printActDoc(id) {
     <table><thead><tr><th>№</th><th>Инв. №</th><th>Автор, заглавие, том</th><th>Година</th><th>УДК</th>${
       showQty ? '<th>Бр.</th>' : ''}<th>Стойност, € / лв.</th></tr></thead><tbody>
     ${a.items.map((l, n) => `<tr><td>${n + 1}</td><td>${l.inv_number}</td>
-    <td>${esc([l.author, l.title].filter(Boolean).join('. '))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
+    <td>${esc(authorTitleText(l.author, l.title))}${l.volume ? ', т. ' + esc(l.volume) : ''}</td>
     <td>${esc(l.year || '')}</td><td>${esc(l.udk || '')}</td>${
       showQty ? `<td>${actQty(l)}</td>` : ''}<td>${actQtyMark(l)}${mny(l.price)}</td></tr>`).join('')}
     <tr><td colspan="5"><b>ОБЩО${showQty ? '' : ' ' + actDocs(count)}</b></td>${
@@ -617,7 +631,7 @@ async function printActDoc(id) {
           + (a.created_at ? ' · ' + bg(tsDay(a.created_at)) + ' г.' : '') : ''}</div>
     ${/* Комисията — всеки член на своя линия, с имената от акта (v2.4.69, Е5). */''}
     ${commissionSig([a.committee1, a.committee2, a.committee3])}
-    ${ssig(['УТВЪРДИЛ, ' + esc(s.director_role || 'Ръководител') + ': …………………'])}</div>`);
+    ${ssig([approverLine(s.director_role || 'Ръководител', a.director)])}</div>`);
 }
 window.printActDoc = printActDoc;
 /* Анулирането вече иска ОСНОВАНИЕ и го казва ясно (v2.4.56): актът не изчезва.
