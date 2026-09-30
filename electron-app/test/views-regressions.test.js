@@ -277,6 +277,10 @@ test('printLoanSlip() отпечатва разписка с читателя, �
 
   const printed = [];
   window.doPrint = (html) => printed.push(html);
+  /* Резервният път дозарежда ИЗБРАНИЯ читател (CIRC.readerId). От v2.4.75 без
+     избран читател заявката readers.get(null) не се прави — истинският
+     обработчик така или иначе не връща никого за null. */
+  window.eval('CIRC.readerId = 9');
 
   await window.printLoanSlip({ title: "Времеубежище", inv_number: 17, date_due: '2026-09-01' });
 
