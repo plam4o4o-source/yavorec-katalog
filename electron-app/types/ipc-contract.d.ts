@@ -141,7 +141,8 @@ interface IpcContract {
       /** При дете с поръчител — телефонът на поръчителя. */
       phone: string | null; email: string | null; category: string | null;
       guarantor_name: string | null; guarantor_relation: string | null; guarantor_phone: string | null;
-      n: number; loans: OverdueRow[]; fine: number; fineAccrued: number; finePaid: number;
+      /** Без daysLate — обработчикът не го смята тук (само loans:overdue). */
+      n: number; loans: Array<Omit<OverdueRow, 'daysLate'>>; fine: number; fineAccrued: number; finePaid: number;
       notice_to: string; notice_via_guarantor: string | null;
     }>;
   };

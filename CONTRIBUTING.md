@@ -165,8 +165,10 @@ element does not have, or passes a function the wrong number of arguments.
   `npm run gen:api-types`; `test/typecheck-v2472.test.js` checks that every
   described channel exists in `preload.js` and that its handler carries the
   contract type. Values read from a form (`formData()`) are cast to the
-  contract type at the call site. The handler's *return value* is not yet
-  checked against `result` — keep the two in step by hand.
+  contract type at the call site — such a cast always compiles, so a field
+  removed from the form is **not** caught; only object literals are fully
+  checked. The handler's *return value* is not yet checked against `result`
+  either — keep the two in step by hand.
 
 **A new capability or a fix without a new or updated test is not accepted.**
 The convention is one test file per handler — `handlers/x.js` →

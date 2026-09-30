@@ -61,7 +61,13 @@ function contractChannels() {
   if (!fs.existsSync(CONTRACT)) return new Set();
   const src = fs.readFileSync(CONTRACT, 'utf8');
   const body = src.slice(src.indexOf('interface IpcContract {'));
-  return new Set([...body.matchAll(/^\s{2}'([A-Za-z]+:[A-Za-z]+)':\s*\{/gm)].map(m => m[1]));
+  const keys = [...body.matchAll(/^\s{2}'([A-Za-z]+:[A-Za-z]+)':\s*\{/gm)].map(m => m[1]);
+  /* Ключ с друг отстъп тихо би останал InvLibInvoke — затова всеки ред, който
+     започва като ключ на канал, трябва да е хванат по-горе. */
+  const loose = [...body.matchAll(/^\s*'([A-Za-z]+:[A-Za-z]+)'\s*:/gm)].map(m => m[1]);
+  const missed = loose.filter(k => !keys.includes(k));
+  if (missed.length) throw new Error('types/ipc-contract.d.ts: ключът трябва да е с отстъп от два интервала: ' + missed.join(', '));
+  return new Set(keys);
 }
 
 function render() {

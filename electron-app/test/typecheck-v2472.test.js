@@ -34,6 +34,7 @@ test.after(() => {
 
 const { contractChannels, render } = require('../scripts/gen-api-types');
 const CHANNELS = [...contractChannels()];
+const CONTRACT_SRC = fs.readFileSync(path.join(APP_DIR, 'types', 'ipc-contract.d.ts'), 'utf8');
 
 test('всеки канал от договора е в preload.js и е изложен с точния си подпис', () => {
   assert.ok(CHANNELS.length >= 38, 'договорът описва четирите модула: ' + CHANNELS.length);
@@ -52,8 +53,12 @@ test('обработчикът на всеки описан канал носи 
     const at = src.indexOf("ipcMain.handle('" + ch + "',");
     assert.ok(at >= 0, ch + ': обработчикът не е в четирите модула');
     const head = src.slice(at, src.indexOf('=>', at));
-    /* Канал без аргументи няма какво да описва — `() =>`. */
-    if (/,\s*\(\)\s*$/.test(head)) continue;
+    /* Канал без аргументи няма какво да описва — `() =>`; но тогава и
+       договорът трябва да казва `args: []`, иначе аргументът се губи. */
+    if (/,\s*\(\)\s*$/.test(head)) {
+      assert.match(CONTRACT_SRC, new RegExp("'" + ch + "': \\{\\s*args: \\[\\];"), ch + ': обработчикът е `() =>`, а договорът чака аргументи');
+      continue;
+    }
     assert.ok(head.includes("IpcArg<'" + ch + "'"), ch + ': параметърът не е описан с договора:\n' + head);
     /* И всеки следващ позиционен аргумент (revoke → опциите, get → preview). */
     const params = head.match(/\(([^()]*)\)\s*$/)[1].split(/,(?![^{]*\})/);
@@ -91,7 +96,8 @@ test('на екрана: грешно, липсващо или излишно п
     /* 3 */ "async function pMissing() { await window.api.loans.checkout({ reader_id: 1, book_id: 2 }); }",
     /* 4 */ "async function pExtra() { await window.api.account.pay({ reader_id: 1, amount: 2, sum: 2 }); }",
     /* 5 */ "async function pResult() { const a = await call(window.api.account.get(1)); if (a) a.balanse.toFixed(2); }",
-    /* 6 */ "async function pMode() { await window.api.inventorySessions.close({ sessionId: 1, mode: 'пълна' }); }"
+    /* 6 */ "async function pMode() { await window.api.inventorySessions.close({ sessionId: 1, mode: 'пълна' }); }",
+    /* 7 */ "async function pLetter() { const d = await call(window.api.loans.overdueByReader()); if (d) d[0].loans[0].daysLate.toFixed(0); }"
   ].join('\n'));
   assert.equal(r.others.length, 0, 'самите изгледи минават чисто:\n' + r.out);
   assert.deepEqual(onLine(r.probe, 1), [], 'вярното извикване не бива да е грешка');
@@ -99,7 +105,9 @@ test('на екрана: грешно, липсващо или излишно п
   assert.ok(onLine(r.probe, 3).some(l => /date_out/.test(l)), 'липсващата дата на заемане:\n' + r.out);
   assert.ok(onLine(r.probe, 4).some(l => /sum/.test(l)), 'излишното поле:\n' + r.out);
   assert.ok(onLine(r.probe, 5).some(l => /balanse/.test(l)), 'грешното поле в отговора:\n' + r.out);
-  assert.ok(onLine(r.probe, 6).length > 0, 'непознатият вид инвентаризация:\n' + r.out);
+  assert.ok(onLine(r.probe, 6).some(l => /пълна/.test(l)), 'непознатият вид инвентаризация:\n' + r.out);
+  /* Писмото по чл. 43 не получава daysLate от обработчика — договорът не го обещава. */
+  assert.ok(onLine(r.probe, 7).some(l => /daysLate/.test(l)), 'daysLate в писмото:\n' + r.out);
 });
 
 test('в обработчика: поле, което договорът не познава, е грешка; вярното не е', () => {
@@ -132,13 +140,20 @@ test('сметка, читалня и предложение за изгубен
       assert.equal(p.ok, false, 'плащане с дата ' + bad);
     }
     assert.equal(lines(), 0, 'в касовия дневник не влиза ред с невалидна дата');
-    assert.equal((await app.invoke('account:pay', { reader_id: r, amount: 2 })).ok, true, 'празна дата = днес, както досега');
+    assert.equal((await app.invoke('account:pay', { reader_id: r, amount: 2 })).ok, true, 'без дата = днес, както досега');
+    assert.equal((await app.invoke('account:pay', { reader_id: r, amount: 1, date: '' })).ok, true, 'празна дата = днес');
+    assert.equal((await app.invoke('account:charge', { reader_id: r, type: 'обезщетение', amount: 3, date: '' })).ok, true);
+    assert.equal((await app.invoke('account:charge', { reader_id: r, type: 'обезщетение', amount: 3, date: '2026-02-27' })).ok, true);
+    assert.deepEqual(db.prepare('SELECT date FROM account_lines WHERE reader_id = ? ORDER BY id').all(r).map(x => x.date),
+      [require('../local-date').localDate(), require('../local-date').localDate(), require('../local-date').localDate(), '2026-02-27']);
 
     const events = () => db.prepare("SELECT COUNT(*) AS n FROM events WHERE kind = 'читалня'").get().n;
     const e0 = events();
     assert.equal((await app.invoke('events:localuse', { date: '2026-02-30' })).ok, false);
     assert.equal(events(), e0);
     assert.equal((await app.invoke('events:localuse', {})).ok, true);
+    assert.equal((await app.invoke('events:localuse', { date: '' })).ok, true);
+    assert.equal(events(), e0 + 2);
 
     const cat = db.prepare("SELECT id FROM categories WHERE name = 'книга'").get().id;
     const b = db.prepare("INSERT INTO books (inv_number, title, status, category_id, register_date, price) VALUES (74720, 'Изгубена', 'наличен', ?, '2026-01-01', 5)").run(cat).lastInsertRowid;

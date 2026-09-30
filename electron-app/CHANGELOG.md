@@ -11,6 +11,72 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.72
+
+**BG:** **По-строга проверка на кода и описан договор между екраните и базата.**
+Изданието е вътрешно — работата на гишето, сметката, отчисляването и
+инвентаризацията не се променя, освен че четири места вече отказват невалидна дата
+(виж по-долу). Версията на базата не се вдига.
+
+**Проверката на типовете хваща повече.** CI вече спира и при неизползвана
+променлива, при функция, която връща стойност само в някои случаи, при `case`, който
+пропада в следващия, и при `this` с неизвестен тип. Намереното при включването —
+осем неизползвани стойности и четири функции без изричен край — е почистено;
+поведението не се променя.
+
+**Договорът екран ↔ обработчик.** Нов `types/ipc-contract.d.ts` описва
+аргументите и отговора на 38 канала — заемания и връщане, изгубени документи,
+читателска сметка, актове за отчисляване и проектите им, сесии за инвентаризация.
+Екранът вижда точния подпис на метода, а обработчикът описва параметъра си със
+същия тип. Така поле, което екранът не праща, поле с друго име в обработчика,
+липсваща задължителна стойност (например датата на заемане) или непознат вид
+инвентаризация стават грешка при проверката, а не находка при следващия пълен тест.
+
+**Невалидна дата вече се отказва** там, където описването показа, че не се
+проверява:
+
+- **начисление и плащане в читателската сметка** — дотук „2026-13-01“ влизаше в
+  касовия дневник и падаше извън всяка година в справката за приходите;
+- **ползване в читалня** — същото в месечната статистика;
+- **предложението за обезщетение на изгубен документ** — невалидна дата тихо
+  ставаше днешната, а „Изгубена“ после отказваше същата дата.
+
+Празна дата значи „днес“, както досега.
+
+**Проверено:** `npm run test:all` — и 7-те проверки минават: проверката на типовете (главен процес, изгледи, описанието на window.api), **2 399 теста в UTC и 2 399 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. Нов `test/typecheck-v2472.test.js`: всеки описан канал е в preload.js с точния си подпис, обработчикът му носи типа от договора (и за втория аргумент), грешно, липсващо или излишно поле на екрана и непознато поле в обработчика са грешки, а вярното извикване не е; четирите проверки на датата — през истинския `main.js`. Независимият преглед на кода намери едно място, където договорът обещаваше повече от обработчика — „дни забава“ по заеманията в писмото по чл. 43, които този канал не смята; описанието е поправено и пробата го пази. Мутационна проверка — **11 мутации, всички уловени** (махната проверка на датата ×4, махнато описание на параметър ×2, отслабен или сгрешен договор ×5; контролната минава).
+
+**EN:** **Stricter code checks and a described contract between the screens and the
+database.** This is an internal release — the desk, the account, deaccession and
+inventory work as before, except that four places now refuse an invalid date (see
+below). The database version is not raised.
+
+**The type check catches more.** CI now also fails on an unused variable, a
+function that returns a value on only some paths, a `case` that falls through, and
+`this` of unknown type. What turned up when these were switched on — eight unused
+variables and four functions without an explicit end — is cleaned up; behaviour is
+unchanged.
+
+**The screen ↔ handler contract.** A new `types/ipc-contract.d.ts` describes the
+arguments and the result of 38 channels — loans and returns, lost items, the reader
+account, deaccession acts and their drafts, inventory sessions. The screen sees the
+exact method signature, and the handler describes its parameter with the same type.
+A field the screen does not send, a field the handler expects under another name, a
+missing required value (such as the loan date) or an unknown inventory mode is now a
+type error, not a finding in the next full test.
+
+**An invalid date is now refused** where describing the channels showed it was not
+checked:
+
+- **charges and payments on the reader account** — until now "2026-13-01" entered
+  the cash journal and fell outside every year in the income report;
+- **reading-room use** — the same in the monthly statistics;
+- **the compensation quote for a lost item** — an invalid date silently became
+  today, while "Lost" then refused the same date.
+
+An empty date still means "today".
+
+**Verified:** `npm run test:all` — all 7 checks pass: type checking (main process, views, the window.api description), **2,399 tests in UTC and 2,399 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. New `test/typecheck-v2472.test.js`: every described channel is in preload.js with its exact signature, its handler carries the contract type (the second argument too), a wrong, missing or extra field on the screen and an unknown field in the handler are errors while the correct call is not; the four date checks run through the real `main.js`. The independent code review found one place where the contract promised more than the handler — "days late" per loan in the Art. 43 letter, which that channel does not compute; the description is fixed and a probe pins it. Mutation testing — **11 mutants, all killed** (a removed date check ×4, a removed parameter description ×2, a weakened or wrong contract ×5; the control passes).
+
 ## v2.4.71
 
 **BG:** **Втори пълен тест на всички модули и всичките 87 находки от него.** Седем
