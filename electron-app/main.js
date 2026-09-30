@@ -2836,6 +2836,7 @@ function catalogJsonText(payload) {
    Товарът е няколко десетки мегабайта в паметта при пълен фонд, затова
    scheduleCatalogWrite() го пуска веднага щом се появи промяна: от този момент
    той е излишен и само държи памет до следващото сглобяване. */
+/** @type {{ db: unknown, stamp: string | null, payload: ReturnType<typeof buildCatalogPayload> | null }} */
 const CATALOG_PAYLOAD_CACHE = { db: null, stamp: null, payload: null };
 function catalogDataStamp() {
   const n = db.prepare('SELECT total_changes() AS n').get().n;

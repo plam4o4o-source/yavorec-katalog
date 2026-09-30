@@ -149,6 +149,15 @@ element does not have, or passes a function the wrong number of arguments.
 - Where TypeScript cannot know the element type, say it with a JSDoc cast —
   `/** @type {HTMLInputElement} */ (document.querySelector('[name=x]'))` —
   rather than changing the code.
+- **`null` and `undefined` are their own types** (`strictNullChecks`, both
+  projects, since v2.4.75). A channel's answer is `{ ok: true, data }` or
+  `{ ok: false, error }` — after `if (!res.ok) return …` the data is there;
+  `call()` returns `T | null`; a nullable column is `| null`. Check before you
+  read. When a value cannot be null for a reason TypeScript does not see (a
+  check in another function, a regex group that always matches), say so with a
+  cast and a comment — `/** @type {number} */ (x)   // проверено горе` — never
+  with a blanket `any`. `.filter()` does not narrow in JSDoc; `flatMap(x =>
+  x.y ? [{ ...x, y: x.y }] : [])` does.
 - CI also fails on unused local variables, a function that returns a value on
   only some paths, a `switch` case that falls through, and `this` of unknown
   type (`noUnusedLocals`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,

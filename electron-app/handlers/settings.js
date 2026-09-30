@@ -191,7 +191,8 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   ipcMain.handle('settings:updateLabelFormat', /** @param {unknown} e @param {IpcArg<'settings:updateLabelFormat'>} o */ (e, o) =>
     run(() => {
       o = Object.assign({}, o || {});
-      const has = (k) => o[k] !== undefined && o[k] !== null && String(o[k]).trim() !== '';
+      // o вече е обект (Object.assign горе); tsc не пренася стесняването в стрелката.
+      const has = (k) => { const v = /** @type {SettingsLabelFormatInput} */ (o)[k]; return v !== undefined && v !== null && String(v).trim() !== ''; };
       // Стар извикващ (две числа) → четирите нови от тях.
       if (!has('lbl_mt') && has('lbl_margin')) o.lbl_mt = o.lbl_margin;
       if (!has('lbl_ml') && has('lbl_margin')) o.lbl_ml = o.lbl_margin;

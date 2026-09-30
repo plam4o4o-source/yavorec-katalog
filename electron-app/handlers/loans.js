@@ -1245,7 +1245,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       if (date != null && date !== '' && !isValidIsoDate(date)) {
         throw new Error('Датата (' + date + ') е невалидна.');
       }
-      if (!LOST_RESOLUTIONS.includes(resolution)) {
+      if (!resolution || !LOST_RESOLUTIONS.includes(resolution)) {
         throw new Error('Изберете как се урежда случаят: ' + LOST_RESOLUTIONS.join(', ') + '.');
       }
       const db = getDb();

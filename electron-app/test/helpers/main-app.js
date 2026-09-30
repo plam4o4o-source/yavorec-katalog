@@ -40,7 +40,8 @@ const UPDATER_ID = require.resolve('electron-updater');
 const MAIN_ID = require.resolve('../../main.js');
 
 function stubModule(id, exports) {
-  const m = new Module(id, null);
+  // null = „без родител“ (m.parent остава null); описанието на node допуска само undefined.
+  const m = new Module(id, /** @type {undefined} */ (/** @type {unknown} */ (null)));
   m.filename = id;
   m.loaded = true;
   m.exports = exports;

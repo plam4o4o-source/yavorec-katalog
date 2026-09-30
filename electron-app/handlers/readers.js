@@ -231,7 +231,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         params.push(ftsQuery(query), q, q);
       }
       if (!page || typeof page !== 'object') {
-        const cap = Number.isFinite(limit) && limit > 0 ? ' LIMIT ' + Math.min(Math.floor(limit), 500) : '';
+        const cap = limit != null && Number.isFinite(limit) && limit > 0 ? ' LIMIT ' + Math.min(Math.floor(limit), 500) : '';
         const W = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
         return maskReaderRows(db.prepare(`${READER_LIST_SELECT} ${W} ORDER BY r.name, r.id${cap}`).all(...params));
       }

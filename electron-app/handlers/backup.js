@@ -1495,7 +1495,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       const ageDays = newest ? (Date.now() - newest.mtime) / 86400000 : null;
       // „По-старо от 2 дни“ е прагът от заданието: библиотека работи и събота,
       // тоест копие отпреди повече от два дни вече значи пропуснат работен ден.
-      const stale = !newest || ageDays > 2;
+      const stale = ageDays === null || ageDays > 2;   // ageDays е null точно когато няма копие
 
       /* Втората папка: има ли зададена, стигна ли дотам последното копие и ако
          не — защо. Ако не е зададена, това НЕ е грешка (програмата работи както

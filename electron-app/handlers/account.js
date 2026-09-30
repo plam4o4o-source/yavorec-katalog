@@ -286,8 +286,9 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
              („… по инв. № N — …“), читателя, датите и достатъчната сума. Ако не се
              намери — редът пак се изтрива, но това се КАЗВА (на екрана и в
              следата), за да не остане тихо разминаване. */
-      /** @type {{ loan_id: number, inv_number: any, title: string, before: number, after: number } | null} */
-      let loanFix = null;
+      // Типът е на стойността, не на декларацията: присвояването е в транзакцията
+      // (стрелка) и tsc иначе смята loanFix за вечно null след нея.
+      let loanFix = /** @type {{ loan_id: number, inv_number: any, title: string, before: number, after: number } | null} */ (null);
       let loanMiss = false;
       const tx = db.transaction(() => {
         if (l.kind === 'начисление' && l.type === LATE_FEE_CHARGE_TYPE) {

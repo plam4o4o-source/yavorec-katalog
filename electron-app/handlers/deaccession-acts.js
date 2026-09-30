@@ -555,7 +555,8 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
         throw new Error('Актът няма нито един документ. Чл. 35, ал. 2 изисква списък на отчислените '
           + 'екземпляри, а номерът на акта се заема завинаги — добавете поне един документ в списъка.');
       }
-      const no = parseRegisterNo(act.no, 'Акт №');
+      // Без allowEmpty празният номер хвърля — null тук не се връща.
+      const no = /** @type {number} */ (parseRegisterNo(act.no, 'Акт №'));
       const year = yearOf(act.date);
       const tx = db.transaction(() => {
         /* Номерът на акта се предлага с MAX(no)+1 при ОТВАРЯНЕ на формата, а

@@ -77,6 +77,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
          причина, за да се въведе на ръка. Празните редове и редовете, започващи
          с „#“ (заглавният ред на списъка от телефона — датата на започване), не
          са кодове и се подминават. */
+      /** @type {IpcData<'inventorySessions:importScans'>} */
       const res = { added: 0, duplicates: 0, unknown: [], skipped: [], malformed: [], lost: [] };
       const cleaned = [];
       for (const raw of (codes || [])) {
