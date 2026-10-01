@@ -42,6 +42,10 @@ const T = E.today();
 const Y = T.slice(0, 4);
 const Y1 = String(Number(Y) - 1);
 const M = T.slice(0, 7); // текущият месец — на него се отваря Дневникът
+/* Миналият месец — изцяло минал. Л1 пише дни 1–6: в текущия месец в първите
+   дни на месеца част от тях още не са настъпили и Дневникът (правилно) ги
+   отказва — тестът падаше всеки месец от 1-во до 5-о число (01.10.2026). */
+const PM = (() => { const [y, m] = M.split('-').map(Number); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); })();
 
 const ok = (r, what) => { assert.ok(r && r.ok, what + ': ' + (r && r.error)); return r.data; };
 const bad = (r, what) => { assert.ok(r && r.ok === false, what + ' — прието е, а не биваше'); return r.error; };
@@ -65,10 +69,16 @@ test.after(() => { if (h) h.stop(); });
 const hoursCell = (date) => `.dnvTable input[data-date="${date}"][data-field="a_hours"]`;
 const aHours = (date) => (q('SELECT a_hours FROM dnevnik_days WHERE date = ?', date) || {}).a_hours;
 async function typeCell(sel, v) { h.type(sel, v); await h.settle(); }
+/* Дневникът на даден месец („ГГГГ-ММ“) — изборът на месец е в DNEVNIK_YEAR/MONTH. */
+async function openDnevnik(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  h.window.eval('DNEVNIK_YEAR = ' + y + '; DNEVNIK_MONTH = ' + m);
+  await h.go('dnevnik');
+}
 
 test('Л1: „8“, „7,5“ и „7.30“ в „Часове“ влизат в базата като 8:00, 7:30 и 7:30', async () => {
-  await h.go('dnevnik');
-  const d1 = M + '-01', d2 = M + '-02', d3 = M + '-03';
+  await openDnevnik(PM);
+  const d1 = PM + '-01', d2 = PM + '-02', d3 = PM + '-03';
   await typeCell(hoursCell(d1), '8');
   await typeCell(hoursCell(d2), '7,5');
   await typeCell(hoursCell(d3), '7.30');
@@ -80,8 +90,8 @@ test('Л1: „8“, „7,5“ и „7.30“ в „Часове“ влизат �
 });
 
 test('Л1: „6“ върху записани 8:00 записва 6:00, а не 0:00; „осем“ се отказва и клетката се връща', async () => {
-  await h.go('dnevnik');
-  const d = M + '-04';
+  await openDnevnik(PM);
+  const d = PM + '-04';
   await typeCell(hoursCell(d), '8:00');
   assert.equal(aHours(d), 480);
   await typeCell(hoursCell(d), '6');
@@ -108,8 +118,8 @@ test('Л1: „6“ върху записани 8:00 записва 6:00, а не
 });
 
 test('Л1: формата „Подробно за деня“ — „5“ е 5:00, а „пет“ не записва деня и го казва', async () => {
-  await h.go('dnevnik');
-  const d = M + '-05';
+  await openDnevnik(PM);
+  const d = PM + '-05';
   await h.window.dnevnikDayForm(d);
   await h.waitFor(() => h.$('#dnvF'), 'формата');
   h.type('#dnvF [name=a_hours_hhmm]', 'пет');
@@ -126,7 +136,7 @@ test('Л1: формата „Подробно за деня“ — „5“ е 5:
 });
 
 test('Л1: обработчикът отказва повече от 24 часа за един ден', async () => {
-  const err = bad(await h.api.dnevnik.saveDay({ date: M + '-06', a_hours: 1500 }), '1500 мин.');
+  const err = bad(await h.api.dnevnik.saveDay({ date: PM + '-06', a_hours: 1500 }), '1500 мин.');
   assert.match(err, /повече от 24 часа/);
 });
 
@@ -252,7 +262,7 @@ test('Л4: „Движение на фонда“ показва и числот
 
 /* ================================================================= Л5 ==== */
 test('Л5: числото на деня в Дневника отваря подробната форма и „⚡“ за ТОЗИ ден', async () => {
-  await h.go('dnevnik');
+  await openDnevnik(M);
   const d = M + '-01';
   const btn = h.$(`.dnvTable tbody tr:first-child td.dnvDay button`);
   assert.ok(btn, 'числото на деня е бутон');

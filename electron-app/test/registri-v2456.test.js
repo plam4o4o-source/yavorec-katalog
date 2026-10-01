@@ -41,7 +41,7 @@ const path = require('path');
 const {
   APP_DIR, freshDb, fakeIpcMain, runDep, cleanupTmpDirs, buildDom, settle, printed
 } = require('./helpers/audit-fixtures');
-const { BOOK_SELECT, BOOK_FIELDS, normalizeScanCode, yearOf, diffFields } = require('./helpers/prod-values');
+const { BOOK_SELECT, BOOK_FIELDS, normalizeScanCode, diffFields } = require('./helpers/prod-values');
 
 const INV_BOOK_VIEW = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'inv-book.js'), 'utf8');
 const IMPORT_VIEW = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'data-import.js'), 'utf8');
@@ -62,7 +62,10 @@ function setup(modules) {
   const deps = {
     getDb: () => db, run: runDep,
     logAudit: (a, d, diff) => audit.push({ action: a, detail: d, diff }),
-    today: () => '2026-08-04', yearOf,
+    /* Годината идва от СЪЩИЯ ден като today — истинският yearOf() чете
+       часовника и от 01.01.2027 „абонаментът за идната 2027 г.“ спираше да е
+       за идната година (тестът щеше да падне сам). */
+    today: () => '2026-08-04', yearOf: (d) => String(d || '2026-08-04').slice(0, 4),
     BOOK_SELECT, BOOK_FIELDS, LOAN_SELECT: null,
     ftsQuery: require(path.join(APP_DIR, 'search-fts')).ftsQuery,
     cnSortKey, diffFields, normalizeScanCode,
