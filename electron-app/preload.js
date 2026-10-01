@@ -259,6 +259,19 @@ contextBridge.exposeInMainWorld('api', {
        прилага същите правила, но по конкретния читател, независимо от срока. */
     forgetReader: invoke('gdpr:forgetReader')
   },
+  /* Онлайн достъп за читатели (мобилно приложение), v2.4.76. Всички канали
+     отказват без валиден код за активация; status връща само activated:false
+     и екраните не показват нищо. Ключът за качване не се връща никога. */
+  online: {
+    status: invoke('online:status'),
+    activate: invoke('online:activate'),
+    deactivate: invoke('online:deactivate'),
+    updateSettings: invoke('online:updateSettings'),
+    setReaderConsent: invoke('online:setReaderConsent'),
+    issuePin: invoke('online:issuePin'),
+    revokePin: invoke('online:revokePin'),
+    syncNow: invoke('online:syncNow')
+  },
   av: {
     categories: invoke('av:categories'),
     options: invoke('av:options'),

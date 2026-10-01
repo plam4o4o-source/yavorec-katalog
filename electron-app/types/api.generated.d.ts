@@ -328,6 +328,24 @@ interface InvLibApi {
     /** канал „gdpr:forgetReader“ */
     forgetReader: IpcMethod<'gdpr:forgetReader'>;
   };
+  online: {
+    /** канал „online:status“ */
+    status: IpcMethod<'online:status'>;
+    /** канал „online:activate“ */
+    activate: IpcMethod<'online:activate'>;
+    /** канал „online:deactivate“ */
+    deactivate: IpcMethod<'online:deactivate'>;
+    /** канал „online:updateSettings“ */
+    updateSettings: IpcMethod<'online:updateSettings'>;
+    /** канал „online:setReaderConsent“ */
+    setReaderConsent: IpcMethod<'online:setReaderConsent'>;
+    /** канал „online:issuePin“ */
+    issuePin: IpcMethod<'online:issuePin'>;
+    /** канал „online:revokePin“ */
+    revokePin: IpcMethod<'online:revokePin'>;
+    /** канал „online:syncNow“ */
+    syncNow: IpcMethod<'online:syncNow'>;
+  };
   av: {
     /** канал „av:categories“ */
     categories: IpcMethod<'av:categories'>;

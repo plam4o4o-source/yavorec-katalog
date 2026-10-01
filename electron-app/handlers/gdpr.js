@@ -746,6 +746,11 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         try { deps.scheduleCatalogWrite(CIRCULATION); }
         catch (err) { console.error('Онлайн каталогът не можа да бъде насрочен за запис след заличаването:', err.message); }
       }
+      /* v2.4.76: заличеният читател отпада и от снимката за мобилното приложение
+         (само при активиран онлайн достъп; иначе повикването е празно). */
+      if (typeof deps.scheduleOnlineSync === 'function') {
+        try { deps.scheduleOnlineSync(); } catch (err) { console.error('Онлайн достъпът не можа да бъде насрочен след заличаването:', err.message); }
+      }
 
       /* Редът в следата — БЕЗ името и БЕЗ номера на картата. Действието, което
          заличава самоличността, не бива да я вписва обратно на последния ред;

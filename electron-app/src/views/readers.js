@@ -294,9 +294,13 @@ async function exportReadersCsv() {
 window.exportReadersCsv = exportReadersCsv;
 const GUARANTOR_CATS = ['дете до 14 г.']; // категории, за които се иска гарант (родител/настойник)
 async function readerForm(id) {
-  const [r, pdp] = await Promise.all([
+  const [r, pdp, online] = await Promise.all([
     id ? call(window.api.readers.get(id)) : Promise.resolve(null),
-    call(window.api.pdp.status())
+    call(window.api.pdp.status()),
+    /* v2.4.76: блокът „Онлайн достъп“ се показва САМО при активиран онлайн
+       достъп (online:status → activated:true); за всяка друга библиотека
+       формата е същата като досега. */
+    call(window.api.online.status())
   ]);
   const v = /** @type {Partial<NonNullable<typeof r>>} */ (r || { registered_at: today(), category: 'възрастен', status: 'активен' });   // нов читател — подразбиранията
   const needsGuarantor = GUARANTOR_CATS.includes(v.category || '');
@@ -376,7 +380,8 @@ async function readerForm(id) {
         ${fld('Телефон на родител/настойник', 'guarantor_phone', { val: v.guarantor_phone || '' })}
       </div>
     </fieldset>
-    </form>`,
+    </form>
+    ${online && online.activated ? onlineReaderBlockHtml(id, v) : ''}`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      ${id ? `<button class="btn" onclick="readerFormToAccount(${id})">Сметка</button>` : ''}
      ${/* „ПРАВО ДА БЪДА ЗАБРАВЕН“ — ОТ КАРТОНА НА ЧОВЕКА (v2.4.65).
@@ -403,6 +408,85 @@ async function readerForm(id) {
     f.dataset.snapshot = JSON.stringify(formData('#readerF'));
   }
 }
+/* ---------------- Онлайн достъп (мобилно приложение), v2.4.76 ----------------
+   Блокът стои ИЗВЪН <form id="readerF">: съгласието и ПИН-ът се записват веднага
+   през своите канали (online:*), а не със „Запиши“ на картона — така не влизат
+   във formData() на readers:update и в отпечатъка за „променен междувременно“.
+   За нов читател (без id) само се казва, че първо трябва да бъде записан. */
+function onlineReaderBlockHtml(id, v) {
+  if (!id) {
+    return `<fieldset id="onlineFs"><legend>Онлайн достъп (мобилно приложение)</legend>
+      <div class="hint">Съгласието за онлайн достъп и ПИН кодът се задават, след като читателят бъде записан.</div></fieldset>`;
+  }
+  const hasPin = !!v.online_pin_hash;
+  return `<fieldset id="onlineFs"><legend>Онлайн достъп (мобилно приложение)</legend>
+    <div class="hint" style="margin-bottom:6px">Читателят влиза в приложението с номера на картата си и 6-цифрен ПИН
+      и вижда само своите отворени заемания и срока на картата си. Нужно е <b>отделно съгласие</b> (към общото по чл. 47,
+      ал. 2); записва се веднага, без „Запиши“.</div>
+    <div class="grid g2">
+      <label class="chk"><input type="checkbox" id="onlineConsentCb" ${v.online_consent ? 'checked' : ''}
+        onchange="onlineConsentToggle(${id}, this.checked)"><span>Читателят е дал съгласие данните му за заеманията да се показват в мобилното приложение.</span></label>
+      ${fld('Дата на съгласието за онлайн достъп', 'online_consent_date',
+        { val: v.online_consent_date || '', type: 'date', hint: 'празно = днес' })}
+    </div>
+    <div class="hint" id="onlinePinState">${hasPin
+      ? 'ПИН: издаден на ' + bg(v.online_pin_set_at || '') + '. При забравен ПИН издайте нов — старият спира да важи.'
+      : 'ПИН: не е издаден.'}</div>
+    <div class="toolbar" style="margin:6px 0 0">
+      <button type="button" class="btn" onclick="onlineIssuePin(${id})" ${v.online_consent ? '' : 'disabled'}>${hasPin ? 'Издай нов ПИН' : 'Издай ПИН'}</button>
+      ${hasPin ? `<button type="button" class="btn" onclick="onlineRevokePin(${id})">Отмени ПИН</button>` : ''}
+    </div>
+  </fieldset>`;
+}
+/* Пречертава само блока, по прясно прочетен картон — картонът остава отворен. */
+async function onlineReaderBlockRefresh(id) {
+  const r = await call(window.api.readers.get(id));
+  const fs = $('#onlineFs');
+  if (!r || !fs) return;
+  fs.outerHTML = onlineReaderBlockHtml(id, r);
+}
+async function onlineConsentToggle(id, checked) {
+  const gdpr = /** @type {HTMLInputElement|null} */ (document.querySelector('#readerF [name=gdpr_consent]'));
+  if (checked && gdpr && !gdpr.checked) {
+    await onlineReaderBlockRefresh(id);
+    return toast('Първо отбележете и запишете общото съгласие по чл. 47, ал. 2 и ОРЗД.', 'err');
+  }
+  const dateEl = /** @type {HTMLInputElement|null} */ (document.querySelector('#onlineFs [name=online_consent_date]'));
+  const res = await window.api.online.setReaderConsent({ readerId: id, consent: checked, date: dateEl ? dateEl.value : '' });
+  if (!res.ok) { toast(res.error, 'err'); await onlineReaderBlockRefresh(id); return; }
+  toast(checked ? 'Съгласието за онлайн достъп е записано.' : 'Съгласието за онлайн достъп е оттеглено.', 'ok');
+  await onlineReaderBlockRefresh(id);
+}
+window.onlineConsentToggle = onlineConsentToggle;
+/* ПИН-ът се вижда ЕДИН път — в базата остава само хешът. Прозорецът е modal2,
+   защото картонът (modal) остава отворен под него. */
+async function onlineIssuePin(id) {
+  const res = await window.api.online.issuePin({ readerId: id });
+  if (!res.ok) return toast(res.error, 'err');
+  const d = res.data;
+  modal2('ПИН за онлайн достъп', `
+    <div class="note w" style="margin-top:0"><b>Показва се само сега.</b> Програмата пази само защитен отпечатък на ПИН-а —
+      след затваряне на прозореца той не може да бъде показан отново, само издаден нов.</div>
+    <div style="text-align:center;margin:14px 0">
+      <div class="hint">Читателска карта № <b>${esc(d.cardNumber)}</b></div>
+      <div style="font-family:var(--mono);font-size:40px;letter-spacing:8px;font-weight:700;margin:6px 0">${esc(d.pin)}</div>
+    </div>
+    <div class="hint">Дайте ПИН-а на читателя (запишете го на листче или на гърба на картата). В мобилното приложение
+      на читалището той влиза с номера на картата и този ПИН. Данните ще се появят в приложението след следващото
+      изпращане към моста (до няколко минути).</div>`,
+    `<button class="btn pri" onclick="closeModal2()">Затвори</button>`);
+  await onlineReaderBlockRefresh(id);
+}
+window.onlineIssuePin = onlineIssuePin;
+async function onlineRevokePin(id) {
+  if (!await askConfirm('Да се отмени ли ПИН-ът за онлайн достъп? Читателят няма да може да влиза в приложението, докато не бъде издаден нов.',
+    { kind: 'danger', title: 'Онлайн достъп', okLabel: 'Отмени ПИН' })) return;
+  const res = await window.api.online.revokePin({ readerId: id });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('ПИН-ът е отменен.', 'ok');
+  await onlineReaderBlockRefresh(id);
+}
+window.onlineRevokePin = onlineRevokePin;
 /* „Сметка“ от формата за редакция (v2.4.29): прозорецът се ЗАМЕСТВА и незаписаните
    промени изчезваха без въпрос. Пита само ако наистина има промени. */
 async function readerFormToAccount(id) {

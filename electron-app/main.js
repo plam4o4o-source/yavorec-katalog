@@ -559,6 +559,24 @@ function initDb() {
     diff: 'TEXT'
   });
 
+  /* Онлайн достъп за читатели (v2.4.76). Идемпотентно, тук, а не като номерирана
+     миграция: колоните са инертни (никой не ги чете без код за активация), а
+     вдигането на user_version би спряло по-старите станции към обща мрежова база
+     (пазачът напред по версия) заради възможност, която те не ползват. */
+  ensureColumns('readers', {
+    online_consent: 'INTEGER DEFAULT 0',
+    online_consent_date: 'TEXT',
+    online_pin_hash: 'TEXT',
+    online_pin_set_at: 'TEXT'
+  });
+  ensureColumns('settings', {
+    online_bridge_url: 'TEXT',
+    online_upload_key: 'TEXT',
+    online_activation: 'TEXT',
+    online_last_sync: 'TEXT',
+    online_last_error: 'TEXT'
+  });
+
   /* Изявленията от schema.sql, които не минаха при първия опит, се опитват пак —
      сега липсващите колони вече са добавени от блоковете ensureColumns() по-горе.
      Виж дългата бележка при db.exec(schemaSql). */
@@ -1847,6 +1865,9 @@ app.whenReady().then(() => {
      данни не можа да бъде отворена“ при напълно здрава база. */
   try { expireStaleHolds(); } catch (e) { console.error('Изтекли резервации при старт:', e.message); }
   startAutoPushTimer();
+  /* v2.4.76: таймерът за онлайн достъпа на читателите тръгва само при валиден
+     код за активация; иначе няма нито таймер, нито заявка навън. */
+  if (onlineActivated()) startOnlineTimer();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
   /* ДНЕВНОТО АВТОМАТИЧНО КОПИЕ — СЛЕД ПРОЗОРЕЦА (v2.4.64, измерване на старта).
@@ -2045,6 +2066,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopAutoBackupTimer();
+  stopOnlineTimer();
   // Само ако наистина има насрочен (debounced) запис (одит v2.4.27) — иначе всяко
   // затваряне пренаписваше многомегабайтния каталог в (мрежовата) папка и
   // произвеждаше git commit без промяна във фонда.
@@ -2290,7 +2312,11 @@ require('./handlers/readers')(ipcMain, {
   /* v2.4.71 (находка М4): изтриването на читател, което освобождава заделена
      книга, я прави „налична“ — и онлайн каталогът трябва да го разбере (при
      заличаването по ОРЗД същото вече става в handlers/gdpr.js). */
-  scheduleCatalogWrite
+  scheduleCatalogWrite,
+  /* v2.4.76: промяна или изтриване на картон → снимката за мобилното
+     приложение се изпраща наново (само при активиран онлайн достъп). Обвивка,
+     защото модулът се регистрира по-долу. */
+  scheduleOnlineSync: () => scheduleOnlineSync()
 });
 
 /* ---------------- Печат → PDF файл ----------------
@@ -2335,7 +2361,26 @@ require('./handlers/gdpr')(ipcMain, {
   activateHoldOnReturn: (bookId) => activateHoldOnReturn(bookId),
   /* v2.4.69: отказаната при заличаване заделена резервация сменя наличността
      на сайта. */
-  scheduleCatalogWrite
+  scheduleCatalogWrite,
+  /* v2.4.76: заличеният читател отпада от снимката за мобилното приложение при
+     следващото изпращане. Функцията е обявена по-долу (const), затова се подава
+     през обвивка — стига до нея чак при извикване. */
+  scheduleOnlineSync: () => scheduleOnlineSync()
+});
+
+/* ---------------- Онлайн достъп за читатели (мобилно приложение) ----------------
+   Изключено по подразбиране и невидимо за всяка библиотека без код за
+   активация: handlers/online-access.js проверява подписания код при всяко
+   действие и без него нито насрочва, нито праща, нито показва раздел. Снимката
+   на съгласилите се читатели (карта, хеш на ПИН, отворени заемания) се праща
+   към мост по HTTPS — отложено (createDebouncer, като katalog.json) след
+   промяна на гишето или в картона и на половин час по таймер. Регистрира се
+   ПРЕДИ handlers/loans.js и handlers/readers.js ги ползват — но те получават
+   обвивки (виж по-горе/по-долу), така че редът не е капан. */
+const { scheduleOnlineSync, startOnlineTimer, stopOnlineTimer, onlineActivated } = require('./handlers/online-access')(ipcMain, {
+  getDb: () => db, run, logAudit, today, createDebouncer,
+  getVersion: () => app.getVersion(),
+  log: (level, msg) => logToFile(level, msg)
 });
 
 /* ---------------- Календар на библиотеката ----------------
@@ -2404,7 +2449,8 @@ const { LOAN_SELECT, effectiveDaysLate } = require('./handlers/loans')(ipcMain, 
   getDb: () => db, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
   circRule, readerCategory, nextWorkDay, closedDaysBetween,
   firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
-  freeCopies, activeHolds
+  freeCopies, activeHolds,
+  scheduleOnlineSync   // v2.4.76: заемане/връщане/продължаване сменят снимката за мобилното приложение
 });
 
 /* ---------------- Периодика ----------------

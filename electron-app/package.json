@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "2.4.75",
+  "version": "2.4.76",
   "description": "Библиотечна система „InvLib“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -58,6 +58,7 @@
       "pii-crypto.js",
       "search-fts.js",
       "debounce.js",
+      "online-access.js",
       "security-utils.js",
       "db-folder.js",
       "bg-holidays.js",

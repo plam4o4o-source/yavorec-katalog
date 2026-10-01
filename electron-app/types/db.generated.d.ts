@@ -550,6 +550,10 @@ interface DbReaders {
   guarantor_phone: string | null;
   note: string | null;
   alert_note: string | null;
+  online_consent: number | null;
+  online_consent_date: string | null;
+  online_pin_hash: string | null;
+  online_pin_set_at: string | null;
   created_at: string | null;
 }
 /** Ред от таблица `readers_fts`. */
@@ -619,6 +623,11 @@ interface DbSettings {
   gh_branch: string | null;
   limit_books: number | null;
   limit_readers: number | null;
+  online_bridge_url: string | null;
+  online_upload_key: string | null;
+  online_activation: string | null;
+  online_last_sync: string | null;
+  online_last_error: string | null;
   lbl_mt: number | null;
   lbl_ml: number | null;
   lbl_gx: number | null;

@@ -348,6 +348,16 @@ async function renderSetup() {
           ${limits.limitReaders > 0 ? limitBarHtml('Читатели', limits.readers, limits.limitReaders) : ''}
         </div>` : ''}
       <div class="toolbar"><button class="btn pri" onclick="saveLimits()">Запиши ограниченията</button></div>`)}
+    ${/* ОНЛАЙН ДОСТЪП ЗА ЧИТАТЕЛИ (v2.4.76). Свито и почти празно, докато не бъде
+          въведен код за активация: за библиотека без такъв код тук стои само
+          едно поле, а нищо не тръгва навън. Съдържанието го рисува
+          loadOnlineBox() по online:status — картата се пази извън
+          [data-setup-form], защото ключът за качване нарочно не минава през
+          settings:update (не влиза в общата форма, в одитния диференц и в
+          „Пълен износ“). */''}
+    ${setupMore('Онлайн достъп за читатели', '<span id="onlineSum">…</span>', `
+      ${setupHow('Читателите на библиотеката могат да виждат в <b>мобилното приложение на читалището</b> кои документи държат в момента, докога са им срокът и картата. Компютърът на библиотеката <b>не е сървър</b> и не е достъпен отвън: програмата само изпраща по защитена връзка (HTTPS) към моста на сайта <i>снимка</i> на читателите, които са дали <b>отделно, датирано съгласие</b> и имат издаден ПИН — номер на карта, име, категория, срок на картата и отворените заемания. <b>ЕГН, лична карта, адрес, телефон и имейл никога не се изпращат.</b> Възможността се включва само с код за активация от разработчика; без него и без ключ за качване нищо не напуска компютъра.')}
+      <div id="onlineBox">зареждане…</div>`, { id: 'setupOnline' })}
     ${setupMore('Антивирусна защита', 'изключения за Windows Defender — веднъж, при инсталиране', `
       ${setupHow('Докато инсталаторът е без закупен цифров подпис, Windows Defender и други антивирусни може да спират инсталирането или да заключват файловете на програмата — базата данни, резервните копия, папката на каталога. Това е <b>фалшива тревога</b> заради липсващия подпис, не признак за зловреден код. Скриптът добавя папките на програмата в изключенията на Windows Defender и я разрешава през „Защита от рансъмуер“. Записва се като файл, който се изпълнява <b>веднъж, като администратор</b> (десен бутон → „Изпълни като администратор“).')}
       <div class="toolbar">
@@ -421,7 +431,89 @@ async function renderSetup() {
   loadCircRulesBox();
   loadCalendarBox();
   loadAutoBackupBox();
+  loadOnlineBox();
 }
+/* ---------------- Онлайн достъп за читатели (v2.4.76) ----------------
+   Само по online:status. Без активация — едно поле „Код за активация“ и бутон;
+   с активация — данните от кода, адрес на моста, ключ за качване (полето никога
+   не показва записания ключ — празно значи „не го сменяй“), състояние на
+   последното изпращане и бутоните „Изпрати сега“ / „Деактивирай“. */
+async function loadOnlineBox() {
+  const el = $('#onlineBox'); if (!el) return;
+  const st = await call(window.api.online.status());
+  const sum = $('#onlineSum');
+  if (!st || !st.activated) {
+    if (sum) sum.textContent = 'не е активиран';
+    el.innerHTML = `<div class="hint" style="margin:0 0 8px">Не е активиран. Ако читалището има договорен достъп за
+      мобилното приложение, въведете получения код за активация.</div>
+      <div id="onlineActivateF" style="max-width:520px">
+        ${fld('Код за активация', 'token', { hint: 'дълъг низ от разработчика; носи кода на библиотеката и срока' })}
+      </div>
+      <div class="toolbar" style="margin:0"><button type="button" class="btn" onclick="onlineActivate()">Активирай</button></div>`;
+    return;
+  }
+  if (sum) sum.textContent = 'активиран · ' + pl(st.consentingReaders, 'читател със съгласие', 'читатели със съгласие');
+  const status = st.lastError
+    ? `<div class="note w" style="margin:8px 0">⚠ Последното изпращане не успя: ${esc(st.lastError)}</div>`
+    : (st.lastSync ? `<div class="hint" style="margin:8px 0">Последно изпратено: ${esc(fmtIsoDateTime(st.lastSync))}.</div>`
+      : '<div class="hint" style="margin:8px 0">Още не е изпращано.</div>');
+  el.innerHTML = `
+    <div class="note" style="margin:0 0 10px">✅ Активиран за <b>${esc(st.name || st.lib)}</b> (код <code>${esc(st.lib)}</code>),
+      валиден до <b>${esc(bg(st.exp))}</b> г. Читатели със съгласие и ПИН: <b>${st.consentingReaders}</b>${st.pending ? ' · насрочено изпращане' : ''}.</div>
+    <div id="onlineSettingsF">
+      <div class="grid g2">
+        ${fld('Адрес на моста', 'online_bridge_url', { val: st.bridgeUrl || '', hint: 'напр. https://chyavorec.org/api/invlib' })}
+        ${fld('Ключ за качване', 'online_upload_key', { type: 'password',
+          hint: st.hasUploadKey ? 'зададен — попълнете само за смяна' : 'от разработчика; без него нищо не се изпраща' })}
+      </div>
+    </div>
+    ${status}
+    <div class="toolbar" style="margin:0">
+      <button type="button" class="btn pri" onclick="onlineSaveSettings()">Запиши</button>
+      <button type="button" class="btn" onclick="onlineSyncNow()" ${st.bridgeUrl && st.hasUploadKey ? '' : 'disabled'}>Изпрати сега</button>
+      <button type="button" class="btn dgr" onclick="onlineDeactivate()">Деактивирай</button>
+    </div>`;
+}
+window.loadOnlineBox = loadOnlineBox;
+/* ISO момент (UTC, от online_last_sync) → местна дата и час за екрана. */
+function fmtIsoDateTime(iso) {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? String(iso) : fmtDateTime(t);
+}
+async function onlineActivate() {
+  const d = formData('#onlineActivateF');
+  if (!String(d.token || '').trim()) return toast('Въведете кода за активация.', 'err');
+  const res = await window.api.online.activate({ token: String(d.token).trim() });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Онлайн достъпът е активиран за „' + (res.data.name || res.data.lib) + '“. Попълнете адреса на моста и ключа за качване.', 'ok');
+  loadOnlineBox();
+}
+window.onlineActivate = onlineActivate;
+async function onlineSaveSettings() {
+  const d = formData('#onlineSettingsF');
+  const res = await window.api.online.updateSettings({ online_bridge_url: d.online_bridge_url, online_upload_key: d.online_upload_key });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Настройките за онлайн достъп са записани.', 'ok');
+  loadOnlineBox();
+}
+window.onlineSaveSettings = onlineSaveSettings;
+async function onlineSyncNow() {
+  toast('Изпращане към моста…');
+  const res = await window.api.online.syncNow();
+  if (!res.ok) { toast(res.error, 'err'); loadOnlineBox(); return; }
+  toast('Снимката е изпратена към моста.', 'ok');
+  loadOnlineBox();
+}
+window.onlineSyncNow = onlineSyncNow;
+async function onlineDeactivate() {
+  if (!await askConfirm('Да се деактивира ли онлайн достъпът за читатели? Програмата ще спре да изпраща данни към моста; '
+    + 'съгласията и ПИН кодовете на читателите остават в базата.', { kind: 'danger', title: 'Онлайн достъп за читатели', okLabel: 'Деактивирай' })) return;
+  const res = await window.api.online.deactivate();
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Онлайн достъпът е деактивиран.', 'ok');
+  loadOnlineBox();
+}
+window.onlineDeactivate = onlineDeactivate;
 /* ---------------- Състояние на автоматичното резервно копие ----------------
    Дневното копие се криптира само когато защитата на личните данни е
    конфигурирана И отключена (тогава ползва нейната парола). Иначе на диска —

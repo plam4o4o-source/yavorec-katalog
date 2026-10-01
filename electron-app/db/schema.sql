@@ -235,6 +235,14 @@ CREATE TABLE IF NOT EXISTS readers (
   guarantor_phone    TEXT,   -- контакт и отговорност носи гарантът, не детето
   note              TEXT,
   alert_note        TEXT,    -- изскача открояващо се при избор в „Заемане и връщане" (Koha: patron messages)
+  -- Онлайн достъп за читатели (мобилно приложение), v2.4.76. Отделно, датирано
+  -- съгласие към общото по чл. 47, ал. 2 и само ХЕШЪТ на ПИН-а (scrypt) — самият
+  -- ПИН се показва веднъж при издаване. Колоните стоят и в бази без активиран
+  -- онлайн достъп: без код за активация нищо не ги чете и не ги показва.
+  online_consent      INTEGER DEFAULT 0,
+  online_consent_date TEXT,
+  online_pin_hash     TEXT,
+  online_pin_set_at   TEXT,
   created_at        TEXT DEFAULT (datetime('now'))
 );
 
@@ -906,7 +914,15 @@ CREATE TABLE IF NOT EXISTS settings (
   gh_repo           TEXT,
   gh_branch         TEXT DEFAULT 'main',
   limit_books       INTEGER DEFAULT 0,
-  limit_readers     INTEGER DEFAULT 0
+  limit_readers     INTEGER DEFAULT 0,
+  -- Онлайн достъп за читатели (v2.4.76). Изключено по подразбиране: без
+  -- online_activation (подписан код от разработчика) програмата не праща нищо.
+  -- online_upload_key е таен — не минава през settings:update и одитния диференц.
+  online_bridge_url TEXT,
+  online_upload_key TEXT,
+  online_activation TEXT,
+  online_last_sync  TEXT,
+  online_last_error TEXT
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
