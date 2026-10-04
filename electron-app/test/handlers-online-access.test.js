@@ -13,6 +13,15 @@ const { createDebouncer } = require('../debounce');
 const { localDate } = require('../local-date');
 const { verifyPin } = require('../online-access');
 
+/* Тестовете не излизат в мрежата: отложеното изпращане (debounce 30 ms) иначе
+   стига до истинския chyavorec.org с фалшив ключ. Тестовете, на които им трябва
+   fetch, го подменят сами и после връщат тази заглушка. */
+const blockedFetches = [];
+globalThis.fetch = async (url) => {
+  blockedFetches.push(String(url));
+  throw new Error('мрежата е изключена в тестовете');
+};
+
 const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
 function makeToken(payload) {
   const p = Buffer.from(JSON.stringify(payload)).toString('base64url');
