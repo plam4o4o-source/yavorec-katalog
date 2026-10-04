@@ -9,8 +9,12 @@
      1) run() е run<T>(fn: () => T): IpcResult<T> и носи типа на данните;
      2) всеки обработчик в main.js и handlers/ носи
         `@returns {IpcReply<'канал'>}` (асинхронният — IpcAsyncReply<…>) за СВОЯ канал;
-     3) отговор с друг тип, с липсващо или измислено поле е грешка, а верният
-        не е. */
+     3) отговор с друг тип или с липсващо поле е грешка, а верният не е;
+        измислено поле е грешка, когато отговорът е написан буквално
+        (`async () => ({ ok: true, data: {…} })`, полетата до data).
+   Граница: в `run(() => ({…}))` TypeScript не проверява ИЗЛИШНИ полета в
+   обекта, който връща стрелката, а ред от базата (getDb() е any) минава като
+   какъвто и да е тип — затова тук се проверяват типът и липсващите полета. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -27,9 +31,12 @@ const HANDLER_FILES = ['main.js'].concat(fs.readdirSync(path.join(APP_DIR, 'hand
   .filter(f => f.endsWith('.js')).map(f => path.join('handlers', f)));
 
 test('всеки обработчик носи типа на отговора за СВОЯ канал', () => {
-  let n = 0;
+  let n = 0, all = 0;
   for (const f of HANDLER_FILES) {
     const src = fs.readFileSync(path.join(APP_DIR, f), 'utf8');
+    // всяко истинско ipcMain.handle( трябва да попадне в проверката отдолу —
+    // написан другояче (именувана функция, нов ред) обработчик не се изплъзва
+    all += (src.match(/^\s*ipcMain\.handle\(/gm) || []).length;
     for (const m of src.matchAll(/^\s*ipcMain\.handle\('([A-Za-z]+:[A-Za-z]+)',\s*(\/\*\*[\s\S]*?\*\/)?\s*(async\s+)?\(/gm)) {
       const [, ch, doc, asy] = m;
       const want = asy ? "@returns {IpcAsyncReply<'" + ch + "'>}" : "@returns {IpcReply<'" + ch + "'>}";
@@ -38,6 +45,7 @@ test('всеки обработчик носи типа на отговора з
     }
   }
   assert.ok(n >= 250, 'обработчици: ' + n);
+  assert.equal(n, all, 'обработчик, който проверката не разпознава (вижте регулярния израз)');
 });
 
 test('run() носи типа на данните до отговора', () => {
@@ -47,7 +55,7 @@ test('run() носи типа на данните до отговора', () => 
   assert.match(contract, /interface HandlerDeps \{\s*run<T>\(fn: \(\) => T\): IpcResult<T>;/);
 });
 
-test('отговор с друг тип, липсващо или измислено поле е грешка; верният не е', () => {
+test('отговор с друг тип, липсващо или (в буквален отговор) измислено поле е грешка; верният не е', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inv-otgovor77-'));
   tmpDirs.push(dir);
   fs.writeFileSync(path.join(dir, 'probe.js'), [
@@ -57,7 +65,10 @@ test('отговор с друг тип, липсващо или измисле�
     /* 4 */ "/** @returns {IpcAsyncReply<'loans:checkout'>} */ const ok4 = async () => ({ ok: true, data: 1 });",
     /* 5 */ "/** @returns {IpcAsyncReply<'loans:checkout'>} */ const bad5 = async () => ({ ok: true });",
     /* 6 */ "/** @returns {IpcReply<'books:delete'>} */ const ok6 = () => deps.run(() => { /* нищо */ });",
-    'module.exports = { ok1, bad2, bad3, ok4, bad5, ok6 };'
+    /* 7 */ "/** @returns {IpcAsyncReply<'account:get'>} */ const bad7 = async () => ({ ok: true, data: { lines: [], balance: 0, balanse: 0 } });",
+    /* 8 */ "/** @returns {IpcAsyncReply<'backup:now'>} */ const bad8 = async () => ({ ok: true, data: '', encryptd: true });",
+    /* 9 */ "/** @returns {IpcAsyncReply<'backup:now'>} */ const ok9 = async () => ({ ok: true, data: '', encrypted: true });",
+    'module.exports = { ok1, bad2, bad3, ok4, bad5, ok6, bad7, bad8, ok9 };'
   ].join('\n'));
   const base = JSON.parse(fs.readFileSync(path.join(APP_DIR, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
   fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify({
@@ -68,8 +79,10 @@ test('отговор с друг тип, липсващо или измисле�
   const all = ((r.stdout || '') + (r.stderr || '')).split('\n');
   const on = (n) => all.filter(l => l.includes('probe.js(' + n + ','));
   assert.deepEqual(all.filter(l => /error TS/.test(l) && !l.includes('probe.js')), [], 'главният процес минава чисто');
-  for (const n of [1, 4, 6]) assert.deepEqual(on(n), [], 'ред ' + n + ' е верен');
+  for (const n of [1, 4, 6, 9]) assert.deepEqual(on(n), [], 'ред ' + n + ' е верен');
   for (const n of [2, 3, 5]) assert.ok(on(n).length > 0, 'ред ' + n + ' трябва да е грешка:\n' + all.join('\n'));
+  assert.ok(on(7).some(l => /balanse/.test(l)), 'измислено поле в буквалния отговор:\n' + all.join('\n'));
+  assert.ok(on(8).some(l => /encryptd/.test(l)), 'неописано поле до data в обработчика:\n' + all.join('\n'));
 });
 
 test('полетата ДО data са описани: известното минава, непознатото е грешка (и на екрана)', () => {
