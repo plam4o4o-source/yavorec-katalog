@@ -27,6 +27,7 @@ function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -203,7 +204,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
     else if (o.source_kind === 'друго') { o.periodical_id = null; o.book_id = null; }
     return checkAnalytic(o, prev);
   }
-  ipcMain.handle('analytics:list', /** @param {unknown} e @param {IpcArg<'analytics:list'>} [arg] */ (e, { q, year, onlyLocal } = {}) =>
+  ipcMain.handle('analytics:list', /** @param {unknown} e @param {IpcArg<'analytics:list'>} [arg] @returns {IpcReply<'analytics:list'>} */ (e, { q, year, onlyLocal } = {}) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const where = [], args = {};
@@ -290,14 +291,14 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       return db.prepare(sql).all(args);
     })
   );
-  ipcMain.handle('analytics:get', /** @param {unknown} e @param {IpcArg<'analytics:get'>} id */ (e, id) =>
+  ipcMain.handle('analytics:get', /** @param {unknown} e @param {IpcArg<'analytics:get'>} id @returns {IpcReply<'analytics:get'>} */ (e, id) =>
     run(() => getDb().prepare(`${ANALYTIC_SELECT} WHERE a.id = ?`).get(id))
   );
-  ipcMain.handle('analytics:years', () =>
+  ipcMain.handle('analytics:years', /** @returns {IpcReply<'analytics:years'>} */ () =>
     run(() => ensureKraeFunctions(getDb()).prepare(`SELECT year, COUNT(*) AS n FROM analytics
       WHERE year IS NOT NULL AND year <> '' GROUP BY year ORDER BY yearkey(year) DESC, year DESC`).all())
   );
-  ipcMain.handle('analytics:create', /** @param {unknown} e @param {IpcArg<'analytics:create'>} d */ (e, d) =>
+  ipcMain.handle('analytics:create', /** @param {unknown} e @param {IpcArg<'analytics:create'>} d @returns {IpcReply<'analytics:create'>} */ (e, d) =>
     run(() => {
       /* НОВО описание към ОТЧИСЛЕН документ се отказва (v2.4.57).
          Огледалната грижа вече съществува от другата страна: books:delete
@@ -319,7 +320,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('analytics:update', /** @param {unknown} e @param {IpcArg<'analytics:update'>} d */ (e, d) =>
+  ipcMain.handle('analytics:update', /** @param {unknown} e @param {IpcArg<'analytics:update'>} d @returns {IpcReply<'analytics:update'>} */ (e, d) =>
     run(() => {
       /* При редакция се проверява само ПРЕНАСОЧВАНЕТО към нова книга. Ако
          описанието вече сочи отчислен документ, то си остава — виж защо в
@@ -361,7 +362,7 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       logAudit('Аналитично описание', 'редакция: ' + (d.title || '') + dropped);
     })
   );
-  ipcMain.handle('analytics:delete', /** @param {unknown} e @param {IpcArg<'analytics:delete'>} id */ (e, id) =>
+  ipcMain.handle('analytics:delete', /** @param {unknown} e @param {IpcArg<'analytics:delete'>} id @returns {IpcReply<'analytics:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const a = db.prepare('SELECT title FROM analytics WHERE id = ?').get(id);

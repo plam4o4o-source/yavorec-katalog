@@ -9,6 +9,7 @@ const FUND = require('../db/fund-sql');
 const { BAD_DATE } = FUND;
 // Единствен обобщаващ справочен handler: чете acquisitions/deaccession_acts/books
 // за дадена година, не пише нищо. Зависи само от getDb, run и yearOf (по стойност).
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerKdbfHandlers(ipcMain, deps) {
   const { getDb, run, yearOf } = deps;
 
@@ -32,7 +33,7 @@ module.exports = function registerKdbfHandlers(ipcMain, deps) {
   const QTYJ = "COALESCE(inv.quantity, 1)";
   const BOOKS_INV = "FROM books b LEFT JOIN inventory inv ON inv.book_id = b.id";
 
-  ipcMain.handle('kdbf:report', /** @param {unknown} e @param {IpcArg<'kdbf:report'>} year */ (e, year) =>
+  ipcMain.handle('kdbf:report', /** @param {unknown} e @param {IpcArg<'kdbf:report'>} year @returns {IpcReply<'kdbf:report'>} */ (e, year) =>
     run(() => {
       const db = getDb();
       const y = year || yearOf();

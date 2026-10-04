@@ -10,6 +10,7 @@
 // `readConfig`/`writeConfig`/`resolveDbDir`/`resolveDbPath` се подават по
 // референция — дефинирани са в main.js и остават там (ползва ги и
 // initDb() при стартиране, извън обхвата на този модул).
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerDbLocationHandlers(ipcMain, deps) {
   const {
     app, dialog, fs, path,
@@ -86,10 +87,10 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
     }
   }
 
-  ipcMain.handle('dbLocation:get', () =>
+  ipcMain.handle('dbLocation:get', /** @returns {IpcReply<'dbLocation:get'>} */ () =>
     run(() => ({ folder: resolveDbDir(), isDefault: !readConfig().dbFolder, isPackaged: app.isPackaged }))
   );
-  ipcMain.handle('dbLocation:choose', async () => {
+  ipcMain.handle('dbLocation:choose', /** @returns {Promise<IpcResult<IpcData<'dbLocation:choose'>>>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете папка за базата данни (локална или мрежова)',
@@ -261,7 +262,7 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('dbLocation:resetDefault', () =>
+  ipcMain.handle('dbLocation:resetDefault', /** @returns {IpcReply<'dbLocation:resetDefault'>} */ () =>
     run(() => {
       const fromDir = resolveDbDir();
       const who = (typeof deps.getCurrentUser === 'function' ? (deps.getCurrentUser() || '') : '');

@@ -9,6 +9,7 @@
 // обратно към main.js, защото ги ползва и домейнът "Заемания" (все още
 // неизваден) — за да изчислява ефективния срок за заемане/лимит на конкретния
 // читател вместо винаги глобалните настройки.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerCircRulesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -54,8 +55,8 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
     return r ? r.category : null;
   }
 
-  ipcMain.handle('circRules:list', () => run(() => getDb().prepare('SELECT * FROM circulation_rules ORDER BY category').all()));
-  ipcMain.handle('circRules:save', /** @param {unknown} e @param {IpcArg<'circRules:save'>} rule */ (e, rule) =>
+  ipcMain.handle('circRules:list', /** @returns {IpcReply<'circRules:list'>} */ () => run(() => getDb().prepare('SELECT * FROM circulation_rules ORDER BY category').all()));
+  ipcMain.handle('circRules:save', /** @param {unknown} e @param {IpcArg<'circRules:save'>} rule @returns {IpcReply<'circRules:save'>} */ (e, rule) =>
     run(() => {
       const category = String((rule && rule.category) || '').trim();
       if (!category) throw new Error('Категорията е задължителна.');
@@ -95,7 +96,7 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
       logAudit('Правила за обслужване', 'категория „' + category + '“');
     })
   );
-  ipcMain.handle('circRules:delete', /** @param {unknown} e @param {IpcArg<'circRules:delete'>} category */ (e, category) =>
+  ipcMain.handle('circRules:delete', /** @param {unknown} e @param {IpcArg<'circRules:delete'>} category @returns {IpcReply<'circRules:delete'>} */ (e, category) =>
     run(() => {
       const info = getDb().prepare('DELETE FROM circulation_rules WHERE category = ?').run(category);
       if (!info.changes) throw new Error('Няма правило за категория „' + category + '“.');
@@ -104,7 +105,7 @@ module.exports = function registerCircRulesHandlers(ipcMain, deps) {
   );
   // Ефективното правило (с падналите обратно към глобалните стойности) — за да показва
   // интерфейсът реалния срок/лимит на читателя, а не винаги глобалните настройки.
-  ipcMain.handle('circRules:effective', /** @param {unknown} e @param {IpcArg<'circRules:effective'>} category */ (e, category) => run(() => circRule(category)));
+  ipcMain.handle('circRules:effective', /** @param {unknown} e @param {IpcArg<'circRules:effective'>} category @returns {IpcReply<'circRules:effective'>} */ (e, category) => run(() => circRule(category)));
 
   return { circRule, readerCategory };
 };

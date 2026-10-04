@@ -11,6 +11,7 @@ const { ANON_READER_NAME } = require('../security-utils');
    на заделена резервация при заличаване е промяна от гишето (М4, v2.4.71). */
 const CIRCULATION = 'circulation';
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerGdprHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -145,7 +146,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
     `UPDATE housebound_visits SET reader_id = @anon WHERE date < @cutoff AND reader_id != @anon`
   ];
 
-  ipcMain.handle('gdpr:candidates', () =>
+  ipcMain.handle('gdpr:candidates', /** @returns {IpcReply<'gdpr:candidates'>} */ () =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
@@ -168,7 +169,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
       return { years, count, auditCount, searchCount, otherCount, cutoff };
     })
   );
-  ipcMain.handle('gdpr:anonymize', () =>
+  ipcMain.handle('gdpr:anonymize', /** @returns {IpcReply<'gdpr:anonymize'>} */ () =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT anonymize_years FROM settings WHERE id = 1').get() || {};
@@ -484,7 +485,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
   }
   const digitsOf = (v) => String(v == null ? '' : v).replace(/\D/g, '');
 
-  ipcMain.handle('gdpr:forgetReader', /** @param {unknown} e @param {IpcArg<'gdpr:forgetReader'>} arg */ (e, arg) =>
+  ipcMain.handle('gdpr:forgetReader', /** @param {unknown} e @param {IpcArg<'gdpr:forgetReader'>} arg @returns {IpcReply<'gdpr:forgetReader'>} */ (e, arg) =>
     run(() => {
       const db = getDb();
       const id = parseInt(/** @type {Id} */ ((arg && typeof arg === 'object') ? arg.id : arg), 10);

@@ -1,6 +1,7 @@
 // Инвентаризация — извадени от main.js в отделен модул (Фаза 4, стъпка 24).
 // Зависи от pctRequired/naturalLoss (стабилни function declarations в
 // main.js, hoisted) и getDb/run/logAudit.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, pctRequired, naturalLoss, normalizeScanCode } = deps;
   /* ОНЛАЙН КАТАЛОГЪТ СЛЕДВА ФОНДА И ОТТУК (v2.4.69, находка К2).
@@ -83,7 +84,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
      се вземе. */
   const QTY_MISSING = 'COALESCE(inv.quantity, 1)';
 
-  ipcMain.handle('inventorySessions:list', () =>
+  ipcMain.handle('inventorySessions:list', /** @returns {IpcReply<'inventorySessions:list'>} */ () =>
     run(() => getDb().prepare(`
       SELECT s.*,
              /* Приключена проверка показва СНИМКАТА (scanned_final) — същото
@@ -117,7 +118,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       FROM inventory_sessions s ORDER BY s.date DESC
     `).all())
   );
-  ipcMain.handle('inventorySessions:requirement', () =>
+  ipcMain.handle('inventorySessions:requirement', /** @returns {IpcReply<'inventorySessions:requirement'>} */ () =>
     run(() => {
       const db = getDb();
       // Одит v2.3.1 №20: `status != 'отчислен'` в SQL дава NULL (не TRUE) за ред с
@@ -187,7 +188,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
         naturalLoss: naturalLoss(activeDocs, s.free_access_pct) };
     })
   );
-  ipcMain.handle('inventorySessions:start', /** @param {unknown} e @param {IpcArg<'inventorySessions:start'>} s */ (e, s) =>
+  ipcMain.handle('inventorySessions:start', /** @param {unknown} e @param {IpcArg<'inventorySessions:start'>} s @returns {IpcReply<'inventorySessions:start'>} */ (e, s) =>
     run(() => {
       /* Датата се проверява като при акта и партидата (одит v2.4.25). Дотук
          изчистено поле пращаше '' — NOT NULL го приема — сесията се записваше без
@@ -275,7 +276,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
       return tx.immediate();
     })
   );
-  ipcMain.handle('inventorySessions:get', /** @param {unknown} e @param {IpcArg<'inventorySessions:get'>} id @param {IpcArg<'inventorySessions:get', 1>} [opts] */ (e, id, opts) =>
+  ipcMain.handle('inventorySessions:get', /** @param {unknown} e @param {IpcArg<'inventorySessions:get'>} id @param {IpcArg<'inventorySessions:get', 1>} [opts] @returns {IpcReply<'inventorySessions:get'>} */ (e, id, opts) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(id);
@@ -397,7 +398,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
   );
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
   // обяснението на кирилско/латинско разминаване при баркод четец.
-  ipcMain.handle('inventorySessions:scan', /** @param {unknown} e @param {IpcArg<'inventorySessions:scan'>} arg */ (e, { sessionId, code }) =>
+  ipcMain.handle('inventorySessions:scan', /** @param {unknown} e @param {IpcArg<'inventorySessions:scan'>} arg @returns {IpcReply<'inventorySessions:scan'>} */ (e, { sessionId, code }) =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
@@ -475,7 +476,7 @@ module.exports = function registerInventorySessionsHandlers(ipcMain, deps) {
 
      Стойността по подразбиране НЕ е 'full': по-безопасно е приключване без изричен
      избор да не пипа статуси, отколкото да ги презапише масово. */
-  ipcMain.handle('inventorySessions:close', /** @param {unknown} e @param {IpcArg<'inventorySessions:close'>} arg */ (e, arg) =>
+  ipcMain.handle('inventorySessions:close', /** @param {unknown} e @param {IpcArg<'inventorySessions:close'>} arg @returns {IpcReply<'inventorySessions:close'>} */ (e, arg) =>
     run(() => {
       const db = getDb();
       // Приема и голо id (стар подпис), и {sessionId, mode} — за съвместимост.

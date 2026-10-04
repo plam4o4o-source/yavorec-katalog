@@ -33,6 +33,7 @@ function titleKey(s) {
   return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
 
@@ -403,7 +404,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     `).all({ pid: periodicalId });
   }
 
-  ipcMain.handle('periodicals:list', () =>
+  ipcMain.handle('periodicals:list', /** @returns {IpcReply<'periodicals:list'>} */ () =>
     run(() => {
       const db = getDb();
       ensureVolumesTable(db);
@@ -482,7 +483,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
     const dated = years.filter(y => /^\d{4}$/.test(y.year));
     return { year: (dated[0] || years[0]).year, years };
   }
-  ipcMain.handle('periodicals:get', /** @param {unknown} e @param {IpcArg<'periodicals:get'>} id @param {IpcArg<'periodicals:get', 1>} [opts] */ (e, id, opts) =>
+  ipcMain.handle('periodicals:get', /** @param {unknown} e @param {IpcArg<'periodicals:get'>} id @param {IpcArg<'periodicals:get', 1>} [opts] @returns {IpcReply<'periodicals:get'>} */ (e, id, opts) =>
     run(() => {
       const db = getDb();
       const p = db.prepare('SELECT * FROM periodicals WHERE id = ?').get(id);
@@ -504,7 +505,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       return p;
     })
   );
-  ipcMain.handle('periodicals:create', /** @param {unknown} e @param {IpcArg<'periodicals:create'>} p */ (e, p) =>
+  ipcMain.handle('periodicals:create', /** @param {unknown} e @param {IpcArg<'periodicals:create'>} p @returns {IpcReply<'periodicals:create'>} */ (e, p) =>
     run(() => {
       const db = getDb();
       const row = periodicalPayload(p);
@@ -522,7 +523,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('periodicals:update', /** @param {unknown} e @param {IpcArg<'periodicals:update'>} p */ (e, p) =>
+  ipcMain.handle('periodicals:update', /** @param {unknown} e @param {IpcArg<'periodicals:update'>} p @returns {IpcReply<'periodicals:update'>} */ (e, p) =>
     run(() => {
       const db = getDb();
       const row = periodicalPayload(p);
@@ -597,7 +598,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       return { languageVolumes: langVolumes };
     })
   );
-  ipcMain.handle('periodicals:delete', /** @param {unknown} e @param {IpcArg<'periodicals:delete'>} id */ (e, id) =>
+  ipcMain.handle('periodicals:delete', /** @param {unknown} e @param {IpcArg<'periodicals:delete'>} id @returns {IpcReply<'periodicals:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const cnt = db.prepare('SELECT COUNT(*) AS n FROM periodical_issues WHERE periodical_id = ?').get(id).n;
@@ -652,7 +653,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
         + ' — без вписани броеве и без инвентирани годишни комплекти');
     })
   );
-  ipcMain.handle('periodicalIssues:add', /** @param {unknown} e @param {IpcArg<'periodicalIssues:add'>} issue */ (e, issue) =>
+  ipcMain.handle('periodicalIssues:add', /** @param {unknown} e @param {IpcArg<'periodicalIssues:add'>} issue @returns {IpcReply<'periodicalIssues:add'>} */ (e, issue) =>
     run(() => {
       /* Одит v2.4.29: без проверки „2026-02-30“ влизаше както е — а прогнозата за
          следващия брой взима MAX(date), date() на невалидна дата е NULL и
@@ -781,7 +782,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('periodicalIssues:delete', /** @param {unknown} e @param {IpcArg<'periodicalIssues:delete'>} id */ (e, id) =>
+  ipcMain.handle('periodicalIssues:delete', /** @param {unknown} e @param {IpcArg<'periodicalIssues:delete'>} id @returns {IpcReply<'periodicalIssues:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       ensureVolumesTable(db);
@@ -851,7 +852,7 @@ module.exports = function registerPeriodicalsHandlers(ipcMain, deps) {
      тук, с обяснение кое е правилното действие, и в самата база с
      UNIQUE(periodical_id, year), която държи и когато две работни места пишат
      едновременно в обща мрежова база. */
-  ipcMain.handle('periodicalVolumes:register', /** @param {unknown} e @param {IpcArg<'periodicalVolumes:register'>} v0 */ (e, v0) =>
+  ipcMain.handle('periodicalVolumes:register', /** @param {unknown} e @param {IpcArg<'periodicalVolumes:register'>} v0 @returns {IpcReply<'periodicalVolumes:register'>} */ (e, v0) =>
     run(() => {
       const db = getDb();
       ensureVolumesTable(db);

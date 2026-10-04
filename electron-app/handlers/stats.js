@@ -59,10 +59,11 @@ function readersRegisteredIn(db, year) {
   `).get({ from: y + '-01-01', next: (parseInt(y, 10) + 1) + '-01-01', y, anon: ANON_READER_NAME }).n;
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerStatsHandlers(ipcMain, deps) {
   const { getDb, run, yearOf, dnevnikSumRow } = deps;
 
-  ipcMain.handle('stats:report', /** @param {unknown} e @param {IpcArg<'stats:report'>} year */ (e, year) =>
+  ipcMain.handle('stats:report', /** @param {unknown} e @param {IpcArg<'stats:report'>} year @returns {IpcReply<'stats:report'>} */ (e, year) =>
     run(() => {
       const db = getDb();
       const y = year || yearOf();
@@ -436,8 +437,8 @@ module.exports = function registerStatsHandlers(ipcMain, deps) {
     { id: 'fees_income', title: 'Приходи от такси и обезщетения', needsYear: true,
       hint: 'Начислено и събрано по вид (годишна такса, обезщетения) от читателската сметка през годината.' }
   ];
-  ipcMain.handle('reports:list', () => run(() => REPORTS_CATALOG));
-  ipcMain.handle('reports:run', /** @param {unknown} e @param {IpcArg<'reports:run'>} arg */ (e, { id, year }) =>
+  ipcMain.handle('reports:list', /** @returns {IpcReply<'reports:list'>} */ () => run(() => REPORTS_CATALOG));
+  ipcMain.handle('reports:run', /** @param {unknown} e @param {IpcArg<'reports:run'>} arg @returns {IpcReply<'reports:run'>} */ (e, { id, year }) =>
     run(() => {
       const db = getDb();
       const y = String(year || yearOf());

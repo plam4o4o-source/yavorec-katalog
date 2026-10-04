@@ -13,6 +13,7 @@
 const { overdueForRows, spreadUnpaidFine } = require('./loans');
 const { authorTitleText } = require('../security-utils'); // Ф7 (v2.4.71) — без двойна точка след инициал
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerNoticesHandlers(ipcMain, deps) {
   const { getDb, run, today, LOAN_SELECT, EUR_RATE, isValidEmail, shell, effectiveDaysLate } = deps;
 
@@ -29,6 +30,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
 С уважение,
 {librarian_line}{library}{place_line}`;
   const DEFAULT_NOTICE_SMS = '{library_short}: имате {count_phrase}{fine_sms}. Моля, върнете {it_them}.';
+  /** @type {Array<[string, string]>} двойки [ключ, обяснение] */
   const NOTICE_PLACEHOLDERS = [
     ['reader', 'до кого е писмото — читателят, а при читател под 14 г. родителят/настойникът'],
     ['library', 'име на библиотеката'],
@@ -180,7 +182,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
     };
   }
 
-  ipcMain.handle('loans:reminders', () =>
+  ipcMain.handle('loans:reminders', /** @returns {IpcReply<'loans:reminders'>} */ () =>
     run(() => {
       const db = getDb();
       const s = db.prepare(`SELECT lib_name, org, place, librarian, notice_subject, notice_body, notice_sms,
@@ -259,7 +261,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
   );
   /* Отбелязва, че напомняне е реално минало към читателя (печат/копиране/поща) —
      така се вижда кой на коя степен е и повторните не се дублират на сляпо. */
-  ipcMain.handle('notices:log', /** @param {unknown} e @param {IpcArg<'notices:log'>} arg */ (e, { reader_id, level, channel, loans_count }) =>
+  ipcMain.handle('notices:log', /** @param {unknown} e @param {IpcArg<'notices:log'>} arg @returns {IpcReply<'notices:log'>} */ (e, { reader_id, level, channel, loans_count }) =>
     run(() => {
       getDb().prepare('INSERT INTO notice_log (reader_id, level, channel, loans_count) VALUES (?, ?, ?, ?)')
         .run(reader_id, level || 1, channel || null, loans_count || 0);
@@ -292,7 +294,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
          обяснение (другите места, които ползват канала, не губят текста
          мълчаливо). */
   const MAILTO_MAX = 1900;
-  ipcMain.handle('loans:mailto', /** @param {unknown} e @param {IpcArg<'loans:mailto'>} arg */ async (e, { email, subject, body, fallbackBody }) => {
+  ipcMain.handle('loans:mailto', /** @param {unknown} e @param {IpcArg<'loans:mailto'>} arg @returns {Promise<IpcResult<IpcData<'loans:mailto'>>>} */ async (e, { email, subject, body, fallbackBody }) => {
     try {
       if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
       if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };
@@ -323,7 +325,8 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
          виждаше ok:true, вписваше напомняне като „изпратено“ и следващото тръгваше
          една степен по-високо, без нищо да е изпратено. */
       await shell.openExternal(url);
-      return { ok: true };
+      // data: undefined — писмото е отворено цяло (без съкращаване); екранът чете res.data && res.data.shortened.
+      return { ok: true, data: undefined };
     } catch (err) { return { ok: false, error: err.message }; }
   });
 

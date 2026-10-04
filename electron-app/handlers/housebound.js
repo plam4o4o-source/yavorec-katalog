@@ -12,10 +12,11 @@
 // дефинирана по-рано, не се преприсвоява).
 const { isValidIsoDate } = require('../security-utils');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerHouseboundHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, logEvent, today } = deps;
 
-  ipcMain.handle('housebound:get', /** @param {unknown} e @param {IpcArg<'housebound:get'>} readerId */ (e, readerId) =>
+  ipcMain.handle('housebound:get', /** @param {unknown} e @param {IpcArg<'housebound:get'>} readerId @returns {IpcReply<'housebound:get'>} */ (e, readerId) =>
     run(() => {
       const db = getDb();
       const p = db.prepare('SELECT * FROM housebound_profiles WHERE reader_id = ?').get(readerId) || null;
@@ -23,7 +24,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       return { profile: p, visits };
     })
   );
-  ipcMain.handle('housebound:save', /** @param {unknown} e @param {IpcArg<'housebound:save'>} arg */ (e, { reader_id, day, frequency, note }) =>
+  ipcMain.handle('housebound:save', /** @param {unknown} e @param {IpcArg<'housebound:save'>} arg @returns {IpcReply<'housebound:save'>} */ (e, { reader_id, day, frequency, note }) =>
     run(() => {
       const db = getDb();
       db.prepare(`INSERT INTO housebound_profiles (reader_id, day, frequency, note) VALUES (?, ?, ?, ?)
@@ -33,7 +34,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       logAudit('Обслужване по домовете', 'график за ' + (r ? r.name : reader_id));
     })
   );
-  ipcMain.handle('housebound:remove', /** @param {unknown} e @param {IpcArg<'housebound:remove'>} readerId */ (e, readerId) =>
+  ipcMain.handle('housebound:remove', /** @param {unknown} e @param {IpcArg<'housebound:remove'>} readerId @returns {IpcReply<'housebound:remove'>} */ (e, readerId) =>
     run(() => {
       const db = getDb();
       const del = db.prepare('DELETE FROM housebound_profiles WHERE reader_id = ?').run(readerId);
@@ -42,7 +43,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       logAudit('Обслужване по домовете', 'спрян график за ' + (r ? r.name : readerId));
     })
   );
-  ipcMain.handle('housebound:addVisit', /** @param {unknown} e @param {IpcArg<'housebound:addVisit'>} arg */ (e, { reader_id, date, note }) =>
+  ipcMain.handle('housebound:addVisit', /** @param {unknown} e @param {IpcArg<'housebound:addVisit'>} arg @returns {IpcReply<'housebound:addVisit'>} */ (e, { reader_id, date, note }) =>
     run(() => {
       const db = getDb();
       const d = date || today();
@@ -79,7 +80,7 @@ module.exports = function registerHouseboundHandlers(ipcMain, deps) {
       return tx.immediate();
     })
   );
-  ipcMain.handle('housebound:list', () =>
+  ipcMain.handle('housebound:list', /** @returns {IpcReply<'housebound:list'>} */ () =>
     run(() => getDb().prepare(`
       SELECT p.*, r.name, r.phone, r.address, r.address2,
              (SELECT MAX(v.date) FROM housebound_visits v WHERE v.reader_id = p.reader_id) AS last_visit

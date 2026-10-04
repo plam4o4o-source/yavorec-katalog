@@ -41,6 +41,7 @@ function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerLinksHandlers(ipcMain, deps) {
   const { getDb, run } = deps;
   /* ОДИТНА СЛЕДА ЗА ВРЪЗКИТЕ (v2.4.61).
@@ -189,7 +190,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     return !!db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id);
   }
 
-  ipcMain.handle('links:list', /** @param {unknown} e @param {IpcArg<'links:list'>} arg */ (e, { fromKind, fromId }) =>
+  ipcMain.handle('links:list', /** @param {unknown} e @param {IpcArg<'links:list'>} arg @returns {IpcReply<'links:list'>} */ (e, { fromKind, fromId }) =>
     run(() => {
       const rows = getDb().prepare('SELECT * FROM links WHERE from_kind = ? AND from_id = ? ORDER BY to_kind, id')
         .all(fromKind, fromId);
@@ -198,7 +199,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     })
   );
   // Обратната посока: кои персоналии и записи в летописа сочат към даден документ.
-  ipcMain.handle('links:backlinks', /** @param {unknown} e @param {IpcArg<'links:backlinks'>} arg */ (e, { toKind, toId }) =>
+  ipcMain.handle('links:backlinks', /** @param {unknown} e @param {IpcArg<'links:backlinks'>} arg @returns {IpcReply<'links:backlinks'>} */ (e, { toKind, toId }) =>
     run(() => {
       const rows = getDb().prepare('SELECT * FROM links WHERE to_kind = ? AND to_id = ? ORDER BY from_kind, id')
         .all(toKind, toId);
@@ -230,7 +231,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
       return rows;
     })
   );
-  ipcMain.handle('links:add', /** @param {unknown} e @param {IpcArg<'links:add'>} arg */ (e, { fromKind, fromId, toKind, toId, note }) =>
+  ipcMain.handle('links:add', /** @param {unknown} e @param {IpcArg<'links:add'>} arg @returns {IpcReply<'links:add'>} */ (e, { fromKind, fromId, toKind, toId, note }) =>
     run(() => {
       const db = getDb();
       if (!LINK_FROM.includes(fromKind) || !LINK_TO.includes(toKind)) throw new Error('Непозната връзка.');
@@ -277,7 +278,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
         + '“ → ' + toKind + ' „' + linkLabel(toKind, toId) + '“');
     })
   );
-  ipcMain.handle('links:delete', /** @param {unknown} e @param {IpcArg<'links:delete'>} id */ (e, id) =>
+  ipcMain.handle('links:delete', /** @param {unknown} e @param {IpcArg<'links:delete'>} id @returns {IpcReply<'links:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const l = db.prepare('SELECT * FROM links WHERE id = ?').get(id);
@@ -290,7 +291,7 @@ module.exports = function registerLinksHandlers(ipcMain, deps) {
     })
   );
   // Търсене на записи, към които да се направи връзка.
-  ipcMain.handle('links:search', /** @param {unknown} e @param {IpcArg<'links:search'>} arg */ (e, { kind, q }) =>
+  ipcMain.handle('links:search', /** @param {unknown} e @param {IpcArg<'links:search'>} arg @returns {IpcReply<'links:search'>} */ (e, { kind, q }) =>
     run(() => {
       const db = ensureKraeFunctions(getDb());
       const raw = String(q == null ? '' : q).trim();

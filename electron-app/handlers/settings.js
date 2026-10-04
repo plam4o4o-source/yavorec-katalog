@@ -11,10 +11,11 @@
 // LOGO_MIME/LOCAL_PHOTO_MAX_BYTES се връщат обратно към main.js, защото
 // handlers/local-photo.js (изваден по-рано, но require()-нат ПО-НАТАТЪК в
 // main.js от този модул) вече ги ползва по пряка референция.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerSettingsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path } = deps;
 
-  ipcMain.handle('settings:get', () => run(() => getDb().prepare('SELECT * FROM settings WHERE id = 1').get()));
+  ipcMain.handle('settings:get', /** @returns {IpcReply<'settings:get'>} */ () => run(() => getDb().prepare('SELECT * FROM settings WHERE id = 1').get()));
   /* Числовите настройки минават през нормализиране (одит v2.4.24). Формата праща
      `el.value`, тоест ИЗЧИСТЕНОТО поле пристига като празен низ, а колоната е
      INTEGER/REAL без NOT NULL — SQLite пази '' като ТЕКСТ (празният низ няма
@@ -90,7 +91,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   };
   const UPDATE_FIELDS = Object.keys(SETTING_LABELS);
 
-  ipcMain.handle('settings:update', /** @param {unknown} e @param {IpcArg<'settings:update'>} s0 */ (e, s0) =>
+  ipcMain.handle('settings:update', /** @param {unknown} e @param {IpcArg<'settings:update'>} s0 @returns {IpcReply<'settings:update'>} */ (e, s0) =>
     run(() => {
       const s = normalizeNumericSettings(s0);
       /* ФОНД НА СВОБОДЕН ДОСТЪП — ПРОЦЕНТ МЕЖДУ 0 И 100 (v2.4.71, кръг 45, С8).
@@ -152,7 +153,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   // Шаблоните за напомняния — отделен формуляр, за да не се засяга основният
   // (better-sqlite3 изисква всички именувани параметри на UPDATE-а да присъстват
   // в подадения обект). Празен низ = "по подразбиране", виж reminderTexts().
-  ipcMain.handle('settings:updateNotices', /** @param {unknown} e @param {IpcArg<'settings:updateNotices'>} o */ (e, o) =>
+  ipcMain.handle('settings:updateNotices', /** @param {unknown} e @param {IpcArg<'settings:updateNotices'>} o @returns {IpcReply<'settings:updateNotices'>} */ (e, o) =>
     run(() => {
       o = o || {};
       getDb().prepare('UPDATE settings SET notice_subject=?, notice_body=?, notice_sms=? WHERE id=1')
@@ -180,6 +181,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
      (в) НИЩО МЪЛЧАЛИВО: стойност извън разумните граници се записва с най-близката
          граница, но обработчикът връща коя е била подрязана ({ clamped: [...] }), а
          екранът го казва. Дотук „63,5“ в числово поле ставаше 635 и тихо — 210. */
+  /** @type {Record<string, [string, number, number, number]>} поле → [надпис, мин., макс., по подразбиране] */
   const LABEL_LIMITS = {
     lbl_w: ['Ширина на етикета за фонда', 10, 210, 40], lbl_h: ['Височина на етикета за фонда', 8, 297, 30],
     lbl_cols: ['Колони на листа', 1, 8, 3],
@@ -188,7 +190,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
     sig_w: ['Ширина на сигнатурния етикет', 10, 100, 25], sig_h: ['Височина на сигнатурния етикет', 10, 120, 35],
     card_w: ['Ширина на картата', 40, 210, 90], card_h: ['Височина на картата', 30, 297, 60]
   };
-  ipcMain.handle('settings:updateLabelFormat', /** @param {unknown} e @param {IpcArg<'settings:updateLabelFormat'>} o */ (e, o) =>
+  ipcMain.handle('settings:updateLabelFormat', /** @param {unknown} e @param {IpcArg<'settings:updateLabelFormat'>} o @returns {IpcReply<'settings:updateLabelFormat'>} */ (e, o) =>
     run(() => {
       o = Object.assign({}, o || {});
       // o вече е обект (Object.assign горе); tsc не пренася стесняването в стрелката.
@@ -234,7 +236,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   const LOCAL_PHOTO_MAX_BYTES = 1024 * 1024;
   const LOGO_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
-  ipcMain.handle('settings:chooseLogo', async () => {
+  ipcMain.handle('settings:chooseLogo', /** @returns {Promise<IpcResult<IpcData<'settings:chooseLogo'>>>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файл с логото на организацията',
@@ -259,17 +261,17 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('settings:clearLogo', () =>
+  ipcMain.handle('settings:clearLogo', /** @returns {IpcReply<'settings:clearLogo'>} */ () =>
     run(() => {
       getDb().prepare('UPDATE settings SET logo = NULL WHERE id = 1').run();
       logAudit('Редакция на настройки', 'премахнато лого на организацията');
     })
   );
-  ipcMain.handle('settings:updateTheme', /** @param {unknown} e @param {IpcArg<'settings:updateTheme'>} theme */ (e, theme) =>
+  ipcMain.handle('settings:updateTheme', /** @param {unknown} e @param {IpcArg<'settings:updateTheme'>} theme @returns {IpcReply<'settings:updateTheme'>} */ (e, theme) =>
     run(() => { getDb().prepare('UPDATE settings SET theme=? WHERE id=1').run(String(theme)); })
   );
   // Звуков сигнал при сканиране (v1.69.0) — вижте beep() в src/views/core.js.
-  ipcMain.handle('settings:updateScanSound', /** @param {unknown} e @param {IpcArg<'settings:updateScanSound'>} on */ (e, on) =>
+  ipcMain.handle('settings:updateScanSound', /** @param {unknown} e @param {IpcArg<'settings:updateScanSound'>} on @returns {IpcReply<'settings:updateScanSound'>} */ (e, on) =>
     run(() => { getDb().prepare('UPDATE settings SET scan_sound=? WHERE id=1').run(on ? 1 : 0); })
   );
 

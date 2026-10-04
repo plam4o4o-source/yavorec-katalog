@@ -103,6 +103,7 @@ function prefixLabel(p) {
    splitName() в handlers/catalog.js за износа в UNIMARC. Псевдоним от две думи
    („Елин Пелин“) не се разпознава като такъв — затова предложението винаги
    казва коя дума е взело за фамилия, за да си личи. */
+/** @returns {{ basis: string, from: 'author' | 'title', exact: boolean, basisFull?: string } | null} */
 function basisOf(book) {
   const author = String((book && book.author) || '').trim();
   if (author) {
@@ -379,6 +380,7 @@ function detectSeparator(values) {
   return count[top] ? top : null;
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, importers } = deps;
   /* Незадължителна (v2.4.71, М6) — виж authorMark:fillApply. */
@@ -397,6 +399,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     const s2 = detectSeparator(cns);
     return s2 === null ? '-' : s2;
   }
+  /** @returns {AuthorMarkHit | AuthorMarkMiss} */
   function suggestFor(db, book, rows, sep) {
     const b = basisOf(book);
     if (!b || !b.basis) return { ok: false, reason: 'няма нито автор, нито заглавие' };
@@ -437,7 +440,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
   }
 
   /* Състояние на таблицата — за екрана в „Настройки“. */
-  ipcMain.handle('authorMark:status', () => run(() => {
+  ipcMain.handle('authorMark:status', /** @returns {IpcReply<'authorMark:status'>} */ () => run(() => {
     const db = getDb();
     const rows = rowsOf(db);
     const letters = [...new Set(rows.map(r => r.prefix.charAt(0)))];
@@ -466,7 +469,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
      Прегледът се пази тук, а не се разнася до екрана и обратно — иначе хиляда
      реда пътуват два пъти без нужда. */
   let pending = null;
-  ipcMain.handle('authorMark:choose', async () => {
+  ipcMain.handle('authorMark:choose', /** @returns {Promise<IpcResult<IpcData<'authorMark:choose'>>>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файла с таблицата за авторски знак',
@@ -509,7 +512,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     }
     return out;
   }
-  ipcMain.handle('authorMark:confirm', () => run(() => {
+  ipcMain.handle('authorMark:confirm', /** @returns {IpcReply<'authorMark:confirm'>} */ () => run(() => {
     if (!pending || !pending.length) throw new Error('Няма разчетена таблица за записване — изберете файла наново.');
     const db = getDb();
     const ins = db.prepare('INSERT OR REPLACE INTO author_table (prefix, mark) VALUES (?, ?)');
@@ -519,7 +522,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     logAudit('Таблица за авторски знак', 'внесена — ' + rows.length + ' реда');
     return { rows: rows.length };
   }));
-  ipcMain.handle('authorMark:clear', () => run(() => {
+  ipcMain.handle('authorMark:clear', /** @returns {IpcReply<'authorMark:clear'>} */ () => run(() => {
     const db = getDb();
     const n = db.prepare('SELECT COUNT(*) AS n FROM author_table').get().n;
     db.prepare('DELETE FROM author_table').run();
@@ -533,7 +536,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
      (main.js); тук е ръчният път и той презаписва, защото човекът го е поискал.
      Разчетен, но незаписан внесен файл отпада — иначе следващото „Запиши“ би
      върнало точно това, което библиотекарката току-що е отменила. */
-  ipcMain.handle('authorMark:loadBuiltin', () => run(() => {
+  ipcMain.handle('authorMark:loadBuiltin', /** @returns {IpcReply<'authorMark:loadBuiltin'>} */ () => run(() => {
     const db = getDb();
     const rows = builtinRows();
     if (!rows.length) throw new Error('Вградената таблица липсва от инсталацията (db/author-table.js).');
@@ -546,7 +549,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
 
   /* Предложение за ЕДИН документ — това стои зад копчето „Предложи“ във формата.
      Връща и откъде идва знакът, за да може екранът да го покаже. */
-  ipcMain.handle('authorMark:suggest', /** @param {unknown} e @param {IpcArg<'authorMark:suggest'>} book */ (e, book) => run(() => {
+  ipcMain.handle('authorMark:suggest', /** @param {unknown} e @param {IpcArg<'authorMark:suggest'>} book @returns {IpcReply<'authorMark:suggest'>} */ (e, book) => run(() => {
     const db = getDb();
     const rows = rowsOf(db);
     if (!rows.length) throw new Error('Няма внесена таблица за авторски знак. Настройки → Фонд → „Авторски знак“.');
@@ -557,7 +560,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
      фамилията. Несъответствието е или грешка при въвеждане, или книга,
      подписана по друго (по лицето, за което е) — програмата не гадае кое от
      двете, само посочва. */
-  ipcMain.handle('authorMark:audit', () => run(() => {
+  ipcMain.handle('authorMark:audit', /** @returns {IpcReply<'authorMark:audit'>} */ () => run(() => {
     const db = getDb();
     const books = db.prepare(`SELECT id, inv_number, author, title, author_mark
       FROM books WHERE status IS NULL OR status <> 'отчислен'`).all();
@@ -589,7 +592,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
   /* Групово попълване — само на ПРАЗНИ знаци и само с изричен преглед преди
      записа. Вече попълнен знак не се пипа: заварените знаци са решение на
      библиотекар и програмата няма право да ги презаписва наум. */
-  ipcMain.handle('authorMark:fillPreview', () => run(() => {
+  ipcMain.handle('authorMark:fillPreview', /** @returns {IpcReply<'authorMark:fillPreview'>} */ () => run(() => {
     const db = getDb();
     const rows = rowsOf(db);
     if (!rows.length) throw new Error('Няма внесена таблица за авторски знак.');
@@ -597,7 +600,10 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     const books = db.prepare(`SELECT id, inv_number, author, title FROM books
       WHERE (author_mark IS NULL OR TRIM(author_mark) = '') AND (status IS NULL OR status <> 'отчислен')
       ORDER BY inv_number`).all();
-    const will = [], skip = [];
+    /** @type {IpcData<'authorMark:fillPreview'>['will']} */
+    const will = [];
+    /** @type {IpcData<'authorMark:fillPreview'>['skip']} */
+    const skip = [];
     for (const b of books) {
       const s = suggestFor(db, b, rows, sep);
       if (s.ok) will.push({ id: b.id, inv_number: b.inv_number, author: b.author, title: b.title, mark: s.mark, basis: s.basis, from: s.from, exact: s.exact });
@@ -605,7 +611,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
     }
     return { willTotal: will.length, skipTotal: skip.length, will: will.slice(0, 200), skip: skip.slice(0, 50) };
   }));
-  ipcMain.handle('authorMark:fillApply', () => run(() => {
+  ipcMain.handle('authorMark:fillApply', /** @returns {IpcReply<'authorMark:fillApply'>} */ () => run(() => {
     const db = getDb();
     const rows = rowsOf(db);
     if (!rows.length) throw new Error('Няма внесена таблица за авторски знак.');

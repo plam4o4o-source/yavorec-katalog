@@ -13,6 +13,7 @@
 // споразумение за достъп до техните SRU/Z39.50 сървъри, затова по
 // подразбиране се ползва каталогът на Library of Congress — публичен,
 // безплатен, без регистрация. Адресът е сменяем от Настройки.
+/** @param {any} ipcMain @param {Record<string, any>} deps   (без run — каналите тук връщат { ok, … } сами) */
 module.exports = function registerIsbnLookupHandlers(ipcMain, deps) {
   const { net, getDb } = deps;
 
@@ -174,6 +175,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
   // MARC подполетата свършват с ISBD пунктуация (" /", " :", " ,"...), която тук не ни
   // трябва — маха се последната пунктуационна group заедно с празнините около нея.
   const trimMarcPunct = (s) => String(s || '').replace(/\s*[:;,./]+\s*$/, '').trim();
+  /** @returns {SruRecord} */
   function marcToBook(fields) {
     const f245 = (fields['245'] || [])[0] || [];
     const title = trimMarcPunct(subVal(f245, 'a'));
@@ -231,7 +233,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     return book.title ? book : null;
   }
 
-  ipcMain.handle('sru:lookup', /** @param {unknown} e @param {IpcArg<'sru:lookup'>} raw */ async (e, raw) => {
+  ipcMain.handle('sru:lookup', /** @param {unknown} e @param {IpcArg<'sru:lookup'>} raw @returns {Promise<IpcResult<IpcData<'sru:lookup'>>>} */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     const s = getDb().prepare('SELECT sru_endpoint FROM settings WHERE id = 1').get() || {};
@@ -256,7 +258,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     }
   });
 
-  ipcMain.handle('isbn:lookup', /** @param {unknown} e @param {IpcArg<'isbn:lookup'>} raw */ async (e, raw) => {
+  ipcMain.handle('isbn:lookup', /** @param {unknown} e @param {IpcArg<'isbn:lookup'>} raw @returns {Promise<IpcResult<IpcData<'isbn:lookup'>>>} */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     // Двете услуги се питат заедно и се допълват: Google Books обикновено дава език и

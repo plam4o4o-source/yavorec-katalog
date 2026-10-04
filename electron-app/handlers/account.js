@@ -149,17 +149,18 @@ function chargeCoverage(db, lineId) {
   return { charged, covered: toCents(charged - outstanding), outstanding };
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerAccountHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
 
-  ipcMain.handle('account:get', /** @param {unknown} e @param {IpcArg<'account:get'>} readerId */ (e, readerId) =>
+  ipcMain.handle('account:get', /** @param {unknown} e @param {IpcArg<'account:get'>} readerId @returns {IpcReply<'account:get'>} */ (e, readerId) =>
     run(() => {
       const lines = getDb().prepare('SELECT * FROM account_lines WHERE reader_id = ? ORDER BY date DESC, id DESC').all(readerId);
       const balance = toCents(lines.reduce((s, l) => s + Number(l.amount || 0), 0));
       return { lines, balance };
     })
   );
-  ipcMain.handle('account:charge', /** @param {unknown} e @param {IpcArg<'account:charge'>} arg */ (e, { reader_id, type, amount, note, date }) =>
+  ipcMain.handle('account:charge', /** @param {unknown} e @param {IpcArg<'account:charge'>} arg @returns {IpcReply<'account:charge'>} */ (e, { reader_id, type, amount, note, date }) =>
     run(() => {
       const db = getDb();
       assertLineDate(date, 'Нищо не е начислено.');
@@ -204,7 +205,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('account:pay', /** @param {unknown} e @param {IpcArg<'account:pay'>} arg */ (e, { reader_id, amount, note, date }) =>
+  ipcMain.handle('account:pay', /** @param {unknown} e @param {IpcArg<'account:pay'>} arg @returns {IpcReply<'account:pay'>} */ (e, { reader_id, amount, note, date }) =>
     run(() => {
       const db = getDb();
       assertLineDate(date, 'Плащането не е записано.');
@@ -233,7 +234,7 @@ module.exports = function registerAccountHandlers(ipcMain, deps) {
      прозорецът обявяваше „Изтрито.“ за нищо. */
   /* Каналът приема и `{ id, reason }` (v2.4.71, Ч12); голото число остава
      за заварените извиквания. */
-  ipcMain.handle('account:deleteLine', /** @param {unknown} e @param {IpcArg<'account:deleteLine'>} arg */ (e, arg) =>
+  ipcMain.handle('account:deleteLine', /** @param {unknown} e @param {IpcArg<'account:deleteLine'>} arg @returns {IpcReply<'account:deleteLine'>} */ (e, arg) =>
     run(() => {
       const db = getDb();
       const id = arg && typeof arg === 'object' ? arg.id : arg;

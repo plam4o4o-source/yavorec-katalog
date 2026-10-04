@@ -20,6 +20,7 @@ const {
 
 const PERIODIC_MS = 30 * 60 * 1000;   // редовно изпращане на половин час, само при активирано
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, today } = deps;
   const appVersion = typeof deps.getVersion === 'function' ? deps.getVersion : () => '0';
@@ -126,7 +127,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
   }
 
   /* ---------------- Канали ---------------- */
-  ipcMain.handle('online:status', () => run(() => {
+  ipcMain.handle('online:status', /** @returns {IpcReply<'online:status'>} */ () => run(() => {
     const s = settingsRow();
     const act = activated(s);
     if (!act) return { activated: false };
@@ -141,7 +142,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     };
   }));
 
-  ipcMain.handle('online:activate', /** @param {unknown} e @param {IpcArg<'online:activate'>} arg */ (e, arg) => run(() => {
+  ipcMain.handle('online:activate', /** @param {unknown} e @param {IpcArg<'online:activate'>} arg @returns {IpcReply<'online:activate'>} */ (e, arg) => run(() => {
     const token = String((arg && arg.token) || '').trim();
     const v = verifyActivation(token, null, verifyOpts);
     if (!v.ok) throw new Error(v.error);
@@ -151,7 +152,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     return { lib: v.lib, name: v.name, exp: v.exp };
   }));
 
-  ipcMain.handle('online:deactivate', () => run(() => {
+  ipcMain.handle('online:deactivate', /** @returns {IpcReply<'online:deactivate'>} */ () => run(() => {
     const s = settingsRow();
     /* Без проверка на срока: изтекъл код също трябва да може да се махне. */
     getDb().prepare('UPDATE settings SET online_activation = NULL, online_last_error = NULL WHERE id = 1').run();
@@ -159,7 +160,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     if (s.online_activation) logAudit('Онлайн достъп за читатели', 'деактивиран; програмата спира да изпраща снимки към моста');
   }));
 
-  ipcMain.handle('online:updateSettings', /** @param {unknown} e @param {IpcArg<'online:updateSettings'>} o */ (e, o) => run(() => {
+  ipcMain.handle('online:updateSettings', /** @param {unknown} e @param {IpcArg<'online:updateSettings'>} o @returns {IpcReply<'online:updateSettings'>} */ (e, o) => run(() => {
     requireActivated();
     const url = String((o && o.online_bridge_url) || '').trim().replace(/\/+$/, '');
     if (url && !/^https:\/\//i.test(url)) throw new Error('Адресът на моста трябва да започва с https://.');
@@ -173,7 +174,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     scheduleSync();
   }));
 
-  ipcMain.handle('online:setReaderConsent', /** @param {unknown} e @param {IpcArg<'online:setReaderConsent'>} arg */ (e, arg) => run(() => {
+  ipcMain.handle('online:setReaderConsent', /** @param {unknown} e @param {IpcArg<'online:setReaderConsent'>} arg @returns {IpcReply<'online:setReaderConsent'>} */ (e, arg) => run(() => {
     requireActivated();
     const db = getDb();
     const r = db.prepare('SELECT id, name, card_no, gdpr_consent, online_consent FROM readers WHERE id = ?').get(arg.readerId);
@@ -192,7 +193,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
   }));
 
   /* Връща ПИН-а ВЕДНЪЖ — в базата остава само хешът, в следата — само фактът. */
-  ipcMain.handle('online:issuePin', /** @param {unknown} e @param {IpcArg<'online:issuePin'>} arg */ (e, arg) => run(() => {
+  ipcMain.handle('online:issuePin', /** @param {unknown} e @param {IpcArg<'online:issuePin'>} arg @returns {IpcReply<'online:issuePin'>} */ (e, arg) => run(() => {
     requireActivated();
     const db = getDb();
     const r = db.prepare('SELECT id, name, card_no, online_consent FROM readers WHERE id = ?').get(arg.readerId);
@@ -207,7 +208,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     return { pin, cardNumber: r.card_no, setAt: at };
   }));
 
-  ipcMain.handle('online:revokePin', /** @param {unknown} e @param {IpcArg<'online:revokePin'>} arg */ (e, arg) => run(() => {
+  ipcMain.handle('online:revokePin', /** @param {unknown} e @param {IpcArg<'online:revokePin'>} arg @returns {IpcReply<'online:revokePin'>} */ (e, arg) => run(() => {
     requireActivated();
     const db = getDb();
     const r = db.prepare('SELECT id, name, card_no FROM readers WHERE id = ?').get(arg.readerId);
@@ -217,7 +218,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     scheduleSync();
   }));
 
-  ipcMain.handle('online:syncNow', async () => {
+  ipcMain.handle('online:syncNow', /** @returns {Promise<IpcResult<IpcData<'online:syncNow'>>>} */ async () => {
     try {
       requireActivated();
       const s = settingsRow();

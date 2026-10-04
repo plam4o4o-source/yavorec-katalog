@@ -1687,7 +1687,7 @@ function initAutoUpdate(win) {
   autoUpdater.on('error', (err) => send('update:status', { state: 'error', message: err.message }));
   autoUpdater.checkForUpdates().catch(err => console.error('Автообновяване:', err.message));
 }
-ipcMain.handle('app:checkForUpdates', () =>
+ipcMain.handle('app:checkForUpdates', /** @returns {IpcReply<'app:checkForUpdates'>} */ () =>
   run(() => {
     if (!app.isPackaged) throw new Error('Проверката за обновления работи само в инсталираната програма.');
     autoUpdater.checkForUpdates().catch(err => console.error('Автообновяване:', err.message));
@@ -1706,7 +1706,7 @@ ipcMain.handle('app:checkForUpdates', () =>
    затваряне (backupBeforeQuit — само ако базата е променяна). Провал на копието
    не спира обновяването, но се вписва в дневника; таймерът се спира, за да не
    тръгне второ копие насред изхода. */
-ipcMain.handle('app:installUpdate', () => run(() => {
+ipcMain.handle('app:installUpdate', /** @returns {IpcReply<'app:installUpdate'>} */ () => run(() => {
   stopAutoBackupTimer();
   /* Насроченият запис на онлайн каталога — също ПРЕДИ изхода, както в
      'window-all-closed' (v2.4.71, след С19): акт или заемане в последните
@@ -2125,6 +2125,8 @@ function friendlyDbError(err) {
   }
   return m;
 }
+/** Отговорът на канал: { ok: true, data } или { ok: false, error }.
+    @template T @param {() => T} fn @returns {IpcResult<T>} */
 function run(fn) {
   try {
     return { ok: true, data: fn() };
@@ -2158,7 +2160,7 @@ function pctRequired(n) { return n <= 50000 ? 10 : n <= 200000 ? 5 : 2; }
 function naturalLoss(n, freeAccessPct) { return (freeAccessPct > 50 ? n * 10 : n * 5) / 1000; }
 
 /* ---------------- Текущ служител (за одитната следа) ---------------- */
-ipcMain.handle('app:setUser', /** @param {unknown} e @param {IpcArg<'app:setUser'>} name */ (e, name) =>
+ipcMain.handle('app:setUser', /** @param {unknown} e @param {IpcArg<'app:setUser'>} name @returns {IpcReply<'app:setUser'>} */ (e, name) =>
   run(() => {
     CURRENT_USER = (name || '').trim();
     // Не readConfig()+writeConfig(): при неуспешен прочит това презаписваше
@@ -2167,7 +2169,7 @@ ipcMain.handle('app:setUser', /** @param {unknown} e @param {IpcArg<'app:setUser
     return CURRENT_USER;
   })
 );
-ipcMain.handle('app:getUser', () => run(() => CURRENT_USER));
+ipcMain.handle('app:getUser', /** @returns {IpcReply<'app:getUser'>} */ () => run(() => CURRENT_USER));
 
 /* ---------------- Служители ----------------
    Извадени в handlers/employees.js (Фаза 4, стъпка 6 от разбиването на
@@ -2184,10 +2186,10 @@ require('./handlers/employees')(ipcMain, {
     return CURRENT_USER;
   }
 });
-ipcMain.handle('app:getVersion', () => run(() => app.getVersion()));
+ipcMain.handle('app:getVersion', /** @returns {IpcReply<'app:getVersion'>} */ () => run(() => app.getVersion()));
 // Отваря папката с дневниците на грешки (logs/) в системния файлов мениджър —
 // удобно, за да прикачи librarianят файловете при заявка за поддръжка.
-ipcMain.handle('app:openLogsFolder', () => run(() => { shell.openPath(logsDir()); }));
+ipcMain.handle('app:openLogsFolder', /** @returns {IpcReply<'app:openLogsFolder'>} */ () => run(() => { shell.openPath(logsDir()); }));
 
 /* ---------------- Търсене по ISBN (Google Books, Open Library) и SRU (MARC) ----------------
    Извадени в handlers/isbn-lookup.js (Фаза 4, стъпка 10 от разбиването на
@@ -2205,7 +2207,7 @@ require('./handlers/isbn-lookup')(ipcMain, { net, getDb: () => db });
 const { LOGO_MIME, LOCAL_PHOTO_MAX_BYTES } = require('./handlers/settings')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path
 });
-ipcMain.handle('settings:noticeDefaults', () =>
+ipcMain.handle('settings:noticeDefaults', /** @returns {IpcReply<'settings:noticeDefaults'>} */ () =>
   run(() => ({
     subject: DEFAULT_NOTICE_SUBJECT, body: DEFAULT_NOTICE_BODY, sms: DEFAULT_NOTICE_SMS,
     placeholders: NOTICE_PLACEHOLDERS

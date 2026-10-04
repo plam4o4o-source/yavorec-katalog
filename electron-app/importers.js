@@ -297,6 +297,7 @@ const HEADER_MAP = {
 const norm = (s) => String(s || '').toLowerCase().trim()
   .replace(/[. ]/g, ' ').replace(/\s+/g, ' ').replace(/[«»„“"']/g, '');
 function guessMapping(headers) {
+  /** @type {Record<string, string>} индекс на колоната → поле */
   const map = {};
   const used = new Set();
   headers.forEach((h, i) => {

@@ -32,6 +32,7 @@
    има разминаване, и се вписва в одитната следа, когато проверката се прави. */
 const F = require('../db/fund-sql');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerFundCheckHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, yearOf } = deps;
 
@@ -227,10 +228,10 @@ module.exports = function registerFundCheckHandlers(ipcMain, deps) {
     return { year: y, findings: out, ok: out.every(f => f.level === 'бележка') };
   }
 
-  ipcMain.handle('fund:check', /** @param {unknown} e @param {IpcArg<'fund:check'>} year */ (e, year) => run(() => runChecks(getDb(), year)));
+  ipcMain.handle('fund:check', /** @param {unknown} e @param {IpcArg<'fund:check'>} year @returns {IpcReply<'fund:check'>} */ (e, year) => run(() => runChecks(getDb(), year)));
   /* Отделен канал за вписване в дневника: самата проверка се вика и при всяко
      отваряне на екрана и не бива да пълни следата с еднакви редове. */
-  ipcMain.handle('fund:checkLogged', /** @param {unknown} e @param {IpcArg<'fund:checkLogged'>} year */ (e, year) =>
+  ipcMain.handle('fund:checkLogged', /** @param {unknown} e @param {IpcArg<'fund:checkLogged'>} year @returns {IpcReply<'fund:checkLogged'>} */ (e, year) =>
     run(() => {
       const r = runChecks(getDb(), year);
       const heavy = r.findings.filter(f => f.level !== 'бележка');

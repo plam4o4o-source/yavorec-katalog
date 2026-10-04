@@ -2,12 +2,13 @@
 // разбиването на монолита на модули по домейн). Най-прост случай досега:
 // само `getDb()`, `run` и `logAudit`, никакви върнати функции назад към
 // main.js — никой друг домейн не вика функции оттук.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerEmployeesHandlers(ipcMain, deps) {
   // syncCurrentUser(name?) — чете/задава текущия служител на тази станция (main.js).
   const { getDb, run, logAudit, syncCurrentUser } = deps;
 
-  ipcMain.handle('employees:list', () => run(() => getDb().prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
-  ipcMain.handle('employees:create', /** @param {unknown} e @param {IpcArg<'employees:create'>} name */ (e, name) =>
+  ipcMain.handle('employees:list', /** @returns {IpcReply<'employees:list'>} */ () => run(() => getDb().prepare('SELECT * FROM employees ORDER BY active DESC, name').all()));
+  ipcMain.handle('employees:create', /** @param {unknown} e @param {IpcArg<'employees:create'>} name @returns {IpcReply<'employees:create'>} */ (e, name) =>
     run(() => {
       if (!name || !name.trim()) throw new Error('Въведете име на служителя.');
       const info = getDb().prepare('INSERT INTO employees (name) VALUES (?)').run(name.trim());
@@ -15,7 +16,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('employees:update', /** @param {unknown} e @param {IpcArg<'employees:update'>} arg */ (e, { id, name, active }) =>
+  ipcMain.handle('employees:update', /** @param {unknown} e @param {IpcArg<'employees:update'>} arg @returns {IpcReply<'employees:update'>} */ (e, { id, name, active }) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT * FROM employees WHERE id = ?').get(id);
@@ -35,7 +36,7 @@ module.exports = function registerEmployeesHandlers(ipcMain, deps) {
       if (syncCurrentUser && cur.name === syncCurrentUser()) syncCurrentUser(nextActive ? nextName : '');
     })
   );
-  ipcMain.handle('employees:delete', /** @param {unknown} e @param {IpcArg<'employees:delete'>} id */ (e, id) =>
+  ipcMain.handle('employees:delete', /** @param {unknown} e @param {IpcArg<'employees:delete'>} id @returns {IpcReply<'employees:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const cur = db.prepare('SELECT name FROM employees WHERE id = ?').get(id);

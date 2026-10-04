@@ -4,6 +4,7 @@
 // IMPORT_CACHE (прочетеният файл между прегледа и внасянето) е module-scope
 // състояние тук — не е нужно да излиза навън, ползва се само вътре в тези
 // три handler-а.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerDataImportHandlers(ipcMain, deps) {
   const { getDb, logAudit, dialog, getMainWindow, fs, path, BOOK_FIELDS, today, cnSortKey } = deps;
   const importers = require('../importers');
@@ -38,6 +39,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
        прегледа: отчетът след вноса се прави от import:run, който дотогава нямаше
        никакъв достъп до него (виж report.fileWarning по-долу). */
     IMPORT_CACHE = { path: filePath, headers, body, warning: t.warning || null };
+    /** @type {Record<string, string>} индекс на колоната → поле */
     const mapping = importers.guessMapping(headers);
     /* Кръг 45, Ф11 — датите в ПРЕГЛЕДА.
        (а) Какво ставаше: Excel пази датата като число на дни; прегледът в
@@ -87,7 +89,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     if (dialogApprovedImports.has(path.resolve(filePath))) return true;
     return IMPORT_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
   }
-  ipcMain.handle('import:load', /** @param {unknown} e @param {IpcArg<'import:load'>} filePath */ (e, filePath) => {
+  ipcMain.handle('import:load', /** @param {unknown} e @param {IpcArg<'import:load'>} filePath @returns {IpcReply<'import:load'>} */ (e, filePath) => {
     try {
       if (!filePath || !fs.existsSync(filePath)) return { ok: false, error: 'Файлът не е намерен.' };
       if (!importSourceAllowed(filePath)) {
@@ -97,7 +99,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       return { ok: true, data: loadImportFile(filePath) };
     } catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('import:choose', async () => {
+  ipcMain.handle('import:choose', /** @returns {Promise<IpcResult<IpcData<'import:choose'>>>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файл за въвеждане (извеждане от друга библиотечна система)',
@@ -286,7 +288,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
     }
     return null;
   }
-  ipcMain.handle('import:run', /** @param {unknown} e @param {IpcArg<'import:run'>} arg */ (e, { mapping, options }) => {
+  ipcMain.handle('import:run', /** @param {unknown} e @param {IpcArg<'import:run'>} arg @returns {IpcReply<'import:run'>} */ (e, { mapping, options }) => {
     try {
       const db = getDb();
       if (!IMPORT_CACHE) return { ok: false, error: 'Първо изберете файл.' };
@@ -344,7 +346,12 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
         convertedLeva: 0, priceEuro: 0, priceEmpty: 0, priceBad: 0, priceNote: /** @type {string|null} */ (null),
         // Ф3 (кръг 45): редовете с дата на вписване след днешния ден — виж по-долу.
         futureDated: /** @type {Array<{line:number, inv:(number|null), title:string, date:string}>} */ ([]),
-        futureDatedCount: 0, futureDateNote: /** @type {string|null} */ (null) };
+        futureDatedCount: 0, futureDateNote: /** @type {string|null} */ (null),
+        /* Истинските стойности се слагат по-долу, преди първия ред от файла
+           (registerDateDefault — след проверката на датата, fileWarning — от кеша);
+           тук стоят, за да е отчетът пълен още при създаването си. */
+        registerDateDefaulted: 0, registerDateDefault: /** @type {string|null} */ (null),
+        fileWarning: /** @type {string|null} */ (null) };
       /* П2 (v2.4.69): валутата от заглавието на колоната с цените — виж
          headerCurrency в importers.js. */
       const priceHeader = cols.price != null ? String(IMPORT_CACHE.headers[cols.price] ?? '').trim() : '';

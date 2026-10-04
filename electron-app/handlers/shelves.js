@@ -14,6 +14,7 @@
 //     за да се отрази промяната при следващото автоматично публикуване
 const { resolveScannedBook } = require('../security-utils');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerShelvesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, scheduleCatalogWrite, normalizeScanCode } = deps;
 
@@ -41,7 +42,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
   const SHELF_PUBLISHED = `(b.status IS NOT NULL AND b.status != 'отчислен'
      AND COALESCE(b.department,'') != 'служебен')`;
 
-  ipcMain.handle('shelves:list', () =>
+  ipcMain.handle('shelves:list', /** @returns {IpcReply<'shelves:list'>} */ () =>
     run(() => getDb().prepare(`
       SELECT sh.*,
              (SELECT COUNT(*) FROM catalog_shelf_items si JOIN books b ON b.id = si.book_id
@@ -56,7 +57,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       FROM catalog_shelves sh ORDER BY sh.sort, sh.name
     `).all())
   );
-  ipcMain.handle('shelves:items', /** @param {unknown} e @param {IpcArg<'shelves:items'>} shelfId */ (e, shelfId) =>
+  ipcMain.handle('shelves:items', /** @param {unknown} e @param {IpcArg<'shelves:items'>} shelfId @returns {IpcReply<'shelves:items'>} */ (e, shelfId) =>
     run(() => getDb().prepare(`
       SELECT b.id, b.inv_number, b.title, b.author, b.status, b.department,
              CASE WHEN ${SHELF_PUBLISHED} THEN 1 ELSE 0 END AS published,
@@ -70,7 +71,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       WHERE si.shelf_id = ? ORDER BY si.sort, b.title
     `).all(shelfId))
   );
-  ipcMain.handle('shelves:create', /** @param {unknown} e @param {IpcArg<'shelves:create'>} name */ (e, name) =>
+  ipcMain.handle('shelves:create', /** @param {unknown} e @param {IpcArg<'shelves:create'>} name @returns {IpcReply<'shelves:create'>} */ (e, name) =>
     run(() => {
       const n = String(name || '').trim();
       if (!n) throw new Error('Името на витрината е задължително.');
@@ -79,7 +80,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       return info.lastInsertRowid;
     })
   );
-  ipcMain.handle('shelves:rename', /** @param {unknown} e @param {IpcArg<'shelves:rename'>} arg */ (e, { id, name }) =>
+  ipcMain.handle('shelves:rename', /** @param {unknown} e @param {IpcArg<'shelves:rename'>} arg @returns {IpcReply<'shelves:rename'>} */ (e, { id, name }) =>
     run(() => {
       const n = String(name || '').trim();
       if (!n) throw new Error('Името на витрината е задължително.');
@@ -91,7 +92,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       scheduleCatalogWrite();
     })
   );
-  ipcMain.handle('shelves:delete', /** @param {unknown} e @param {IpcArg<'shelves:delete'>} id */ (e, id) =>
+  ipcMain.handle('shelves:delete', /** @param {unknown} e @param {IpcArg<'shelves:delete'>} id @returns {IpcReply<'shelves:delete'>} */ (e, id) =>
     run(() => {
       const sh = getDb().prepare('SELECT name FROM catalog_shelves WHERE id = ?').get(id);
       getDb().prepare('DELETE FROM catalog_shelves WHERE id = ?').run(id);
@@ -105,7 +106,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
   // прибегне до пълно сканиране на фонда.
   // normalizeScanCode() (v1.70.1) — виж books:byBarcode в handlers/books.js за
   // обяснението на кирилско/латинско разминаване при баркод четец.
-  ipcMain.handle('shelves:addBook', /** @param {unknown} e @param {IpcArg<'shelves:addBook'>} arg */ (e, { shelfId, code }) =>
+  ipcMain.handle('shelves:addBook', /** @param {unknown} e @param {IpcArg<'shelves:addBook'>} arg @returns {IpcReply<'shelves:addBook'>} */ (e, { shelfId, code }) =>
     run(() => {
       const c = normalizeScanCode(code);
       // Одит v2.4.24 — виж resolveScannedBook() в security-utils.js.
@@ -148,7 +149,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
     })
   );
   // Групово добавяне — от отметките в „Книги". Отчислените/служебните се подминават тихо.
-  ipcMain.handle('shelves:addBooks', /** @param {unknown} e @param {IpcArg<'shelves:addBooks'>} arg */ (e, { shelfId, ids }) =>
+  ipcMain.handle('shelves:addBooks', /** @param {unknown} e @param {IpcArg<'shelves:addBooks'>} arg @returns {IpcReply<'shelves:addBooks'>} */ (e, { shelfId, ids }) =>
     run(() => {
       if (!Array.isArray(ids) || !ids.length) throw new Error('Няма избрани документи.');
       const db = getDb();
@@ -194,7 +195,7 @@ module.exports = function registerShelvesHandlers(ipcMain, deps) {
       return { added, skipped };
     })
   );
-  ipcMain.handle('shelves:removeBook', /** @param {unknown} e @param {IpcArg<'shelves:removeBook'>} arg */ (e, { shelfId, bookId }) =>
+  ipcMain.handle('shelves:removeBook', /** @param {unknown} e @param {IpcArg<'shelves:removeBook'>} arg @returns {IpcReply<'shelves:removeBook'>} */ (e, { shelfId, bookId }) =>
     run(() => {
       getDb().prepare('DELETE FROM catalog_shelf_items WHERE shelf_id = ? AND book_id = ?').run(shelfId, bookId);
       scheduleCatalogWrite();

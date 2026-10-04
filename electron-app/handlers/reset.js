@@ -200,6 +200,7 @@ const KEEP = [
 const CATALOG_RESET_COLS = ['catalog_folder', 'gh_user', 'gh_repo', 'gh_branch'];
 const IDENTITY_RESET_COLS = ['lib_name', 'org', 'place'];
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerResetHandlers(ipcMain, deps) {
   const {
     app, fs, path,
@@ -377,7 +378,9 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
     return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?").get(name);
   }
   function countRows(db) {
+    /** @type {Record<string, number>} */
     const byTable = {};
+    /** @type {Record<string, number>} */
     const byGroup = {};
     let total = 0;
     for (const [table, group] of WIPE) {
@@ -430,7 +433,7 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
       });
   }
 
-  ipcMain.handle('reset:plan', () =>
+  ipcMain.handle('reset:plan', /** @returns {IpcReply<'reset:plan'>} */ () =>
     run(() => {
       const db = getDb();
       const counts = countRows(db);
@@ -477,7 +480,7 @@ module.exports = function registerResetHandlers(ipcMain, deps) {
   /* --------------------------------------------------------------------------
      САМОТО ИЗТРИВАНЕ
   -------------------------------------------------------------------------- */
-  ipcMain.handle('reset:wipe', /** @param {unknown} e @param {IpcArg<'reset:wipe'>} opts */ (e, opts) =>
+  ipcMain.handle('reset:wipe', /** @param {unknown} e @param {IpcArg<'reset:wipe'>} opts @returns {IpcReply<'reset:wipe'>} */ (e, opts) =>
     run(() => {
       /* 1) ДУМАТА. Проверката е тук, а не (само) на екрана — обработчикът е
             границата, зад която действието става необратимо. Сравнява се без

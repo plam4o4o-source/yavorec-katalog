@@ -47,6 +47,7 @@
    добавя към package.json. */
 const zlib = require('zlib');
 
+/** @param {any} ipcMain @param {Record<string, any>} deps   (без run — каналите тук връщат { ok, … } сами) */
 module.exports = function registerExportAllHandlers(ipcMain, deps) {
   const { getDb, logAudit, dialog, getMainWindow, fs, csvCell, today } = deps;
   const pii = require('../pii-crypto');
@@ -348,7 +349,7 @@ module.exports = function registerExportAllHandlers(ipcMain, deps) {
       .join('\r\n') + '\r\n';
   }
 
-  ipcMain.handle('exportAll:run', async () => {
+  ipcMain.handle('exportAll:run', /** @returns {Promise<IpcResult<IpcData<'exportAll:run'>>>} */ async () => {
     try {
       const db = getDb();
       const day = today();
