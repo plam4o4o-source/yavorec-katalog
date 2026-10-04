@@ -632,7 +632,7 @@ module.exports = function registerDnevnikHandlers(ipcMain, deps) {
         } };
     })
   );
-  ipcMain.handle('dnevnik:exportCsv', /** @param {unknown} e @param {IpcArg<'dnevnik:exportCsv'>} arg @returns {Promise<IpcResult<IpcData<'dnevnik:exportCsv'>>>} */ async (e, { year, month }) => {
+  ipcMain.handle('dnevnik:exportCsv', /** @param {unknown} e @param {IpcArg<'dnevnik:exportCsv'>} arg @returns {IpcAsyncReply<'dnevnik:exportCsv'>} */ async (e, { year, month }) => {
     try {
       const db = getDb();
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {

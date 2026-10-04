@@ -726,7 +726,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
   // Извеждане на списъка читатели в CSV (v1.70.0). Нарочно БЕЗ ЕГН/№ на лична карта —
   // това е справочен документ, не заместител на защитата на личните данни; ЕГН/№ ЛК
   // и без друго излизат маскирани от readers:list, ако защитата е заключена.
-  ipcMain.handle('readers:exportCsv', /** @returns {Promise<IpcResult<IpcData<'readers:exportCsv'>>>} */ async () => {
+  ipcMain.handle('readers:exportCsv', /** @returns {IpcAsyncReply<'readers:exportCsv'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на читателите (CSV)',

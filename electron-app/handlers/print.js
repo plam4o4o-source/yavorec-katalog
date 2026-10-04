@@ -56,7 +56,7 @@ function pdfWriteError(err, filePath, path) {
 module.exports = function registerPrintHandlers(ipcMain, deps) {
   const { getMainWindow, dialog, fs, path, app, shell, logAudit } = deps;
 
-  ipcMain.handle('print:savePdf', /** @param {unknown} e @param {IpcArg<'print:savePdf'>} opts @returns {Promise<IpcResult<IpcData<'print:savePdf'>>>} */ async (e, opts) => {
+  ipcMain.handle('print:savePdf', /** @param {unknown} e @param {IpcArg<'print:savePdf'>} opts @returns {IpcAsyncReply<'print:savePdf'>} */ async (e, opts) => {
     try {
       const win = getMainWindow();
       if (!win) return { ok: false, error: 'Няма активен прозорец.' };

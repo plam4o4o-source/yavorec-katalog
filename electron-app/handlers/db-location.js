@@ -90,7 +90,7 @@ module.exports = function registerDbLocationHandlers(ipcMain, deps) {
   ipcMain.handle('dbLocation:get', /** @returns {IpcReply<'dbLocation:get'>} */ () =>
     run(() => ({ folder: resolveDbDir(), isDefault: !readConfig().dbFolder, isPackaged: app.isPackaged }))
   );
-  ipcMain.handle('dbLocation:choose', /** @returns {Promise<IpcResult<IpcData<'dbLocation:choose'>>>} */ async () => {
+  ipcMain.handle('dbLocation:choose', /** @returns {IpcAsyncReply<'dbLocation:choose'>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете папка за базата данни (локална или мрежова)',

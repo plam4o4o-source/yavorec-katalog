@@ -25,10 +25,13 @@ type IsoDate = string;
 
 /** Отговорът на всеки канал през run() (handlers → main.js). Някои канали
     връщат и допълнителни полета до `data` (напр. books:create — catalogWarning). */
-type IpcResult<T> = (
+type IpcResult<T> =
   | { ok: true; data: T; error?: undefined }
-  | { ok: false; error: string; data?: undefined }
-) & { [extra: string]: any };
+  | { ok: false; error: string; data?: undefined };
+/** Полетата ДО `data` (v2.4.77) — канал, който ги има, ги описва в записа си
+    като `extra`. Отговорът няма „свободни“ полета: непознато поле е грешка и
+    на екрана, и в обработчика. */
+type IpcExtra<C extends keyof IpcContract> = IpcContract[C] extends { extra: infer X } ? Partial<X> : {};
 
 /** Типът на метод от window.api за описан канал. Канал, чийто отговор зависи от
     аргументите (прозорец или целият списък, етикети…), описва и `call` — отделен
@@ -36,14 +39,16 @@ type IpcResult<T> = (
     а обработчикът пак вижда `args` (всички режими наведнъж). */
 type IpcMethod<C extends keyof IpcContract> =
   IpcContract[C] extends { call: infer F } ? F
-    : (...args: IpcContract[C]['args']) => Promise<IpcResult<IpcContract[C]['result']>>;
+    : (...args: IpcContract[C]['args']) => Promise<IpcResult<IpcContract[C]['result']> & IpcExtra<C>>;
 /** Аргументът на обработчика (по подразбиране първият след `e`). */
 type IpcArg<C extends keyof IpcContract, I extends number = 0> = IpcContract[C]['args'][I];
 /** Данните в отговора на канала. */
 type IpcData<C extends keyof IpcContract> = IpcContract[C]['result'];
 /** Какво връща обработчикът на канала (v2.4.77): отговорът през run() с данните
     от договора — обработчик, който връща друго, е грешка при проверката. */
-type IpcReply<C extends keyof IpcContract> = IpcResult<IpcData<C>> | Promise<IpcResult<IpcData<C>>>;
+type IpcReply<C extends keyof IpcContract> = (IpcResult<IpcData<C>> & IpcExtra<C>) | Promise<IpcResult<IpcData<C>> & IpcExtra<C>>;
+/** Същото за асинхронен обработчик. */
+type IpcAsyncReply<C extends keyof IpcContract> = Promise<IpcResult<IpcData<C>> & IpcExtra<C>>;
 /** Зависимостите, които main.js подава на всеки handlers/*.js. Описан е run() —
     той носи типа на данните до отговора; останалите са различни за всеки модул. */
 interface HandlerDeps {
@@ -1003,10 +1008,15 @@ interface IpcContract {
   /** Няма извикване от екран. */
   'books:checks': { args: [Id]; result: Array<{ date: string }> };
   'books:clearOrphanDeaccession': { args: [Id]; result: void };
-  /** `data` е id на новия ред. ДО него в отговора (не в data): invGap: BookInvGapNotice | null,
-      dateWarning/acqWarning/kindWarning/catalogWarning: string | null, isbnDuplicate: BookIsbnMatch | null,
-      suggestions: отворените предложения за покупка (handlers/suggestions.js). */
+  /** `data` е id на новия ред; предупрежденията и предложенията стоят ДО него (`extra`). */
   'books:create': {
+    extra: {
+      invGap: BookInvGapNotice | null; dateWarning: string | null; acqWarning: string | null;
+      kindWarning: string | null; isbnDuplicate: BookIsbnMatch | null; catalogWarning: string | null;
+      /** Отворените предложения за покупка на същото заглавие (handlers/suggestions.js). */
+      suggestions: Array<{ id: number; date: string | null; title: string; author: string | null; reader_id: number | null;
+        reader_name: string | null; status: string; author_match: boolean }>;
+    };
     args: [BookInput & {
       /** Инвентарният номер на оригинала при „+ Още екземпляр“ — тогава не се предупреждава за ISBN. */
       copied_from?: Id | null }];
@@ -1068,17 +1078,22 @@ interface IpcContract {
     args: [];
     result: { at: string | null; error: string | null; okAt: string | null; write: CatalogWriteState | null };
   };
-  /** `data` е избраната папка. ДО него: adopted: CatalogRemoteSlug | null, mismatch: boolean,
-      remote: CatalogRemoteSlug | null, write: { written, blocked, error, published, now, message }. */
-  'catalog:chooseFolder': { args: []; result: string };
+  /** `data` е избраната папка; състоянието на връзката и първият запис — ДО него (`extra`). */
+  'catalog:chooseFolder': {
+    args: []; result: string;
+    extra: {
+      adopted: CatalogRemoteSlug | null; mismatch: boolean; remote: CatalogRemoteSlug | null;
+      write: { written: boolean; blocked: boolean; error: string | null; published: number | null; now: number | null; message: string | null };
+    };
+  };
   'catalog:disconnectFolder': { args: []; result: void };
   /** Пътят на записания файл. */
   'catalog:export': { args: []; result: string };
   'catalog:exportCsv': { args: []; result: string };
   'catalog:exportDc': { args: []; result: { path: string; count: number; excluded: number } };
   'catalog:exportMarc': { args: []; result: { path: string; count: number; excluded: number } };
-  /** Без `data`: при успех отговорът е { ok:true, committed: boolean } (committed — ДО data). */
-  'catalog:gitPublishNow': { args: []; result: void };
+  /** Без данни; `committed` — имало ли е промяна за публикуване. */
+  'catalog:gitPublishNow': { args: []; result: void; extra: { committed: boolean } };
   /** null — няма свързана папка. */
   'catalog:remoteCheck': { args: []; result: { mismatch: boolean; remote: CatalogRemoteSlug | null } | null };
   'catalog:status': {
@@ -1496,8 +1511,8 @@ interface IpcContract {
   'backup:chooseSecondFolder': { args: []; result: { folder: string; copied: boolean } };
   'backup:clearSecondFolder': { args: []; result: true };
   'backup:list': { args: []; result: BackupFileRow[] };
-  /** Паролата — поне 10 знака, иначе отказ. `data` е пътят; до него в отговора стои и `encrypted`. */
-  'backup:now': { args: [{ password?: string }?]; result: string };
+  /** Паролата — поне 10 знака, иначе отказ. `data` е пътят. */
+  'backup:now': { args: [{ password?: string }?]; result: string; extra: { encrypted: boolean } };
   /** Без аргумент — системен диалог; второто извикване носи пътя, одобрен от диалога, и паролата. */
   'backup:restoreBrowse': {
     args: [{ path?: string; password?: string }?];

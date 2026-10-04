@@ -349,7 +349,7 @@ module.exports = function registerExportAllHandlers(ipcMain, deps) {
       .join('\r\n') + '\r\n';
   }
 
-  ipcMain.handle('exportAll:run', /** @returns {Promise<IpcResult<IpcData<'exportAll:run'>>>} */ async () => {
+  ipcMain.handle('exportAll:run', /** @returns {IpcAsyncReply<'exportAll:run'>} */ async () => {
     try {
       const db = getDb();
       const day = today();

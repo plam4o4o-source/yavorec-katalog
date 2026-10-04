@@ -218,7 +218,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     scheduleSync();
   }));
 
-  ipcMain.handle('online:syncNow', /** @returns {Promise<IpcResult<IpcData<'online:syncNow'>>>} */ async () => {
+  ipcMain.handle('online:syncNow', /** @returns {IpcAsyncReply<'online:syncNow'>} */ async () => {
     try {
       requireActivated();
       const s = settingsRow();

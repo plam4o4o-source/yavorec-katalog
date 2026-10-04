@@ -1568,7 +1568,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:now', /** @param {unknown} e @param {IpcArg<'backup:now'>} opts @returns {Promise<IpcResult<IpcData<'backup:now'>>>} */ async (e, opts) => {
+  ipcMain.handle('backup:now', /** @param {unknown} e @param {IpcArg<'backup:now'>} opts @returns {IpcAsyncReply<'backup:now'>} */ async (e, opts) => {
     try {
       const password = opts && opts.password ? String(opts.password) : '';
       /* ПАРОЛАТА НА РЪЧНОТО КОПИЕ — ПОНЕ 10 ЗНАКА (v2.4.71, кръг 45, С18).
@@ -1957,7 +1957,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:restoreBrowse', /** @param {unknown} e @param {IpcArg<'backup:restoreBrowse'>} opts @returns {Promise<IpcResult<IpcData<'backup:restoreBrowse'>>>} */ async (e, opts) => {
+  ipcMain.handle('backup:restoreBrowse', /** @param {unknown} e @param {IpcArg<'backup:restoreBrowse'>} opts @returns {IpcAsyncReply<'backup:restoreBrowse'>} */ async (e, opts) => {
     try {
       let target = opts && opts.path;
       if (target) {
@@ -2008,7 +2008,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       return { folder, configured: !!folder, available, last: lastSecondCopy, canConfigure: typeof updateConfig === 'function' };
     })
   );
-  ipcMain.handle('backup:chooseSecondFolder', /** @returns {Promise<IpcResult<IpcData<'backup:chooseSecondFolder'>>>} */ async () => {
+  ipcMain.handle('backup:chooseSecondFolder', /** @returns {IpcAsyncReply<'backup:chooseSecondFolder'>} */ async () => {
     try {
       if (typeof updateConfig !== 'function') {
         throw new Error('Тази версия на програмата не може да запише настройката за втора папка.');

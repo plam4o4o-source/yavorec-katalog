@@ -422,7 +422,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   );
   // Проверява накъде наистина сочи свързаната папка. Извиква се от интерфейса, за да се
   // покаже предупреждение, преди да се стигне до публикуване.
-  ipcMain.handle('catalog:remoteCheck', /** @returns {Promise<IpcResult<IpcData<'catalog:remoteCheck'>>>} */ async () => {
+  ipcMain.handle('catalog:remoteCheck', /** @returns {IpcAsyncReply<'catalog:remoteCheck'>} */ async () => {
     try {
       const s = getDb().prepare('SELECT catalog_folder, gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
       if (!s.catalog_folder) return { ok: true, data: null };
@@ -465,7 +465,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       }
     })
   );
-  ipcMain.handle('catalog:chooseFolder', /** @returns {Promise<IpcResult<IpcData<'catalog:chooseFolder'>>>} */ async () => {
+  ipcMain.handle('catalog:chooseFolder', /** @returns {IpcAsyncReply<'catalog:chooseFolder'>} */ async () => {
     try {
       const db = getDb();
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
@@ -558,7 +558,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       throw new Error('Записът на каталога не успя. Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
     }
   }
-  ipcMain.handle('catalog:gitPublishNow', /** @returns {Promise<IpcResult<IpcData<'catalog:gitPublishNow'>>>} */ async () => {
+  ipcMain.handle('catalog:gitPublishNow', /** @returns {IpcAsyncReply<'catalog:gitPublishNow'>} */ async () => {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
     const seen = dataVersionNow();
@@ -825,7 +825,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     return getDb().prepare(`SELECT COUNT(*) AS n FROM books b
       WHERE COALESCE(b.status,'') = 'отчислен' OR COALESCE(b.department,'') = 'служебен'`).get().n;
   }
-  ipcMain.handle('catalog:exportMarc', /** @returns {Promise<IpcResult<IpcData<'catalog:exportMarc'>>>} */ async () => {
+  ipcMain.handle('catalog:exportMarc', /** @returns {IpcAsyncReply<'catalog:exportMarc'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане в UNIMARC / MARCXML',
@@ -840,7 +840,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: true, data: { path: filePath, count: books.length, excluded: exportExcludedCount() } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('catalog:exportDc', /** @returns {Promise<IpcResult<IpcData<'catalog:exportDc'>>>} */ async () => {
+  ipcMain.handle('catalog:exportDc', /** @returns {IpcAsyncReply<'catalog:exportDc'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане в Dublin Core',
@@ -856,7 +856,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  ipcMain.handle('catalog:export', /** @returns {Promise<IpcResult<IpcData<'catalog:export'>>>} */ async () => {
+  ipcMain.handle('catalog:export', /** @returns {IpcAsyncReply<'catalog:export'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на онлайн каталог',
@@ -875,7 +875,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('catalog:exportCsv', /** @returns {Promise<IpcResult<IpcData<'catalog:exportCsv'>>>} */ async () => {
+  ipcMain.handle('catalog:exportCsv', /** @returns {IpcAsyncReply<'catalog:exportCsv'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на фонда (CSV)',

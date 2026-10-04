@@ -294,7 +294,7 @@ module.exports = function registerNoticesHandlers(ipcMain, deps) {
          обяснение (другите места, които ползват канала, не губят текста
          мълчаливо). */
   const MAILTO_MAX = 1900;
-  ipcMain.handle('loans:mailto', /** @param {unknown} e @param {IpcArg<'loans:mailto'>} arg @returns {Promise<IpcResult<IpcData<'loans:mailto'>>>} */ async (e, { email, subject, body, fallbackBody }) => {
+  ipcMain.handle('loans:mailto', /** @param {unknown} e @param {IpcArg<'loans:mailto'>} arg @returns {IpcAsyncReply<'loans:mailto'>} */ async (e, { email, subject, body, fallbackBody }) => {
     try {
       if (!email) return { ok: false, error: 'Читателят няма записан имейл.' };
       if (!isValidEmail(email)) return { ok: false, error: 'Записаният имейл не изглежда валиден.' };

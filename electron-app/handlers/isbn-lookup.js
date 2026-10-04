@@ -233,7 +233,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     return book.title ? book : null;
   }
 
-  ipcMain.handle('sru:lookup', /** @param {unknown} e @param {IpcArg<'sru:lookup'>} raw @returns {Promise<IpcResult<IpcData<'sru:lookup'>>>} */ async (e, raw) => {
+  ipcMain.handle('sru:lookup', /** @param {unknown} e @param {IpcArg<'sru:lookup'>} raw @returns {IpcAsyncReply<'sru:lookup'>} */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     const s = getDb().prepare('SELECT sru_endpoint FROM settings WHERE id = 1').get() || {};
@@ -258,7 +258,7 @@ const SRU_ENDPOINT_DEFAULT = 'http://lx2.loc.gov:210/lcdb';
     }
   });
 
-  ipcMain.handle('isbn:lookup', /** @param {unknown} e @param {IpcArg<'isbn:lookup'>} raw @returns {Promise<IpcResult<IpcData<'isbn:lookup'>>>} */ async (e, raw) => {
+  ipcMain.handle('isbn:lookup', /** @param {unknown} e @param {IpcArg<'isbn:lookup'>} raw @returns {IpcAsyncReply<'isbn:lookup'>} */ async (e, raw) => {
     const isbn = normalizeIsbn(raw);
     if (!isbn) return { ok: false, error: 'Невалиден ISBN — очакват се 10 или 13 цифри.' };
     // Двете услуги се питат заедно и се допълват: Google Books обикновено дава език и

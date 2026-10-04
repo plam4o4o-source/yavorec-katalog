@@ -126,7 +126,7 @@ module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
       return { dirs: b.dirs, safe: b.safe, rejected: b.rejected, exe: b.exe };
     })
   );
-  ipcMain.handle('security:writeExclusionScript', /** @returns {Promise<IpcResult<IpcData<'security:writeExclusionScript'>>>} */ async () => {
+  ipcMain.handle('security:writeExclusionScript', /** @returns {IpcAsyncReply<'security:writeExclusionScript'>} */ async () => {
     try {
       const b = buildAvExclusionScript();
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {

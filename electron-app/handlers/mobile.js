@@ -31,7 +31,7 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
     .replace(/[а-яё]/g, (ch) => BG2LAT[ch] || '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
 
-  ipcMain.handle('mobile:generate', /** @returns {Promise<IpcResult<IpcData<'mobile:generate'>>>} */ async () => {
+  ipcMain.handle('mobile:generate', /** @returns {IpcAsyncReply<'mobile:generate'>} */ async () => {
     try {
       const s = getDb().prepare('SELECT lib_name, org, place FROM settings WHERE id = 1').get() || {};
       const tpl = fs.readFileSync(path.join(__dirname, '..', 'src', 'mobile-template.html'), 'utf8');

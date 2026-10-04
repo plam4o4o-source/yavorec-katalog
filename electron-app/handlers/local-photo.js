@@ -45,7 +45,7 @@ module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
   }
   const kbDown = (n) => Math.floor(n / 1024);
 
-  ipcMain.handle('localPhoto:choose', /** @param {unknown} e @param {IpcArg<'localPhoto:choose'>} arg @returns {Promise<IpcResult<IpcData<'localPhoto:choose'>>>} */ async (e, { table, id }) => {
+  ipcMain.handle('localPhoto:choose', /** @param {unknown} e @param {IpcArg<'localPhoto:choose'>} arg @returns {IpcAsyncReply<'localPhoto:choose'>} */ async (e, { table, id }) => {
     try {
       if (!['persons', 'chronicle'].includes(table)) return { ok: false, error: 'Непозната таблица.' };
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {

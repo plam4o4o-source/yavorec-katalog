@@ -14,6 +14,8 @@
     "strict": false,
     // v2.4.75 (т. 4): null и undefined са отделни типове — виж tsconfig.renderer.json.
     "strictNullChecks": true,
+    // v2.4.77 (т. 4): „може да липсва“ (x?: T) и „изрично undefined“ са различни неща.
+    "exactOptionalPropertyTypes": true,
     // v2.4.72: без шум за този код (измерено) — мъртъв код и функция, която
     // връща стойност само в някои случаи, спират PR-а.
     "noUnusedLocals": true,

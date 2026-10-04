@@ -195,11 +195,12 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
       o = Object.assign({}, o || {});
       // o вече е обект (Object.assign горе); tsc не пренася стесняването в стрелката.
       const has = (k) => { const v = /** @type {SettingsLabelFormatInput} */ (o)[k]; return v !== undefined && v !== null && String(v).trim() !== ''; };
-      // Стар извикващ (две числа) → четирите нови от тях.
-      if (!has('lbl_mt') && has('lbl_margin')) o.lbl_mt = o.lbl_margin;
-      if (!has('lbl_ml') && has('lbl_margin')) o.lbl_ml = o.lbl_margin;
-      if (!has('lbl_gx') && has('lbl_gap')) o.lbl_gx = o.lbl_gap;
-      if (!has('lbl_gy') && has('lbl_gap')) o.lbl_gy = o.lbl_gap;
+      // Стар извикващ (две числа) → четирите нови от тях. has() е проверил, че старото поле е непразно.
+      const old = (/** @type {'lbl_margin' | 'lbl_gap'} */ k) => /** @type {number | string} */ (/** @type {SettingsLabelFormatInput} */ (o)[k]);
+      if (!has('lbl_mt') && has('lbl_margin')) o.lbl_mt = old('lbl_margin');
+      if (!has('lbl_ml') && has('lbl_margin')) o.lbl_ml = old('lbl_margin');
+      if (!has('lbl_gx') && has('lbl_gap')) o.lbl_gx = old('lbl_gap');
+      if (!has('lbl_gy') && has('lbl_gap')) o.lbl_gy = old('lbl_gap');
       const clamped = [];
       const v = {};
       for (const [k, [label, lo, hi, def]] of Object.entries(LABEL_LIMITS)) {
@@ -236,7 +237,7 @@ module.exports = function registerSettingsHandlers(ipcMain, deps) {
   const LOCAL_PHOTO_MAX_BYTES = 1024 * 1024;
   const LOGO_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
-  ipcMain.handle('settings:chooseLogo', /** @returns {Promise<IpcResult<IpcData<'settings:chooseLogo'>>>} */ async () => {
+  ipcMain.handle('settings:chooseLogo', /** @returns {IpcAsyncReply<'settings:chooseLogo'>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файл с логото на организацията',

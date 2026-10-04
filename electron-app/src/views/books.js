@@ -1160,6 +1160,7 @@ async function saveBook(id, andNew) {
   // Дотогава closeModal() беше безусловен: при дублиран инв. номер тостът светваше,
   // но формата вече беше затворена и всички попълнени полета — изгубени.
   let savedId = id;
+  /** @type {IpcExtra<'books:create'> | null} */
   let after = null;
   if (id) {
     /* Редакцията вече може да носи предупреждение за прескочени инвентарни номера
@@ -1209,6 +1210,7 @@ window.saveBook = saveBook;
 /* СЛЕД ВПИСВАНЕТО (v2.4.57) — трите неща, които дотук не стигаха до никого.
    Показват се в този ред: първо предупрежденията, после предложението за
    покупка, защото второто иска решение и не бива да се изгуби под тост. */
+/** @param {IpcExtra<'books:create'>} res — полетата ДО data в отговора на books:create @param {Id} bookId */
 async function bookAftermath(res, bookId) {
   if (res.catalogWarning) toast(res.catalogWarning, 'warn');
   if (res.invGap) toast(res.invGap.message, 'warn');

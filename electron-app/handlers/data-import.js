@@ -99,7 +99,7 @@ module.exports = function registerDataImportHandlers(ipcMain, deps) {
       return { ok: true, data: loadImportFile(filePath) };
     } catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('import:choose', /** @returns {Promise<IpcResult<IpcData<'import:choose'>>>} */ async () => {
+  ipcMain.handle('import:choose', /** @returns {IpcAsyncReply<'import:choose'>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файл за въвеждане (извеждане от друга библиотечна система)',

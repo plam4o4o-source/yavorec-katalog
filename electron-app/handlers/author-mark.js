@@ -469,7 +469,7 @@ module.exports = function registerAuthorMarkHandlers(ipcMain, deps) {
      Прегледът се пази тук, а не се разнася до екрана и обратно — иначе хиляда
      реда пътуват два пъти без нужда. */
   let pending = null;
-  ipcMain.handle('authorMark:choose', /** @returns {Promise<IpcResult<IpcData<'authorMark:choose'>>>} */ async () => {
+  ipcMain.handle('authorMark:choose', /** @returns {IpcAsyncReply<'authorMark:choose'>} */ async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
         title: 'Изберете файла с таблицата за авторски знак',

@@ -338,7 +338,7 @@ async function catalogChooseFolder() {
   if (!res.ok) return toast(res.error, 'err');
   /* К1 (v2.4.69): спрян или неуспешен първи запис се казва ВЕДНАГА, а не с
      обещанието „katalog.json се обновява автоматично“ — вж. catalog:chooseFolder. */
-  const w = res.write || {};
+  const w = res.write || /** @type {Partial<NonNullable<typeof res.write>>} */ ({});   // стар обработчик без write
   if (res.adopted) {
     toast(`Папката е свързана с хранилището ${res.adopted.user}/${res.adopted.repo} — настройките са попълнени сами.`, 'ok');
   } else if (res.mismatch) {
