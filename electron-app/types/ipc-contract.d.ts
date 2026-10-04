@@ -25,10 +25,13 @@ type IsoDate = string;
 
 /** Отговорът на всеки канал през run() (handlers → main.js). Някои канали
     връщат и допълнителни полета до `data` (напр. books:create — catalogWarning). */
-type IpcResult<T> = (
+type IpcResult<T> =
   | { ok: true; data: T; error?: undefined }
-  | { ok: false; error: string; data?: undefined }
-) & { [extra: string]: any };
+  | { ok: false; error: string; data?: undefined };
+/** Полетата ДО `data` (v2.4.77) — канал, който ги има, ги описва в записа си
+    като `extra`. Отговорът няма „свободни“ полета: непознато поле е грешка и
+    на екрана, и в обработчика. */
+type IpcExtra<C extends keyof IpcContract> = IpcContract[C] extends { extra: infer X } ? Partial<X> : {};
 
 /** Типът на метод от window.api за описан канал. Канал, чийто отговор зависи от
     аргументите (прозорец или целият списък, етикети…), описва и `call` — отделен
@@ -36,11 +39,22 @@ type IpcResult<T> = (
     а обработчикът пак вижда `args` (всички режими наведнъж). */
 type IpcMethod<C extends keyof IpcContract> =
   IpcContract[C] extends { call: infer F } ? F
-    : (...args: IpcContract[C]['args']) => Promise<IpcResult<IpcContract[C]['result']>>;
+    : (...args: IpcContract[C]['args']) => Promise<IpcResult<IpcContract[C]['result']> & IpcExtra<C>>;
 /** Аргументът на обработчика (по подразбиране първият след `e`). */
 type IpcArg<C extends keyof IpcContract, I extends number = 0> = IpcContract[C]['args'][I];
 /** Данните в отговора на канала. */
 type IpcData<C extends keyof IpcContract> = IpcContract[C]['result'];
+/** Какво връща обработчикът на канала (v2.4.77): отговорът през run() с данните
+    от договора — обработчик, който връща друго, е грешка при проверката. */
+type IpcReply<C extends keyof IpcContract> = (IpcResult<IpcData<C>> & IpcExtra<C>) | Promise<IpcResult<IpcData<C>> & IpcExtra<C>>;
+/** Същото за асинхронен обработчик. */
+type IpcAsyncReply<C extends keyof IpcContract> = Promise<IpcResult<IpcData<C>> & IpcExtra<C>>;
+/** Зависимостите, които main.js подава на всеки handlers/*.js. Описан е run() —
+    той носи типа на данните до отговора; останалите са различни за всеки модул. */
+interface HandlerDeps {
+  run<T>(fn: () => T): IpcResult<T>;
+  [dep: string]: any;
+}
 
 /* ---------------- Общи редове ---------------- */
 
@@ -993,11 +1007,16 @@ interface IpcContract {
   'books:byIsbn': { args: [string, (Id | null)?]; result: BookIsbnMatch[] };
   /** Няма извикване от екран. */
   'books:checks': { args: [Id]; result: Array<{ date: string }> };
-  'books:clearOrphanDeaccession': { args: [Id]; result: undefined };
-  /** `data` е id на новия ред. ДО него в отговора (не в data): invGap: BookInvGapNotice | null,
-      dateWarning/acqWarning/kindWarning/catalogWarning: string | null, isbnDuplicate: BookIsbnMatch | null,
-      suggestions: отворените предложения за покупка (handlers/suggestions.js). */
+  'books:clearOrphanDeaccession': { args: [Id]; result: void };
+  /** `data` е id на новия ред; предупрежденията и предложенията стоят ДО него (`extra`). */
   'books:create': {
+    extra: {
+      invGap: BookInvGapNotice | null; dateWarning: string | null; acqWarning: string | null;
+      kindWarning: string | null; isbnDuplicate: BookIsbnMatch | null; catalogWarning: string | null;
+      /** Отворените предложения за покупка на същото заглавие (handlers/suggestions.js). */
+      suggestions: Array<{ id: number; date: string | null; title: string; author: string | null; reader_id: number | null;
+        reader_name: string | null; status: string; author_match: boolean }>;
+    };
     args: [BookInput & {
       /** Инвентарният номер на оригинала при „+ Още екземпляр“ — тогава не се предупреждава за ISBN. */
       copied_from?: Id | null }];
@@ -1008,7 +1027,7 @@ interface IpcContract {
     result: Array<Pick<BookColumns, 'id' | 'inv_number' | 'title' | 'author' | 'status_date'>>;
   };
   /** При история или вписан номер първото повикване отказва; второто до 2 минути трие. */
-  'books:delete': { args: [Id]; result: undefined };
+  'books:delete': { args: [Id]; result: void };
   'books:findDuplicateBarcodes': {
     args: [];
     result: Array<{ barcode: string; books: Array<Pick<BookColumns, 'id' | 'inv_number' | 'barcode' | 'title' | 'author' | 'status'>> }>;
@@ -1031,7 +1050,7 @@ interface IpcContract {
     args: [];
     result: Array<Pick<BookColumns, 'id' | 'inv_number' | 'title' | 'author' | 'price' | 'status'> & { quantity: number; open_loans: number }>;
   };
-  'books:setLendable': { args: [Id]; result: undefined };
+  'books:setLendable': { args: [Id]; result: void };
   'books:splitCopies': { args: [Id]; result: BookSplitResult };
   /** Число — целият запис липсва; { id, missing, date } — липсват `missing` от бройките (date → status_date). */
   'books:splitCopiesBatch': {
@@ -1051,7 +1070,7 @@ interface IpcContract {
   /** Липсващо или нечислово поле става 0 (без ограничение). */
   'limits:update': {
     args: [{ limit_books?: number | string; limit_readers?: number | string }];
-    result: undefined;
+    result: void;
   };
 
   /* ---- Онлайн каталог (handlers/catalog.js) ---- */
@@ -1059,17 +1078,22 @@ interface IpcContract {
     args: [];
     result: { at: string | null; error: string | null; okAt: string | null; write: CatalogWriteState | null };
   };
-  /** `data` е избраната папка. ДО него: adopted: CatalogRemoteSlug | null, mismatch: boolean,
-      remote: CatalogRemoteSlug | null, write: { written, blocked, error, published, now, message }. */
-  'catalog:chooseFolder': { args: []; result: string };
-  'catalog:disconnectFolder': { args: []; result: undefined };
+  /** `data` е избраната папка; състоянието на връзката и първият запис — ДО него (`extra`). */
+  'catalog:chooseFolder': {
+    args: []; result: string;
+    extra: {
+      adopted: CatalogRemoteSlug | null; mismatch: boolean; remote: CatalogRemoteSlug | null;
+      write: { written: boolean; blocked: boolean; error: string | null; published: number | null; now: number | null; message: string | null };
+    };
+  };
+  'catalog:disconnectFolder': { args: []; result: void };
   /** Пътят на записания файл. */
   'catalog:export': { args: []; result: string };
   'catalog:exportCsv': { args: []; result: string };
   'catalog:exportDc': { args: []; result: { path: string; count: number; excluded: number } };
   'catalog:exportMarc': { args: []; result: { path: string; count: number; excluded: number } };
-  /** Без `data`: при успех отговорът е { ok:true, committed: boolean } (committed — ДО data). */
-  'catalog:gitPublishNow': { args: []; result: undefined };
+  /** Без данни; `committed` — имало ли е промяна за публикуване. */
+  'catalog:gitPublishNow': { args: []; result: void; extra: { committed: boolean } };
   /** null — няма свързана папка. */
   'catalog:remoteCheck': { args: []; result: { mismatch: boolean; remote: CatalogRemoteSlug | null } | null };
   'catalog:status': {
@@ -1084,7 +1108,7 @@ interface IpcContract {
   };
   'catalog:updateGh': {
     args: [{ gh_user?: string | null; gh_repo?: string | null; gh_branch?: string | null }];
-    result: undefined;
+    result: void;
   };
   /** `force` — записва въпреки предпазителя срещу рязко свиване (след изричен въпрос). */
   'catalog:writeNow': { args: [{ force?: boolean }?]; result: true };
@@ -1094,7 +1118,7 @@ interface IpcContract {
   /** Броят документи, останали без вид. */
   'categories:delete': { args: [Id]; result: number };
   'categories:list': { args: []; result: CategoryRow[] };
-  'categories:update': { args: [{ id: Id; name: string }]; result: undefined };
+  'categories:update': { args: [{ id: Id; name: string }]; result: void };
   /** Броят документи от този вид. */
   'categories:usage': { args: [Id]; result: number };
 
@@ -1107,12 +1131,12 @@ interface IpcContract {
   };
   /** id на новата витрина. */
   'shelves:create': { args: [string]; result: number };
-  'shelves:delete': { args: [Id]; result: undefined };
+  'shelves:delete': { args: [Id]; result: void };
   'shelves:items': { args: [Id]; result: ShelfItemRow[] };
   /** `n` — публикуваните документи, `stale` — стоят във витрината, но не стигат до сайта. */
   'shelves:list': { args: []; result: Array<ShelfRow & { n: number; stale: number }> };
-  'shelves:removeBook': { args: [{ shelfId: Id; bookId: Id }]; result: undefined };
-  'shelves:rename': { args: [{ id: Id; name: string }]; result: undefined };
+  'shelves:removeBook': { args: [{ shelfId: Id; bookId: Id }]; result: void };
+  'shelves:rename': { args: [{ id: Id; name: string }]; result: void };
 
   /* ---- Календар (handlers/calendar.js) ---- */
   'calendar:get': { args: []; result: { workDays: number[]; closed: CalendarClosedRow[]; from: IsoDate } };
@@ -1328,7 +1352,7 @@ interface IpcContract {
   'acquisitions:create': { args: [AcqInput & { no: number | string }]; result: number };
   /** Номерът и годината не се пипат оттук; отговорът е броят променени полета. */
   'acquisitions:update': { args: [{ id: Id; acq: AcqInput }]; result: number };
-  'acquisitions:delete': { args: [Id]; result: undefined };
+  'acquisitions:delete': { args: [Id]; result: void };
 
   /* ---- Периодика (handlers/periodicals.js) ---- */
   'periodicals:list': {
@@ -1347,14 +1371,14 @@ interface IpcContract {
   'periodicals:create': { args: [PeriodicalInput]; result: number };
   /** languageVolumes — в колко инвентирани комплекта е пренесен смененият език. */
   'periodicals:update': { args: [PeriodicalInput & { id: Id }]; result: { languageVolumes: number } };
-  'periodicals:delete': { args: [Id]; result: undefined };
+  'periodicals:delete': { args: [Id]; result: void };
   /** outside_volume: true — изрично „само в кардекса“ за вече инвентиран комплект. */
   'periodicalIssues:add': {
     args: [{ periodical_id: Id; issue_no: string; date?: IsoDate; price?: number | string | null;
       note?: string | null; volume_year?: number | string | null; outside_volume?: boolean }];
     result: number;
   };
-  'periodicalIssues:delete': { args: [Id]; result: undefined };
+  'periodicalIssues:delete': { args: [Id]; result: void };
   /** Празна цена → сборът на броевете; confirm_empty — комплект без броеве и с нулева стойност. */
   'periodicalVolumes:register': {
     args: [{ periodical_id: Id; year: string | number; price?: number | string | null; register_date?: IsoDate;
@@ -1368,8 +1392,8 @@ interface IpcContract {
   'analytics:get': { args: [Id]; result: AnalyticRow | undefined };
   'analytics:years': { args: []; result: Array<{ year: string; n: number }> };
   'analytics:create': { args: [AnalyticInput]; result: number };
-  'analytics:update': { args: [AnalyticInput & { id: Id }]; result: undefined };
-  'analytics:delete': { args: [Id]; result: undefined };
+  'analytics:update': { args: [AnalyticInput & { id: Id }]; result: void };
+  'analytics:delete': { args: [Id]; result: void };
 
   /* ---- Персоналии (handlers/persons.js) ---- */
   /** Низ — търсене; обект { sameAs } — картоните със същия ключ на името (PersonNamesakeRow). */
@@ -1379,8 +1403,8 @@ interface IpcContract {
   };
   'persons:get': { args: [Id]; result: (PersonColumns & { photo: string | null }) | undefined };
   'persons:create': { args: [PersonInput]; result: number };
-  'persons:update': { args: [PersonInput & { id: Id }]; result: undefined };
-  'persons:delete': { args: [Id]; result: undefined };
+  'persons:update': { args: [PersonInput & { id: Id }]; result: void };
+  'persons:delete': { args: [Id]; result: void };
 
   /* ---- Летопис (handlers/chronicle.js) ---- */
   'chronicle:list': {
@@ -1390,37 +1414,37 @@ interface IpcContract {
   'chronicle:get': { args: [Id]; result: (ChronicleColumns & { photo: string | null }) | undefined };
   'chronicle:years': { args: []; result: Array<{ year: string; n: number }> };
   'chronicle:create': { args: [ChronicleInput]; result: number };
-  'chronicle:update': { args: [ChronicleInput & { id: Id }]; result: undefined };
-  'chronicle:delete': { args: [Id]; result: undefined };
+  'chronicle:update': { args: [ChronicleInput & { id: Id }]; result: void };
+  'chronicle:delete': { args: [Id]; result: void };
 
   /* ---- Краеведски връзки (handlers/links.js) ---- */
   'links:list': { args: [{ fromKind: LinkFromKind; fromId: Id }]; result: LinkRow[] };
   'links:backlinks': { args: [{ toKind: LinkToKind; toId: Id }]; result: LinkBacklinkRow[] };
   'links:add': {
     args: [{ fromKind: LinkFromKind; fromId: Id; toKind: LinkToKind; toId: Id; note?: string | null }];
-    result: undefined;
+    result: void;
   };
-  'links:delete': { args: [Id]; result: undefined };
+  'links:delete': { args: [Id]; result: void };
   'links:search': { args: [{ kind: LinkToKind; q: string }]; result: Array<{ id: number; label: string }> };
 
   /* ---- Краеведски снимки (handlers/local-photo.js) ---- */
   /** Отговорът е data URI на записаната снимка; затворен диалог е { ok:false } с FILE_DIALOG_CANCELLED. */
   'localPhoto:choose': { args: [{ table: 'persons' | 'chronicle'; id: Id }]; result: string };
-  'localPhoto:clear': { args: [{ table: 'persons' | 'chronicle'; id: Id }]; result: undefined };
+  'localPhoto:clear': { args: [{ table: 'persons' | 'chronicle'; id: Id }]; result: void };
 
   /* ---- Онлайн достъп за читатели (handlers/online-access.js) ---- */
   'online:status': { args: []; result: OnlineStatus };
   'online:activate': { args: [{ token: string }]; result: { lib: string; name: string; exp: IsoDate } };
-  'online:deactivate': { args: []; result: undefined };
+  'online:deactivate': { args: []; result: void };
   /** Празен ключ = „не го сменяй“ (записаният никога не се връща към екрана). */
-  'online:updateSettings': { args: [{ online_bridge_url?: string | null; online_upload_key?: string | null }]; result: undefined };
+  'online:updateSettings': { args: [{ online_bridge_url?: string | null; online_upload_key?: string | null }]; result: void };
   'online:setReaderConsent': {
     args: [{ readerId: Id; consent: boolean | number; date?: IsoDate | null }];
     result: { online_consent: number; online_consent_date: IsoDate | null };
   };
   /** ПИН-ът се връща ЕДИН път; в базата остава само хешът. */
   'online:issuePin': { args: [{ readerId: Id }]; result: { pin: string; cardNumber: string; setAt: IsoDate } };
-  'online:revokePin': { args: [{ readerId: Id }]; result: undefined };
+  'online:revokePin': { args: [{ readerId: Id }]; result: void };
   'online:syncNow': { args: []; result: { generated: string | null } };
 
   /* ---- Защита на ЕГН/№ ЛК (handlers/pdp.js) ---- */
@@ -1428,7 +1452,7 @@ interface IpcContract {
   'pdp:setup': { args: [string]; result: true };
   /** При стара/кратка парола data е обект с подсказка за смяна (отключването пак е успешно). */
   'pdp:unlock': { args: [string]; result: true | { ok: true; advise: string } };
-  'pdp:lock': { args: []; result: undefined };
+  'pdp:lock': { args: []; result: void };
   'pdp:changePassword': { args: [{ oldPassword: string; newPassword: string }]; result: true };
 
   /* ---- Номенклатури (handlers/av.js) ---- */
@@ -1472,8 +1496,8 @@ interface IpcContract {
   'app:getUser': { args: []; result: string };
   'app:getVersion': { args: []; result: string };
   /** Изходът става в quitAndInstall() — отговор почти не стига до екрана. */
-  'app:installUpdate': { args: []; result: undefined };
-  'app:openLogsFolder': { args: []; result: undefined };
+  'app:installUpdate': { args: []; result: void };
+  'app:openLogsFolder': { args: []; result: void };
   /** Името се изрязва; празно/липсващо = без служител. Връща записаното име. */
   'app:setUser': { args: [(string | null)?]; result: string };
 
@@ -1487,8 +1511,8 @@ interface IpcContract {
   'backup:chooseSecondFolder': { args: []; result: { folder: string; copied: boolean } };
   'backup:clearSecondFolder': { args: []; result: true };
   'backup:list': { args: []; result: BackupFileRow[] };
-  /** Паролата — поне 10 знака, иначе отказ. `data` е пътят; до него в отговора стои и `encrypted`. */
-  'backup:now': { args: [{ password?: string }?]; result: string };
+  /** Паролата — поне 10 знака, иначе отказ. `data` е пътят. */
+  'backup:now': { args: [{ password?: string }?]; result: string; extra: { encrypted: boolean } };
   /** Без аргумент — системен диалог; второто извикване носи пътя, одобрен от диалога, и паролата. */
   'backup:restoreBrowse': {
     args: [{ path?: string; password?: string }?];
@@ -1509,7 +1533,7 @@ interface IpcContract {
   /** Рестартира програмата; `data` (новата папка) практически не стига до екрана. */
   'dbLocation:choose': { args: []; result: string };
   'dbLocation:get': { args: []; result: DbLocationInfo };
-  'dbLocation:resetDefault': { args: []; result: undefined };
+  'dbLocation:resetDefault': { args: []; result: void };
 
   /* ---- Износ (handlers/export-all.js) ---- */
   'exportAll:run': { args: []; result: ExportAllResult };
@@ -1557,22 +1581,22 @@ interface IpcContract {
   /* ---- Настройки (handlers/settings.js, settings:noticeDefaults — main.js) ---- */
   /** Системен диалог; `data` е data URI на логото. */
   'settings:chooseLogo': { args: []; result: string };
-  'settings:clearLogo': { args: []; result: undefined };
+  'settings:clearLogo': { args: []; result: void };
   'settings:get': { args: []; result: SettingsRow };
   'settings:noticeDefaults': {
     args: [];
     /** placeholders — двойки [ключ, обяснение]. */
     result: { subject: string; body: string; sms: string; placeholders: Array<[string, string]> };
   };
-  'settings:update': { args: [SettingsUpdateInput]; result: undefined };
+  'settings:update': { args: [SettingsUpdateInput]; result: void };
   'settings:updateLabelFormat': { args: [SettingsLabelFormatInput?]; result: { clamped: SettingsLabelClamp[] } };
   /** Празно = текстът по подразбиране (записва се NULL). */
   'settings:updateNotices': {
     args: [{ notice_subject?: string | null; notice_body?: string | null; notice_sms?: string | null }?];
-    result: undefined;
+    result: void;
   };
   /** Истинност → 1/0. */
-  'settings:updateScanSound': { args: [boolean | number]; result: undefined };
+  'settings:updateScanSound': { args: [boolean | number]; result: void };
   /** Записва се String(theme). */
-  'settings:updateTheme': { args: [string | number]; result: undefined };
+  'settings:updateTheme': { args: [string | number]; result: void };
 }

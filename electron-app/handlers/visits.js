@@ -4,6 +4,7 @@ const { isValidIsoDate } = require('../security-utils');
 
 const bgDate = (d) => String(d).slice(8, 10) + '.' + String(d).slice(5, 7) + '.' + String(d).slice(0, 4);
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerVisitsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
   /* „Днес“ (v2.4.71, Д5): main.js не подава `today` на този модул; дотогава —
@@ -19,7 +20,7 @@ module.exports = function registerVisitsHandlers(ipcMain, deps) {
      задължителна и валидна, броят е положително цяло число, `replace` задава
      стойността вместо да добавя (за поправка), а отговорът носи новото общо за деня,
      за да го види библиотекарят веднага. */
-  ipcMain.handle('visits:add', /** @param {unknown} e @param {IpcArg<'visits:add'>} arg */ (e, { date, count, replace }) =>
+  ipcMain.handle('visits:add', /** @param {unknown} e @param {IpcArg<'visits:add'>} arg @returns {IpcReply<'visits:add'>} */ (e, { date, count, replace }) =>
     run(() => {
       if (!isValidIsoDate(date)) throw new Error('Датата на посещенията липсва или е невалидна.');
       /* БЪДЕЩ ДЕН — ОТКАЗ (v2.4.71, находка Д5 от кръг 45).
@@ -75,7 +76,7 @@ module.exports = function registerVisitsHandlers(ipcMain, deps) {
       return { added: replace ? null : n, total, before: before ? before.count : 0, dnevnik };
     })
   );
-  ipcMain.handle('visits:get', /** @param {unknown} e @param {IpcArg<'visits:get'>} date */ (e, date) =>
+  ipcMain.handle('visits:get', /** @param {unknown} e @param {IpcArg<'visits:get'>} date @returns {IpcReply<'visits:get'>} */ (e, date) =>
     run(() => {
       const r = getDb().prepare('SELECT count FROM visits WHERE date = ?').get(date);
       return r ? r.count : 0;

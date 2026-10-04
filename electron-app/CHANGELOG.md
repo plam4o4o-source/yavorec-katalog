@@ -11,6 +11,81 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.77
+
+**BG:** **Отговорът на обработчика се сверява с договора; полетата до `data` са
+описани.** Изданието е вътрешно — работата на програмата не се променя, версията на
+базата не се вдига.
+
+Досега договорът между екраните и главния процес (`types/ipc-contract.d.ts`) пазеше
+входа в двете посоки, а отговора — само откъм екрана. Сега и обработчикът е проверен:
+
+- `run()` носи типа на данните до отговора, а всеки от 255-те обработчика казва
+  отговора на кой канал връща (`@returns {IpcReply<'канал'>}`). Отговор с друг тип
+  или с липсващо поле е грешка при CI. Истинско разминаване между обработчик и
+  договор не се намери — около 80-те съобщения бяха описания на празни списъци и
+  обекти, които TypeScript не може да познае сам; оправени са с описание, без
+  промяна на кода.
+- Свободните полета в отговора ги няма: полетата до `data` (предупрежденията при
+  нова книга, `encrypted` при копие, `committed` при публикуване, данните при избор
+  на папка за каталога) са описани за своя канал. Печатна грешка в име на поле или
+  чуждо поле е грешка — и на екрана, и в обработчика.
+- Включено е `exactOptionalPropertyTypes`: незадължително поле може да липсва, но не
+  е `undefined`, освен ако договорът не го казва.
+- `noPropertyAccessFromIndexSignature` нарочно не е включено: то само налага
+  `obj['x']` вместо `obj.x` и не хваща печатни грешки — махането на свободните полета
+  ги хваща.
+- Границите са записани честно в CONTRIBUTING: в `run(() => ({…}))` TypeScript не
+  хваща *излишно* поле в обекта, а ред от базата не е описан (better-sqlite3 тук е без
+  типове); тази страна пазят типовете на редовете и проверката на SQL срещу схемата.
+
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 421 теста в UTC и
+2 421 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002
+записа. Нов `test/otgovor-v2477.test.js`: всеки обработчик носи типа на отговора за
+своя канал (и никой не се изплъзва от проверката); отговор с друг тип, липсващо поле
+или — в буквален отговор — измислено поле е грешка, а верният не е; на екрана
+описаното поле до `data` минава, а печатна грешка и чуждо поле не. Независимият
+преглед на кода не намери промяна в поведението и потвърди описанията на полетата до
+`data`; по негова бележка тестът и CONTRIBUTING вече не твърдят повече, отколкото
+типовете проверяват. Мутационна проверка — **8 мутации, всички уловени**.
+
+**EN:** **The handler's answer is checked against the contract; fields next to
+`data` are described.** An internal release — how the program works does not change
+and the database version is not raised.
+
+Until now the contract between the screens and the main process
+(`types/ipc-contract.d.ts`) guarded the input in both directions, but the answer only
+on the screen side. Now the handler is checked too:
+
+- `run()` carries the data type through to the answer, and each of the 255 handlers
+  says which channel's answer it returns (`@returns {IpcReply<'channel'>}`). An answer
+  of another type or with a missing field is a CI error. No genuine mismatch between
+  a handler and the contract was found — the ~80 messages were empty lists and
+  objects TypeScript cannot infer; they were fixed with type descriptions, without
+  code changes.
+- No more free fields in an answer: the fields next to `data` (the new-book warnings,
+  `encrypted` on backup, `committed` on publish, the catalogue-folder details) are
+  described per channel. A typo in a field name or a field belonging to another
+  channel is an error — on the screen and in the handler.
+- `exactOptionalPropertyTypes` is on: an optional field may be missing, but is not
+  `undefined` unless the contract says so.
+- `noPropertyAccessFromIndexSignature` is deliberately off: it only forces `obj['x']`
+  over `obj.x` and does not catch typos — removing the free fields does.
+- The limits are stated in CONTRIBUTING: inside `run(() => ({…}))` TypeScript does not
+  flag an *extra* field, and a database row is untyped (better-sqlite3 has no types
+  here); that side is covered by the row types and the SQL-vs-schema check.
+
+**Verified:** `npm run test:all` — all 8 checks pass: **2,421 tests in UTC and 2,421
+in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record
+scale check. New `test/otgovor-v2477.test.js`: every handler carries its own
+channel's answer type (and none slips past the check); an answer of another type, a
+missing field or — in a literal answer — an invented field is an error, while the
+correct one is not; on the screen a described field next to `data` passes, a typo
+and another channel's field do not. The independent code review found no change in
+behaviour and confirmed the descriptions of the fields next to `data`; following its
+note, the test and CONTRIBUTING no longer claim more than the types check. Mutation
+testing — **8 mutants, all killed**.
+
 ## v2.4.76
 
 **BG:** **Подготовка за онлайн достъп за читатели (изключено по подразбиране; включва се

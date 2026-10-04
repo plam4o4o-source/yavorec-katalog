@@ -11,6 +11,7 @@ const FUND = require('../db/fund-sql');
 // ползва BOOK_SELECT/BOOK_FIELDS (свои собствени JOIN-и), само getDb()/run.
 const { ftsQuery } = require('../search-fts');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerInvBookHandlers(ipcMain, deps) {
   const { getDb, run } = deps;
 
@@ -20,7 +21,7 @@ module.exports = function registerInvBookHandlers(ipcMain, deps) {
      показателя над таблицата (вписани, неотчислени екземпляри и стойност,
      отчислени, с отбелязана проверка) по ЦЕЛИЯ регистър, а не по порцията.
      Търсенето е по инв. №, автор, заглавие и сигнатура, както беше в паметта. */
-  ipcMain.handle('invBook:list', /** @param {unknown} e @param {IpcArg<'invBook:list'>} page */ (e, page) =>
+  ipcMain.handle('invBook:list', /** @param {unknown} e @param {IpcArg<'invBook:list'>} page @returns {IpcReply<'invBook:list'>} */ (e, page) =>
     run(() => {
       const db = getDb();
       if (page && typeof page === 'object') return invBookWindow(db, page);

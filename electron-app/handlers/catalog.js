@@ -21,6 +21,7 @@ const { localDate } = require('../local-date');
    същата, която ползват етикетът, „Книги“, инвентарната книга и katalog.json. */
 const { effectiveCallNumber } = require('./books');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerCatalogHandlers(ipcMain, deps) {
   /* BOOK_SELECT вече НЕ се взима тук (v2.4.64): и трите износа минават през
      EXPORT_SELECT по-долу — лека изброена проекция с агрегат вместо `b.*` с
@@ -70,6 +71,8 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const mismatch = slug.user.toLowerCase() !== u.toLowerCase() || slug.repo.toLowerCase() !== r.toLowerCase();
     return { slug, mismatch };
   }
+  /** @typedef {{ ok: true, data: undefined, committed: boolean } | { ok: false, error: string }} GitPublishResult */
+  /** @returns {Promise<GitPublishResult>} */
   async function gitPublish(folder) {
     if (!isGitRepo(folder)) return { ok: false, error: 'Папката не е git хранилище (липсва .git). Клонирайте хранилището с "git clone" веднъж, преди да я свържете тук.' };
 
@@ -127,7 +130,8 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     }
 
     if (!push.ok) return { ok: false, error: 'git push: ' + (push.stderr || 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
-    return { ok: true, committed: commit.ok };
+    // data: undefined — както при run() за канал без данни (catalog:gitPublishNow → void); committed стои до него.
+    return { ok: true, data: undefined, committed: commit.ok };
   }
   /* Последният провал на автоматичното публикуване, за да може интерфейсът да го
      покаже. Дотук грешката отиваше САМО в конзолата — а в готово приложение никой
@@ -152,6 +156,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      katalog.json и програмата съветваше библиотекаря да изпълни „git pull“ ръчно —
      инструкция, която няма да помогне, защото хранилището изобщо не е изостанало. */
   let PUBLISHING = false;
+  /** @returns {Promise<GitPublishResult>} */
   async function gitPublishExclusive(folder) {
     if (PUBLISHING) {
       return { ok: false, error: 'Публикуване вече тече — изчакайте няколко секунди и опитайте пак.' };
@@ -273,7 +278,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      { at, ok, blocked, error, published, now, message, folder } или null.
      Публикуването и записът са две различни неща: успешен `git push` на стария
      файл не значи, че сайтът е актуален, затова екранът ги показва поотделно. */
-  ipcMain.handle('catalog:autoPushStatus', () => run(() => Object.assign({}, LAST_AUTO_PUSH, { write: catalogWriteState() })));
+  ipcMain.handle('catalog:autoPushStatus', /** @returns {IpcReply<'catalog:autoPushStatus'>} */ () => run(() => Object.assign({}, LAST_AUTO_PUSH, { write: catalogWriteState() })));
   function stopAutoPushTimer() {
     if (AUTO_PUSH_TIMER) { clearInterval(AUTO_PUSH_TIMER); AUTO_PUSH_TIMER = null; }
   }
@@ -370,7 +375,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     return (short || 'biblioteka') + '-katalog';
   }
 
-  ipcMain.handle('catalog:status', () =>
+  ipcMain.handle('catalog:status', /** @returns {IpcReply<'catalog:status'>} */ () =>
     run(() => {
       const db = getDb();
       const s = db.prepare('SELECT catalog_folder, gh_user, gh_repo, gh_branch, lib_name, org FROM settings WHERE id = 1').get();
@@ -417,7 +422,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
   );
   // Проверява накъде наистина сочи свързаната папка. Извиква се от интерфейса, за да се
   // покаже предупреждение, преди да се стигне до публикуване.
-  ipcMain.handle('catalog:remoteCheck', async () => {
+  ipcMain.handle('catalog:remoteCheck', /** @returns {IpcAsyncReply<'catalog:remoteCheck'>} */ async () => {
     try {
       const s = getDb().prepare('SELECT catalog_folder, gh_user, gh_repo FROM settings WHERE id = 1').get() || {};
       if (!s.catalog_folder) return { ok: true, data: null };
@@ -443,7 +448,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      после се задава, е „откога сайтът чете от този адрес и какъв беше преди“.
      Ако нищо не се е променило (екранът записва формата и без промяна), ред не
      се прави — следа от незасегнати записи заглушава истинските. */
-  ipcMain.handle('catalog:updateGh', /** @param {unknown} e @param {IpcArg<'catalog:updateGh'>} arg */ (e, { gh_user, gh_repo, gh_branch }) =>
+  ipcMain.handle('catalog:updateGh', /** @param {unknown} e @param {IpcArg<'catalog:updateGh'>} arg @returns {IpcReply<'catalog:updateGh'>} */ (e, { gh_user, gh_repo, gh_branch }) =>
     run(() => {
       const db = getDb();
       const before = db.prepare('SELECT gh_user, gh_repo, gh_branch FROM settings WHERE id=1').get() || {};
@@ -460,7 +465,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       }
     })
   );
-  ipcMain.handle('catalog:chooseFolder', async () => {
+  ipcMain.handle('catalog:chooseFolder', /** @returns {IpcAsyncReply<'catalog:chooseFolder'>} */ async () => {
     try {
       const db = getDb();
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
@@ -511,7 +516,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      предупреждение и без начин после да се разбере откога. Тук е и мястото да
      се каже, че файлът НЕ се маха: изключва се само записът от програмата
      нататък, а публикуваното си остава публикувано. */
-  ipcMain.handle('catalog:disconnectFolder', () =>
+  ipcMain.handle('catalog:disconnectFolder', /** @returns {IpcReply<'catalog:disconnectFolder'>} */ () =>
     run(() => {
       const db = getDb();
       const before = (db.prepare('SELECT catalog_folder FROM settings WHERE id = 1').get() || {}).catalog_folder || '';
@@ -553,7 +558,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       throw new Error('Записът на каталога не успя. Проверете дали папката е достъпна (свързан ли е мрежовият диск?).');
     }
   }
-  ipcMain.handle('catalog:gitPublishNow', async () => {
+  ipcMain.handle('catalog:gitPublishNow', /** @returns {IpcAsyncReply<'catalog:gitPublishNow'>} */ async () => {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
     if (!s || !s.catalog_folder) return { ok: false, error: 'Първо изберете папка (git clone на хранилището).' };
     const seen = dataVersionNow();
@@ -574,7 +579,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      САМО след „Запиши въпреки това…“ и изричен въпрос с двете числа. Тук остава
      редът в следата — кой брой е заменил кой, — защото това е съзнателно
      свиване на публичния каталог и после се пита „кой и кога го направи“. */
-  ipcMain.handle('catalog:writeNow', /** @param {unknown} e @param {IpcArg<'catalog:writeNow'>} opts */ (e, opts) =>
+  ipcMain.handle('catalog:writeNow', /** @param {unknown} e @param {IpcArg<'catalog:writeNow'>} opts @returns {IpcReply<'catalog:writeNow'>} */ (e, opts) =>
     run(() => {
       const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
       if (!s || !s.catalog_folder) throw new Error('Първо изберете папка за автоматичен запис.');
@@ -820,7 +825,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     return getDb().prepare(`SELECT COUNT(*) AS n FROM books b
       WHERE COALESCE(b.status,'') = 'отчислен' OR COALESCE(b.department,'') = 'служебен'`).get().n;
   }
-  ipcMain.handle('catalog:exportMarc', async () => {
+  ipcMain.handle('catalog:exportMarc', /** @returns {IpcAsyncReply<'catalog:exportMarc'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане в UNIMARC / MARCXML',
@@ -835,7 +840,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: true, data: { path: filePath, count: books.length, excluded: exportExcludedCount() } };
     } catch (err) { return { ok: false, error: err.message }; }
   });
-  ipcMain.handle('catalog:exportDc', async () => {
+  ipcMain.handle('catalog:exportDc', /** @returns {IpcAsyncReply<'catalog:exportDc'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане в Dublin Core',
@@ -851,7 +856,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  ipcMain.handle('catalog:export', async () => {
+  ipcMain.handle('catalog:export', /** @returns {IpcAsyncReply<'catalog:export'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на онлайн каталог',
@@ -870,7 +875,7 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('catalog:exportCsv', async () => {
+  ipcMain.handle('catalog:exportCsv', /** @returns {IpcAsyncReply<'catalog:exportCsv'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на фонда (CSV)',

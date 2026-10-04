@@ -16,6 +16,7 @@ const { localDate } = require('../local-date');
    резервациите и оттук и за акта (v2.4.71, находка М2). */
 const { mzsBlockForBook } = require('./mzs');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, BOOK_SELECT, yearOf, scheduleCatalogWrite, flushCatalogWrite, normalizeScanCode,
     /* Трите допълнителни зависимости (v2.4.61) идват от main.js и са НЕЗАДЪЛЖИТЕЛНИ,
@@ -323,14 +324,14 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
     }
   }
 
-  ipcMain.handle('deaccessionActs:list', () =>
+  ipcMain.handle('deaccessionActs:list', /** @returns {IpcReply<'deaccessionActs:list'>} */ () =>
     run(() => getDb().prepare(`
       SELECT a.*, (SELECT COALESCE(SUM(COALESCE(i.quantity,1)),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_count,
              (SELECT COALESCE(SUM(i.price * COALESCE(i.quantity,1)),0) FROM deaccession_items i WHERE i.act_id = a.id) AS item_value
       FROM deaccession_acts a ORDER BY a.date DESC, a.no DESC
     `).all())
   );
-  ipcMain.handle('deaccessionActs:get', /** @param {unknown} e @param {IpcArg<'deaccessionActs:get'>} id */ (e, id) =>
+  ipcMain.handle('deaccessionActs:get', /** @param {unknown} e @param {IpcArg<'deaccessionActs:get'>} id @returns {IpcReply<'deaccessionActs:get'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       /* Колоните deaccession_act_id/status_before върху holds и shelves_before
@@ -397,7 +398,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return act;
     })
   );
-  ipcMain.handle('deaccessionActs:nextNo', /** @param {unknown} e @param {IpcArg<'deaccessionActs:nextNo'>} year */ (e, year) =>
+  ipcMain.handle('deaccessionActs:nextNo', /** @param {unknown} e @param {IpcArg<'deaccessionActs:nextNo'>} year @returns {IpcReply<'deaccessionActs:nextNo'>} */ (e, year) =>
     run(() => {
       const y = year || yearOf();
       const row = getDb().prepare('SELECT MAX(no) AS m FROM deaccession_acts WHERE year = ?').get(y);
@@ -437,7 +438,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       + 'а заявката би останала да сочи към отчислен документ. Когато се върне, отбележете заявката „върнато“ '
       + 'в „МЗС“ и тогава съставете акта.' + (tail || ' Актът НЕ е съставен.');
   }
-  ipcMain.handle('deaccessionActs:findBook', /** @param {unknown} e @param {IpcArg<'deaccessionActs:findBook'>} code */ (e, code) => run(() => {
+  ipcMain.handle('deaccessionActs:findBook', /** @param {unknown} e @param {IpcArg<'deaccessionActs:findBook'>} code @returns {IpcReply<'deaccessionActs:findBook'>} */ (e, code) => run(() => {
     const c = normalizeScanCode(code);
     const db = getDb();
     /* Одит v2.4.24 — виж resolveScannedBook() в security-utils.js. Тук цената на
@@ -1173,7 +1174,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
           + ' Проверете папката за онлайн каталога в „Отчети“ → „Онлайн каталог“.');
       }
   }
-  ipcMain.handle('deaccessionActs:create', /** @param {unknown} e @param {IpcArg<'deaccessionActs:create'>} arg */ (e, { act, bookIds }) =>
+  ipcMain.handle('deaccessionActs:create', /** @param {unknown} e @param {IpcArg<'deaccessionActs:create'>} arg @returns {IpcReply<'deaccessionActs:create'>} */ (e, { act, bookIds }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1196,7 +1197,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
      грешките трябва да имат къде да се случат преди него. */
   const DRAFT_FIELDS = ['date', 'order_no', 'reason_code', 'reason_text', 'disposal',
     'attach', 'committee1', 'committee2', 'committee3', 'note'];
-  ipcMain.handle('deaccessionActs:drafts', () =>
+  ipcMain.handle('deaccessionActs:drafts', /** @returns {IpcReply<'deaccessionActs:drafts'>} */ () =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1206,7 +1207,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       `).all();
     })
   );
-  ipcMain.handle('deaccessionActs:getDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:getDraft'>} id */ (e, id) =>
+  ipcMain.handle('deaccessionActs:getDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:getDraft'>} id @returns {IpcReply<'deaccessionActs:getDraft'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1222,7 +1223,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return d;
     })
   );
-  ipcMain.handle('deaccessionActs:saveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:saveDraft'>} arg */ (e, { id, draft, bookIds }) =>
+  ipcMain.handle('deaccessionActs:saveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:saveDraft'>} arg @returns {IpcReply<'deaccessionActs:saveDraft'>} */ (e, { id, draft, bookIds }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1278,7 +1279,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return draftId;
     })
   );
-  ipcMain.handle('deaccessionActs:deleteDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:deleteDraft'>} id */ (e, id) =>
+  ipcMain.handle('deaccessionActs:deleteDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:deleteDraft'>} id @returns {IpcReply<'deaccessionActs:deleteDraft'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1294,7 +1295,7 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return true;
     })
   );
-  ipcMain.handle('deaccessionActs:approveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:approveDraft'>} arg */ (e, { id, no }) =>
+  ipcMain.handle('deaccessionActs:approveDraft', /** @param {unknown} e @param {IpcArg<'deaccessionActs:approveDraft'>} arg @returns {IpcReply<'deaccessionActs:approveDraft'>} */ (e, { id, no }) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
@@ -1333,13 +1334,17 @@ module.exports = function registerDeaccessionActsHandlers(ipcMain, deps) {
       return actId;
     })
   );
-  ipcMain.handle('deaccessionActs:revoke', /** @param {unknown} e @param {IpcArg<'deaccessionActs:revoke'>} id @param {IpcArg<'deaccessionActs:revoke', 1>} [opts] */ (e, id, opts) =>
+  ipcMain.handle('deaccessionActs:revoke', /** @param {unknown} e @param {IpcArg<'deaccessionActs:revoke'>} id @param {IpcArg<'deaccessionActs:revoke', 1>} [opts] @returns {IpcReply<'deaccessionActs:revoke'>} */ (e, id, opts) =>
     run(() => {
       const db = getDb();
       ensureLoanActColumn(db);
       /* Каквото прозорецът трябва да КАЖЕ на библиотекарката след анулирането.
-         Стои извън транзакцията, защото се чете след нея. */
-      const revokeInfo = { droppedHolds: 0, shelvesToRestore: [], reopenedLoans: [], closedYear: null };
+         Стои извън транзакцията, защото се чете след нея. Всяко поле се
+         презаписва в транзакцията (без ранен изход); началните стойности са
+         само за типа на отговора. */
+      /** @type {IpcData<'deaccessionActs:revoke'>} */
+      const revokeInfo = { droppedHolds: 0, shelvesToRestore: [], reopenedLoans: [], closedYear: null,
+        keptCharges: [], dueMoved: [] };
       /* Основанието за анулиране е ЗАДЪЛЖИТЕЛНО (v2.4.56). Актът остава в
          документацията завинаги; щом остава, до него трябва да пише ЗАЩО е
          отпаднал — иначе след година никой, включително проверяващият, не може

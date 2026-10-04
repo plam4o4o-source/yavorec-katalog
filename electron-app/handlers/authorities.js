@@ -4,6 +4,7 @@
 // Вазов“, „И. Вазов“) и записите се разпиляват. Тук се събират наличните
 // стойности за автодовършване и се откриват вероятните дублети, за да
 // бъдат слети. Изцяло самостоятелен: само getDb()/run/logAudit.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
   // Ключът „налично днес“ — виж db/fund-sql.js и бележката при authorityValues().
@@ -103,19 +104,21 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
        WHERE ${field} IS NOT NULL AND TRIM(${field}) <> '' GROUP BY ${field} ORDER BY n DESC, ${field}`
     ).all();
   }
-  ipcMain.handle('authorities:fields', () => run(() => AUTHORITY_FIELDS));
-  ipcMain.handle('authorities:list', /** @param {unknown} e @param {IpcArg<'authorities:list'>} field */ (e, field) => run(() => authorityValues(field)));
+  ipcMain.handle('authorities:fields', /** @returns {IpcReply<'authorities:fields'>} */ () => run(() => AUTHORITY_FIELDS));
+  ipcMain.handle('authorities:list', /** @param {unknown} e @param {IpcArg<'authorities:list'>} field @returns {IpcReply<'authorities:list'>} */ (e, field) => run(() => authorityValues(field)));
   // Стойностите за автодовършване във формата за книга — всички полета наведнъж.
-  ipcMain.handle('authorities:suggest', () =>
+  ipcMain.handle('authorities:suggest', /** @returns {IpcReply<'authorities:suggest'>} */ () =>
     run(() => {
-      const out = {};
+      /* Празният обект се обявява за пълния запис: цикълът по-долу попълва всяко
+         поле от AUTHORITY_FIELDS (същите ключове като AuthorityField). */
+      const out = /** @type {Record<AuthorityField, string[]>} */ ({});
       for (const f of Object.keys(AUTHORITY_FIELDS)) out[f] = authorityValues(f).map(r => r.value);
       return out;
     })
   );
   // Групи вероятни дублети. strict=true сравнява само разместени думи, иначе се
   // включват и съкратените имена, което е по-широко и изисква повече внимание.
-  ipcMain.handle('authorities:duplicates', /** @param {unknown} e @param {IpcArg<'authorities:duplicates'>} arg */ (e, { field, loose }) =>
+  ipcMain.handle('authorities:duplicates', /** @param {unknown} e @param {IpcArg<'authorities:duplicates'>} arg @returns {IpcReply<'authorities:duplicates'>} */ (e, { field, loose }) =>
     run(() => {
       const rows = authorityValues(field).filter(r => authKey(r.value));
       let buckets;
@@ -189,7 +192,7 @@ module.exports = function registerAuthoritiesHandlers(ipcMain, deps) {
         .sort((a, b) => b.total - a.total);
     })
   );
-  ipcMain.handle('authorities:merge', /** @param {unknown} e @param {IpcArg<'authorities:merge'>} arg */ (e, { field, from, to }) =>
+  ipcMain.handle('authorities:merge', /** @param {unknown} e @param {IpcArg<'authorities:merge'>} arg @returns {IpcReply<'authorities:merge'>} */ (e, { field, from, to }) =>
     run(() => {
       if (!(field in AUTHORITY_FIELDS)) throw new Error('Непознато поле: ' + field);
       const target = String(to || '').trim();

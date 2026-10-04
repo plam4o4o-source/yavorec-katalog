@@ -6,6 +6,7 @@
 const { resolveScannedBook } = require('../security-utils');
 const { BOOK_STATUS_LOST } = require('../db/enum-triggers');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerHoldsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, normalizeScanCode } = deps;
   /* ОНЛАЙН КАТАЛОГЪТ СЛЕД ОТКАЗАНА ИЛИ ИЗТЕКЛА РЕЗЕРВАЦИЯ (v2.4.69, към находка К4).
@@ -115,7 +116,7 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
     return next;
   }
 
-  ipcMain.handle('holds:list', () =>
+  ipcMain.handle('holds:list', /** @returns {IpcReply<'holds:list'>} */ () =>
     run(() => getDb().prepare(`${HOLD_SELECT} WHERE h.status IN ${HOLD_ACTIVE}
       ORDER BY CASE h.status WHEN 'заделена' THEN 0 ELSE 1 END, h.placed_at, h.id`).all())
   );
@@ -136,7 +137,7 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
      .immediate() взима правото на запис ПРЕДИ проверките, така че между
      проверката за дубликат/свободни бройки и INSERT-а никой друг паралелен
      процес не може да вмъкне същия ред. */
-  ipcMain.handle('holds:add', /** @param {unknown} e @param {IpcArg<'holds:add'>} arg */ (e, { reader_id, code }) =>
+  ipcMain.handle('holds:add', /** @param {unknown} e @param {IpcArg<'holds:add'>} arg @returns {IpcReply<'holds:add'>} */ (e, { reader_id, code }) =>
     run(() => {
       const db = getDb();
       const c = normalizeScanCode(code);
@@ -228,7 +229,7 @@ module.exports = function registerHoldsHandlers(ipcMain, deps) {
      v2.4.24). Дотук нищо не го правеше: книгата вече не е заета, тоест
      activateHoldOnReturn няма да бъде извикана никога повече, и вторият читател
      оставаше „чака“ завинаги, докато екземплярът стои заделен за никого. */
-  ipcMain.handle('holds:cancel', /** @param {unknown} e @param {IpcArg<'holds:cancel'>} id */ (e, id) =>
+  ipcMain.handle('holds:cancel', /** @param {unknown} e @param {IpcArg<'holds:cancel'>} id @returns {IpcReply<'holds:cancel'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const tx = db.transaction(() => {

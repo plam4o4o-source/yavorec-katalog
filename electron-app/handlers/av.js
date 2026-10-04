@@ -2,6 +2,7 @@
 // в отделен модул (Фаза 4, стъпка 12 от разбиването на монолита на модули
 // по домейн). Един източник на истина за списъчните стойности (отдел,
 // език, постоянно място). Изцяло самостоятелен: getDb()/run/logAudit.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerAvHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -12,17 +13,19 @@ module.exports = function registerAvHandlers(ipcMain, deps) {
   };
   function avOptions() {
     const db = getDb();
-    const out = {};
+    /* Празният обект се обявява за пълния запис: цикълът по-долу попълва всяка
+       категория от AV_CATEGORIES (същите ключове като AvCategory). */
+    const out = /** @type {Record<AvCategory, AvOption[]>} */ ({});
     for (const c of Object.keys(AV_CATEGORIES)) {
       out[c] = db.prepare('SELECT value, opac_label FROM authorised_values WHERE category = ? ORDER BY sort, value').all(c);
     }
     return out;
   }
-  ipcMain.handle('av:categories', () => run(() => AV_CATEGORIES));
-  ipcMain.handle('av:options', () => run(() => avOptions()));
+  ipcMain.handle('av:categories', /** @returns {IpcReply<'av:categories'>} */ () => run(() => AV_CATEGORIES));
+  ipcMain.handle('av:options', /** @returns {IpcReply<'av:options'>} */ () => run(() => avOptions()));
   // Замества целия списък на една категория наведнъж — редакторът в Настройки подава
   // пълния нов ред на стойностите (ред по ред), затова частични UPDATE-и не са нужни.
-  ipcMain.handle('av:save', /** @param {unknown} e @param {IpcArg<'av:save'>} arg */ (e, { category, values }) =>
+  ipcMain.handle('av:save', /** @param {unknown} e @param {IpcArg<'av:save'>} arg @returns {IpcReply<'av:save'>} */ (e, { category, values }) =>
     run(() => {
       if (!(category in AV_CATEGORIES)) throw new Error('Непозната номенклатура.');
       const list = (values || [])

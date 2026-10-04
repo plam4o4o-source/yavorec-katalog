@@ -14,6 +14,7 @@
 // вече ги ползва по пряка референция в обект, подаден на неговия require(),
 // който стои СЛЕД мястото на този модул в main.js — същият модел на връщане
 // напред, установен за LOAN_SELECT/BOOK_SELECT.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerPdpHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
   const pii = require('../pii-crypto');
@@ -383,13 +384,13 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
     }
     return unreadable === 0;
   }
-  ipcMain.handle('pdp:status', () =>
+  ipcMain.handle('pdp:status', /** @returns {IpcReply<'pdp:status'>} */ () =>
     // unlocked:false при негодна сесия — интерфейсът заключва полетата ЕГН/№ ЛК
     // (виж pdpLocked в src/views/readers.js) вместо да ги остави за редакция с
     // плейсхолдър вътре. `stale` е отделно, за да може екранът да обясни защо.
     run(() => ({ configured: pdpConfigured(), unlocked: !!PDP_KEY && !PDP_STALE, stale: PDP_STALE, unreadable: unreadableSeen }))
   );
-  ipcMain.handle('pdp:setup', /** @param {unknown} e @param {IpcArg<'pdp:setup'>} password */ (e, password) =>
+  ipcMain.handle('pdp:setup', /** @param {unknown} e @param {IpcArg<'pdp:setup'>} password @returns {IpcReply<'pdp:setup'>} */ (e, password) =>
     run(() => {
       const db = getDb();
       if (!password || String(password).length < PDP_MIN_PASSWORD) {
@@ -411,7 +412,7 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
       return true;
     })
   );
-  ipcMain.handle('pdp:unlock', /** @param {unknown} e @param {IpcArg<'pdp:unlock'>} password */ (e, password) =>
+  ipcMain.handle('pdp:unlock', /** @param {unknown} e @param {IpcArg<'pdp:unlock'>} password @returns {IpcReply<'pdp:unlock'>} */ (e, password) =>
     run(() => {
       const s = pdpSettingsRow();
       if (!s.pdp_salt || !s.pdp_verifier) throw new Error('Защитата не е зададена.');
@@ -441,8 +442,8 @@ module.exports = function registerPdpHandlers(ipcMain, deps) {
         : true;
     })
   );
-  ipcMain.handle('pdp:lock', () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; badLogged = false; pii.clearSession(); }));
-  ipcMain.handle('pdp:changePassword', /** @param {unknown} e @param {Partial<IpcArg<'pdp:changePassword'>>} [arg] */ (e, { oldPassword, newPassword } = {}) =>
+  ipcMain.handle('pdp:lock', /** @returns {IpcReply<'pdp:lock'>} */ () => run(() => { PDP_KEY = null; PDP_STALE = false; unreadableSeen = 0; badLogged = false; pii.clearSession(); }));
+  ipcMain.handle('pdp:changePassword', /** @param {unknown} e @param {Partial<IpcArg<'pdp:changePassword'>>} [arg] @returns {IpcReply<'pdp:changePassword'>} */ (e, { oldPassword, newPassword } = {}) =>
     run(() => {
       const db = getDb();
       const s = pdpSettingsRow();

@@ -18,6 +18,7 @@ const FUND = require('../db/fund-sql');
 const { ANON_READER_NAME } = require('../security-utils');
 const { readersRegisteredIn } = require('./stats'); // Д3 (v2.4.71) — едно броене за таблото и „Статистика“
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerDashboardHandlers(ipcMain, deps) {
   const { getDb, run, today, yearOf, pctRequired, isWorkDay, LOAN_SELECT, countOverduePeriodicals,
     effectiveDaysLate } = deps;
@@ -31,7 +32,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
   const QTYJ = "COALESCE(inv.quantity, 1)";
   const BOOKS_INV = "FROM books b LEFT JOIN inventory inv ON inv.book_id = b.id";
 
-  ipcMain.handle('dashboard:stats', () =>
+  ipcMain.handle('dashboard:stats', /** @returns {IpcReply<'dashboard:stats'>} */ () =>
     run(() => {
       const db = getDb();
       return {
@@ -46,7 +47,7 @@ module.exports = function registerDashboardHandlers(ipcMain, deps) {
       };
     })
   );
-  ipcMain.handle('dashboard:full', () =>
+  ipcMain.handle('dashboard:full', /** @returns {IpcReply<'dashboard:full'>} */ () =>
     run(() => {
       const db = getDb();
       const y = yearOf();

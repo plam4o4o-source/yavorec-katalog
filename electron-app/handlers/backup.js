@@ -17,6 +17,7 @@
 //     практика не се стига до втори прочит) — но за да няма нужда да се
 //     разчита на това стечение на обстоятелствата, преприсвояването минава
 //     през setDb(), а не през локална променлива в този файл.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerBackupHandlers(ipcMain, deps) {
   const {
     app, dialog, fs, path,
@@ -1335,7 +1336,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
                      отключената защита) — причината е в warning;
        'locked'    — защитата е включена, но заключена;
        'off'       — защитата изобщо не е включена. */
-  ipcMain.handle('backup:autoStatus', () =>
+  ipcMain.handle('backup:autoStatus', /** @returns {IpcReply<'backup:autoStatus'>} */ () =>
     run(() => {
       let configured = false;
       try {
@@ -1426,7 +1427,9 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
           + ' личните данни на читателите в чист текст.'
         : '';
 
-      let state, warning;
+      /** @type {IpcData<'backup:autoStatus'>['state']} */
+      let state;
+      let warning;
       if (encrypted) {
         state = 'encrypted';
         /* Надписът брои и двата вида поотделно (В11). „Дневни“ са
@@ -1548,7 +1551,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     return localDate(d) + '-' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
   }
 
-  ipcMain.handle('backup:list', () =>
+  ipcMain.handle('backup:list', /** @returns {IpcReply<'backup:list'>} */ () =>
     run(() => {
       const dir = backupsDir();
       return fs.readdirSync(dir)
@@ -1565,7 +1568,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:now', /** @param {unknown} e @param {IpcArg<'backup:now'>} opts */ async (e, opts) => {
+  ipcMain.handle('backup:now', /** @param {unknown} e @param {IpcArg<'backup:now'>} opts @returns {IpcAsyncReply<'backup:now'>} */ async (e, opts) => {
     try {
       const password = opts && opts.password ? String(opts.password) : '';
       /* ПАРОЛАТА НА РЪЧНОТО КОПИЕ — ПОНЕ 10 ЗНАКА (v2.4.71, кръг 45, С18).
@@ -1938,7 +1941,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     }
   }
 
-  ipcMain.handle('backup:restoreFromList', /** @param {unknown} e @param {IpcArg<'backup:restoreFromList'>} arg */ (e, { path: sourcePath, password }) =>
+  ipcMain.handle('backup:restoreFromList', /** @param {unknown} e @param {IpcArg<'backup:restoreFromList'>} arg @returns {IpcReply<'backup:restoreFromList'>} */ (e, { path: sourcePath, password }) =>
     run(() => {
       // Пътят идва от renderer-а. Приема се само ако наистина е файл от папката с
       // резервните копия — тоест нещо, което backup:list е показал; всичко друго е
@@ -1954,7 +1957,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
     })
   );
 
-  ipcMain.handle('backup:restoreBrowse', /** @param {unknown} e @param {IpcArg<'backup:restoreBrowse'>} opts */ async (e, opts) => {
+  ipcMain.handle('backup:restoreBrowse', /** @param {unknown} e @param {IpcArg<'backup:restoreBrowse'>} opts @returns {IpcAsyncReply<'backup:restoreBrowse'>} */ async (e, opts) => {
     try {
       let target = opts && opts.path;
       if (target) {
@@ -1979,7 +1982,8 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
           ]
         });
         if (canceled || !filePaths[0]) return { ok: false, error: 'Отказано от потребителя.' };
-        target = filePaths[0];
+        // Диалогът е нетипизиран (any); празен избор вече е върнат по-горе, тук пътят е непразен низ.
+        target = /** @type {string} */ (filePaths[0]);
         dialogApprovedPaths.add(normPath(target)); // одобрено от самия потребител през диалога
       }
       const password = opts && opts.password ? String(opts.password) : '';
@@ -1996,7 +2000,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
   /* ---------------- Втора папка за копие (незадължителна) ----------------
      Три канала, а не едно поле в „Настройки“: пътят се избира със системния
      диалог, за да няма сгрешено написан път, който мълчаливо не работи. */
-  ipcMain.handle('backup:secondFolder', () =>
+  ipcMain.handle('backup:secondFolder', /** @returns {IpcReply<'backup:secondFolder'>} */ () =>
     run(() => {
       const folder = secondBackupFolder();
       let available = null;
@@ -2004,7 +2008,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       return { folder, configured: !!folder, available, last: lastSecondCopy, canConfigure: typeof updateConfig === 'function' };
     })
   );
-  ipcMain.handle('backup:chooseSecondFolder', async () => {
+  ipcMain.handle('backup:chooseSecondFolder', /** @returns {IpcAsyncReply<'backup:chooseSecondFolder'>} */ async () => {
     try {
       if (typeof updateConfig !== 'function') {
         throw new Error('Тази версия на програмата не може да запише настройката за втора папка.');
@@ -2035,7 +2039,7 @@ module.exports = function registerBackupHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('backup:clearSecondFolder', () =>
+  ipcMain.handle('backup:clearSecondFolder', /** @returns {IpcReply<'backup:clearSecondFolder'>} */ () =>
     run(() => {
       if (typeof updateConfig !== 'function') {
         throw new Error('Тази версия на програмата не може да промени настройката за втора папка.');

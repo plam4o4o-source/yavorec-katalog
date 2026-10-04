@@ -4,6 +4,7 @@
 // и при работа в мрежа. mainWindow се подава като getMainWindow() getter
 // по същия модел като handlers/backup.js, защото се пресъздава при
 // app.on('activate', ...).
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
   const { getDb, run, dialog, getMainWindow, fs, path, LOGO_MIME, LOCAL_PHOTO_MAX_BYTES } = deps;
   /* Одитна следа за снимките (v2.4.61). Добавянето и махането на снимка
@@ -44,7 +45,7 @@ module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
   }
   const kbDown = (n) => Math.floor(n / 1024);
 
-  ipcMain.handle('localPhoto:choose', /** @param {unknown} e @param {IpcArg<'localPhoto:choose'>} arg */ async (e, { table, id }) => {
+  ipcMain.handle('localPhoto:choose', /** @param {unknown} e @param {IpcArg<'localPhoto:choose'>} arg @returns {IpcAsyncReply<'localPhoto:choose'>} */ async (e, { table, id }) => {
     try {
       if (!['persons', 'chronicle'].includes(table)) return { ok: false, error: 'Непозната таблица.' };
       const { canceled, filePaths } = await dialog.showOpenDialog(getMainWindow(), {
@@ -130,7 +131,7 @@ module.exports = function registerLocalPhotoHandlers(ipcMain, deps) {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('localPhoto:clear', /** @param {unknown} e @param {IpcArg<'localPhoto:clear'>} arg */ (e, { table, id }) =>
+  ipcMain.handle('localPhoto:clear', /** @param {unknown} e @param {IpcArg<'localPhoto:clear'>} arg @returns {IpcReply<'localPhoto:clear'>} */ (e, { table, id }) =>
     run(() => {
       if (!['persons', 'chronicle'].includes(table)) throw new Error('Непозната таблица.');
       const info = getDb().prepare(`UPDATE ${table} SET photo = NULL WHERE id = ?`).run(id);

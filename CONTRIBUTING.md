@@ -150,8 +150,9 @@ element does not have, or passes a function the wrong number of arguments.
   `/** @type {HTMLInputElement} */ (document.querySelector('[name=x]'))` —
   rather than changing the code.
 - **`null` and `undefined` are their own types** (`strictNullChecks`, both
-  projects, since v2.4.75). A channel's answer is `{ ok: true, data }` or
-  `{ ok: false, error }` — after `if (!res.ok) return …` the data is there;
+  projects, since v2.4.75; `exactOptionalPropertyTypes` since v2.4.77 — an
+  optional `x?: T` may be missing, but is not `undefined` unless it says
+  so). A channel's answer is `{ ok: true, data }` or `{ ok: false, error }` — after `if (!res.ok) return …` the data is there;
   `call()` returns `T | null`; a nullable column is `| null`. Check before you
   read. When a value cannot be null for a reason TypeScript does not see (a
   check in another function, a regex group that always matches), say so with a
@@ -181,8 +182,27 @@ element does not have, or passes a function the wrong number of arguments.
   - **What is not checked:** values read from a form (`formData()`,
     `setupFormData()`) are `any` — the form's HTML is the only thing that knows
     its fields — so a field removed from a form is **not** caught; objects built
-    in code are fully checked. The handler's *return value* is not checked
-    against `result` either — keep the two in step by hand.
+    in code are fully checked.
+  - **The handler's answer is checked too** (since v2.4.77). `run()` is
+    `run<T>(fn: () => T): IpcResult<T>`, each module's `deps` is
+    `HandlerDeps`, and each handler carries `@returns {IpcReply<'ch'>}`
+    (`IpcAsyncReply<'ch'>` when async) — returning another type, or leaving
+    out a field, is a type error; so is an invented field in an answer written
+    out literally (`async () => ({ ok: true, data: {…} })`, fields next to
+    `data`). An empty `{}` / `[]` filled later needs a type on its declaration
+    (`/** @type {BookInvGap[]} */`). **Limits:** inside `run(() => ({…}))`
+    TypeScript does not flag *extra* fields of the returned object, and a
+    database row is `any` (better-sqlite3 has no types here), so a handler
+    that returns rows straight from SQL is not compared with the contract —
+    the row types (below) and `test/shema-v2474.test.js` cover that side.
+  - **Fields next to `data`** (`catalogWarning`, `encrypted`, `committed`…) are
+    described in the channel's entry as `extra: { … }`. A response has no
+    "free" fields: reading or returning an undescribed one is an error. They
+    are optional on both sides, so a handler that stops sending one is not
+    caught by the types — the screen must cope with it missing.
+    (`noPropertyAccessFromIndexSignature` is deliberately off: it only forces
+    `obj['x']` instead of `obj.x` — on `dataset`, `process.env`, `deps` — and
+    does not catch a typo; removing the free fields does.)
 - **Row types come from the database schema** (`types/db.generated.d.ts`,
   `interface DbBooks`, `DbLoans`… — one per table). They are generated from the
   *real* schema: `scripts/gen-db-types.js` starts the program in-process (as

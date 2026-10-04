@@ -6,6 +6,7 @@
 // изключенията наведнъж; пуска се веднъж, като администратор. Съдържанието
 // се показва на екрана преди записване, за да се вижда какво точно ще бъде
 // изключено.
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
   const { getDb, run, logAudit, dialog, getMainWindow, fs, path, app, resolveDbDir } = deps;
 
@@ -117,7 +118,7 @@ module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
     lines.push('pause');
     return { content: lines.join('\r\n') + '\r\n', dirs: [...dirs], safe, rejected, exe: exePath };
   }
-  ipcMain.handle('security:exclusionInfo', () =>
+  ipcMain.handle('security:exclusionInfo', /** @returns {IpcReply<'security:exclusionInfo'>} */ () =>
     run(() => {
       const b = buildAvExclusionScript();
       // `dirs` е пълният списък (какъвто беше и досега), `safe`/`rejected` казват
@@ -125,7 +126,7 @@ module.exports = function registerSecurityExclusionsHandlers(ipcMain, deps) {
       return { dirs: b.dirs, safe: b.safe, rejected: b.rejected, exe: b.exe };
     })
   );
-  ipcMain.handle('security:writeExclusionScript', async () => {
+  ipcMain.handle('security:writeExclusionScript', /** @returns {IpcAsyncReply<'security:writeExclusionScript'>} */ async () => {
     try {
       const b = buildAvExclusionScript();
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {

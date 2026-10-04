@@ -87,6 +87,7 @@ function isPiiPlaceholderOrCipher(v) {
   return !s || /^Защитени данни/.test(s) || isEncryptedField(s);
 }
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerReadersHandlers(ipcMain, deps) {
   const {
     getDb, run, logAudit, today, ftsQuery,
@@ -218,7 +219,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
      readers:list(query, limit, page) — прозорец (v2.4.31): page = { offset, limit,
      cat, status } връща { rows, total } — списъкът „Читатели“ при 3 000 читатели
      теглеше 2 МБ с всички лични данни при всяко отваряне и търсене. */
-  ipcMain.handle('readers:list', /** @param {unknown} e @param {IpcArg<'readers:list'>} query @param {IpcArg<'readers:list', 1>} [limit] @param {IpcArg<'readers:list', 2>} [page] */ (e, query, limit, page) =>
+  ipcMain.handle('readers:list', /** @param {unknown} e @param {IpcArg<'readers:list'>} query @param {IpcArg<'readers:list', 1>} [limit] @param {IpcArg<'readers:list', 2>} [page] @returns {IpcReply<'readers:list'>} */ (e, query, limit, page) =>
     run(() => {
       const db = getDb();
       // Името минава през FTS5 (виж books:list за обяснението); телефон и
@@ -281,7 +282,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
      не носи истинските стойности и отпечатъкът му би се сменял според това дали
      защитата на личните данни е отключена, тоест би отказвал редакция без
      никаква чужда промяна. Виж rowFingerprint в security-utils.js. */
-  ipcMain.handle('readers:get', /** @param {unknown} e @param {IpcArg<'readers:get'>} id */ (e, id) => run(() => {
+  ipcMain.handle('readers:get', /** @param {unknown} e @param {IpcArg<'readers:get'>} id @returns {IpcReply<'readers:get'>} */ (e, id) => run(() => {
     const raw = getDb().prepare('SELECT * FROM readers WHERE id = ?').get(id);
     if (!raw) return raw;
     const rev = rowFingerprint(raw, READER_FIELDS);
@@ -294,7 +295,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
   // разредба на Windows превръща букви от Code 39 картата (напр. B) в
   // кирилски еквивалент (Б) — картата не се намираше, макар да е сканирана
   // правилно. Виж и books:byBarcode за същия дефект/поправка.
-  ipcMain.handle('readers:byCard', /** @param {unknown} e @param {IpcArg<'readers:byCard'>} card */ (e, card) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE card_no = ?').get(normalizeScanCode(card)))));
+  ipcMain.handle('readers:byCard', /** @param {unknown} e @param {IpcArg<'readers:byCard'>} card @returns {IpcReply<'readers:byCard'>} */ (e, card) => run(() => maskReaderRow(getDb().prepare('SELECT * FROM readers WHERE card_no = ?').get(normalizeScanCode(card)))));
   /* НОВ ЧИТАТЕЛ БЕЗ ОТБЕЛЯЗАНО СЪГЛАСИЕ НЕ СЕ ЗАПИСВА (v2.4.61).
      =====================================================================
      КАКВО СТАВАШЕ ДОТУК. Формата за читател отказва запис без отметнато съгласие
@@ -431,7 +432,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
          библиотеката към партньора.
      (в) Отделен канал (а не поле в readers:get, който пълни и формата за
          редакция): връща заявките с `overdue`, за да ги оцвети екранът. */
-  ipcMain.handle('readers:mzsHeld', /** @param {unknown} e @param {IpcArg<'readers:mzsHeld'>} readerId */ (e, readerId) =>
+  ipcMain.handle('readers:mzsHeld', /** @param {unknown} e @param {IpcArg<'readers:mzsHeld'>} readerId @returns {IpcReply<'readers:mzsHeld'>} */ (e, readerId) =>
     run(() => {
       const db = getDb();
       const cols = db.prepare('PRAGMA table_info(mzs_requests)').all().map(c => c.name);
@@ -443,7 +444,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         .map(m => Object.assign(m, { overdue: !!(m.due_date && m.due_date < t) }));
     })
   );
-  ipcMain.handle('readers:create', /** @param {unknown} e @param {IpcArg<'readers:create'>} r */ (e, r) =>
+  ipcMain.handle('readers:create', /** @param {unknown} e @param {IpcArg<'readers:create'>} r @returns {IpcReply<'readers:create'>} */ (e, r) =>
     run(() => {
       const db = getDb();
       /* Редът е нарочен: първо техническата граница на записите, после правилото
@@ -471,7 +472,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
       return id;
     })
   );
-  ipcMain.handle('readers:update', /** @param {unknown} e @param {IpcArg<'readers:update'>} r */ (e, r) =>
+  ipcMain.handle('readers:update', /** @param {unknown} e @param {IpcArg<'readers:update'>} r @returns {IpcReply<'readers:update'>} */ (e, r) =>
     run(() => {
       const db = getDb();
       const prev = db.prepare('SELECT * FROM readers WHERE id = ?').get(r.id);
@@ -519,7 +520,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     })
   );
   // Сваля наказанието „преустановено заемане" предсрочно — решение на библиотекаря.
-  ipcMain.handle('readers:clearSuspension', /** @param {unknown} e @param {IpcArg<'readers:clearSuspension'>} id */ (e, id) =>
+  ipcMain.handle('readers:clearSuspension', /** @param {unknown} e @param {IpcArg<'readers:clearSuspension'>} id @returns {IpcReply<'readers:clearSuspension'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       /* Липсващият ред е ОТКАЗ, не тиха успешна операция (v2.4.61). Дотук
@@ -570,7 +571,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
     pending.set(id, now);
     return false;
   }
-  ipcMain.handle('readers:delete', /** @param {unknown} e @param {IpcArg<'readers:delete'>} id */ (e, id) =>
+  ipcMain.handle('readers:delete', /** @param {unknown} e @param {IpcArg<'readers:delete'>} id @returns {IpcReply<'readers:delete'>} */ (e, id) =>
     run(() => {
       const db = getDb();
       const open = db.prepare('SELECT COUNT(*) AS n FROM loans WHERE reader_id = ? AND date_in IS NULL').get(id).n;
@@ -725,7 +726,7 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
   // Извеждане на списъка читатели в CSV (v1.70.0). Нарочно БЕЗ ЕГН/№ на лична карта —
   // това е справочен документ, не заместител на защитата на личните данни; ЕГН/№ ЛК
   // и без друго излизат маскирани от readers:list, ако защитата е заключена.
-  ipcMain.handle('readers:exportCsv', async () => {
+  ipcMain.handle('readers:exportCsv', /** @returns {IpcAsyncReply<'readers:exportCsv'>} */ async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Извеждане на читателите (CSV)',

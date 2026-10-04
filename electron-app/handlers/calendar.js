@@ -16,6 +16,7 @@ const { isValidIsoDate } = require('../security-utils');
 
 const { localDate } = require('../local-date');
 
+/** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerCalendarHandlers(ipcMain, deps) {
   const { getDb, run, logAudit } = deps;
 
@@ -167,7 +168,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
          има невърнато заемане с по-стар падеж — от неговия падеж насам: точно
          онези, които още могат да влязат в някоя забава. `from` казва от коя
          дата е списъкът, за да го напише екранът. */
-  ipcMain.handle('calendar:get', () =>
+  ipcMain.handle('calendar:get', /** @returns {IpcReply<'calendar:get'>} */ () =>
     run(() => {
       const db = getDb();
       const yearStart = new Date().getFullYear() + '-01-01';
@@ -181,7 +182,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { workDays: [...workDaysSet()], closed, from };
     })
   );
-  ipcMain.handle('calendar:saveWorkDays', /** @param {unknown} e @param {IpcArg<'calendar:saveWorkDays'>} days */ (e, days) =>
+  ipcMain.handle('calendar:saveWorkDays', /** @param {unknown} e @param {IpcArg<'calendar:saveWorkDays'>} days @returns {IpcReply<'calendar:saveWorkDays'>} */ (e, days) =>
     run(() => {
       invalidateCalendarCache();
       const list = (Array.isArray(days) ? days : []).map(n => parseInt(n, 10)).filter(n => n >= 0 && n <= 6);
@@ -202,7 +203,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { moved: moved.length, message: moved.length ? movedText(moved) : null };
     })
   );
-  ipcMain.handle('calendar:addClosed', /** @param {unknown} e @param {IpcArg<'calendar:addClosed'>} arg */ (e, { date, reason }) =>
+  ipcMain.handle('calendar:addClosed', /** @param {unknown} e @param {IpcArg<'calendar:addClosed'>} arg @returns {IpcReply<'calendar:addClosed'>} */ (e, { date, reason }) =>
     run(() => {
       invalidateCalendarCache();
       if (!date) throw new Error('Изберете дата.');
@@ -219,7 +220,7 @@ module.exports = function registerCalendarHandlers(ipcMain, deps) {
       return { moved: moved.length, message: moved.length ? movedText(moved) : null };
     })
   );
-  ipcMain.handle('calendar:removeClosed', /** @param {unknown} e @param {IpcArg<'calendar:removeClosed'>} date */ (e, date) =>
+  ipcMain.handle('calendar:removeClosed', /** @param {unknown} e @param {IpcArg<'calendar:removeClosed'>} date @returns {IpcReply<'calendar:removeClosed'>} */ (e, date) =>
     run(() => {
       invalidateCalendarCache();
       const info = getDb().prepare('DELETE FROM calendar_closed WHERE date = ?').run(date);

@@ -128,7 +128,7 @@ function invBookUndatedNote(sum) {
 }
 window.invBookUndatedNote = invBookUndatedNote;
 /** Като booksFetch: целият регистър (`all`) или прозорец (`rows`, `total`, `summary`).
-    @returns {Promise<{ all?: InvBookRow[], rows?: InvBookRow[], total?: number, summary?: InvBookSummary } | null>} */
+    @returns {Promise<{ all?: InvBookRow[], rows?: InvBookRow[], total?: number, summary?: InvBookSummary | undefined } | null>} */
 async function invBookFetch(offset, limit, withSummary) {
   const res = await call(window.api.invBook.list({ q: INVBOOK_QUERY, offset,
     limit: Math.min(limit || INVBOOK_PAGE_SIZE, 2000), summary: !!withSummary }));
