@@ -403,7 +403,9 @@ contextBridge.exposeInMainWorld('api', {
     pathOf: (file) => filePath(file)
   },
   mobile: {
-    generate: invoke('mobile:generate')
+    generate: invoke('mobile:generate'),
+    sessionExport: invoke('mobile:sessionExport'),
+    siteInfo: invoke('mobile:siteInfo')
   },
   security: {
     exclusionInfo: invoke('security:exclusionInfo'),

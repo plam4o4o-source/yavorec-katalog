@@ -7,10 +7,50 @@ const { resolveScannedBook } = require('../security-utils');
    сканиране на компютъра (v2.4.69, находка О3; виж lostCaseOf там). */
 const { lostCaseOf } = require('./inventory-sessions');
 const { BOOK_STATUS_LOST } = require('../db/enum-triggers');
+const { fundByStatus } = require('../db/fund-sql');
+const { buildScannerPage } = require('../mobile-page');
+const qrcode = require('qrcode-generator');
+
+/* ПРИЛОЖЕНИЕТО ПО HTTPS (v2.4.78). Същата страница, публикувана от
+   .github/workflows/skener-pages.yml. По https Chrome пита за камерата и помни
+   отговора — живата камера работи, вместо да се снима всяка книга поотделно.
+   Страницата е една за всички библиотеки: в нея няма нищо от базата, а името за
+   файла идва след „#“ (тази част от адреса не стига до сървъра). */
+const SKENER_URL = 'https://plam4o4o-source.github.io/yavorec-katalog/skener/';
+
+/* СПИСЪКЪТ НА ПРОВЕРКАТА ЗА ТЕЛЕФОНА (v2.4.78).
+   Документите в обхвата на отворената сесия — СЪЩОТО условие като пула при
+   inventorySessions:start (db/fund-sql.js, fundByStatus и отделът), за да брои
+   телефонът „X от N“ спрямо същото N, което стои в протокола. За всеки документ:
+   инв. №, баркод, заглавие (съкратено — за проверка с очи, не за каталог),
+   сигнатура (за подреждане по рафта) и дали вече е сканиран в тази сесия.
+   Без лични данни: нито читатели, нито заемания — само фондът. */
+const TITLE_MAX = 70;
+/** @param {any} db @param {any} s */
+function sessionList(db, s) {
+  /** @type {Record<string, any>} */
+  const params = { sid: s.id };
+  if (s.department) params.department = s.department;
+  const rows = db.prepare(`SELECT b.inv_number, b.barcode, b.title, b.call_number,
+      EXISTS(SELECT 1 FROM inventory_session_scans sc WHERE sc.session_id = @sid AND sc.book_id = b.id) AS done
+    FROM books b WHERE ${fundByStatus} ${s.department ? 'AND b.department = @department' : ''}
+    ORDER BY b.inv_number, b.id`).all(params);
+  const cut = (/** @type {any} */ t) => {
+    const v = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+    return v.length > TITLE_MAX ? v.slice(0, TITLE_MAX - 1) + '…' : v;
+  };
+  return {
+    fmt: 'invlib-inventory-list', v: 1, made: new Date().toISOString(),
+    session: { id: s.id, no: s.no == null ? null : s.no, year: s.year || String(s.date || '').slice(0, 4),
+      date: s.date, department: s.department || null },
+    items: rows.map((/** @type {any} */ r) => [r.inv_number == null ? null : r.inv_number, r.barcode ? String(r.barcode) : null,
+      cut(r.title), r.call_number ? String(r.call_number) : null, r.done ? 1 : 0])
+  };
+}
 
 /** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerMobileHandlers(ipcMain, deps) {
-  const { getDb, run, logAudit, dialog, getMainWindow, fs, path, normalizeScanCode } = deps;
+  const { getDb, run, logAudit, dialog, getMainWindow, fs, normalizeScanCode } = deps;
   /* Вносът връща „липсващ“ в „наличен“ — онлайн каталогът трябва да го разбере
      (v2.4.69, находка К2; виж същата бележка в handlers/inventory-sessions.js).
      Незадължителна зависимост: модулът се зарежда и самостоятелно. */
@@ -34,12 +74,10 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
   ipcMain.handle('mobile:generate', /** @returns {IpcAsyncReply<'mobile:generate'>} */ async () => {
     try {
       const s = getDb().prepare('SELECT lib_name, org, place FROM settings WHERE id = 1').get() || {};
-      const tpl = fs.readFileSync(path.join(__dirname, '..', 'src', 'mobile-template.html'), 'utf8');
-      /* Заместването е с ФУНКЦИЯ, а не с низ: при низ „$&“, „$'“ и „$1“ са
-         специални за String.replace. Слъгът е само [a-z0-9-] и не може да ги
-         съдържа, но формата остава — тя не зависи от това какво влиза. */
       const base = slug(s.lib_name || s.org || '');
-      const html = tpl.replace(/__SLUG__/g, () => base);   // само [a-z0-9-] — влиза в JS низ
+      /* v2.4.78: сглобяването е в mobile-page.js — там влиза и вграденият четец
+         (за телефони без BarcodeDetector), а слъгът е само [a-z0-9-]. */
+      const html = buildScannerPage({ slug: base });
       const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), {
         title: 'Запишете страницата за сканиране с телефон',
         defaultPath: base ? `inventarizaciya-skener-${base}.html` : 'inventarizaciya-skener.html',
@@ -50,6 +88,49 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       return { ok: true, data: filePath };
     } catch (err) { return { ok: false, error: err.message }; }
   });
+
+  /* „Списък за телефона“ (v2.4.78) — виж sessionList горе. kind 'html' записва
+     страницата за сканиране с ВГРАДЕН списък (за отваряне като файл), kind
+     'json' — само списъка, който приложението по https зарежда с „Зареди
+     списъка на проверката“. */
+  ipcMain.handle('mobile:sessionExport', /** @param {unknown} e @param {IpcArg<'mobile:sessionExport'>} arg @returns {IpcAsyncReply<'mobile:sessionExport'>} */ async (e, { sessionId, kind }) => {
+    try {
+      if (kind !== 'html' && kind !== 'json') throw new Error('Непознат вид на списъка: ' + kind);
+      const db = getDb();
+      const sess = db.prepare('SELECT * FROM inventory_sessions WHERE id = ?').get(sessionId);
+      if (!sess || sess.closed) throw new Error('Няма отворена сесия за инвентаризация.');
+      const list = sessionList(db, sess);
+      const st = db.prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
+      const base = slug(st.lib_name || st.org || '');
+      const tag = (base ? base + '-' : '') + (sess.no ? 'protokol-' + sess.no + '-' + list.session.year : 'proverka-' + sess.id);
+      const { canceled, filePath } = await dialog.showSaveDialog(getMainWindow(), kind === 'html'
+        ? { title: 'Запишете страницата за сканиране със списъка на проверката', defaultPath: 'inventarizaciya-skener-' + tag + '.html',
+            filters: [{ name: 'HTML страница', extensions: ['html'] }] }
+        : { title: 'Запишете списъка на проверката за приложението на телефона', defaultPath: 'inventarizaciya-spisak-' + tag + '.json',
+            filters: [{ name: 'Списък (JSON)', extensions: ['json'] }] });
+      if (canceled || !filePath) return { ok: false, error: 'Отказано от потребителя.' };
+      fs.writeFileSync(filePath, kind === 'html' ? buildScannerPage({ slug: base, expected: list }) : JSON.stringify(list), 'utf8');
+      logAudit('Инвентаризация', 'списък за телефона (' + (kind === 'html' ? 'страница' : 'файл за приложението') + ') за '
+        + (sess.no ? 'протокол № ' + sess.no + '/' + list.session.year : 'проверката от ' + sess.date)
+        + ' — ' + list.items.length + ' документа в обхвата');
+      return { ok: true, data: filePath };
+    } catch (err) { return { ok: false, error: /** @type {Error} */ (err).message }; }
+  });
+
+  /* Адресът на приложението по https и QR код за него (v2.4.78) — телефонът го
+     отваря, като насочи камерата към екрана. QR кодът се рисува тук (главният
+     процес), а екранът го получава като готов SVG. */
+  ipcMain.handle('mobile:siteInfo', /** @returns {IpcReply<'mobile:siteInfo'>} */ () =>
+    run(() => {
+      const st = getDb().prepare('SELECT lib_name, org FROM settings WHERE id = 1').get() || {};
+      const base = slug(st.lib_name || st.org || '');
+      const url = SKENER_URL + (base ? '#lib=' + base : '');
+      const qr = qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      return { url, qrSvg: qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true }) };
+    })
+  );
 
   // Внасяне на сканираните с телефона номера в отворена сесия за инвентаризация.
   ipcMain.handle('inventorySessions:importScans', /** @param {unknown} e @param {IpcArg<'inventorySessions:importScans'>} arg @returns {IpcReply<'inventorySessions:importScans'>} */ (e, { sessionId, codes }) =>

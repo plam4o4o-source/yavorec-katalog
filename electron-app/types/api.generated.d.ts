@@ -536,6 +536,10 @@ interface InvLibApi {
   mobile: {
     /** канал „mobile:generate“ */
     generate: IpcMethod<'mobile:generate'>;
+    /** канал „mobile:sessionExport“ */
+    sessionExport: IpcMethod<'mobile:sessionExport'>;
+    /** канал „mobile:siteInfo“ */
+    siteInfo: IpcMethod<'mobile:siteInfo'>;
   };
   security: {
     /** канал „security:exclusionInfo“ */
