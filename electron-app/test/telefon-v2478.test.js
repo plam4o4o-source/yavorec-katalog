@@ -111,7 +111,9 @@ function openPhone(o = {}) {
       }
       if (o.wake) {
         Object.defineProperty(w.navigator, 'wakeLock', { value: { request: async () => {
-          state.wake++; return { release: async () => { state.wakeRel++; }, addEventListener() {} };
+          state.wake++;
+          if (o.wakeDelay) await tick(o.wakeDelay);
+          return { release: async () => { state.wakeRel++; }, addEventListener() {} };
         } } });
       }
       w.URL.createObjectURL = () => 'blob:x';
@@ -131,12 +133,19 @@ function openPhone(o = {}) {
 const saved = (w) => JSON.parse(w.localStorage.getItem('inventar-scan-v1') || '{}');
 const add = (d, v) => { d.getElementById('manual').value = v; d.getElementById('addBtn').click(); };
 async function liveFor(d, ms) { d.getElementById('startBtn').click(); await tick(ms); }
+/* Камерата върви, докато четецът не изчете всички подготвени кадри — под натоварване
+   (пълната поредица в CI) фиксирано време не стига. */
+async function liveUntil(d, state, extra) {
+  d.getElementById('startBtn').click();
+  const t0 = Date.now();
+  while (state.fi < state.frames.length + (extra || 2) && Date.now() - t0 < 15000) await tick(25);
+}
 
 /* ============================== ЕТАП 1 ============================== */
 
 test('Т1 — номер се приема при ДВА поредни прочита; единичен (отблясък) не влиза', async () => {
-  const { w, d } = openPhone({ frames: [['10245'], ['1024'], ['10245'], ['10245'], []] });
-  await liveFor(d, 900);
+  const { w, d, state } = openPhone({ frames: [['10245'], ['1024'], ['10245'], ['10245'], []] });
+  await liveUntil(d, state);
   assert.deepEqual(saved(w).codes, ['10245'], 'единичното „1024“ между два „10245“ е отблясък, не етикет');
   assert.equal(d.getElementById('dupCnt').textContent, '0');
   d.getElementById('stopBtn').click();
@@ -146,8 +155,8 @@ test('Т1 — задържаният етикет не дава „повтор�
   const f = []; for (let i = 0; i < 6; i++) f.push(['55']);
   for (let i = 0; i < 10; i++) f.push([]);           // > GONE_MS без етикета
   f.push(['55'], ['55'], []);
-  const { w, d } = openPhone({ frames: f });
-  await liveFor(d, 3000);
+  const { w, d, state } = openPhone({ frames: f });
+  await liveUntil(d, state);
   assert.deepEqual(saved(w).codes, ['55']);
   assert.equal(d.getElementById('dupCnt').textContent, '1', 'върнат пред камерата след пауза — повторен');
   d.getElementById('stopBtn').click();
@@ -157,8 +166,8 @@ test('Т2 — ISBN и етикет в кадъра, редуващи се: са�
   const a = ['9789540912345', '1024'], f = [];
   for (let k = 0; k < 10; k++) f.push(k % 2 ? a : a.slice().reverse());
   f.push([]);
-  const { w, d } = openPhone({ frames: f });
-  await liveFor(d, 1600);
+  const { w, d, state: st0 } = openPhone({ frames: f });
+  await liveUntil(d, st0);
   assert.deepEqual(saved(w).codes, ['1024']);
   assert.equal(d.getElementById('dupCnt').textContent, '0', 'дотук: 10 фалшиви „повторни“ за 6 секунди');
   d.getElementById('stopBtn').click();
@@ -285,7 +294,7 @@ test('„Изпрати“: файлът с името и заглавния р�
   add(d, '1024');
   d.getElementById('manual').value = '1025';                     // набран, без „Добави“
   d.getElementById('shareBtn').click();
-  await tick(50);
+  for (let i = 0; i < 100 && !state.shared; i++) await tick(20);
   assert.match(state.shared.name, /^inventarizaciya-biblioteka-\d{4}-\d{2}-\d{2}\.txt$/);
   assert.deepEqual(state.shared.text.split('\n').slice(1), ['1024', '1025']);
   assert.equal(saved(w).unsent, false);
@@ -347,14 +356,14 @@ test('Списъкът на проверката от файл (приложен
   const file = new w.File([JSON.stringify(EXP)], 'spisak.json', { type: 'application/json' });
   Object.defineProperty(inp, 'files', { value: [file], configurable: true });
   inp.dispatchEvent(new w.Event('change'));
-  await tick(50);
+  for (let i = 0; i < 100 && !/протокол/.test(d.getElementById('listInfo').textContent); i++) await tick(20);
   assert.match(d.getElementById('listInfo').textContent, /протокол № 3\/2026/);
   assert.ok(w.localStorage.getItem('inventar-expected-v1'), 'запомнен за следващото отваряне');
   assert.match(d.getElementById('oldList').textContent, /Сканираните номера са от друга проверка \(#99\)/);
   const bad = new w.File(['{"a":1}'], 'drugo.json');
   Object.defineProperty(inp, 'files', { value: [bad], configurable: true });
   inp.dispatchEvent(new w.Event('change'));
-  await tick(50);
+  for (let i = 0; i < 100 && !/не е списък/.test(d.getElementById('snackTxt').textContent); i++) await tick(20);
   assert.match(d.getElementById('snackTxt').textContent, /не е списък на проверка/);
   assert.match(d.getElementById('listInfo').textContent, /протокол № 3\/2026/, 'грешният файл не маха добрия списък');
 });
@@ -363,13 +372,19 @@ test('Вграденият четец (zxing) за телефони без Barco
   const { w, d, state } = openPhone({ native: false, zx: true, url: 'file:///x/skener.html', frames: [['1024'], ['1024'], []] });
   assert.equal(d.getElementById('startBtn').disabled, false);
   assert.equal(d.getElementById('shotBtn').style.display, 'inline-block');
-  d.getElementById('startBtn').click();
-  await tick(600);
+  await liveUntil(d, state);
   assert.equal(d.getElementById('cnt').textContent, '1');
   assert.deepEqual(plain(state.zx[0].formats), ['Code39', 'Code128', 'Codabar', 'EAN13', 'EAN8']);
   assert.ok(state.zxPrep.overrides.wasmBinary instanceof w.ArrayBuffer, 'четецът идва от самата страница');
   assert.equal(state.zxPrep.overrides.locateFile, undefined, 'никога от CDN');
   d.getElementById('stopBtn').click();
+  // Снимката минава през същия четец.
+  state.frames = [['2048']]; state.fi = 0;
+  const inp = d.getElementById('shotInp');
+  Object.defineProperty(inp, 'files', { value: [{ name: 'shot.jpg' }], configurable: true });
+  inp.dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 100 && d.getElementById('cnt').textContent !== '2'; i++) await tick(20);
+  assert.equal(d.getElementById('cnt').textContent, '2', 'снимката също');
   // Без вграден четец и без BarcodeDetector — както досега: само ръчно.
   const { d: d2 } = openPhone({ native: false, url: 'file:///x/skener.html' });
   assert.equal(d2.getElementById('startBtn').disabled, true);
@@ -392,7 +407,8 @@ const mobilePage = require('../mobile-page');
 test('mobile-page: заглавие с „</script>“, „$&“ или образец не чупи страницата', () => {
   const html = mobilePage.buildScannerPage({ slug: 'x', expected: { fmt: 'invlib-inventory-list', session: { id: 1 },
     items: [[1, null, '</script><script>alert(1)</script> $& __SLUG__ <!--__PWA__-->', null, 0]] } });
-  assert.equal((html.match(/<\/script>/g) || []).length, (html.match(/<script>/g) || []).length, 'нито един скрипт не е затворен от заглавие');
+  assert.ok(html.includes('\\u003c/script>\\u003cscript>alert(1)'), 'заглавието е вградено обезвредено');
+  assert.ok(!html.includes('</script><script>alert(1)'), 'суровото „</script>“ от заглавието не стига до страницата');
   const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://example.org/', virtualConsole: new VirtualConsole(), pretendToBeVisual: true });
   phones.push(dom.window);
   assert.equal(dom.window.EMBEDDED.items[0][2], '</script><script>alert(1)</script> $& __SLUG__ <!--__PWA__-->');
@@ -527,4 +543,209 @@ test('Страницата от файла и приложението са ЕД
   assert.equal(dom.window.SLUG, 'yavorec');
   assert.equal(dom.window.localStorage.getItem('inventar-slug'), 'yavorec', 'запомнено за отваряне от началния екран (без #)');
   assert.match(dom.window.fileName(), /^inventarizaciya-yavorec-/);
+});
+
+/* ============ Преглед на v2.4.78 — находките на независимия преглед ============ */
+
+test('Преглед 1 — двусмислен код от ЦЕЛИЯ фонд: телефонът не казва „✓“ за код, който вносът отказва', async () => {
+  const { d } = openPhone({ embedded: Object.assign({}, EXP, { amb: ['1024', 'B-77'] }) });
+  add(d, '1024');
+  assert.equal(d.getElementById('hit').className, 'warn');
+  assert.match(d.getElementById('hit').textContent, /двусмислен код/);
+  assert.equal(d.getElementById('prog').textContent, '1/5', 'не се брои като проверен');
+});
+
+test('Преглед 1 — програмата изброява двусмислените кодове: баркод на два документа, баркод = инв. № на друг (и извън обхвата)', async () => {
+  const dep = 'Т78-двусм';
+  mkBook(78201, { department: dep, barcode: '78299' });           // баркод = инв. № на отчислен
+  mkBook(78299, { department: dep, status: 'отчислен' });
+  mkBook(78202, { department: dep, barcode: 'DUP-78' });
+  mkBook(78203, { department: 'чужд', barcode: 'DUP-78' });       // същият баркод, извън обхвата
+  mkBook(78204, { department: dep, barcode: 'OK-78' });
+  const sid = await startSess(dep);
+  const dir = tmp();
+  h.dialogs.savePath = path.join(dir, 'l.json');
+  okd(await h.api.mobile.sessionExport({ sessionId: sid, kind: 'json' }), 'json');
+  h.dialogs.savePath = null;
+  const list = JSON.parse(fs.readFileSync(path.join(dir, 'l.json'), 'utf8'));
+  assert.ok(list.amb.includes('78299'), 'баркод, който е инв. № на друг документ');
+  assert.ok(list.amb.includes('DUP-78'), 'баркод на два документа');
+  assert.ok(!list.amb.includes('OK-78'));
+  // и вносът наистина ги отказва — телефонът казва същото
+  const r = okd(await h.api.inventorySessions.importScans({ sessionId: sid, codes: ['78299', 'DUP-78', 'OK-78'] }), 'внос');
+  assert.equal(r.added, 1);
+  assert.equal(r.skipped.length, 2);
+});
+
+test('Преглед 2 — две пускания на камерата наведнъж не оставят включена камера; скрита страница спира камерата', async () => {
+  const { w, d, state } = openPhone({ frames: [[]] });
+  d.getElementById('startBtn').click();
+  d.getElementById('startBtn').click();
+  w.startCamera();                              // както самостоятелното връщане от заключен екран
+  await tick(60);
+  assert.equal(state.gum, 1, 'второто пускане не тръгва, докато тече първото');
+  d.getElementById('stopBtn').click();
+  // скрита по време на пускането
+  let hidden = false;
+  Object.defineProperty(d, 'hidden', { configurable: true, get: () => hidden });
+  d.getElementById('startBtn').click();
+  hidden = true;
+  await tick(60);
+  assert.ok(state.track.stopped, 'камерата, тръгнала при скрита страница, е спряна');
+  assert.ok(!d.body.classList.contains('live'));
+  hidden = false;
+  d.dispatchEvent(new w.Event('visibilitychange'));
+  await tick(60);
+  assert.ok(d.body.classList.contains('live'), 'тръгва, когато страницата се покаже');
+  d.getElementById('stopBtn').click();
+});
+
+test('Преглед 4 — бавен четец: един пропуснат кадър на задържан етикет не дава „повторно“', async () => {
+  const { d, state } = openPhone({ delay: 950, frames: [['55'], ['55'], ['55'], [], ['55'], ['55'], ['55']] });
+  await liveUntil(d, state, 0);
+  assert.equal(d.getElementById('cnt').textContent, '1');
+  assert.equal(d.getElementById('dupCnt').textContent, '0');
+  d.getElementById('stopBtn').click();
+});
+
+test('Преглед 5 — несканираните са в реда на рафта по УДК (десетично, не „като числа“)', () => {
+  const calls = ['9(497.2) ИВА', '82 АБВ', '087.5 ДЕТ', '891.9 ЛЕО', '1 ФИЛ', '821.111 ШЕК', '891.81 ВАЗ'];
+  const exp = Object.assign({}, EXP, { items: calls.map((c, i) => [100 + i, null, 'К' + i, c, 0]) });
+  const { d } = openPhone({ embedded: exp });
+  d.getElementById('missBtn').click();
+  const got = [...d.querySelectorAll('#missList li small')].map(x => x.textContent.split(' · ')[1]);
+  assert.deepEqual(got, ['087.5 ДЕТ', '1 ФИЛ', '82 АБВ', '821.111 ШЕК', '891.81 ВАЗ', '891.9 ЛЕО', '9(497.2) ИВА']);
+});
+
+test('Преглед 6 — вграденият списък печели над запомнен списък от ДРУГА проверка', () => {
+  const other = Object.assign({}, EXP, { session: { id: 99, no: 9, year: '2025', date: '2025-01-01' }, made: '2030-01-01T00:00:00Z' });
+  const { d } = openPhone({ embedded: EXP, storedList: other });
+  assert.match(d.getElementById('listInfo').textContent, /протокол № 3\/2026/);
+  const newer = Object.assign({}, EXP, { made: '2030-01-01T00:00:00Z', items: EXP.items.slice(0, 2) });
+  const { d: d2 } = openPhone({ embedded: EXP, storedList: newer });
+  assert.match(d2.getElementById('listInfo').textContent, /2 документа/, 'по-нов за СЪЩАТА проверка — той');
+  const { d: d3 } = openPhone({ embedded: EXP, storedList: { fmt: 'invlib-inventory-list', session: { id: 7 }, made: '2031', items: [null] } });
+  assert.match(d3.getElementById('listInfo').textContent, /5 документа/, 'повреден запомнен — вграденият');
+});
+
+test('Преглед 7 — четец, който не работи, се казва (камерата не стои „жива“ без да чете)', async () => {
+  const { w, d } = openPhone({ native: false, zx: true, url: 'file:///x/skener.html' });
+  w.ZXingWASM.readBarcodes = async () => { throw new Error('wasm не тръгна'); };
+  d.getElementById('startBtn').click();
+  const t0 = Date.now();
+  while (d.body.classList.contains('live') || Date.now() - t0 < 100) { if (Date.now() - t0 > 8000) break; await tick(50); }
+  assert.ok(!d.body.classList.contains('live'));
+  assert.match(d.getElementById('nocam').textContent, /Четецът на баркодове не работи на този телефон \(wasm не тръгна\)/);
+});
+
+test('Преглед 8 — „Отмени“ след „Изчисти“ връща и когато междувременно е прочетен нов номер', () => {
+  const { w, d } = openPhone({});
+  add(d, '1'); add(d, '2');
+  d.getElementById('clearBtn').click();
+  add(d, '3');
+  d.getElementById('snackBtn').click();
+  assert.deepEqual(saved(w).codes, ['1', '2', '3']);
+  assert.match(d.getElementById('snackTxt').textContent, /Върнати са 2 номера; 1 прочетени след изчистването остават/);
+});
+
+test('Преглед 9 — счупен списък не оставя страницата полузаредена; сканирането продължава да се пази', async () => {
+  const { w, d } = openPhone({ embedded: EXP });
+  const inp = d.getElementById('listInp');
+  const bad = new w.File([JSON.stringify(Object.assign({}, EXP, { session: { id: 8 }, items: [[1, null, 'x', null, 0], null] }))], 'b.json');
+  Object.defineProperty(inp, 'files', { value: [bad], configurable: true });
+  inp.dispatchEvent(new w.Event('change'));
+  for (let i = 0; i < 100 && !d.getElementById('snackTxt').textContent; i++) await tick(20);
+  assert.match(d.getElementById('snackTxt').textContent, /не е списък на проверка/, 'файлът е прочетен и отказан');
+  assert.match(d.getElementById('listInfo').textContent, /протокол № 3\/2026/, 'остава добрият списък');
+  add(d, '1024');
+  assert.deepEqual(saved(w).codes, ['1024']);
+  assert.match(d.getElementById('hit').textContent, /Под игото/, 'четенето е по добрия списък, не по полузаредения');
+  assert.equal(d.getElementById('prog').textContent, '2/5');
+});
+
+test('Преглед 10 — Wake Lock, дошъл след спиране на камерата, се освобождава', async () => {
+  const { d, state } = openPhone({ frames: [[]], wake: true, wakeDelay: 80 });
+  d.getElementById('startBtn').click();
+  await tick(20);                               // камерата върви, заявката още чака
+  assert.equal(state.wake, 1);
+  d.getElementById('stopBtn').click();
+  await tick(150);
+  assert.equal(state.wake, state.wakeRel, 'няма останала ключалка при спряна камера');
+});
+
+test('Един документ под два кода („9“ и „0009“) е един; ISSN (977) също не е етикет', () => {
+  const { w, d } = openPhone({ embedded: EXP });
+  add(d, '9'); add(d, '0009');
+  assert.deepEqual(saved(w).codes, ['9']);
+  assert.equal(d.getElementById('dupCnt').textContent, '1');
+  const { w: w2, d: d2, state } = openPhone({});
+  state.frames = [['9771234567003']];
+  const inp = d2.getElementById('shotInp');
+  Object.defineProperty(inp, 'files', { value: [{ name: 's.jpg' }], configurable: true });
+  inp.dispatchEvent(new w2.Event('change'));
+  return tick(30).then(() => {
+    assert.equal(d2.getElementById('cnt').textContent, '0');
+    assert.match(d2.getElementById('hit').textContent, /е ISSN от корицата/);
+  });
+});
+
+test('mobile:sessionExport за целия фонд (без отдел) — без отчислените, с двусмислените', async () => {
+  const sid = okd(await h.api.inventorySessions.start({ date: E.today(), scope: 'целият фонд', department: null,
+    committee1: 'А', committee2: 'Б', committee3: 'В', order_no: '2', no: null }), 'сесия');
+  const dir = tmp();
+  h.dialogs.savePath = path.join(dir, 'all.json');
+  okd(await h.api.mobile.sessionExport({ sessionId: sid, kind: 'json' }), 'json');
+  h.dialogs.savePath = null;
+  const list = JSON.parse(fs.readFileSync(path.join(dir, 'all.json'), 'utf8'));
+  assert.equal(list.session.department, null);
+  const n = h.db.prepare("SELECT COUNT(*) AS n FROM books WHERE status != 'отчислен' OR status IS NULL").get().n;
+  assert.equal(list.items.length, n);
+  assert.ok(Array.isArray(list.amb));
+});
+
+test('Вграденият четец наистина чете Code 39 с опциите на страницата (истински zxing, без мрежа)', async () => {
+  const dist = path.join(path.dirname(require.resolve('zxing-wasm/reader')), '..', '..');
+  const full = require('zxing-wasm/full');
+  const reader = require('zxing-wasm/reader');
+  full.prepareZXingModule({ overrides: { wasmBinary: fs.readFileSync(path.join(dist, 'full', 'zxing_full.wasm')).buffer } });
+  reader.prepareZXingModule({ overrides: { wasmBinary: fs.readFileSync(path.join(dist, 'reader', 'zxing_reader.wasm')).buffer } });
+  const formats = JSON.parse(PAGE.match(/var ZX_FORMATS = (\[[^\]]+\]);/)[1].replace(/'/g, '"'));
+  const optsSrc = PAGE.match(/readBarcodes\(data, (\{[^}]+\})\)/)[1];
+  const opts = new Function('ZX_FORMATS', 'return ' + optsSrc)(formats);
+  assert.equal(opts.tryCode39ExtendedMode, false, 'както BarcodeDetector — без разширения режим');
+  for (const code of ['1024', 'T78-1024']) {
+    const img = await full.writeBarcode(code, { format: 'Code39', scale: 2 });
+    const rs = await reader.readBarcodes(img.image, opts);
+    assert.deepEqual(rs.map(r => r.text), [code]);
+  }
+});
+
+test('Service worker-ът: отворен в раздел файл от папката не застава на мястото на страницата', async () => {
+  const out = tmp();
+  require('../scripts/build-skener-site').build(out);
+  const src = fs.readFileSync(path.join(out, 'skener', 'sw.js'), 'utf8');
+  const listeners = {}, store = new Map(), puts = [], reqs = [];
+  const cache = { match: async (k) => store.get(String(k)) || null, put: async (k, r) => { puts.push(String(k)); store.set(String(k), r); },
+    addAll: async (list) => { for (const r of list) reqs.push(r); } };
+  const sandbox = {
+    self: { location: { origin: 'https://x.github.io' }, addEventListener: (t, fn) => { listeners[t] = fn; }, skipWaiting() {}, clients: { claim() {} } },
+    caches: { open: async () => cache, keys: async () => [], match: async () => null, delete: async () => true },
+    Request: function (u, o) { this.url = u; this.cache = o && o.cache; },
+    fetch: async (req) => ({ ok: true, url: req.url, clone() { return this; },
+      headers: { get: () => (req.url.endsWith('.png') ? 'image/png' : /\?plain$/.test(req.url) ? 'text/plain' : 'text/html') } }),
+    URL, console
+  };
+  require('vm').runInNewContext(src, sandbox);
+  let wait = null;
+  listeners.install({ waitUntil: (p) => { wait = p; } });
+  await wait;
+  assert.ok(reqs.length >= 6 && reqs.every(r => r.cache === 'reload'), 'новият кеш е мимо кеша на браузъра');
+  const nav = async (url) => { let p = null; listeners.fetch({ request: { method: 'GET', mode: 'navigate', url }, respondWith: (x) => { p = x; } }); return p && p.then(() => tick(5)); };
+  await nav('https://x.github.io/yavorec-katalog/skener/icon-512.png');
+  await nav('https://x.github.io/yavorec-katalog/skener/druga.html');
+  assert.deepEqual(puts, [], 'иконата или друга страница, отворени в раздел, не са „страницата“');
+  await nav('https://x.github.io/yavorec-katalog/skener/?plain');
+  assert.deepEqual(puts, [], 'отговор, който не е HTML, не застава на мястото на страницата');
+  await nav('https://x.github.io/yavorec-katalog/skener/');
+  assert.deepEqual(puts, ['index.html']);
 });

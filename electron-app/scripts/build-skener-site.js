@@ -61,9 +61,16 @@ function serviceWorker(version) {
    Сглобено от electron-app/scripts/build-skener-site.js — не се пипа на ръка. */
 const CACHE = 'skener-v${version}';
 const FILES = ${JSON.stringify(FILES)};
+/* cache: 'reload' — мимо кеша на браузъра (GitHub Pages дава max-age=600):
+   новият кеш не бива да поеме старата страница. */
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
+/* Само самото приложение е „страницата“ — отворен в раздел файл от папката
+   (иконата, манифестът) не бива да застане в кеша на нейно място. */
+const isAppPage = (url) => { const p = new URL(url).pathname; return p.endsWith('/') || p.endsWith('/index.html'); };
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
     .then((ks) => Promise.all(ks.filter((k) => k.startsWith('skener-') && k !== CACHE).map((k) => caches.delete(k))))
@@ -72,9 +79,12 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  if (req.mode === 'navigate') {
+  if (req.mode === 'navigate' && isAppPage(req.url)) {
     e.respondWith(caches.open(CACHE).then((c) => c.match('index.html').then((hit) => {
-      const net = fetch(req).then((r) => { if (r.ok) c.put('index.html', r.clone()); return r; });
+      const net = fetch(req).then((r) => {
+        if (r.ok && (r.headers.get('content-type') || '').includes('text/html')) c.put('index.html', r.clone());
+        return r;
+      });
       if (hit) { net.catch(() => {}); return hit; }
       return net;
     })));

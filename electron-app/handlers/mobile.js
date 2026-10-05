@@ -39,8 +39,19 @@ function sessionList(db, s) {
     const v = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
     return v.length > TITLE_MAX ? v.slice(0, TITLE_MAX - 1) + '…' : v;
   };
+  /* ДВУСМИСЛЕНИТЕ КОДОВЕ — ОТ ЦЕЛИЯ ФОНД (преглед на v2.4.78). Вносът минава през
+     resolveScannedBook() (security-utils.js), който сверява кода с ВСИЧКИ документи
+     и отказва баркод, стоящ на два документа, и баркод, който е инв. № на друг
+     документ. Списъкът за телефона носи само обхвата — без тези кодове телефонът
+     би казал „✓“ за документ, който вносът после пропуска. Изброяват се тук. */
+  const amb = db.prepare(`
+    SELECT barcode AS c FROM books WHERE barcode IS NOT NULL AND barcode <> '' GROUP BY barcode HAVING COUNT(*) > 1
+    UNION
+    SELECT b.barcode AS c FROM books b JOIN books o ON o.inv_number = CAST(b.barcode AS INTEGER) AND o.id <> b.id
+    WHERE b.barcode GLOB '[0-9]*' AND NOT b.barcode GLOB '*[^0-9]*' AND length(b.barcode) <= 9`).all()
+    .map((/** @type {any} */ r) => String(r.c));
   return {
-    fmt: 'invlib-inventory-list', v: 1, made: new Date().toISOString(),
+    fmt: 'invlib-inventory-list', v: 1, made: new Date().toISOString(), amb,
     session: { id: s.id, no: s.no == null ? null : s.no, year: s.year || String(s.date || '').slice(0, 4),
       date: s.date, department: s.department || null },
     items: rows.map((/** @type {any} */ r) => [r.inv_number == null ? null : r.inv_number, r.barcode ? String(r.barcode) : null,
@@ -128,7 +139,8 @@ module.exports = function registerMobileHandlers(ipcMain, deps) {
       const qr = qrcode(0, 'M');
       qr.addData(url);
       qr.make();
-      return { url, qrSvg: qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true }) };
+      // тиха зона 4 модула (4 × cellSize) — по-малка пречи на четенето от екран
+      return { url, qrSvg: qr.createSvgTag({ cellSize: 4, margin: 16, scalable: true }) };
     })
   );
 

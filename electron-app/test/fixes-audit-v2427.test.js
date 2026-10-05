@@ -332,10 +332,10 @@ test('мобилното сканиране приема същия баркод
   assert.doesNotMatch(html, /lastAt > 2000/);
   /* ПРОМЕНЕНО НАРОЧНО в v2.4.78: правилото „едва когато е излязъл от кадъра“ остава,
      но вече за ВСЕКИ код в кадъра поотделно (inFrame), с два поредни прочита преди
-     приемане и с време вместо брой празни кадри (GONE_MS). Поведението се проверява
+     приемане и с време И брой празни кадри (GONE_MS, GONE_FRAMES). Поведението се проверява
      с изпълнение в test/telefon-v2478.test.js; тук — само че правилото е на място. */
   assert.match(html, /if \(nh\[v\] >= 2 && !inFrame\[v\]\) \{ inFrame\[v\] = 1; acceptScanned\(v\); \}/);
-  assert.match(html, /if \(now - \(lastSeen\[v\] \|\| 0\) > GONE_MS\) \{ delete inFrame\[v\]; delete lastSeen\[v\]; \}/);
+  assert.match(html, /if \(missed\[v\] >= GONE_FRAMES && now - \(lastSeen\[v\] \|\| 0\) > GONE_MS\) \{ delete inFrame\[v\];/);
 });
 
 test('лентата вляво се побира на 768 px височина', () => {
