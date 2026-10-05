@@ -56,7 +56,7 @@ for full detail.
   пита веднъж и помни). Програмата показва адреса като QR код. Еднократно в
   хранилището: Settings → Pages → Source: GitHub Actions.
 
-**Проверено:** __TESTS__ Нов `test/telefon-v2478.test.js` (38 теста — всяка поправка
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 459 теста в UTC и 2 459 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. Нов `test/telefon-v2478.test.js` (38 теста — всяка поправка
 и възможност, изпълнени в страницата; списъкът на проверката в програмата; вносът
 по „проверка #N“; сглобяването на приложението). В истински Chromium: етикет
 Code 39 се чете през вградения четец и от снимка, и от живо видео (0,37 s), и от
@@ -117,7 +117,7 @@ and re-verified there.
   address as a QR code. One-time in the repository: Settings → Pages → Source:
   GitHub Actions.
 
-**Verified:** __TESTS_EN__ New `test/telefon-v2478.test.js` (38 tests). In real
+**Verified:** `npm run test:all` — all 8 checks pass: **2,459 tests in UTC and 2,459 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. New `test/telefon-v2478.test.js` (38 tests). In real
 Chromium a Code 39 label is read by the built-in reader from a photo and from live
 video (0.37 s), from the file and over http(s), with no CSP violations; the manifest
 has no installability errors. Mutation testing — **32 mutants, all killed** (three missed on the first run led
