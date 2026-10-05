@@ -11,6 +11,128 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.78
+
+**BG:** **Телефонът при инвентаризация: по-сигурно четене, „Изпрати“, списък на
+проверката и приложение по https.** Версията на базата не се вдига.
+
+Страницата за сканиране с телефон беше проверена в истински Chromium като телефон
+(Pixel 5, изкуствена камера, истински етикет Code 39, axe-core, Lighthouse). Всяко
+от намереното е поправено и проверено отново там.
+
+**Поправки**
+- **Два еднакви прочита подред.** Дотук номер влизаше от един кадър — отблясък,
+  разчетен като друг валиден номер, ставаше „проверен“ чужд документ. Сега номерът
+  се приема при два поредни прочита (около ¼ секунда).
+- **ISBN не е етикет.** Баркодът от гърба на книгата (978/979…) влизаше с „успешен“
+  бийп, етикетът оставаше несканиран, а книгата — „липсваща“. Сега се отказва с
+  обяснение. ISBN и етикет в един кадър даваха 10 фалшиви „повторни“ за 6 секунди —
+  сега всеки код в кадъра се приема веднъж. Махнати са ITF („къси“ прочитания) и QR.
+- На бавен телефон четенията се трупаха (до 3 едновременно) — сега едно след друго.
+- Спряла отвън камера и заключен екран вече се забелязват; камерата тръгва сама
+  при връщане.
+- Ако браузърът не дава памет на страницата, тя **го казва** — дотук списъкът
+  изчезваше мълчаливо при презареждане.
+- „Копирано!“ вече не се пише, когато телефонът е отказал копирането.
+- „×“ и „Изчисти“ имат **„Отмени“**; „Изчисти“ казва, ако списъкът не е изпратен.
+- Контраст на бутоните 5:1 (беше 4,4:1); махането на ред при 2 500 номера —
+  38 ms вместо 664 ms на 4× по-бавен процесор. axe-core: 0 нарушения.
+
+**Нови възможности**
+- **„Изпрати“** — менюто за споделяне на телефона: файлът отива направо във Вайбър
+  или пощата.
+- **Екранът не загасва**, докато камерата чете; **фенерче** и **приближение**, където
+  камерата ги поддържа.
+- **Списък на проверката** — в отворената сесия „📋 Списък за телефона“ записва
+  документите в обхвата ѝ (инв. №, баркод, заглавие, сигнатура; без лични данни).
+  Телефонът показва заглавието на прочетения документ, предупреждава веднага за
+  номер извън обхвата, брои „проверени X от N“ и показва несканираните по сигнатура.
+  Списъкът носи „проверка #N“ и вносът пита, ако е за друга проверка.
+- **Вграден четец** (zxing-wasm) за iPhone и телефони без услугите на Google
+  (Huawei) — без нищо от интернет (Content-Security-Policy го забранява).
+- **Приложение по https** — същата страница, публикувана в GitHub Pages
+  (`…/yavorec-katalog/skener/`) с манифест и service worker: инсталира се на
+  началния екран, работи без интернет, а живата камера тръгва (по https телефонът
+  пита веднъж и помни). Програмата показва адреса като QR код. Еднократно в
+  хранилището: Settings → Pages → Source: GitHub Actions.
+
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 459 теста в UTC и 2 459 в Europe/Sofia, 0 неуспешни**, каталожната страница (8 сценария) и мащаб 15 002 записа. Нов `test/telefon-v2478.test.js` (38 теста — всяка поправка
+и възможност, изпълнени в страницата; списъкът на проверката в програмата; вносът
+по „проверка #N“; сглобяването на приложението). В истински Chromium: етикет
+Code 39 се чете през вградения четец и от снимка, и от живо видео (0,37 s), и от
+файла, и по http(s), без нарушения на CSP; манифестът е без грешки за инсталиране.
+Мутационна проверка — **32 мутации, всички уловени** (три, пропуснати при първото
+пускане, доведоха до по-точни тестове). Независимият преглед на кода намери десет
+неща, всички поправени преди изданието: двусмислен код (баркод на два документа или
+баркод = инв. № на друг) — телефонът казваше „✓“, а вносът го отказва; сега списъкът
+носи тези кодове от целия фонд; две едновременни пускания на камерата оставяха
+едната включена; service worker-ът можеше да запише друг файл на мястото на
+страницата; на бавен телефон задържан етикет излизаше „повторен“; несканираните не
+бяха в реда на рафта по УДК; запомнен списък от друга проверка печелеше над
+вградения; повреден списък можеше да спре записа на сканираното; неработещ четец не
+се казваше; „Отмени“ след „Изчисти“ понякога не правеше нищо; изтичане на Wake Lock.
+Още: ISSN (977) се отказва като ISBN, „9“ и „0009“ са един документ. Тестът „Ч4“
+(sglobyavane-v2471) вече не зависи от празник в последните две седмици.
+
+**EN:** **The phone at inventory time: safer reading, "Send", the session list and
+an https app.** The database version is not raised.
+
+The phone scanning page was examined in real Chromium emulating a phone (Pixel 5,
+fake camera, a real Code 39 label, axe-core, Lighthouse); everything found is fixed
+and re-verified there.
+
+**Fixes**
+- **Two identical reads in a row.** A number used to enter from a single frame — a
+  glare read as another valid number became a "checked" foreign document. Now a
+  number is accepted after two consecutive reads (about ¼ second).
+- **An ISBN is not a label.** The publisher's barcode on the back cover (978/979…)
+  entered with a "success" beep while the label stayed unscanned and the book came
+  out "missing". It is now refused with an explanation. ISBN and label in one frame
+  produced 10 false "repeats" in 6 seconds — each code in the frame is now accepted
+  once. ITF (short reads) and QR are no longer read.
+- On a slow phone reads piled up (up to 3 at once) — now one after another.
+- A camera stopped from outside and a locked screen are now noticed; the camera
+  restarts on return.
+- When the browser gives the page no storage, the page **says so** — the list used
+  to vanish silently on reload.
+- "Copied!" is no longer shown when the phone refused the copy.
+- "×" and "Clear" have **Undo**; "Clear" warns when the list has not been sent.
+- Button contrast 5:1 (was 4.4:1); removing a row at 2,500 numbers takes 38 ms
+  instead of 664 ms on a 4× slower CPU. axe-core: 0 violations.
+
+**New**
+- **"Send"** — the phone's share sheet: the file goes straight to Viber or e-mail.
+- **The screen stays on** while the camera reads; **torch** and **zoom** where the
+  camera supports them.
+- **Session list** — in an open session "📋 List for the phone" saves the documents
+  in scope (inventory no., barcode, title, call number; no personal data). The phone
+  shows the title of what was read, warns at once about a number outside the scope,
+  counts "checked X of N" and lists the unscanned ones by call number. The list
+  carries "check #N" and the import asks when it belongs to another check.
+- **Built-in reader** (zxing-wasm) for iPhone and phones without Google services
+  (Huawei) — nothing from the internet (the Content-Security-Policy forbids it).
+- **https app** — the same page published on GitHub Pages (`…/yavorec-katalog/skener/`)
+  with a manifest and a service worker: installable, works offline, and the live
+  camera works (over https the phone asks once and remembers). The program shows the
+  address as a QR code. One-time in the repository: Settings → Pages → Source:
+  GitHub Actions.
+
+**Verified:** `npm run test:all` — all 8 checks pass: **2,459 tests in UTC and 2,459 in Europe/Sofia, 0 failed**, the catalogue page (8 scenarios) and the 15,002-record scale check. New `test/telefon-v2478.test.js` (38 tests). In real
+Chromium a Code 39 label is read by the built-in reader from a photo and from live
+video (0.37 s), from the file and over http(s), with no CSP violations; the manifest
+has no installability errors. Mutation testing — **32 mutants, all killed** (three missed on the first run led
+to sharper tests). The independent code review found ten issues, all fixed before
+release: an ambiguous code (a barcode on two documents, or a barcode equal to
+another document's inventory number) got a "✓" on the phone while the import
+refuses it — the list now carries such codes from the whole fund; two simultaneous
+camera starts left one camera on; the service worker could store another file in
+place of the page; on a slow phone a held label came out as a "repeat"; the unscanned
+list was not in UDC shelf order; a stored list of another check beat the embedded
+one; a broken list could stop saving the scans; a failing reader was silent; Undo
+after Clear sometimes did nothing; a Wake Lock leak. Also: ISSN (977) is refused like
+ISBN, "9" and "0009" are one document. Test "Ч4" (sglobyavane-v2471) no longer
+depends on a public holiday in the last two weeks.
+
 ## v2.4.77
 
 **BG:** **Отговорът на обработчика се сверява с договора; полетата до `data` са

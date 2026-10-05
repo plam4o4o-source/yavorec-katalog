@@ -193,31 +193,46 @@ test('Ч4 — актът по т. 5 брои забавата от първия 
      дни): първият ден от преди 8 дни насам, който не е работен. Календарът на
      програмата не се пипа отстрани — обработчиците държат снимка от него. */
   let due = E.addDays(T, -12);
-  while (E.nextWorkDay(h.db, due) === due) due = E.addDays(due, 1);
-  assert.ok(due < E.addDays(T, -3), 'няма неработен ден в последните две седмици — сменете постановката');
-  const lid = ok(await h.api.loans.checkout({ reader_id: r, book_id: b, date_out: E.addDays(T, -40) }), 'заемане');
-  /* Вече начислена сума по заемането (продължение) и ставка 0,10 € на ден.
-     Сумата се избира така, че събирането в двоична аритметика да остави
-     остатък (като 0,10 + 0,70 = 0.7999999999999999) — тогава записът трябва да
-     я закръгли до стотинка, както гишето. */
-  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(due, lid);
-  h.db.prepare('UPDATE settings SET fine_per_day = 0.1 WHERE id = 1').run();
-  const nDays = E.effectiveDaysLate(h.db, due, T);
-  const add = Math.round(nDays * 0.1 * 100) / 100;
-  let prior = 0.01;
-  while (String(prior + add).length <= 5 && prior < 0.99) prior = Math.round((prior + 0.01) * 100) / 100;
-  assert.ok(String(prior + add).length > 5, 'намерена сума с двоичен остатък (' + nDays + ' дни)');
-  h.db.prepare('UPDATE loans SET fine = ? WHERE id = ?').run(prior, lid);
-  const ov = ok(await h.api.loans.overdue(), 'просрочени').find(x => x.id === lid);
-  const expected = E.effectiveDaysLate(h.db, due, T);
-  assert.equal(ov.daysLate, expected, '„Просрочени“ брои от първия работен ден');
-  ok(await h.api.deaccessionActs.create({ act: { no: (await h.api.deaccessionActs.nextNo(Y)).data, disposal: 'за унищожаване', date: T, reason_code: 5, reason_text: 'невърнат от читател',
-    committee1: 'Библиотекар Първи', committee3: 'Счетоводител Трети' }, bookIds: [b] }), 'акт по т. 5');
-  const l = q('SELECT deaccession_fine, fine FROM loans WHERE id = ?', lid);
-  const perDay = Number(q('SELECT fine_per_day FROM settings WHERE id = 1').fine_per_day) || 0;
-  assert.equal(l.deaccession_fine, Math.round(expected * perDay * 100) / 100, 'актът начислява същите дни като „Просрочени“');
-  assert.equal(l.fine, Math.round((prior + l.deaccession_fine) * 100) / 100, 'сумата по заемането е до стотинка');
-  assert.equal(String(l.fine).length <= 4, true, 'без двоичен остатък: ' + l.fine);
+  while (E.nextWorkDay(h.db, due) === due && due < E.addDays(T, -3)) due = E.addDays(due, 1);
+  /* ДАТА-БОМБА (v2.4.78): неработен ден се търсеше само сред празниците — на
+     5.10.2026 г. 22 септември излезе от прозореца и тестът падна, а между 24 май и
+     6 септември празник няма изобщо. Когато в прозореца няма неработен ден, тестът
+     си прави затворен ден през самата програма (calendar:addClosed — така и
+     обработчиците го виждат) и го маха накрая. */
+  let ownClosed = null;
+  if (due >= E.addDays(T, -3)) {
+    due = E.addDays(T, -8);
+    ok(await h.api.calendar.addClosed({ date: due, reason: 'постановка Ч4' }), 'затворен ден');
+    ownClosed = due;
+  }
+  assert.ok(due < E.addDays(T, -3) && E.nextWorkDay(h.db, due) !== due, 'падежът е в неработен ден');
+  try {
+    const lid = ok(await h.api.loans.checkout({ reader_id: r, book_id: b, date_out: E.addDays(T, -40) }), 'заемане');
+    /* Вече начислена сума по заемането (продължение) и ставка 0,10 € на ден.
+       Сумата се избира така, че събирането в двоична аритметика да остави
+       остатък (като 0,10 + 0,70 = 0.7999999999999999) — тогава записът трябва да
+       я закръгли до стотинка, както гишето. */
+    h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(due, lid);
+    h.db.prepare('UPDATE settings SET fine_per_day = 0.1 WHERE id = 1').run();
+    const nDays = E.effectiveDaysLate(h.db, due, T);
+    const add = Math.round(nDays * 0.1 * 100) / 100;
+    let prior = 0.01;
+    while (String(prior + add).length <= 5 && prior < 0.99) prior = Math.round((prior + 0.01) * 100) / 100;
+    assert.ok(String(prior + add).length > 5, 'намерена сума с двоичен остатък (' + nDays + ' дни)');
+    h.db.prepare('UPDATE loans SET fine = ? WHERE id = ?').run(prior, lid);
+    const ov = ok(await h.api.loans.overdue(), 'просрочени').find(x => x.id === lid);
+    const expected = E.effectiveDaysLate(h.db, due, T);
+    assert.equal(ov.daysLate, expected, '„Просрочени“ брои от първия работен ден');
+    ok(await h.api.deaccessionActs.create({ act: { no: (await h.api.deaccessionActs.nextNo(Y)).data, disposal: 'за унищожаване', date: T, reason_code: 5, reason_text: 'невърнат от читател',
+      committee1: 'Библиотекар Първи', committee3: 'Счетоводител Трети' }, bookIds: [b] }), 'акт по т. 5');
+    const l = q('SELECT deaccession_fine, fine FROM loans WHERE id = ?', lid);
+    const perDay = Number(q('SELECT fine_per_day FROM settings WHERE id = 1').fine_per_day) || 0;
+    assert.equal(l.deaccession_fine, Math.round(expected * perDay * 100) / 100, 'актът начислява същите дни като „Просрочени“');
+    assert.equal(l.fine, Math.round((prior + l.deaccession_fine) * 100) / 100, 'сумата по заемането е до стотинка');
+    assert.equal(String(l.fine).length <= 4, true, 'без двоичен остатък: ' + l.fine);
+  } finally {
+    if (ownClosed) ok(await h.api.calendar.removeClosed(ownClosed), 'махане на затворения ден');
+  }
 });
 
 /* ------------------------------------------------------------------ Ф7 */

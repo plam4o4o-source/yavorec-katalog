@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- ЗАЩИТА В ДЪЛБОЧИНА (v2.4.78). Страницата не зарежда нищо отвън: четецът на
+     баркодове е вграден, а списъкът никъде не се праща. connect-src 'self' значи
+     и това, че вграденият четец (zxing) не може тихо да тегли файла си от CDN —
+     ако нещо липсва, той спира, вместо да излезе в интернет. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' 'self'; style-src 'unsafe-inline'; img-src 'self' blob: data:; media-src blob: mediastream:; connect-src 'self' blob: data:; worker-src 'self'; manifest-src 'self'">
+<meta name="theme-color" content="#241809">
 <title>Инвентаризация — сканиране</title>
+<!--__PWA__-->
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:#1A1208;color:#EFE9D8;
@@ -21,12 +28,15 @@
      камерата върви, двете бележки се скриват (подсказката е излишна — човекът
      вече е натиснал бутона; червената е невярна — камерата тръгна), а видеото е
      най-много 40% от височината. Броячът стои веднага под бутоните. */
-  body.live #hint, body.live #nocam, body.live #oldList{display:none !important}
-  .btn{display:inline-block;padding:13px 18px;border:none;border-radius:7px;background:#96731F;
+  body.live #hint, body.live #nocam, body.live #oldList, body.live #listBar{display:none !important}
+  /* Контраст (v2.4.78): белият текст върху #96731F беше 4,4:1 при изискване
+     4,5:1 (WCAG AA) — на слънце до прозореца се чете трудно. #8A6A1C дава 5:1. */
+  .btn{display:inline-block;padding:13px 18px;border:none;border-radius:7px;background:#8A6A1C;
     color:#fff;font-size:15px;font-weight:600;cursor:pointer;margin:6px 6px 0 0}
   .btn.sec{background:#3A2A12;color:#EFE9D8}
   .btn.dgr{background:#A32B22}
   .btn:disabled{opacity:.45}
+  .btn.on{background:#C9A84C;color:#1A1208}
   .stat{display:flex;gap:10px;margin:14px 0}
   .box{flex:1;background:#241809;border:1px solid #3A2A12;border-radius:7px;padding:11px;text-align:center}
   .box b{display:block;font-size:26px;color:#C9A84C}
@@ -41,20 +51,40 @@
   ul{list-style:none;padding:0;margin:12px 0 0}
   li{padding:9px 11px;background:#241809;border-radius:6px;margin-bottom:5px;display:flex;
     justify-content:space-between;align-items:center;font-size:15px}
+  li small{display:block;font-size:12px;color:#B8AF95;margin-top:2px}
+  li.out{border-left:3px solid #E0913A}
   /* Цел за пръст ≥ 44 px (v2.4.69, находка О5): „×“ беше 29×24 px и на телефон
      се триеше съседният ред вместо грешния. */
-  li .x{color:#A32B22;font-size:22px;cursor:pointer;min-width:44px;min-height:44px;
+  li .x{color:#E06B60;font-size:22px;cursor:pointer;min-width:44px;min-height:44px;
     display:inline-flex;align-items:center;justify-content:center;margin:-6px -6px -6px 6px}
   .btn{min-height:44px}
   .dup{border-left:3px solid #C98A2E}
   #out{width:100%;height:150px;background:#120C05;color:#EFE9D8;border:1px solid #3A2A12;
     border-radius:7px;padding:10px;font-family:monospace;font-size:13px;margin-top:8px}
+  details#outBox{margin-top:12px;font-size:13px;color:#B8AF95}
+  details#outBox summary{cursor:pointer;padding:8px 0}
   .note{background:#241809;border-left:3px solid #96731F;padding:10px 12px;border-radius:0 6px 6px 0;
     font-size:13px;line-height:1.5;color:#DCD4BB;margin-bottom:12px}
   .err{background:#3A1512;border-left-color:#A32B22;color:#F0DEDA}
+  /* Какво точно се прочете (v2.4.78) — с вграден списък на проверката тук стои и
+     заглавието, за да види човекът, че е прочетена книгата в ръката му. */
+  #hit{display:none;padding:10px 12px;border-radius:7px;margin:-4px 0 12px;font-size:15px;line-height:1.4;
+    background:#1F2A12;border-left:4px solid #7FA650}
+  #hit.warn{background:#3A2A12;border-left-color:#E0913A}
+  #hit.bad{background:#3A1512;border-left-color:#A32B22}
+  #hit small{display:block;font-size:12px;color:#DCD4BB;margin-top:2px}
+  .camCtl{display:none;align-items:center;gap:10px;margin-top:6px}
+  .camCtl input{flex:1}
+  #missing{display:none;margin-top:12px}
+  #missing li{font-size:14px}
   footer{position:fixed;bottom:0;left:0;right:0;background:#241809;border-top:1px solid #3A2A12;
-    padding:10px 16px;display:flex;gap:8px}
-  footer .btn{flex:1;margin:0;text-align:center}
+    padding:10px 12px;display:flex;gap:6px}
+  footer .btn{flex:1;margin:0;text-align:center;padding:13px 6px;font-size:14px}
+  /* Съобщение с „Отмени“ (v2.4.78) — над долната лента. */
+  #snack{position:fixed;left:12px;right:12px;bottom:78px;background:#EFE9D8;color:#1A1208;border-radius:8px;
+    padding:10px 12px;display:none;align-items:center;gap:10px;font-size:14px;box-shadow:0 4px 14px rgba(0,0,0,.5)}
+  #snack span{flex:1}
+  #snack button{background:none;border:none;color:#7A2E0E;font-weight:700;font-size:15px;min-height:44px;min-width:44px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -71,24 +101,37 @@
     Насочете телефона към баркода на документа: с <b>„Пусни камерата“</b> (жива камера) или с
     <b>„Снимай баркод“</b> (снимка с камерата на телефона — работи и когато страницата е отворена
     като файл). Всеки разчетен номер се добавя в списъка. Когато свършите, натиснете
-    <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, имейл или както Ви е удобно) —
-    там се въвежда в „Инвентаризация“.
+    <b>„Изпрати“</b> (или „Копирай“) и пратете списъка на компютъра (по Вайбър, имейл или както Ви е
+    удобно) — там се въвежда в „Инвентаризация“.
   </div>
   <div class="note err" id="nocam" style="display:none"></div>
+  <!-- Паметта на браузъра (v2.4.78) — виж STORAGE_OK. -->
+  <div class="note err" id="storageWarn" style="display:none"></div>
+
+  <!-- Списъкът на проверката (v2.4.78) — виж setExpected. -->
+  <div id="listBar">
+    <button class="btn sec" id="listBtn" type="button">📋 Зареди списъка на проверката</button>
+    <input type="file" id="listInp" accept=".json,application/json" style="display:none">
+    <div class="since" id="listInfo" style="margin:6px 0 10px"></div>
+  </div>
 
   <video id="cam" playsinline muted></video>
   <button class="btn" id="startBtn">Пусни камерата</button>
   <button class="btn sec" id="stopBtn" style="display:none">Спри камерата</button>
+  <button class="btn sec" id="torchBtn" type="button" style="display:none">🔦 Фенерче</button>
   <!-- Снимка през самото приложение „Камера“ на телефона. Не минава през
        getUserMedia и затова НЕ иска разрешение от страницата — единственият път,
        който работи, когато страницата е отворена като файл от паметта. -->
   <button class="btn sec" id="shotBtn" style="display:none">Снимай баркод</button>
   <input type="file" id="shotInp" accept="image/*" capture="environment" style="display:none">
+  <div class="camCtl" id="zoomRow"><span>🔍</span><input type="range" id="zoom" aria-label="Приближение"></div>
 
   <div class="stat">
     <div class="box"><b id="cnt">0</b><span>сканирани</span></div>
     <div class="box"><b id="dupCnt">0</b><span>повторни</span></div>
+    <div class="box" id="progBox" style="display:none"><b id="prog">0</b><span id="progTxt">от проверката</span></div>
   </div>
+  <div id="hit" role="status" aria-live="polite"></div>
   <!-- Кога е започнат списъкът (v2.4.69, находка О5) — виж бележката при STARTED. -->
   <div class="since" id="since"></div>
   <div class="note err" id="oldList" style="display:none"></div>
@@ -97,29 +140,42 @@
        клавиш Enter, а номерът се добавяше само с Enter — на iPhone ръчното
        въвеждане изобщо не работеше. Enter си остава за Android и за четец. -->
   <div class="addRow">
-    <input id="manual" inputmode="numeric" autocomplete="off" placeholder="Или въведете номер">
+    <input id="manual" inputmode="numeric" autocomplete="off" placeholder="Или въведете номер" aria-label="Инвентарен номер">
     <button class="btn" id="addBtn" type="button">Добави</button>
   </div>
-  <div id="manualMsg"></div>
+  <div id="manualMsg" role="status" aria-live="polite"></div>
+
+  <button class="btn sec" id="missBtn" type="button" style="display:none">Несканирани</button>
+  <div id="missing"><div class="since" id="missTxt"></div><ul id="missList"></ul>
+    <button class="btn sec" id="missMore" type="button" style="display:none">Покажи още</button></div>
 
   <ul id="list"></ul>
   <!-- Под списъка — колко номера не са показани (v2.4.71, находка И5; виж VISIBLE). -->
   <div class="since" id="more" style="display:none"><span id="moreTxt"></span>
     <button class="btn sec" id="moreBtn" type="button">Покажи всички</button></div>
 
-  <textarea id="out" readonly placeholder="Тук се събира списъкът за пренасяне"></textarea>
+  <details id="outBox"><summary>Текстът на списъка</summary>
+    <textarea id="out" readonly placeholder="Тук се събира списъкът за пренасяне"></textarea></details>
 </main>
+<div id="snack" role="status" aria-live="polite"><span id="snackTxt"></span><button id="snackBtn" type="button">Отмени</button></div>
 <footer>
-  <button class="btn" id="copyBtn">Копирай списъка</button>
-  <button class="btn sec" id="fileBtn">Запиши файл</button>
+  <button class="btn" id="shareBtn" style="display:none">Изпрати</button>
+  <button class="btn" id="copyBtn">Копирай</button>
+  <button class="btn sec" id="fileBtn">Файл</button>
   <button class="btn dgr" id="clearBtn">Изчисти</button>
 </footer>
 
+<!--__ZXING__-->
 <script>
 /* Списъкът се пази в паметта на браузъра, за да не се загуби при заключване на
    екрана или случайно затваряне на страницата по време на обхождането. */
 var KEY = 'inventar-scan-v1';
+var LIST_KEY = 'inventar-expected-v1';
+var SLUG_KEY = 'inventar-slug';
 var SLUG = '__SLUG__';                    // името на библиотеката за името на файла
+/* Списъкът на проверката, вграден от програмата при „Списък за телефона“ →
+   „Страница със списъка“ (v2.4.78). Без него страницата е същата като досега. */
+var EMBEDDED = /*__EXPECTED__*/null;
 var codes = [];
 var dups = 0;
 /* ДАТАТА НА ЗАПОЧВАНЕ НА СПИСЪКА (v2.4.69, находка О5).
@@ -132,10 +188,39 @@ var dups = 0;
    програмата при вноса. Заварен списък без дата (от по-стара страница) се
    обявява като такъв, вместо да му се измисля дата. */
 var STARTED = null;
+/* За коя проверка е списъкът (v2.4.78): номерът на сесията от списъка на
+   проверката, ако е зареден при първия номер. Влиза в заглавния ред и
+   програмата го сверява при вноса — по-сигурно от датата. */
+var SID = null;
+/* Изпратен ли е списъкът след последната промяна (v2.4.78) — за „Изчисти“. */
+var UNSENT = false;
+
+/* ПАМЕТТА НА БРАУЗЪРА МОЖЕ ДА Я НЯМА (v2.4.78).
+   Отворена по определен начин (в изолиран изглед, в някои случаи направо от
+   приложението, през което е получена), страницата няма право да пише в паметта
+   на браузъра. Дотук това минаваше мълчаливо: списъкът стоеше на екрана, а при
+   презареждане изчезваше — въпреки че помощта обещава „сканираното не се губи“.
+   Измерено в Chromium в изолиран изглед: добавен номер, презареждане, броячът — 0.
+   Сега страницата пробва паметта при отваряне и го КАЗВА. */
+var STORAGE_OK = (function () {
+  try { localStorage.setItem(KEY + '-probe', '1'); localStorage.removeItem(KEY + '-probe'); return true; }
+  catch (e) { return false; }
+})();
 try {
   var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
   codes = saved.codes || []; dups = saved.dups || 0; STARTED = saved.started || null;
+  SID = saved.sid == null ? null : saved.sid; UNSENT = !!saved.unsent;
 } catch (e) { /* повредена памет на браузъра — започва се с празен списък */ codes = []; dups = 0; STARTED = null; }
+/* Приложението по https (v2.4.78) е едно за всички библиотеки — името за файла
+   идва от адреса („…/skener/#lib=yavorec“, частта след # не стига до сървъра) и
+   се запомня. Страницата, записана от програмата, го носи вградено. */
+(function slugFromAddress() {
+  var m = /(?:^#|&)lib=([a-z0-9-]{1,40})(?:&|$)/.exec(location.hash || '');
+  try { if (m) localStorage.setItem(SLUG_KEY, m[1]); } catch (e) { /* без памет — само за този път */ }
+  if (!SLUG) { try { SLUG = (m && m[1]) || localStorage.getItem(SLUG_KEY) || ''; } catch (e) { SLUG = (m && m[1]) || ''; } }
+})();
+/* Устойчива памет: браузърът да не изтрие списъка сам при недостиг на място. */
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {}); } catch (e) {}
 
 /* Денят по МЕСТНОТО време на телефона. new Date().toISOString() е по UTC: в
    България между 00:00 и 03:00 (лятно време) даваше вчерашната дата — в името на
@@ -146,24 +231,228 @@ function localDay(d) {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 function bgDay(iso) { return iso ? iso.slice(8, 10) + '.' + iso.slice(5, 7) + '.' + iso.slice(0, 4) : ''; }
+function sessLabel(s) {
+  return s ? (s.no ? 'протокол № ' + s.no + (s.year ? '/' + s.year : '') : 'проверка от ' + bgDay(s.date)) : '';
+}
 /* Текстът за пренасяне: заглавен ред с датата, после по един номер на ред.
    Програмата подминава редовете, започващи с „#“ (виж importScansRun), и сверява
-   датата с датата на проверката. */
+   датата с датата на проверката. От v2.4.78 списък, започнат при зареден списък
+   на проверката, носи и „проверка #N“ — програмата сверява и нея. */
 function exportText() {
   var head = '# Инвентаризация — списък ' + (STARTED ? 'започнат на ' + bgDay(STARTED) + ' г.' : 'без дата на започване')
-    + ', ' + codes.length + (codes.length === 1 ? ' номер' : ' номера');
+    + ', ' + codes.length + (codes.length === 1 ? ' номер' : ' номера')
+    + (SID != null ? ', проверка #' + SID + (EXP && EXP.session.id === SID && EXP.session.no ? ' (' + sessLabel(EXP.session) + ')' : '') : '');
   return codes.length ? head + '\n' + codes.join('\n') : '';
 }
+function fileName() {
+  return 'inventarizaciya-' + (SLUG ? SLUG + '-' : '') + (STARTED || localDay()) + '.txt';
+}
 
+function showStorageWarn(why) {
+  var el = document.getElementById('storageWarn');
+  el.innerHTML = '<b>Списъкът не се пази в паметта на телефона</b> ' + why + '. Ако затворите страницата или телефонът я ' +
+    'презареди, сканираното ще се изгуби. Изпращайте списъка по-често (бутон „Изпрати“ или „Копирай“) или ' +
+    'отворете страницата от папката „Изтеглени“ (Downloads), а не направо от разговора.';
+  el.style.display = 'block';
+}
 function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups, started: STARTED })); }
-  catch (e) { /* пълна или забранена памет — списъкът остава на екрана, но не оцелява при презареждане */ }
+  if (!STORAGE_OK) return;
+  try { localStorage.setItem(KEY, JSON.stringify({ codes: codes, dups: dups, started: STARTED, sid: SID, unsent: UNSENT })); }
+  catch (e) { /* пълна памет — казва се, вместо да се мълчи */ showStorageWarn('— паметта на браузъра е пълна'); }
 }
 function escHtml(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, function (ch) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
   });
 }
+
+/* ---- СПИСЪКЪТ НА ПРОВЕРКАТА (v2.4.78) ----
+   Дотук телефонът не знаеше нищо за фонда: всеки прочетен низ влизаше в списъка
+   и едва при вноса на компютъра се разбираше, че е непознат, от друг отдел или
+   ISBN от гърба на книгата — тоест след като рафтът отдавна е обходен. Програмата
+   вече записва за отворената проверка списък на документите в обхвата ѝ —
+   инв. №, баркод, заглавие (съкратено), сигнатура и дали вече е проверен на
+   компютъра. Без лични данни: нито читатели, нито заемания.
+   С него телефонът на място:
+   • показва заглавието на прочетения документ — човекът вижда, че е прочетена
+     книгата в ръката му, а не съседната;
+   • предупреждава с друг звук, когато номерът го няма в обхвата (непознат,
+     отчислен или от друг отдел) — програмата пак решава окончателно при вноса;
+   • брои „проверени X от N“ и показва несканираните, подредени по сигнатура —
+     в реда, в който стоят на рафта.
+   Формат: { fmt, v, session: {id, no, year, date, department}, items: [[инв.№,
+   баркод, заглавие, сигнатура, вече проверен]] } — виж mobile:sessionExport. */
+var EXP = null, EXP_BC = null, EXP_INV = null, EXP_AMB = null, EXP_SEEN = null, EXP_ORDER = null;
+var EXP_FROM_FILE = false;
+/* Баркодът се сравнява ТОЧНО, както в програмата (books.barcode = ?): „b-77“ и
+   „B-77“ там са различни кодове и телефонът не бива да казва „в списъка“ за код,
+   който вносът ще обяви за непознат. (Етикетите Code 39 са само с главни букви.) */
+function expKey(v) { return String(v).trim(); }
+/* Проверява ЦЕЛИЯ списък, преди да пипне каквото и да е (преглед на v2.4.78):
+   файл с верен заглавен ред, но счупен ред вътре, оставяше страницата с
+   полузареден списък — и всяко следващо добавяне падаше преди записа в паметта. */
+function setExpected(obj, fromFile) {
+  var bad = new Error('Това не е списък на проверка, записан от програмата.');
+  if (!obj || obj.fmt !== 'invlib-inventory-list' || !obj.session || obj.session.id == null || !Array.isArray(obj.items)) throw bad;
+  var bc = Object.create(null), inv = Object.create(null), amb = Object.create(null);
+  for (var i = 0; i < obj.items.length; i++) {
+    var it = obj.items[i];
+    if (!Array.isArray(it) || it.length < 5) throw bad;
+    if (it[1]) bc[expKey(it[1])] = i;
+    if (it[0] != null) inv[String(it[0])] = i;
+  }
+  (Array.isArray(obj.amb) ? obj.amb : []).forEach(function (c) { amb[expKey(c)] = 1; });
+  EXP = obj; EXP_FROM_FILE = !!fromFile;
+  EXP_BC = bc; EXP_INV = inv; EXP_AMB = amb;
+  EXP_ORDER = null;
+  recomputeSeen();
+}
+/* Същото правило като resolveScannedBook() в програмата: първо баркод, после
+   инв. № (водещите нули не значат нищо). Код, който е баркод на един документ и
+   инв. № на друг, не се гадае — „двусмислен“, програмата казва кой.
+   ДВУСМИСЛЕНОСТТА СЕ ВИЖДА ОТ ЦЕЛИЯ ФОНД (преглед на v2.4.78): списъкът носи само
+   обхвата, а програмата сверява кода с ВСИЧКИ документи — баркод на документ от
+   проверката, който е инв. № на отчислен или от друг отдел, или баркод на два
+   документа. Програмата изброява тези кодове в `amb` и телефонът не казва „✓“ за
+   код, който вносът ще откаже. */
+function lookup(code) {
+  if (!EXP) return null;
+  var c = expKey(code);
+  if (EXP_AMB[c]) return { i: -1, amb: true };
+  var a = c in EXP_BC ? EXP_BC[c] : -1;
+  var b = /^\d{1,9}$/.test(c) && (String(parseInt(c, 10)) in EXP_INV) ? EXP_INV[String(parseInt(c, 10))] : -1;
+  if (a >= 0 && b >= 0 && a !== b) return { i: -1, amb: true };
+  return { i: a >= 0 ? a : b, amb: false };
+}
+function markSeen(code) {
+  var r = lookup(code);
+  if (!r) return null;
+  if (r.amb) return 'amb';
+  if (r.i < 0) return 'out';
+  EXP_SEEN[r.i] = 1;
+  return EXP.items[r.i][4] ? 'done' : 'ok';
+}
+function recomputeSeen() {
+  if (!EXP) return;
+  EXP_SEEN = new Uint8Array(EXP.items.length);
+  for (var k = 0; k < codes.length; k++) markSeen(codes[k]);
+}
+function expDoneCount() {
+  var n = 0;
+  for (var i = 0; i < EXP.items.length; i++) if (EXP.items[i][4] || EXP_SEEN[i]) n++;
+  return n;
+}
+function renderExpected() {
+  var bar = document.getElementById('listInfo'), btn = document.getElementById('listBtn');
+  var pb = document.getElementById('progBox'), mb = document.getElementById('missBtn');
+  if (!EXP) {
+    bar.textContent = ''; pb.style.display = 'none'; mb.style.display = 'none';
+    document.getElementById('missing').style.display = 'none';
+    btn.style.display = 'inline-block';
+    btn.textContent = '📋 Зареди списъка на проверката';
+    return;
+  }
+  var s = EXP.session;
+  bar.innerHTML = 'Списък на проверката: <b>' + escHtml(sessLabel(s)) + '</b>' +
+    (s.department ? ', отдел „' + escHtml(s.department) + '“' : ', целият фонд') + ' · ' + EXP.items.length +
+    (EXP.items.length === 1 ? ' документ' : ' документа') +
+    (EXP_FROM_FILE ? ' · <a href="#" id="listDrop" style="color:#C9A84C">махни списъка</a>' : '');
+  btn.style.display = EXP_FROM_FILE || !EMBEDDED ? 'inline-block' : 'none';
+  btn.textContent = '📋 Друг списък на проверката';
+  pb.style.display = 'block'; mb.style.display = 'inline-block';
+  renderProgress();
+}
+function renderProgress() {
+  if (!EXP) return;
+  var done = expDoneCount();
+  document.getElementById('prog').textContent = done + '/' + EXP.items.length;
+  document.getElementById('missBtn').textContent = 'Несканирани (' + (EXP.items.length - done) + ')';
+  if (document.getElementById('missing').style.display === 'block') renderMissing(MISS_SHOWN);
+}
+/* Несканираните — по сигнатура, после по инв. №: в реда на рафта. Показват се
+   по 200 — цял фонд от 15 000 реда на телефон е бавен и безполезен. */
+var MISS_SHOWN = 200;
+function renderMissing(limit) {
+  if (!EXP_ORDER) {
+    EXP_ORDER = EXP.items.map(function (_, i) { return i; });
+    /* РЕДЪТ НА РАФТА (преглед на v2.4.78). УДК е ДЕСЕТИЧНА класификация: 82 стои
+       след 1 и преди 9, 891.81 — преди 891.9. Сравнение „като числа“ (numeric)
+       дава точно обратното (9 преди 82); знак по знак — вярното. */
+    var coll = (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator('bg') : null;
+    EXP_ORDER.sort(function (x, y) {
+      var a = EXP.items[x], b = EXP.items[y];
+      var ca = a[3] || '\uffff', cb = b[3] || '\uffff';
+      var c = coll ? coll.compare(ca, cb) : (ca < cb ? -1 : ca > cb ? 1 : 0);
+      return c || ((+a[0] || 0) - (+b[0] || 0));
+    });
+  }
+  var rows = [], left = 0;
+  for (var k = 0; k < EXP_ORDER.length; k++) {
+    var i = EXP_ORDER[k], it = EXP.items[i];
+    if (it[4] || EXP_SEEN[i]) continue;
+    left++;
+    if (rows.length < limit) {
+      rows.push('<li><span>' + escHtml(it[0] != null ? it[0] : it[1]) + '<small>' + escHtml(it[2] || '') +
+        (it[3] ? ' · ' + escHtml(it[3]) : '') + '</small></span></li>');
+    }
+  }
+  document.getElementById('missTxt').textContent = left
+    ? 'Несканирани: ' + left + (left > rows.length ? ' (показани са първите ' + rows.length + ', по сигнатура)' : ', по сигнатура') + '.'
+    : 'Всички документи от списъка са сканирани.';
+  document.getElementById('missList').innerHTML = rows.join('');
+  document.getElementById('missMore').style.display = left > rows.length ? 'inline-block' : 'none';
+}
+document.getElementById('missBtn').addEventListener('click', function () {
+  var m = document.getElementById('missing');
+  var open = m.style.display !== 'block';
+  m.style.display = open ? 'block' : 'none';
+  if (open) { MISS_SHOWN = 200; renderMissing(MISS_SHOWN); }
+});
+document.getElementById('missMore').addEventListener('click', function () { MISS_SHOWN += 200; renderMissing(MISS_SHOWN); });
+document.getElementById('listBtn').addEventListener('click', function () { document.getElementById('listInp').click(); });
+document.getElementById('listInp').addEventListener('change', function () {
+  var f = this.files && this.files[0];
+  this.value = '';
+  if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function () {
+    try {
+      var obj = JSON.parse(String(rd.result || '').replace(/^\uFEFF/, ''));
+      setExpected(obj, true);
+      try { localStorage.setItem(LIST_KEY, JSON.stringify(obj)); }
+      catch (e) { showStorageWarn('— списъкът на проверката е зареден само за този път (няма място да се запомни)'); }
+      renderExpected(); render();
+      snack('Зареден е списъкът на проверката — ' + obj.items.length + ' документа.');
+    } catch (e) {
+      snack('Файлът „' + f.name + '“ не е списък на проверка: ' + ((e && e.message) || e));
+    }
+  };
+  rd.readAsText(f, 'utf-8');
+});
+document.getElementById('listInfo').addEventListener('click', function (e) {
+  if (!e.target || e.target.id !== 'listDrop') return;
+  e.preventDefault();
+  if (!confirm('Да махна списъка на проверката от телефона? Сканираните номера остават.')) return;
+  try { localStorage.removeItem(LIST_KEY); } catch (err) {}
+  EXP = null; EXP_FROM_FILE = false;
+  if (EMBEDDED) { try { setExpected(EMBEDDED, false); } catch (err) {} }
+  renderExpected(); render();
+});
+/* КОЙ СПИСЪК (преглед на v2.4.78). Паметта на браузъра е обща за всички
+   страници, отворени като файл, а приложението по https е едно за всички
+   проверки: списък, зареден някога за проверка #7, оставаше над страницата,
+   записана наново за #8. Вграденият списък печели, освен ако запомненият е за
+   СЪЩАТА проверка и е по-нов (зареден след записа на страницата). Повреден
+   запомнен списък не оставя страницата без вградения. */
+(function loadExpected() {
+  var stored = null;
+  try { stored = JSON.parse(localStorage.getItem(LIST_KEY) || 'null'); } catch (e) { stored = null; }
+  var useStored = !!stored && (!EMBEDDED || (stored.session && EMBEDDED.session && stored.session.id === EMBEDDED.session.id
+    && String(stored.made || '') > String(EMBEDDED.made || '')));
+  try { if (useStored) { setExpected(stored, true); return; } } catch (e) { EXP = null; }
+  try { if (EMBEDDED) setExpected(EMBEDDED, false); } catch (e) { EXP = null; }
+})();
+
 /* ДОБАВЯНЕТО НЕ ЗАВИСИ ОТ ДЪЛЖИНАТА НА СПИСЪКА (v2.4.71, находка И5).
    ===========================================================================
    (а) Всяко добавено число минаваше през render(): целият <ul> се сглобяваше
@@ -188,14 +477,15 @@ function escHtml(v) {
          всички, с бутон „Покажи всички“ за редкия случай, в който трябва да се
          махне стар номер. Списъкът в паметта и изнесеният текст са ЦЕЛИТЕ;
        • полето за пренасяне се попълва, когато потрябва — при докосване, при
-         „Копирай списъка“ и „Запиши файл“ — и отложено, след пауза в
-         сканирането, за да не стои остаряло на екрана;
+         „Копирай“ и „Файл“ — и отложено, след пауза в сканирането, за да не стои
+         остаряло на екрана;
        • паметта на браузъра (persist) се пише ВЕДНАГА след всяко добавяне,
          както досега: тя пази списъка при заключен екран и не бива да
          изостава нито с един номер (измерено — не тя е скъпото).
        Резултат със същата проба: 30 ms при 250 и 28 ms при 2 500 номера.
-       Пълно прерисуване остава за редките случаи — махане на ред (номерата на
-       редовете след него се сменят), „Изчисти“, „Покажи всички“ и зареждането. */
+   v2.4.78: махането на ред при 2 500 номера още струваше 664 ms на същия
+   забавен процесор — пълното прерисуване пишеше и полето за пренасяне. Полето
+   вече е прибрано („Текстът на списъка“) и се пише само когато е отворено. */
 var VISIBLE = 100;
 var SHOW_ALL = false;
 function renderMore() {
@@ -213,7 +503,14 @@ function renderMeta() {
   since.textContent = codes.length
     ? (STARTED ? 'Списъкът е започнат на ' + bgDay(STARTED) + ' г.' : 'Списъкът е записан от по-стара версия на страницата — датата му не е известна.')
     : '';
-  if (codes.length && STARTED !== localDay()) {
+  /* Списък от ДРУГА проверка (v2.4.78) — по-сигурно от датата: зареден е
+     списъкът на една проверка, а сканираното е започнато за друга. */
+  var otherSess = codes.length && EXP && SID != null && SID !== EXP.session.id;
+  if (otherSess) {
+    old.innerHTML = '<b>Сканираните номера са от друга проверка</b> (#' + escHtml(SID) + '), а зареденият списък е за ' +
+      escHtml(sessLabel(EXP.session)) + '. Изпратете ги на компютъра и натиснете <b>„Изчисти“</b>, преди да сканирате за новата.';
+    old.style.display = 'block';
+  } else if (codes.length && STARTED !== localDay()) {
     old.innerHTML = '<b>Този списък не е от днес</b>' + (STARTED ? ' — започнат е на ' + bgDay(STARTED) + ' г.' : '')
       + '. Ако е от предишна проверка, изпратете го на компютъра и натиснете <b>„Изчисти“</b>, преди да сканирате за новата — '
       + 'иначе старите номера ще влязат в новия протокол като проверени.';
@@ -227,20 +524,26 @@ function renderMeta() {
    както е — единственото такова място в целия проект. QR код, съдържащ
    <img src=x onerror=...>, се изпълняваше в страницата. Затова escHtml. */
 function liHtml(c, idx) {
-  return '<li><span>' + escHtml(c) + '</span><span class="x" role="button" aria-label="Махни ' + escHtml(c)
+  var r = EXP ? lookup(c) : null, extra = '', cls = '';
+  if (r && r.i >= 0) extra = '<small>' + escHtml(EXP.items[r.i][2] || '') + '</small>';
+  else if (r) { cls = ' class="out"'; extra = '<small>' + (r.amb ? 'двусмислен код' : 'не е в списъка на проверката') + '</small>'; }
+  return '<li' + cls + '><span>' + escHtml(c) + extra + '</span><span class="x" role="button" aria-label="Махни ' + escHtml(c)
     + '" data-i="' + idx + '">&times;</span></li>';
 }
 /* Текстовото поле за пренасяне — попълва се при нужда (виж бележката отгоре). */
 var outTimer = null;
+var outBox = document.getElementById('outBox');
 function fillOut() {
   if (outTimer) { clearTimeout(outTimer); outTimer = null; }
   document.getElementById('out').value = exportText();
 }
 function fillOutLater() {
   if (outTimer) clearTimeout(outTimer);
-  outTimer = setTimeout(fillOut, 1500);
+  outTimer = null;
+  if (outBox.open) outTimer = setTimeout(fillOut, 1500);
 }
 document.getElementById('out').addEventListener('focus', fillOut);
+outBox.addEventListener('toggle', function () { if (outBox.open) fillOut(); });
 /* Пълното прерисуване — само при махане на ред, „Изчисти“ и зареждане. */
 function render() {
   renderMeta();
@@ -250,7 +553,8 @@ function render() {
     return liHtml(c, base + shown.length - 1 - i);
   }).join('');
   renderMore();
-  fillOut();
+  renderProgress();
+  fillOutLater();
   persist();
 }
 /* Добавянето — само новият ред и броячите (находка И5). */
@@ -264,38 +568,122 @@ function renderAdded() {
   if (codes.length === 1) renderMeta();
   else document.getElementById('cnt').textContent = codes.length;
   if (codes.length > VISIBLE) renderMore();
+  renderProgress();
   fillOutLater();
   persist();
 }
 document.getElementById('moreBtn').addEventListener('click', function () { SHOW_ALL = true; render(); });
+
+/* ОТМЯНА (v2.4.78). „×“ и „Изчисти“ нямаха връщане: случайно махнат номер е
+   документ, който излиза „липсващ“ в протокола, а случайно изчистен списък е
+   изгубено обхождане. Сега всяко от двете оставя за няколко секунди „Отмени“. */
+var undoFn = null, snackTimer = null;
+function snack(text, undo, ms) {
+  var el = document.getElementById('snack');
+  document.getElementById('snackTxt').textContent = text;
+  document.getElementById('snackBtn').style.display = undo ? 'inline-block' : 'none';
+  undoFn = undo || null;
+  el.style.display = 'flex';
+  if (snackTimer) clearTimeout(snackTimer);
+  snackTimer = setTimeout(function () { el.style.display = 'none'; undoFn = null; }, ms || (undo ? 7000 : 4000));
+}
+document.getElementById('snackBtn').addEventListener('click', function () {
+  var f = undoFn; undoFn = null;
+  document.getElementById('snack').style.display = 'none';
+  if (f) f();
+});
 document.getElementById('list').addEventListener('click', function (e) {
   var i = e.target.getAttribute('data-i');
-  if (i !== null) { codes.splice(+i, 1); render(); }
+  if (i === null) return;
+  var at = +i, c = codes[at];
+  codes.splice(at, 1); UNSENT = true;
+  recomputeSeen();
+  render();
+  snack('Махнат е ' + c + '.', function () {
+    if (codes.indexOf(c) < 0) { codes.splice(Math.min(at, codes.length), 0, c); UNSENT = true; recomputeSeen(); render(); }
+  });
 });
 
-function beep(ok) {
+/* Звук и вибрация. Един общ AudioContext (v2.4.78) — дотук се създаваше нов за
+   всеки бийп. Три сигнала: успех (висок), „внимание“ (два средни — номерът го
+   няма в списъка на проверката, ISBN), грешка (нисък — повторен номер). */
+var AC = null;
+function tone(freq, at, dur) {
+  var o = AC.createOscillator(), g = AC.createGain();
+  o.connect(g); g.connect(AC.destination);
+  o.frequency.value = freq; g.gain.value = 0.12;
+  o.start(at); o.stop(at + dur);
+}
+function beep(kind) {
+  var ok = kind === true, warn = kind === 'warn';
   try {
-    var ctx = new (window.AudioContext || window.webkitAudioContext)();
-    var o = ctx.createOscillator(), g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.frequency.value = ok ? 880 : 300;
-    g.gain.value = 0.12;
-    o.start(); setTimeout(function () { o.stop(); ctx.close(); }, ok ? 90 : 220);
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+    if (AC.state === 'suspended' && AC.resume) AC.resume();
+    var t = AC.currentTime;
+    if (ok) tone(880, t, 0.09);
+    else if (warn) { tone(600, t, 0.1); tone(600, t + 0.16, 0.1); }
+    else tone(300, t, 0.22);
   } catch (e) {}
-  if (navigator.vibrate) navigator.vibrate(ok ? 40 : [60, 50, 60]);
+  if (navigator.vibrate) navigator.vibrate(ok ? 40 : warn ? [40, 60, 40] : [60, 50, 60]);
+}
+/* Какво точно се прочете — най-горе, с голям шрифт (v2.4.78). */
+function showHit(code, kind) {
+  var el = document.getElementById('hit');
+  var r = EXP ? lookup(code) : null, it = r && r.i >= 0 ? EXP.items[r.i] : null;
+  var t = it ? '<small>' + escHtml(it[2] || '') + (it[3] ? ' · ' + escHtml(it[3]) : '') + '</small>' : '';
+  var cls = '', html;
+  if (kind === 'isbn') {
+    cls = 'warn';
+    html = '⚠ <b>' + escHtml(code) + '</b> е ' + (/^977/.test(code) ? 'ISSN' : 'ISBN') + ' от корицата, а не етикетът с инвентарния номер. Насочете камерата към етикета на библиотеката.';
+  } else if (kind === 'dup') {
+    cls = 'bad'; html = 'Повторно: <b>' + escHtml(code) + '</b> вече е в списъка.' + t;
+  } else if (kind === 'out') {
+    cls = 'warn';
+    html = '⚠ <b>' + escHtml(code) + '</b> — няма го в списъка на тази проверка (непознат, отчислен или от друг отдел). Добавен е; програмата ще каже при вноса.';
+  } else if (kind === 'amb') {
+    cls = 'warn'; html = '⚠ <b>' + escHtml(code) + '</b> — двусмислен код (баркод на един документ и инв. № на друг). Добавен е; програмата ще каже кой.';
+  } else {
+    html = '✓ <b>' + escHtml(code) + '</b>' + (kind === 'done' ? ' — вече е проверен на компютъра' : '') + t;
+  }
+  el.className = cls; el.innerHTML = html; el.style.display = 'block';
 }
 function addCode(raw) {
   var c = String(raw || '').trim();
   if (!c) return;
   /* Повторният номер сменя само брояча на повторните — списъкът не се пипа. */
-  if (codes.indexOf(c) >= 0) {
+  /* Същият документ под друг код („9“ и „0009“, баркод и инв. №) — програмата
+     ги брои за един; телефонът също (преглед на v2.4.78). */
+  var same = EXP ? lookup(c) : null;
+  if (codes.indexOf(c) >= 0 || (same && same.i >= 0 && EXP_SEEN[same.i])) {
     dups++; beep(false);
     document.getElementById('dupCnt').textContent = dups;
+    showHit(c, 'dup');
     persist();
     return;
   }
-  if (!codes.length) STARTED = localDay();
-  codes.push(c); beep(true); renderAdded();
+  if (!codes.length) { STARTED = localDay(); SID = EXP ? EXP.session.id : null; }
+  codes.push(c); UNSENT = true;
+  var kind = markSeen(c);
+  beep(kind === 'out' || kind === 'amb' ? 'warn' : true);
+  renderAdded();
+  showHit(c, kind);
+}
+/* ISBN ОТ ГЪРБА НА КНИГАТА (v2.4.78).
+   Етикетите на библиотеката са Code 39 с инвентарния номер. EAN-13, започващ с
+   978/979, е ISBN, отпечатан от издателя. Дотук и той влизаше в списъка с
+   „успешен“ бийп: човекът снимаше гърба на книгата, чуваше, че е прочетено, и
+   продължаваше — етикетът оставаше несканиран, документът излизаше „липсващ“, а
+   ISBN-ът — „непознат“ при вноса. Сега се отказва на място и се казва защо.
+   Изключение: ако зареденият списък на проверката го познава като баркод (стари
+   етикети по ISBN), се приема. Ръчното поле приема всичко — там човекът е решил. */
+function isIsbn(v) { return /^97[789]\d{10}$/.test(String(v)); }   // 978/979 ISBN, 977 ISSN
+function acceptScanned(v) {
+  if (isIsbn(v)) {
+    var r = EXP ? lookup(v) : null;
+    if (!(r && r.i >= 0)) { beep('warn'); showHit(v, 'isbn'); return false; }
+  }
+  addCode(v);
+  return true;
 }
 
 /* РЪЧНОТО ПОЛЕ: ЕДИН НОМЕР НАВЕДНЪЖ (v2.4.69, находка О2).
@@ -337,23 +725,48 @@ function takePending() {
   if (!String(manual.value || '').trim()) return;
   if (addManual()) manualSay('Номерът ' + codes[codes.length - 1] + ' от полето е добавен в списъка, преди да се изнесе.');
 }
+function markSent() { UNSENT = false; persist(); }
+function flash(btn, text, back) {
+  btn.textContent = text;
+  setTimeout(function () { btn.textContent = back; }, 1800);
+}
+/* КОПИРАНЕТО КАЗВА ИСТИНАТА (v2.4.78). Дотук бутонът пишеше „Копирано!“
+   винаги — и когато браузърът откаже достъп до системния буфер. Човекът
+   поставяше във Вайбър нещо друго (стар списък, адрес) и не разбираше защо.
+   Сега: системният буфер, ако откаже — старият начин с маркиране, и ако и той
+   откаже — казва се и текстът остава отворен и маркиран за ръчно копиране. */
+function copyByCommand() {
+  try {
+    outBox.open = true; fillOut();
+    var t = document.getElementById('out');
+    t.focus(); t.select(); t.setSelectionRange(0, 9999999);
+    return !!(document.execCommand && document.execCommand('copy'));
+  } catch (e) { return false; }
+}
 document.getElementById('copyBtn').addEventListener('click', function () {
+  var btn = this;
   takePending();
-  /* Полето за пренасяне се попълва преди маркирането — то вече не се пише
-     при всяко добавяне (находка И5), а маркира се именно то. */
-  fillOut();
-  var t = document.getElementById('out');
-  t.select(); t.setSelectionRange(0, 999999);
-  if (navigator.clipboard) navigator.clipboard.writeText(exportText());
-  else document.execCommand('copy');
-  this.textContent = 'Копирано!';
-  var b = this; setTimeout(function () { b.textContent = 'Копирай списъка'; }, 1500);
+  if (!codes.length) { snack('Списъкът е празен — няма какво да се копира.'); return; }
+  var text = exportText();
+  var done = function (ok) {
+    if (ok) { markSent(); flash(btn, 'Копирано!', 'Копирай'); return; }
+    outBox.open = true; fillOut();
+    var t = document.getElementById('out'); try { t.focus(); t.select(); } catch (e) {}
+    snack('Телефонът не позволи копиране. Текстът е отворен и маркиран отдолу — задръжте пръст върху него и изберете „Копиране“.', null, 9000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(copyByCommand()); });
+  } else {
+    done(copyByCommand());
+  }
 });
 document.getElementById('fileBtn').addEventListener('click', function () {
   takePending();
+  if (!codes.length) { snack('Списъкът е празен — няма какво да се запише.'); return; }
   var blob = new Blob([exportText()], { type: 'text/plain;charset=utf-8' });
   var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  var url = URL.createObjectURL(blob);
+  a.href = url;
   /* Името на библиотеката влиза и в името на файла: в един разговор във Вайбър
      се събират списъци от повече от една проверка. В САМИЯ файл не влиза нищо
      освен номерата — програмата чете всяка дума като номер (importScansRun). */
@@ -361,12 +774,57 @@ document.getElementById('fileBtn').addEventListener('click', function () {
      го подминава като номер и сверява датата), после по един номер на ред.
      Датата в името е по МЕСТНО време (находка О5 — дотук беше по UTC и между
      полунощ и 03:00 ч. излизаше вчерашната) и е денят на ЗАПОЧВАНЕ на списъка. */
-  a.download = 'inventarizaciya-' + (SLUG ? SLUG + '-' : '') + (STARTED || localDay()) + '.txt';
+  a.download = fileName();
   a.click();
+  setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 30000);
+  markSent();
+});
+/* „ИЗПРАТИ“ (v2.4.78, Web Share). Менюто за споделяне на самия телефон: файлът
+   отива направо във Вайбър, пощата или Drive — без „Копирай“, превключване на
+   приложението и поставяне. Бутонът се показва само където телефонът може да
+   споделя файлове; другаде остават „Копирай“ и „Файл“. */
+function shareFile() {
+  try { return new File([exportText()], fileName(), { type: 'text/plain' }); } catch (e) { return null; }
+}
+(function shareSupport() {
+  var f = null;
+  try { f = typeof File === 'function' ? new File(['x'], 'x.txt', { type: 'text/plain' }) : null; } catch (e) { f = null; }
+  var ok = false;
+  try { ok = !!(f && navigator.share && navigator.canShare && navigator.canShare({ files: [f] })); } catch (e) { ok = false; }
+  if (ok) document.getElementById('shareBtn').style.display = 'inline-block';
+})();
+document.getElementById('shareBtn').addEventListener('click', function () {
+  takePending();
+  if (!codes.length) { snack('Списъкът е празен — няма какво да се изпрати.'); return; }
+  var f = shareFile();
+  if (!f) { snack('Телефонът не можа да подготви файла. Ползвайте „Копирай“ или „Файл“.'); return; }
+  navigator.share({ files: [f], title: f.name, text: 'Списък от инвентаризацията (' + codes.length + ' номера)' })
+    .then(function () { markSent(); snack('Списъкът е изпратен.'); }, function (e) {
+      if (e && e.name === 'AbortError') return;          // човекът затвори менюто
+      snack('Изпращането не стана (' + ((e && e.message) || e) + '). Ползвайте „Копирай“ или „Файл“.');
+    });
 });
 document.getElementById('clearBtn').addEventListener('click', function () {
-  if (!confirm('Изчистване на целия списък?')) return;
-  codes = []; dups = 0; STARTED = null; SHOW_ALL = false; manualSay(''); render();
+  var n = codes.length;
+  if (!confirm(n && UNSENT
+    ? 'Списъкът (' + n + (n === 1 ? ' номер' : ' номера') + ') още НЕ е изпратен на компютъра след последната промяна. Изчистване въпреки това?'
+    : 'Изчистване на целия списък?')) return;
+  var prev = { codes: codes, dups: dups, started: STARTED, sid: SID, unsent: UNSENT };
+  codes = []; dups = 0; STARTED = null; SID = null; UNSENT = false; SHOW_ALL = false; manualSay('');
+  document.getElementById('hit').style.display = 'none';
+  recomputeSeen();
+  render();
+  /* „Отмени“ винаги връща (преглед на v2.4.78): дотук, ако междувременно е
+     прочетен нов номер, отмяната тихо не правеше нищо — а човекът мисли, че
+     списъкът е върнат. Сега старите номера се връщат пред новите. */
+  if (n) snack('Списъкът е изчистен (' + n + (n === 1 ? ' номер' : ' номера') + ').', function () {
+    var fresh = codes.filter(function (c) { return prev.codes.indexOf(c) < 0; });
+    var merged = fresh.length;
+    codes = prev.codes.concat(fresh); dups = prev.dups + dups; STARTED = prev.started; SID = prev.sid;
+    UNSENT = prev.unsent || merged > 0;
+    recomputeSeen(); render();
+    if (merged) snack('Върнати са ' + n + ' номера; ' + merged + ' прочетени след изчистването остават след тях.');
+  }, 10000);
 });
 
 /* ---- Камерата като баркод четец ----
@@ -388,18 +846,71 @@ document.getElementById('clearBtn').addEventListener('click', function () {
      телефона (input type=file capture). То си има собствено разрешение и не
      зависи от адреса на страницата, затова работи и от файл;
    • пази живата камера за случаите, в които тя наистина работи — на компютър
-     и когато страницата е отворена по https://. */
-var stream = null, detector = null, timer = null;
+     и когато страницата е отворена по https:// (v2.4.78: приложението по
+     https, което програмата показва с QR код). */
+var stream = null, detector = null, live = false, loopTimer = null, track = null;
 var video = document.getElementById('cam');
 var noCam = document.getElementById('nocam');
 var startBtn = document.getElementById('startBtn');
 var shotBtn = document.getElementById('shotBtn');
 var LOCAL_FILE = !/^https?:$/.test(location.protocol);
 
+/* ФОРМАТИТЕ (v2.4.78). Етикетите на програмата са Code 39; Code 128 и Codabar
+   остават за етикети от предишни системи, EAN-13/EAN-8 — за да се познае ISBN-ът
+   и да се откаже (виж isIsbn). Махнати са ITF и QR: ITF е известен с „къси“
+   прочитания — част от етикета се чете като друг, валиден по-къс номер — а QR
+   кодове по книгите библиотеката не лепи. */
+var FORMATS = ['code_39', 'code_128', 'codabar', 'ean_13', 'ean_8'];
+var ZX_FORMATS = ['Code39', 'Code128', 'Codabar', 'EAN13', 'EAN8'];
+
+/* ВГРАДЕНИЯТ ЧЕТЕЦ (v2.4.78). BarcodeDetector го има само в Chrome на Android
+   с услугите на Google — няма го на iPhone, във Firefox и на телефони без тези
+   услуги (Huawei). Там страницата ползва вградения четец zxing (WebAssembly):
+   програмата го вгражда в записаната страница, а приложението по https го носи
+   до себе си. Нищо не се тегли от интернет — виж Content-Security-Policy горе. */
+var ZX_READY = false;
+function zxAvailable() { return !!(window.ZXingWASM && (window.ZXING_WASM_B64 || !LOCAL_FILE)); }
+function zxPrepare() {
+  if (ZX_READY) return;
+  var ov;
+  if (window.ZXING_WASM_B64) {
+    var bin = atob(window.ZXING_WASM_B64), u8 = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    ov = { wasmBinary: u8.buffer };
+  } else {
+    ov = { locateFile: function (p) { return new URL(p, location.href).href; } };
+  }
+  window.ZXingWASM.prepareZXingModule({ overrides: ov });
+  ZX_READY = true;
+}
+var zxCanvas = null;
+function zxReader() {
+  return {
+    detect: function (src) {
+      zxPrepare();
+      var w = src.videoWidth || src.width, h = src.videoHeight || src.height;
+      if (!w || !h) return Promise.resolve([]);
+      /* Снимката е 12 Mpx и тънките ленти на Code 39 искат повече точки от
+         видеото; кадърът от видеото — по-малко, за да е бързо. */
+      var k = Math.min(1, (src.videoWidth ? 1280 : 2560) / Math.max(w, h));
+      zxCanvas = zxCanvas || document.createElement('canvas');
+      zxCanvas.width = Math.round(w * k); zxCanvas.height = Math.round(h * k);
+      var ctx = zxCanvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(src, 0, 0, zxCanvas.width, zxCanvas.height);
+      var data = ctx.getImageData(0, 0, zxCanvas.width, zxCanvas.height);
+      return window.ZXingWASM.readBarcodes(data, { formats: ZX_FORMATS, tryHarder: true, maxNumberOfSymbols: 4, tryCode39ExtendedMode: false })
+        .then(function (rs) {
+          return rs.filter(function (r) { return r.isValid !== false && r.text; }).map(function (r) { return { rawValue: r.text, format: r.format }; });
+        });
+    }
+  };
+}
+var USE_NATIVE = ('BarcodeDetector' in window);
 function newDetector() {
-  return new BarcodeDetector({
-    formats: ['code_39', 'code_128', 'ean_13', 'ean_8', 'codabar', 'itf', 'qr_code']
-  });
+  if (USE_NATIVE) {
+    try { return new BarcodeDetector({ formats: FORMATS }); } catch (e) { if (!zxAvailable()) throw e; USE_NATIVE = false; }
+  }
+  return zxReader();
 }
 function showNoCam(html) { noCam.innerHTML = html; noCam.style.display = 'block'; }
 
@@ -427,7 +938,7 @@ function camErrText(e) {
 
 /* Какво може ТОЗИ телефон, казано преди първото натискане, а не след него. */
 (function capabilities() {
-  var canRead = ('BarcodeDetector' in window);
+  var canRead = USE_NATIVE || zxAvailable();
   var canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   if (!canRead) {
     startBtn.disabled = true;
@@ -437,11 +948,20 @@ function camErrText(e) {
        текст, който сочи несъществуващо копче, губи повече време от липсата му. */
     document.getElementById('hint').innerHTML =
       'Въведете инвентарния номер в полето по-долу и натиснете „Добави“ — по един номер наведнъж. ' +
-      'Когато свършите, натиснете <b>„Копирай списъка“</b> и го изпратете на компютъра (по Вайбър, ' +
+      'Когато свършите, натиснете <b>„Изпрати“</b> (или „Копирай“) и пратете списъка на компютъра (по Вайбър, ' +
       'имейл или както Ви е удобно) — там се въвежда в „Инвентаризация“.';
     return;
   }
   shotBtn.style.display = 'inline-block';   // снимката работи навсякъде, където има четец
+  /* Chrome без услугите на Google: BarcodeDetector го има, но не чете нищо —
+     тогава вграденият четец (v2.4.78). */
+  if (USE_NATIVE && zxAvailable() && window.BarcodeDetector.getSupportedFormats) {
+    try {
+      window.BarcodeDetector.getSupportedFormats().then(function (list) {
+        if (!list || list.indexOf('code_39') < 0) { USE_NATIVE = false; detector = live ? newDetector() : null; }
+      }, function () { USE_NATIVE = false; detector = live ? newDetector() : null; });
+    } catch (e) { USE_NATIVE = false; }
+  }
   if (!canLive) {
     startBtn.disabled = true;
     showNoCam('Живата камера не е достъпна в този браузър. Ползвайте <b>„Снимай баркод“</b> — ' +
@@ -452,9 +972,10 @@ function camErrText(e) {
     showNoCam('Страницата е отворена като <b>файл</b> от паметта на телефона. В този режим Chrome ' +
       'не пита за достъп до камерата и живата камера няма да тръгне. Ползвайте <b>„Снимай баркод“</b> — ' +
       'снимка с приложението „Камера“, номерът се разчита от нея. (Живата камера работи, ако страницата ' +
-      'се отвори по интернет адрес, започващ с https://.)');
+      'се отвори по интернет адрес, започващ с https:// — приложението, което програмата показва с QR код.)');
   }
 })();
+if (!STORAGE_OK) showStorageWarn('— страницата е отворена по начин, при който браузърът не ѝ дава памет');
 
 /* ---- Снимка през приложението „Камера“ ---- */
 var shotInp = document.getElementById('shotInp');
@@ -476,61 +997,212 @@ shotInp.addEventListener('change', async function () {
     noCam.style.display = 'none';
     // Един кадър може да хване няколко етикета; всеки влиза веднъж.
     var seen = {};
-    found.forEach(function (b) { if (!seen[b.rawValue]) { seen[b.rawValue] = 1; addCode(b.rawValue); } });
+    found.forEach(function (b) { if (!seen[b.rawValue]) { seen[b.rawValue] = 1; acceptScanned(b.rawValue); } });
   } catch (e) {
     showNoCam('Снимката не можа да се прочете: ' + escHtml((e && e.message) || e));
   }
 });
 
-startBtn.addEventListener('click', async function () {
+/* ---- Живата камера ----
+   ДВА ЕДНАКВИ ПРОЧИТА ПОДРЕД (v2.4.78). Дотук номерът влизаше от ЕДИН кадър.
+   Отблясък или размазан кадър дава понякога друг, валиден номер — проба: кадър
+   „10245“, после „1024“ — и двата влизаха; единият е чужд документ, отбелязан
+   като проверен, другият — липсващ. Сега номер се приема, когато е прочетен в
+   два поредни кадъра (≈ ¼ секунда при задържан етикет).
+
+   ВСЕКИ ЕТИКЕТ В КАДЪРА ПООТДЕЛНО. Дотук се гледаше само първият разчетен
+   (found[0]). С ISBN и етикет в кадъра редът им се сменя от кадър на кадър:
+   проба — за 6 секунди 10 фалшиви „повторни“ с грешен сигнал. Сега всеки код е
+   „в кадъра“, докато се вижда, и се приема еднократно; приема се пак, едва когато
+   е излязъл от кадъра за GONE_MS (етикет, задържан под телефона, не дава
+   „повторно“ — правилото от v2.4.27).
+
+   КАДЪРЪТ СЕ ЧЕТЕ, КОГАТО ПРЕДИШНИЯТ Е ГОТОВ. Дотук setInterval на 350 ms
+   пускаше следващото четене, без да чака предишното: на бавен телефон (четене
+   900 ms) се трупаха до 3 едновременно. Сега следващото започва GAP ms след
+   края на предишното. */
+/* „Излязъл от кадъра“ = не е прочетен поне GONE_FRAMES поредни кадъра И поне
+   GONE_MS (преглед на v2.4.78): на бавен телефон (четене 900 ms) един пропуснат
+   кадър вече надхвърляше GONE_MS и задържаният етикет излизаше „повторен“. */
+var GAP = 120, GONE_MS = 900, GONE_FRAMES = 3;
+var hits = {}, lastSeen = {}, missed = {}, inFrame = {};
+function onFrame(found) {
+  var now = Date.now(), nh = {}, vals = {};
+  (found || []).forEach(function (b) { if (b && b.rawValue) vals[b.rawValue] = 1; });
+  Object.keys(vals).forEach(function (v) {
+    nh[v] = (hits[v] || 0) + 1;
+    if (nh[v] >= 2 && !inFrame[v]) { inFrame[v] = 1; acceptScanned(v); }
+    if (inFrame[v]) { lastSeen[v] = now; missed[v] = 0; }
+  });
+  hits = nh;
+  Object.keys(inFrame).forEach(function (v) {
+    if (vals[v]) return;
+    missed[v] = (missed[v] || 0) + 1;
+    if (missed[v] >= GONE_FRAMES && now - (lastSeen[v] || 0) > GONE_MS) { delete inFrame[v]; delete lastSeen[v]; delete missed[v]; }
+  });
+}
+/* ЧЕТЕЦЪТ, КОЙТО НЕ ЧЕТЕ, СЕ КАЗВА (преглед на v2.4.78). Грешка при четене
+   (вграденият четец не тръгва — малко памет, стар браузър) дотук се гълташе:
+   камерата изглеждаше жива, а нищо не се разчиташе. */
+var loopErrors = 0;
+function frameLoop() {
+  if (!live) return;
+  var p;
+  try { p = Promise.resolve(detector.detect(video)); } catch (e) { p = Promise.reject(e); }
+  p.then(function (found) { loopErrors = 0; onFrame(found); }, function (e) {
+    if (++loopErrors < 8) return;
+    stopCamera();
+    showNoCam('<b>Четецът на баркодове не работи на този телефон</b> (' + escHtml((e && e.message) || e) +
+      '). Въвеждайте номерата на ръка в полето по-долу — резултатът е същият.');
+  }).then(function () { if (live) loopTimer = setTimeout(frameLoop, GAP); });
+}
+
+/* ЕКРАНЪТ НЕ ЗАГАСВА, ДОКАТО КАМЕРАТА ЧЕТЕ (v2.4.78, Wake Lock). Дотук след
+   половин минута без докосване екранът загасваше насред рафта, камерата спираше
+   и човекът отключваше телефона на всеки няколко книги. */
+var wakeLock = null, wakeWanted = false;
+function keepAwake(on) {
+  wakeWanted = on;
+  try {
+    if (on && !wakeLock && navigator.wakeLock && navigator.wakeLock.request) {
+      navigator.wakeLock.request('screen').then(function (l) {
+        /* Камерата е спряна, докато заявката е чакала — ключалката не е нужна. */
+        if (!wakeWanted || wakeLock) { if (l && l.release) l.release().catch(function () {}); return; }
+        wakeLock = l;
+        if (l && l.addEventListener) l.addEventListener('release', function () { if (wakeLock === l) wakeLock = null; });
+      }, function () {});
+    } else if (!on && wakeLock) {
+      var l = wakeLock; wakeLock = null;
+      if (l.release) l.release().catch(function () {});
+    }
+  } catch (e) {}
+}
+
+/* ФЕНЕРЧЕ И ПРИБЛИЖЕНИЕ (v2.4.78). Рафтовете в ъглите са тъмни, а етикетите на
+   тънките книжки — малки. Където камерата ги поддържа, се появяват бутон
+   „Фенерче“ и плъзгач за приближение; където не — нищо не се показва. */
+var torchOn = false;
+var torchBtn = document.getElementById('torchBtn');
+var zoomRow = document.getElementById('zoomRow'), zoomInp = document.getElementById('zoom');
+function trackControls(t) {
+  var caps = {};
+  try { caps = (t && t.getCapabilities) ? t.getCapabilities() || {} : {}; } catch (e) { caps = {}; }
+  torchOn = false; torchBtn.classList.remove('on');
+  torchBtn.style.display = caps.torch ? 'inline-block' : 'none';
+  if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+    zoomInp.min = caps.zoom.min; zoomInp.max = caps.zoom.max; zoomInp.step = caps.zoom.step || 0.1;
+    var cur = 0; try { cur = (t.getSettings && t.getSettings().zoom) || caps.zoom.min; } catch (e) { cur = caps.zoom.min; }
+    zoomInp.value = cur;
+    zoomRow.style.display = 'flex';
+  } else {
+    zoomRow.style.display = 'none';
+  }
+  if (caps.focusMode && caps.focusMode.indexOf && caps.focusMode.indexOf('continuous') >= 0 && t.applyConstraints) {
+    t.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
+  }
+}
+torchBtn.addEventListener('click', function () {
+  if (!track || !track.applyConstraints) return;
+  var want = !torchOn;
+  track.applyConstraints({ advanced: [{ torch: want }] }).then(function () {
+    torchOn = want; torchBtn.classList.toggle('on', want);
+  }, function () { snack('Фенерчето не се включи на тази камера.'); });
+});
+zoomInp.addEventListener('input', function () {
+  if (track && track.applyConstraints) track.applyConstraints({ advanced: [{ zoom: +zoomInp.value }] }).catch(function () {});
+});
+
+function stopCamera() {
+  live = false;
+  if (loopTimer) { clearTimeout(loopTimer); loopTimer = null; }
+  if (stream) { try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} }
+  stream = null; track = null;
+  keepAwake(false);
+  hits = {}; lastSeen = {}; missed = {}; inFrame = {};
+  video.style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'none';
+  torchBtn.style.display = 'none'; zoomRow.style.display = 'none';
+  startBtn.style.display = 'inline-block';
+  document.body.classList.remove('live');
+}
+/* ЕДНО ПУСКАНЕ НАВЕДНЪЖ (преглед на v2.4.78). Пускането отнема ~300 ms; ако
+   междувременно тръгне второ (бутонът при самостоятелното връщане), първата
+   камера оставаше включена без кой да я спре, а провал на второто спираше
+   първото. Сега докато едно пускане тече, друго не започва, а камера, тръгнала
+   при вече скрита страница, се спира веднага. */
+var starting = false;
+async function startCamera() {
+  if (starting || live) return;
+  starting = true; startBtn.disabled = true;
+  var got = null;
   try {
     detector = newDetector();
-    stream = await navigator.mediaDevices.getUserMedia({
+    got = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 } }
     });
+    if (document.hidden) {
+      got.getTracks().forEach(function (t) { t.stop(); });
+      RESUME = true;
+      return;
+    }
+    stream = got;
     video.srcObject = stream;
     await video.play();
     video.style.display = 'block';
-    this.style.display = 'none';
+    startBtn.style.display = 'none';
     document.getElementById('stopBtn').style.display = 'inline-block';
     /* Камерата тръгна (v2.4.69, находка О5): червената бележка („отворена като
        файл — няма да тръгне“) вече не е вярна и се маха, а подсказката се
        скрива, за да останат броячът и „Спри камерата“ на екрана (body.live). */
     noCam.style.display = 'none';
     document.body.classList.add('live');
-    var last = '', misses = 0;
-    timer = setInterval(async function () {
-      try {
-        var found = await detector.detect(video);
-        if (found && found.length) {
-          var v = found[0].rawValue;
-          // Един и същ баркод пред камерата се разчита многократно в секунда —
-          // приема се повторно едва когато е ИЗЛЯЗЪЛ от кадъра (last се нулира
-          // по-долу). Дотук (v2.4.27) се приемаше пак след 2 секунди: етикет,
-          // задържан под телефона, докато се прочете номерът, даваше „повторно“
-          // с грешен сигнал и завишен брояч на повторните.
-          if (v !== last) { last = v; addCode(v); }
-          misses = 0;
-        } else if (++misses >= 3) {
-          // Три празни кадъра (≈1 с): етикетът наистина е излязъл от кадъра, а не е
-          // изпуснат от автофокуса за миг.
-          last = ''; misses = 0;
-        }
-      } catch (e) {}
-    }, 350);
+    var tracks = stream.getVideoTracks ? stream.getVideoTracks() : (stream.getTracks ? stream.getTracks() : []);
+    track = tracks && tracks[0] || null;
+    /* КАМЕРАТА СПРЯ ОТВЪН (v2.4.78) — друго приложение я взе, системата я
+       спря. Дотук страницата не забелязваше: изглеждаше, че чете, а не четеше. */
+    if (track && track.addEventListener) {
+      track.addEventListener('ended', function () {
+        if (!live) return;
+        stopCamera();
+        showNoCam('<b>Камерата спря</b> — вероятно друго приложение я взе. Натиснете „Пусни камерата“, за да продължите.');
+      });
+    }
+    trackControls(track);
+    keepAwake(true);
+    live = true; loopErrors = 0;
+    hits = {}; lastSeen = {}; missed = {}; inFrame = {};
+    frameLoop();
   } catch (e) {
+    if (got && got !== stream) { try { got.getTracks().forEach(function (t) { t.stop(); }); } catch (x) {} }
+    stopCamera();
     showNoCam('<b>Живата камера не тръгна.</b> ' + camErrText(e));
+  } finally {
+    starting = false; startBtn.disabled = false;
+  }
+}
+startBtn.addEventListener('click', function () { startCamera(); });
+document.getElementById('stopBtn').addEventListener('click', function () { RESUME = false; stopCamera(); });
+/* ЗАКЛЮЧЕН ЕКРАН / ДРУГО ПРИЛОЖЕНИЕ (v2.4.78). Камерата се освобождава, щом
+   страницата не се вижда, и тръгва сама, когато човекът се върне — вместо да
+   стои „жива“ с черно или замръзнало видео. */
+var RESUME = false;
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) {
+    if (live) { RESUME = true; stopCamera(); }
+  } else if (RESUME) {
+    RESUME = false;
+    startCamera();
   }
 });
-document.getElementById('stopBtn').addEventListener('click', function () {
-  if (timer) clearInterval(timer);
-  if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
-  video.style.display = 'none';
-  this.style.display = 'none';
-  document.getElementById('startBtn').style.display = 'inline-block';
-  document.body.classList.remove('live');
-});
 
+/* ---- Приложението по https (v2.4.78) ----
+   Само там, където страницата носи манифест (приложението, публикувано от
+   програмата): service worker-ът я пази за работа без интернет. */
+if (location.protocol === 'https:' && 'serviceWorker' in navigator && document.querySelector('link[rel="manifest"]')) {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+
+renderExpected();
 render();
 </script>
 </body>

@@ -398,6 +398,15 @@ For maintainers: pushing a `vX.Y.Z` tag triggers
 publishes a GitHub Release automatically. See
 [“Автоматично обновяване” in `electron-app/README.md`](electron-app/README.md#автоматично-обновяване).
 
+**The phone scanning page** (`electron-app/src/mobile-template.html`) is one
+template with two outputs, both assembled by `electron-app/mobile-page.js`: the
+file the program saves (the zxing reader is embedded), and the https app built by
+`electron-app/scripts/build-skener-site.js` and published to GitHub Pages by
+`.github/workflows/skener-pages.yml` on every push to `main` that touches it. The
+Pages source must be set once to **GitHub Actions** (Settings → Pages). The page
+must never load anything from the internet — its Content-Security-Policy forbids
+it, and `test/telefon-v2478.test.js` checks that.
+
 ---
 
 ## Licence

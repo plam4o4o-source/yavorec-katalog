@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "2.4.77",
+  "version": "2.4.78",
   "description": "Библиотечна система „InvLib“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -24,7 +24,9 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "qrcode-generator": "2.0.4",
+    "zxing-wasm": "3.1.4"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
@@ -63,6 +65,7 @@
       "db-folder.js",
       "bg-holidays.js",
       "local-date.js",
+      "mobile-page.js",
       "install-report.js",
       "handlers/**/*",
       "src/**/*",

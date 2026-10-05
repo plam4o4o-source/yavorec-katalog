@@ -330,9 +330,12 @@ test('main.js: при затваряне каталогът се пише сам
 test('мобилното сканиране приема същия баркод повторно едва когато е излязъл от кадъра', () => {
   const html = fs.readFileSync(path.join(APP_DIR, 'src', 'mobile-template.html'), 'utf8');
   assert.doesNotMatch(html, /lastAt > 2000/);
-  assert.match(html, /if \(v !== last\) \{ last = v; addCode\(v\); \}/);
-  assert.match(html, /\+\+misses >= 3/);
-  assert.match(html, /last = ''; misses = 0;/);
+  /* ПРОМЕНЕНО НАРОЧНО в v2.4.78: правилото „едва когато е излязъл от кадъра“ остава,
+     но вече за ВСЕКИ код в кадъра поотделно (inFrame), с два поредни прочита преди
+     приемане и с време И брой празни кадри (GONE_MS, GONE_FRAMES). Поведението се проверява
+     с изпълнение в test/telefon-v2478.test.js; тук — само че правилото е на място. */
+  assert.match(html, /if \(nh\[v\] >= 2 && !inFrame\[v\]\) \{ inFrame\[v\] = 1; acceptScanned\(v\); \}/);
+  assert.match(html, /if \(missed\[v\] >= GONE_FRAMES && now - \(lastSeen\[v\] \|\| 0\) > GONE_MS\) \{ delete inFrame\[v\];/);
 });
 
 test('лентата вляво се побира на 768 px височина', () => {

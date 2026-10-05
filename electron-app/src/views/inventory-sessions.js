@@ -280,6 +280,7 @@ async function renderInventRun() {
         ((INVENT_SESSION && INVENT_SESSION.log) || []).join('')}</div>
     </div>
     <div class="toolbar">
+      <button class="btn" onclick="phoneListModal(${s.id})">📋 Списък за телефона</button>
       <button class="btn" onclick="importScansModal(${s.id})">📱 Въведи сканирания от телефон</button>
       <button class="btn pri" onclick="closeInvent()">Приключи и състави протокол</button>
       <button class="btn" onclick="leaveInvent()">Излез (сесията остава отворена)</button>

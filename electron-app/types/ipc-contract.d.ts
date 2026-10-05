@@ -1214,6 +1214,10 @@ interface IpcContract {
   /* ---- Мобилно сканиране (handlers/mobile.js) ---- */
   /** Път до записания файл; отказан диалог — { ok:false, error: 'Отказано от потребителя.' }. */
   'mobile:generate': { args: []; result: string };
+  /** Списъкът на отворената проверка за телефона: 'html' — страницата с вграден списък, 'json' — само списъкът. Път до файла. */
+  'mobile:sessionExport': { args: [{ sessionId: Id; kind: 'html' | 'json' }]; result: string };
+  /** Адресът на приложението по https (с #lib=… за името на файла) и QR код за него като SVG. */
+  'mobile:siteInfo': { args: []; result: { url: string; qrSvg: string } };
   /** Един елемент на `codes` = един код; редове с „#“ и празните се подминават. */
   'inventorySessions:importScans': {
     args: [{ sessionId: Id; codes: string[] }];

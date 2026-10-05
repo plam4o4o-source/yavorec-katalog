@@ -1,0 +1,68 @@
+name: Приложение за сканиране (GitHub Pages)
+
+# ПРИЛОЖЕНИЕТО ЗА СКАНИРАНЕ ПРИ ИНВЕНТАРИЗАЦИЯ ПО HTTPS (v2.4.78).
+# Същата страница, която програмата записва като файл за телефона, публикувана
+# на https://plam4o4o-source.github.io/yavorec-katalog/skener/ — по https Chrome
+# пита за камерата и помни отговора, тоест живата камера работи, вместо да се
+# снима всяка книга поотделно. Сглобява се от electron-app/src/mobile-template.html
+# със scripts/build-skener-site.js; в нея няма нищо от базата на която и да е
+# библиотека.
+#
+# ЕДНОКРАТНО: в GitHub → Settings → Pages → „Build and deployment“ → Source
+# трябва да е „GitHub Actions“. Докато не е, стъпката „Настройка на Pages“ пада
+# с „Get Pages site failed“ — това не засяга програмата и изданията.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'electron-app/src/mobile-template.html'
+      - 'electron-app/mobile-page.js'
+      - 'electron-app/scripts/build-skener-site.js'
+      - 'electron-app/package.json'
+      - 'electron-app/package-lock.json'
+      - 'site/skener/**'
+      - '.github/workflows/skener-pages.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Едно публикуване наведнъж; по-новото чака, не отменя започнатото.
+concurrency:
+  group: skener-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Сглобяване
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Зависимости (без родни модули — тук не трябват)
+        working-directory: electron-app
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Сглобяване на приложението
+        working-directory: electron-app
+        run: node scripts/build-skener-site.js ../_site
+      - name: Настройка на Pages
+        uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Публикуване
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}skener/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
