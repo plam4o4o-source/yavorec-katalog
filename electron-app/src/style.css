@@ -281,7 +281,7 @@ body{
    въпреки поправката v2.4.27. Блокът е преместен СЛЕД правилата за `#nav a` и
    отгоре на това всеки селектор в него е вдигнат с `#rail` пред себе си (1-1-1
    срещу 0-1-0/1-0-1). Така поправката не зависи от това КЪДЕ в 1500-редовия файл
-   стои блокът: `.railFoot` и `.appCredit` например са описани чак 600 реда
+   стои блокът: `.railFoot` например е описан чак 600 реда
    по-надолу, в дъното на лентата, и уплътняването им пак щеше да е мъртво, ако
    се разчиташе само на реда. */
 @media (max-height:780px){
@@ -292,8 +292,6 @@ body{
   #rail .brandMark{padding:8px 9px}
   #rail .brandSub{margin-top:5px}
   #rail .railFoot{padding:9px 16px}
-  #rail .appCredit{margin-top:6px}
-  #rail .devLogo{height:20px; margin-top:6px}
   #rail .savedIndicator{margin-top:4px}
 }
 /* Скролбарът на тъмната лента — тънък и в нейните цветове, вместо системния сив.
@@ -968,10 +966,7 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .userBadge:hover{background:var(--paper3); border-color:var(--brassD); box-shadow:var(--sh)}
 /* Докато служителят не е избран — приглушено, за да личи, че е подкана */
 .userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
-.appCredit{font-size:10px; color:var(--spineDim); margin-top:10px; text-align:center; line-height:1.4}
-/* Знакът на разработчика (v2.4.70) — малък, над реда с авторството; златото се
-   чете и на тъмната, и на светлата лента, затова не се оцветява по темата. */
-.devLogo{display:block; height:26px; width:auto; margin:10px auto 0; opacity:.95}
+/* Знакът на разработчика до реда с авторството — само в „Настройки“ (v2.4.79). */
 .devCredit{display:flex; align-items:center; gap:10px; margin-top:20px}
 .devCredit img{height:34px; width:auto; flex:0 0 auto}
 .savedIndicator{font-size:11px; color:var(--spineDim); margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}

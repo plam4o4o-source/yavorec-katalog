@@ -60,7 +60,6 @@ function appYears() {
 let APP_CREDIT_TEXT = '';
 async function initAppCredit() {
   const version = await call(window.api.app.getVersion());
-  APP_CREDIT_TEXT = 'Създадено от Пламен Христов - Пачо · GPL-3.0-or-later © ' + appYears() + (version ? ' · v' + version : '');
-  const el = $('#appCredit');
-  if (el) el.textContent = APP_CREDIT_TEXT;
+  /* Само в „Настройки“ (v2.4.79): страничната лента вече не носи авторството. */
+  APP_CREDIT_TEXT = 'Създадено от Пламен Христов · GPL-3.0-or-later © ' + appYears() + (version ? ' · v' + version : '');
 }
