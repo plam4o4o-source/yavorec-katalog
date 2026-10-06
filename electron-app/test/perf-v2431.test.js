@@ -297,11 +297,24 @@ test('loans:overdue — дните забава и обезщетението с
   const wd = new Set(String(s.work_days == null ? '0,1,2,3,4,5,6' : s.work_days).split(',').map(Number));
   const closed = new Set(all('SELECT date FROM calendar_closed').map(r => r.date));
   const t = localDayOff(0);
+  /* ДАТА-БОМБА (v2.4.78): огледалото тук броеше забавата от САМИЯ падеж, а от
+     v2.4.71 (находка Ч4) програмата я брои от ПЪРВИЯ РАБОТЕН ДЕН след него —
+     падеж, паднал в неработен ден, не носи ден забава. Падежите в тази база са
+     спрямо днешната дата, затова тестът минаваше в едни дни и падаше в други
+     (6.10.2026: 27 срещу 28). Огледалото вече следва същото правило като
+     effectiveDaysLate() в test/helpers/e2e-app.js. */
+  const isOff = (d) => !wd.has(d.getUTCDay()) || closed.has(iso(d));
   for (const l of rows) {
-    let n = 0; const d = new Date(l.date_due + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); const end = new Date(t + 'T00:00:00Z');
-    for (let i = 0; d <= end && i < 5000; i++) { const ds = iso(d); if (!wd.has(d.getUTCDay()) || closed.has(ds)) n++; d.setUTCDate(d.getUTCDate() + 1); }
-    const raw = Math.max(0, Math.round((new Date(t) - new Date(l.date_due)) / 864e5));
-    assert.equal(l.daysLate, Math.max(0, raw - n), 'дни забава за инв. № ' + l.inv_number);
+    const start = new Date(l.date_due + 'T00:00:00Z');
+    for (let i = 0; isOff(start) && i < 400; i++) start.setUTCDate(start.getUTCDate() + 1);
+    const end = new Date(t + 'T00:00:00Z');
+    let expected = 0;
+    if (end > start) {
+      let n = 0; const d = new Date(start); d.setUTCDate(d.getUTCDate() + 1);
+      for (let i = 0; d <= end && i < 5000; i++) { if (isOff(d)) n++; d.setUTCDate(d.getUTCDate() + 1); }
+      expected = Math.max(0, Math.round((end - start) / 864e5) - n);
+    }
+    assert.equal(l.daysLate, expected, 'дни забава за инв. № ' + l.inv_number);
   }
 });
 
