@@ -20,7 +20,7 @@ for full detail.
 „Пламен Христов“. Лицензът и свойствата на инсталатора не са променени. Версията на
 базата не се вдига.
 
-**Проверено:** __TESTS__ `test/logo-v2470.test.js` проверява знака в лентата без реда с
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 459 теста в UTC и 2 459 в Europe/Sofia, 0 неуспешни**. `test/logo-v2470.test.js` проверява знака в лентата без реда с
 авторството и наръчника и README без прякора. В истински Chromium, свързан с истинския
 главен процес: знакът стои под „Автоматичен запис“, „Настройки“ показват „Създадено от
 Пламен Христов“; грешки в конзолата няма.
@@ -32,7 +32,7 @@ The handbook cover (HTML and PDF), README.md and electron-app/README.md now read
 "Пламен Христов". The licence and the installer properties are unchanged. The database
 version is not raised.
 
-**Verified:** __TESTS_EN__ `test/logo-v2470.test.js` checks the mark in the sidebar
+**Verified:** `npm run test:all` — all 8 checks pass: **2,459 tests in UTC and 2,459 in Europe/Sofia, 0 failed**. `test/logo-v2470.test.js` checks the mark in the sidebar
 without the authorship line, and the handbook and READMEs without the nickname. In real
 Chromium wired to the real main process: the mark sits under the autosave indicator and
 Settings show "Създадено от Пламен Христов"; no console errors.
