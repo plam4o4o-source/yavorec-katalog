@@ -18,7 +18,7 @@ for full detail.
 В „Настройки“, най-долу, остават знакът и „Създадено от Пламен Христов · GPL-3.0-or-later
 © 2026 · v<версия>“. Версията на базата не се вдига.
 
-**Проверено:** __TESTS__ `test/logo-v2470.test.js` проверява, че лентата е без
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 459 теста в UTC и 2 459 в Europe/Sofia, 0 неуспешни**. `test/logo-v2470.test.js` проверява, че лентата е без
 авторството, а „Настройки“ — с „Създадено от Пламен Христов“. В истински Chromium,
 свързан с истинския главен процес: лентата свършва с „Автоматичен запис“, а
 „Настройки“ показват знака и реда с авторството; грешки в конзолата няма.
@@ -28,7 +28,7 @@ shows the developer mark and the "Created by …" line — it is for work. Setti
 bottom, keep the mark and "Създадено от Пламен Христов · GPL-3.0-or-later © 2026 ·
 v<version>". The database version is not raised.
 
-**Verified:** __TESTS_EN__ `test/logo-v2470.test.js` checks the sidebar has no
+**Verified:** `npm run test:all` — all 8 checks pass: **2,459 tests in UTC and 2,459 in Europe/Sofia, 0 failed**. `test/logo-v2470.test.js` checks the sidebar has no
 authorship and Settings show "Създадено от Пламен Христов". In real Chromium wired to
 the real main process: the sidebar ends with the autosave indicator and Settings show
 the mark and the authorship line; no console errors.
