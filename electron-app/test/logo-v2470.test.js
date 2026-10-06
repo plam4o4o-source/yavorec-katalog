@@ -38,7 +38,9 @@ test('знакът стои до авторството: „Настройки�
   assert.match(badge, /APP_CREDIT_TEXT = 'Създадено от Пламен Христов · GPL-3\.0-or-later © '/);
   assert.doesNotMatch(badge + read(APP_DIR, 'src', 'views', 'settings.js'), /Пачо/, 'в програмата — без прякора');
   const n = read(ROOT, 'docs', 'narachnik.html');
-  assert.match(n, /Автор на програмата: Пламен Христов - Пачо[^<]*<\/div>\s*<img class="devlogo" src="assets\/dev-logo\.png"/);
+  /* v2.4.79 (по искане на автора): наръчникът и README — без прякора. Променено нарочно. */
+  assert.match(n, /Автор на програмата: Пламен Христов ·[^<]*<\/div>\s*<img class="devlogo" src="assets\/dev-logo\.png" alt="Пламен Христов">/);
+  assert.doesNotMatch(n + read(ROOT, 'README.md') + read(APP_DIR, 'README.md'), /Пачо/, 'наръчникът и README — без прякора');
   assert.match(read(ROOT, 'README.md'), /## Автор\s+<img src="docs\/assets\/dev-logo\.png"/);
   assert.match(read(APP_DIR, 'src', 'style.css'), /\.devCredit img\{/);
 });
