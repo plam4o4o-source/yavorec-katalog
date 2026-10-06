@@ -278,6 +278,31 @@ jobs:
 
           echo "GitHub Release updated successfully."
 
+      # Tells invlib.com (site-inventar) that the scan result is now on the
+      # release. release-electron.yml already pinged it when the build finished,
+      # but this scan only starts after that and takes a few minutes, so the site
+      # read the release first and showed "scan in progress" until its next
+      # scheduled run, hours later. Same secret and same event as there; without
+      # the secret this is a no-op, and a failure here never fails the scan.
+      - name: Notify invlib.com that the scan result is in
+        if: success()
+        continue-on-error: true
+        env:
+          DISPATCH_TOKEN: ${{ secrets.SITE_INVENTAR_DISPATCH_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::notice::SITE_INVENTAR_DISPATCH_TOKEN is not set — invlib.com will pick the scan up on its schedule."
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/plam4o4o-source/site-inventar/dispatches \
+            -d "{\"event_type\":\"app-released\",\"client_payload\":{\"tag\":\"$RELEASE_TAG\",\"reason\":\"virustotal\"}}"
+          echo "invlib.com notified: VirusTotal result for $RELEASE_TAG is published."
+
       - name: Upload scan report as GitHub artifact
         uses: actions/upload-artifact@v4
         with:
