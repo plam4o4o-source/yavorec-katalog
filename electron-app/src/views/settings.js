@@ -414,7 +414,7 @@ async function renderSetup() {
         <button type="button" class="btn pri" onclick="reportBug()">Съобщи за грешка…</button>
         <button type="button" class="btn" onclick="copyDevEmail()">Копирай имейла</button>
       </div>`)}
-    <div class="devCredit"><img src="assets/dev-logo.png" alt="Пламен Христов - Пачо">
+    <div class="devCredit"><img src="assets/dev-logo.png" alt="Пламен Христов">
       <div class="hint" style="font-family:var(--mono);font-size:10.5px">${esc(APP_CREDIT_TEXT)}</div></div>
     </section>
 
