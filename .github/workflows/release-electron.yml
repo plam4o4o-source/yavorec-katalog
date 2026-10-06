@@ -223,3 +223,36 @@ jobs:
           if ((Get-Item $env:RELEASE_NOTES_FILE).Length -eq 0) { Write-Host 'Няма раздел в CHANGELOG.md — пропуска се.'; exit 0 }
           gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file $env:RELEASE_NOTES_FILE
           Write-Host 'Описанието на изданието е обновено от CHANGELOG.md.'
+
+      # Последна стъпка: казва на invlib.com (хранилището site-inventar), че
+      # има ново издание. Там .github/workflows/sync-release.yml слуша за
+      # repository_dispatch „app-released“ и обновява версията, връзките за
+      # изтегляне и списъка с промени веднага, вместо да чака графика си
+      # (той е ежечасен, но GitHub пуска планираните задачи средно на ~5 ч).
+      #
+      # Изисква secret SITE_INVENTAR_DISPATCH_TOKEN: fine-grained token само за
+      # plam4o4o-source/site-inventar с право „Contents: Read and write“
+      # (толкова иска POST /repos/{owner}/{repo}/dispatches). Без него стъпката
+      # само отбелязва това и излиза успешно — сайтът се обновява по графика,
+      # както досега. continue-on-error: грешка тук никога не проваля
+      # изданието, което вече е публикувано.
+      - name: Съобщава на invlib.com за новото издание
+        if: success()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          DISPATCH_TOKEN: ${{ secrets.SITE_INVENTAR_DISPATCH_TOKEN }}
+        run: |
+          if (-not $env:DISPATCH_TOKEN) {
+            Write-Host '::notice::SITE_INVENTAR_DISPATCH_TOKEN не е зададен — invlib.com ще се обнови по графика си.'
+            exit 0
+          }
+          $body = @{ event_type = 'app-released'; client_payload = @{ tag = $env:RELEASE_TAG } } | ConvertTo-Json -Compress
+          $headers = @{
+            Authorization          = "Bearer $env:DISPATCH_TOKEN"
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          Invoke-RestMethod -Method Post -Uri 'https://api.github.com/repos/plam4o4o-source/site-inventar/dispatches' `
+            -Headers $headers -Body $body -ContentType 'application/json'
+          Write-Host "invlib.com е уведомен за $env:RELEASE_TAG."
