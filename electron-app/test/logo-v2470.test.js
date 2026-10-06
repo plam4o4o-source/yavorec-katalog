@@ -28,19 +28,23 @@ test('знакът е PNG с прозрачен фон — в програмат
 });
 
 test('знакът стои до авторството: „Настройки“, наръчникът, README', () => {
-  /* v2.4.79 (по искане на автора): страничната лента вече не носи нито знака, нито
-     „Създадено от …“ — авторството стои само в „Настройки“, като „Създадено от
-     Пламен Христов“. Променено нарочно. */
+  /* По искане на автора: v2.4.79 махна от страничната лента реда „Създадено от …“
+     (остава само в „Настройки“ като „Създадено от Пламен Христов“), а v2.4.80 върна
+     в лентата знака — без реда с името. Променено нарочно. */
   const index = read(APP_DIR, 'src', 'index.html');
-  assert.doesNotMatch(index, /dev-logo\.png|id="appCredit"|Създадено от/, 'лентата е без авторството');
+  assert.match(index, /<div class="railFoot">[\s\S]*?<img class="devLogo" src="assets\/dev-logo\.png" alt="Пламен Христов"[^>]*>\s*<\/div>/, 'знакът е в дъното на лентата');
+  assert.doesNotMatch(index, /id="appCredit"|Създадено от|Пачо/, 'лентата е без реда с авторството');
   assert.match(read(APP_DIR, 'src', 'views', 'settings.js'), /<div class="devCredit"><img src="assets\/dev-logo\.png" alt="Пламен Христов">[\s\S]{0,200}APP_CREDIT_TEXT/);
   const badge = read(APP_DIR, 'src', 'views', 'employee-badge.js');
   assert.match(badge, /APP_CREDIT_TEXT = 'Създадено от Пламен Христов · GPL-3\.0-or-later © '/);
   assert.doesNotMatch(badge + read(APP_DIR, 'src', 'views', 'settings.js'), /Пачо/, 'в програмата — без прякора');
   const n = read(ROOT, 'docs', 'narachnik.html');
-  assert.match(n, /Автор на програмата: Пламен Христов - Пачо[^<]*<\/div>\s*<img class="devlogo" src="assets\/dev-logo\.png"/);
+  /* v2.4.79 (по искане на автора): наръчникът и README — без прякора. Променено нарочно. */
+  assert.match(n, /Автор на програмата: Пламен Христов ·[^<]*<\/div>\s*<img class="devlogo" src="assets\/dev-logo\.png" alt="Пламен Христов">/);
+  assert.doesNotMatch(n + read(ROOT, 'README.md') + read(APP_DIR, 'README.md'), /Пачо/, 'наръчникът и README — без прякора');
   assert.match(read(ROOT, 'README.md'), /## Автор\s+<img src="docs\/assets\/dev-logo\.png"/);
   assert.match(read(APP_DIR, 'src', 'style.css'), /\.devCredit img\{/);
+  assert.match(read(APP_DIR, 'src', 'style.css'), /\.devLogo\{/);
 });
 
 test('знакът влиза в инсталатора', () => {

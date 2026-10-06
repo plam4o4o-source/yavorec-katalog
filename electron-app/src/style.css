@@ -292,6 +292,7 @@ body{
   #rail .brandMark{padding:8px 9px}
   #rail .brandSub{margin-top:5px}
   #rail .railFoot{padding:9px 16px}
+  #rail .devLogo{height:20px; margin-top:6px}
   #rail .savedIndicator{margin-top:4px}
 }
 /* Скролбарът на тъмната лента — тънък и в нейните цветове, вместо системния сив.
@@ -966,7 +967,10 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .userBadge:hover{background:var(--paper3); border-color:var(--brassD); box-shadow:var(--sh)}
 /* Докато служителят не е избран — приглушено, за да личи, че е подкана */
 .userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
-/* Знакът на разработчика до реда с авторството — само в „Настройки“ (v2.4.79). */
+/* Знакът на разработчика (v2.4.70) — малък, в дъното на лентата; златото се чете и
+   на тъмната, и на светлата лента, затова не се оцветява по темата. Редът с
+   авторството е само в „Настройки“ (v2.4.79). */
+.devLogo{display:block; height:26px; width:auto; margin:10px auto 0; opacity:.95}
 .devCredit{display:flex; align-items:center; gap:10px; margin-top:20px}
 .devCredit img{height:34px; width:auto; flex:0 0 auto}
 .savedIndicator{font-size:11px; color:var(--spineDim); margin-top:8px; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px}

@@ -11,6 +11,32 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.80
+
+**BG:** **Знакът на създателя — обратно в менюто; „Пламен Христов“ без прякора.** По искане
+на автора в дъното на страничната лента отново стои знакът на разработчика, но без реда с
+името и версията (той остава само в „Настройки“ — „Създадено от Пламен Христов · …“). На
+корицата на наръчника (HTML и PDF), в README.md и в electron-app/README.md вече пише
+„Пламен Христов“. Лицензът и свойствата на инсталатора не са променени. Версията на
+базата не се вдига.
+
+**Проверено:** `npm run test:all` — и 8-те проверки минават: **2 459 теста в UTC и 2 459 в Europe/Sofia, 0 неуспешни**. `test/logo-v2470.test.js` проверява знака в лентата без реда с
+авторството и наръчника и README без прякора. В истински Chromium, свързан с истинския
+главен процес: знакът стои под „Автоматичен запис“, „Настройки“ показват „Създадено от
+Пламен Христов“; грешки в конзолата няма.
+
+**EN:** **The creator's mark back in the menu; "Пламен Христов" without the nickname.** At
+the author's request the developer mark is back at the bottom of the sidebar, without the
+name and version line (that stays only in Settings — "Създадено от Пламен Христов · …").
+The handbook cover (HTML and PDF), README.md and electron-app/README.md now read
+"Пламен Христов". The licence and the installer properties are unchanged. The database
+version is not raised.
+
+**Verified:** `npm run test:all` — all 8 checks pass: **2,459 tests in UTC and 2,459 in Europe/Sofia, 0 failed**. `test/logo-v2470.test.js` checks the mark in the sidebar
+without the authorship line, and the handbook and READMEs without the nickname. In real
+Chromium wired to the real main process: the mark sits under the autosave indicator and
+Settings show "Създадено от Пламен Христов"; no console errors.
+
 ## v2.4.79
 
 **BG:** **Авторството — само в „Настройки“.** По искане на автора страничната лента с
