@@ -127,11 +127,20 @@ function readerStatus(r, validUntil, today) {
   if (!validUntil || validUntil < today) return 'expired';
   return 'active';
 }
+/* v2.4.81: към всяко отворено заемане — `canRenew` (може ли читателят да го
+   удължи от приложението; смята се с opts.canRenew — вратата renewGate от
+   handlers/loans.js, същата като на гишето; без подадена функция е false, тоест
+   приложението праща читателя на гишето), а към читателя — `history`: до 200
+   ПРИКЛЮЧЕНИ заемания (date_in NOT NULL, най-новите първи). Историята е само
+   за читатели, които и без това са в снимката, и носи само документа и
+   датите — нищо ново от картона. */
+const HISTORY_LIMIT = 200;
 function buildSnapshot(db, settings, nowIso, opts) {
   const { isEncryptedField } = require('./pii-crypto');
   const s = settings || {};
   const now = nowIso || new Date().toISOString();
   const today = require('./local-date').localDate();
+  const canRenew = opts && typeof opts.canRenew === 'function' ? opts.canRenew : () => false;
   const readers = db.prepare(`
     SELECT id, card_no, name, category, registered_at, re_registered_at, status, suspended_until,
            online_pin_hash
@@ -139,10 +148,16 @@ function buildSnapshot(db, settings, nowIso, opts) {
      WHERE online_consent = 1 AND online_pin_hash IS NOT NULL AND TRIM(online_pin_hash) <> ''
      ORDER BY id`).all();
   const loansByReader = db.prepare(`
-    SELECT l.id, l.reader_id, l.date_out, l.date_due, l.renewals, b.inv_number, b.title, b.author
+    SELECT l.id, l.reader_id, l.book_id, l.date_out, l.date_due, l.date_in, l.renewals, b.inv_number, b.title, b.author
       FROM loans l JOIN books b ON b.id = l.book_id
      WHERE l.reader_id = ? AND l.date_in IS NULL AND (l.lost IS NULL OR l.lost = 0)
      ORDER BY l.date_due, l.id`);
+  const historyByReader = db.prepare(`
+    SELECT l.id, l.date_out, l.date_in, b.inv_number, b.title, b.author
+      FROM loans l JOIN books b ON b.id = l.book_id
+     WHERE l.reader_id = ? AND l.date_in IS NOT NULL
+     ORDER BY l.date_in DESC, l.id DESC
+     LIMIT ${HISTORY_LIMIT}`);
   const act = verifyActivation(s.online_activation, null, opts);
   return {
     library: act.ok ? act.lib : '',   // кодът на библиотеката идва само от подписания код за активация
@@ -169,7 +184,16 @@ function buildSnapshot(db, settings, nowIso, opts) {
           author: l.author || '',
           dateOut: l.date_out,
           dateDue: l.date_due,
-          renewals: l.renewals || 0
+          renewals: l.renewals || 0,
+          canRenew: (() => { try { return !!canRenew(l); } catch (e) { return false; } })()
+        })),
+        history: historyByReader.all(r.id).map(l => ({
+          loanId: String(l.id),
+          inv: l.inv_number,
+          title: l.title || '',
+          author: l.author || '',
+          dateOut: l.date_out,
+          dateIn: l.date_in
         }))
       };
     })
@@ -179,7 +203,9 @@ function buildSnapshot(db, settings, nowIso, opts) {
 /* ---------------- Изпращане ----------------
    Никога не хвърля — резултатът отива в online_last_error и в дневника, а не
    в диалог пред библиотекаря (изпращането е фоново). 20 секунди таван: по
-   бавна връзка в читалище заявката не бива да виси до безкрай. */
+   бавна връзка в читалище заявката не бива да виси до безкрай.
+   При успех връща и `requests` — заявките на читателите от отговора на моста
+   (виж бележката долу). */
 const SEND_TIMEOUT_MS = 20000;
 async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
   const base = String(bridgeUrl || '').trim().replace(/\/+$/, '');
@@ -202,7 +228,16 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
       signal: ctrl.signal
     });
     const status = res.status;
-    if (res.ok) return { ok: true, status, error: null };
+    if (res.ok) {
+      /* v2.4.81: отговорът на моста носи заявките на читателите (засега само
+         „удължи“) — handlers/online-access.js ги обработва след всяко успешно
+         изпращане. Тяло, което не е JSON или няма масив requests, значи „няма
+         заявки“, не грешка. */
+      let requests = [];
+      try { const j = await res.json(); if (j && Array.isArray(j.requests)) requests = j.requests; }
+      catch (e) { /* мост без заявки или с празно тяло */ }
+      return { ok: true, status, error: null, requests };
+    }
     let detail = '';
     try { const j = await res.json(); detail = j && (j.message || j.error) ? String(j.message || j.error) : ''; }
     catch (e) { /* тялото не е JSON — стига кодът */ }
@@ -222,6 +257,6 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
 }
 
 module.exports = {
-  ACTIVATION_PUBLIC_KEY_B64, PIN_LENGTH, SEND_TIMEOUT_MS,
+  ACTIVATION_PUBLIC_KEY_B64, PIN_LENGTH, SEND_TIMEOUT_MS, HISTORY_LIMIT,
   generatePin, hashPin, verifyPin, verifyActivation, buildSnapshot, sendSnapshot, addOneYear
 };

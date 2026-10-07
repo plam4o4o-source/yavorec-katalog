@@ -120,6 +120,23 @@ test('флагът „налична" (av) отчита статуса, а не 
   assert.equal(byInv[23].av, 0, 'документ за реставрация не е на рафта');
 });
 
+/* v2.4.81: ISBN излиза в katalog.json (ключ `i`), нормализиран — само цифри и X.
+   Дотук SELECT-ът на товара не теглеше books.isbn и publicBookFields нямаше ключ
+   за него, тоест сайтът и приложението виждаха „празен ISBN“ за всяка книга. */
+test('ISBN излиза в katalog.json като `i` — само цифри и X; без ISBN — празен низ', async () => {
+  clearBooks();
+  const id1 = addBook({ inv_number: 31, title: 'С ISBN-13' });
+  const id2 = addBook({ inv_number: 32, title: 'С ISBN-10 и X' });
+  const id3 = addBook({ inv_number: 33, title: 'Без ISBN' });
+  db.prepare('UPDATE books SET isbn = ? WHERE id = ?').run('978-954-09-1234-5', id1);
+  db.prepare('UPDATE books SET isbn = ? WHERE id = ?').run(' isbn 954-01-1234-x ', id2);
+  assert.equal((await writeCatalog()).ok, true);
+  const byInv = Object.fromEntries(readKatalog().items.map(i => [i.inv, i]));
+  assert.equal(byInv[31].i, '9789540912345');
+  assert.equal(byInv[32].i, '954011234X');
+  assert.equal(byInv[33].i, '');
+});
+
 /* v2.4.69 (кръг 44, К1): предпазителят спира и РЯЗКО СВИВАНЕ (под половината
    от публикуваното), не само празен товар. Тестовете в този файл сменят фонда
    изцяло между проверките (3 публикувани → 1), тоест точно случая, който

@@ -414,6 +414,25 @@ type OnlineStatus =
     lastSync: string | null; lastError: string | null; consentingReaders: number; pending: boolean;
   };
 
+/** Отговор към моста за заявка на читател от мобилното приложение (v2.4.81,
+    processRequests в handlers/online-access.js): „удължи“ е изпълнено или отказано
+    с кратка причина на български. Пази се в online_request_results, за да е
+    отговорът същият при повторно получена заявка. */
+type OnlineRequestResult =
+  | { id: string; status: 'done' }
+  | { id: string; status: 'rejected'; reason: string };
+/** Отворено заемане в снимката за моста (buildSnapshot в online-access.js). */
+interface OnlineSnapshotLoan {
+  loanId: string; inv: number | null; title: string; author: string;
+  dateOut: IsoDate; dateDue: IsoDate | null; renewals: number;
+  /** Може ли читателят да го удължи от приложението — renewGate в handlers/loans.js. */
+  canRenew: boolean;
+}
+/** Приключено заемане от историята на читателя в снимката (до 200, най-новите първи). */
+interface OnlineSnapshotHistoryItem {
+  loanId: string; inv: number | null; title: string; author: string; dateOut: IsoDate; dateIn: IsoDate;
+}
+
 /** Колона от Дневника (DNEVNIK_FIELDS в handlers/dnevnik.js) — 30 в Раздел А и 36 в Раздел Б. */
 type DnevnikField =
   | 'a_hours' | 'a_age_u14' | 'a_age_15_18' | 'a_age_19_28' | 'a_age_o28'

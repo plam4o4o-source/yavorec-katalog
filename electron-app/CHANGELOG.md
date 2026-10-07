@@ -11,6 +11,79 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.81
+
+**BG:** **Онлайн достъп за читатели: история на заеманията, „Удължи“ от приложението и
+ISBN в публичния каталог.** Всичко за мобилното приложение е само при активиран онлайн
+достъп (код за активация) — за всяка друга библиотека програмата е същата като досега.
+Версията на базата не се вдига.
+
+- **Снимката към моста** носи за всеки вече включен читател `history` — до 200 приключени
+  заемания (най-новите първи; документ и дати, нищо ново от картона), а всяко отворено
+  заемане — `canRenew`: може ли читателят да го удължи от приложението. Преценката е
+  СЪЩАТА врата, през която минава „Продължи“ на гишето (`renewGate` в
+  `handlers/loans.js`): броят продължения по правилото за категорията, резервация от друг
+  читател без свободна бройка. Просрочено заемане гишето продължава (и начислява
+  забавата), приложението — не: обезщетение и наказание не се налагат без библиотекар.
+- **Заявки „Удължи“.** Отговорът на моста при всяко изпращане носи заявките на читателите;
+  всяка се проверява наново (заемането е негово, отворено, вратата го пуска) и се
+  изпълнява точно както на гишето: нов срок от по-късната от двете дати + дните за
+  продължение, до работен ден; `renewals + 1`; събитие „подновяване“; ред в одитната следа
+  „Удължено от приложението“ с документа и читателя. Отказът е с кратка причина
+  (достигнат максимален брой удължавания / книгата е запазена от друг читател / просрочена /
+  не е намерена). Резултатите тръгват веднага с ново изпращане (`requestResults` + обновените
+  заемания) и се пазят в новата таблица `online_request_results`, за да е обработката
+  идемпотентна: повторно получена заявка получава същия отговор, без второ удължаване и без
+  ново изпращане.
+- **ISBN в `katalog.json`.** Сайтът и приложението чакаха ключ `i`, а товарът не го носеше
+  изобщо: `books.isbn` съществува, но заявката за каталога не го теглеше и
+  `publicBookFields` нямаше ключ за него — „празен ISBN за всяка книга“. Вече излиза
+  нормализиран (само цифри и X), както го търси четецът на баркодове.
+
+**Проверено:** `npm run typecheck` минава; `node --test` — **__N__ теста, 0 неуспешни**.
+Нови тестове: снимката с `canRenew`, `history` (до 200, най-новите първи) и заявките на
+моста (`test/online-access.test.js`); гишето (circ-rules, holds, calendar, loans)
+регистрирано наистина и онлайн модулът през същата обвивка като в `main.js` —
+`canRenew` по лимит/резервация/просрочено, изпълнена заявка със следа и незабавен отговор,
+всички откази, идемпотентност, нищо без активация и без обвивка
+(`test/handlers-online-access.test.js`); ISBN като `i` в `katalog.json`
+(`test/main-catalog-norms.test.js`).
+
+**EN:** **Online reader access: loan history, "Renew" from the app, and ISBN in the public
+catalogue.** Everything for the mobile app runs only with online access activated
+(activation code) — for any other library the program is unchanged. The database version is
+not raised.
+
+- **The snapshot sent to the bridge** carries, for every reader already included, `history` —
+  up to 200 closed loans (newest first; document and dates only, nothing new from the card) —
+  and for every open loan `canRenew`: whether the reader may renew it from the app. The
+  decision is the SAME gate the desktop "Renew" goes through (`renewGate` in
+  `handlers/loans.js`): the renewal count from the category rule, a hold by another reader with
+  no free copy. An overdue loan the desk renews (charging the fine); the app does not —
+  compensation and suspension are not imposed without a librarian.
+- **"Renew" requests.** The bridge's reply to each sync carries the readers' requests; each is
+  re-checked (the loan is theirs, open, and passes the gate) and executed exactly as at the
+  desk: new due date from the later of the two dates + the extension days, moved to a working
+  day; `renewals + 1`; a "renewal" event; an audit entry "Удължено от приложението" with the
+  document and the reader. A rejection carries a short Bulgarian reason (max renewals reached /
+  held by another reader / overdue / not found). Results go out at once in a follow-up sync
+  (`requestResults` + the updated loans) and are stored in the new `online_request_results`
+  table so processing is idempotent: a request received again gets the same answer, with no
+  second renewal and no extra sync.
+- **ISBN in `katalog.json`.** The site and the app expected an `i` key, but the payload never
+  carried it: `books.isbn` exists, yet the catalogue query did not select it and
+  `publicBookFields` had no key for it — "empty ISBN for every book". It is now exported
+  normalised (digits and X only), as the barcode reader searches for it.
+
+**Verified:** `npm run typecheck` passes; `node --test` — **__N__ tests, 0 failed**. New
+tests: the snapshot with `canRenew`, `history` (up to 200, newest first) and the bridge's
+requests (`test/online-access.test.js`); the real desk modules (circ-rules, holds, calendar,
+loans) registered and the online module wired through the same wrapper as in `main.js` —
+`canRenew` by limit/hold/overdue, an executed request with audit entry and immediate reply,
+every rejection, idempotency, nothing without activation or without the wrapper
+(`test/handlers-online-access.test.js`); ISBN as `i` in `katalog.json`
+(`test/main-catalog-norms.test.js`).
+
 ## v2.4.80
 
 **BG:** **Знакът на създателя — обратно в менюто; „Пламен Христов“ без прякора.** По искане

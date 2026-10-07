@@ -125,8 +125,8 @@ function seed(db) {
   const b3 = book(158, 'Чичовци', 'Иван Вазов');
   const loan = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due, date_in, renewals, lost) VALUES (?, ?, ?, ?, ?, ?, ?)');
   ids.openLoan = loan.run(ids.active, b1, '2026-09-12', '2026-10-03', null, 0, null).lastInsertRowid;
-  loan.run(ids.active, b2, '2026-08-01', '2026-08-31', '2026-08-20', 1, null);   // върната — не влиза
-  loan.run(ids.active, b3, '2026-07-01', '2026-07-31', '2026-09-01', 0, 1);      // изгубена (затворена) — не влиза
+  ids.returnedLoan = loan.run(ids.active, b2, '2026-08-01', '2026-08-31', '2026-08-20', 1, null).lastInsertRowid;   // върната — не влиза в loans, влиза в history
+  ids.lostLoan = loan.run(ids.active, b3, '2026-07-01', '2026-07-31', '2026-09-01', 0, 1).lastInsertRowid;          // изгубена (затворена) — не влиза в loans
   return ids;
 }
 
@@ -154,8 +154,16 @@ test('buildSnapshot: само читатели със съгласие И ПИН
   assert.match(a.pinHash, /^scrypt\$16384\$8\$1\$/);
   assert.deepEqual(a.loans, [{
     loanId: String(ids.openLoan), inv: 156, title: 'Под игото', author: 'Иван Вазов',
-    dateOut: '2026-09-12', dateDue: '2026-10-03', renewals: 0
+    dateOut: '2026-09-12', dateDue: '2026-10-03', renewals: 0,
+    canRenew: false   // без подадена врата (opts.canRenew) — „на гишето“
   }]);
+  /* v2.4.81: историята — само ПРИКЛЮЧЕНИТЕ заемания, най-новите първи (и
+     изгубеното е приключено с date_in); само документът и датите. */
+  assert.deepEqual(a.history, [
+    { loanId: String(ids.lostLoan), inv: 158, title: 'Чичовци', author: 'Иван Вазов', dateOut: '2026-07-01', dateIn: '2026-09-01' },
+    { loanId: String(ids.returnedLoan), inv: 157, title: 'Немили-недраги', author: 'Иван Вазов', dateOut: '2026-08-01', dateIn: '2026-08-20' }
+  ]);
+  assert.deepEqual(snap.readers.find(r => r.cardNumber === 'R-0003').history, []);
   assert.equal(snap.readers.find(r => r.cardNumber === 'R-0003').status, 'expired');
   assert.equal(snap.readers.find(r => r.cardNumber === 'R-0004').status, 'suspended');
   /* Нищо от чл. 42, ал. 3 не напуска компютъра. */
@@ -163,6 +171,44 @@ test('buildSnapshot: само читатели със съгласие И ПИН
   for (const secret of ['1234567890', 'ул. Х', '0888', 'egn', 'phone', 'address', 'email', 'id_card']) {
     assert.ok(!text.includes(secret), 'снимката не бива да съдържа: ' + secret);
   }
+});
+
+test('buildSnapshot: canRenew идва от подадената врата (opts.canRenew) с реда на заемането; грешка в нея = false', () => {
+  const db = freshDb();
+  const ids = seed(db);
+  const seen = [];
+  let snap = oa.buildSnapshot(db, {}, '2026-09-30T10:00:00Z', { canRenew: (l) => { seen.push(l); return true; } });
+  const a = snap.readers.find(r => r.cardNumber === 'R-0042');
+  assert.equal(a.loans[0].canRenew, true);
+  assert.equal(seen.length, 1);
+  /* Вратата получава онова, което ѝ трябва: читател, документ, срок, брой продължения. */
+  assert.equal(seen[0].reader_id, ids.active);
+  assert.ok(seen[0].book_id > 0);
+  assert.equal(seen[0].date_due, '2026-10-03');
+  assert.equal(seen[0].renewals, 0);
+  assert.equal(seen[0].date_in, null);
+  snap = oa.buildSnapshot(db, {}, '2026-09-30T10:00:00Z', { canRenew: () => { throw new Error('x'); } });
+  assert.equal(snap.readers.find(r => r.cardNumber === 'R-0042').loans[0].canRenew, false, 'грешка във вратата не спира снимката');
+});
+
+test('buildSnapshot: историята е до 200 приключени заемания, най-новите първи', () => {
+  const db = freshDb();
+  const ids = seed(db);
+  const b = db.prepare("INSERT INTO books (inv_number, title, author) VALUES (?, ?, ?)").run(900, 'Стара', 'Х').lastInsertRowid;
+  db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(b);
+  const ins = db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due, date_in) VALUES (?, ?, ?, ?, ?)');
+  for (let i = 0; i < 250; i++) {
+    const d = new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10);
+    ins.run(ids.active, b, d, d, d);
+  }
+  const a = oa.buildSnapshot(db, {}, '2026-09-30T10:00:00Z').readers.find(r => r.cardNumber === 'R-0042');
+  assert.equal(a.history.length, oa.HISTORY_LIMIT);
+  assert.equal(oa.HISTORY_LIMIT, 200);
+  assert.equal(a.history[0].dateIn, '2026-09-01', 'най-новото приключване е първо');
+  for (let i = 1; i < a.history.length; i++) assert.ok(a.history[i - 1].dateIn >= a.history[i].dateIn);
+  assert.equal(a.loans.length, 1, 'отворените заемания не са в историята');
+  const text = JSON.stringify(a.history);
+  for (const k of ['egn', 'phone', 'address', 'reader_id', 'fine']) assert.ok(!text.includes(k), 'историята не носи ' + k);
 });
 
 test('buildSnapshot: без нито един съгласил се читател — readers: [] (валидно; мостът трие данните)', () => {
@@ -187,7 +233,7 @@ test('sendSnapshot: заглавки и адрес по договора; 200 �
   const fetch = async (url, init) => { seen = { url, init }; return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
   const body = { library: 'yavorec', readers: [] };
   const r = await oa.sendSnapshot('https://chyavorec.org/api/invlib/', 'yavorec', 'KEY123', body, { fetch, version: '2.4.76' });
-  assert.deepEqual(r, { ok: true, status: 200, error: null });
+  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [] });
   assert.equal(seen.url, 'https://chyavorec.org/api/invlib/yavorec/sync');
   assert.equal(seen.init.method, 'POST');
   assert.equal(seen.init.headers.Authorization, 'Bearer KEY123');
@@ -195,6 +241,16 @@ test('sendSnapshot: заглавки и адрес по договора; 200 �
   assert.equal(seen.init.headers['User-Agent'], 'InvLib/2.4.76');
   assert.equal(seen.init.body, JSON.stringify(body));
   assert.ok(seen.init.signal, 'има сигнал за прекъсване (таймаут)');
+});
+
+test('sendSnapshot: заявките на читателите от отговора на моста; тяло без JSON или без масив = няма заявки', async () => {
+  const reqs = [{ id: 'q1', type: 'renew', readerId: '1', cardNumber: 'R-1', loanId: '5', inv: 156, at: '2026-09-30T10:00:00Z' }];
+  let r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, requests: reqs }) }) });
+  assert.deepEqual(r.requests, reqs);
+  r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => { throw new Error('not json'); } }) });
+  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [] });
+  r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ requests: 'x' }) }) });
+  assert.deepEqual(r.requests, []);
 });
 
 test('sendSnapshot: 401/403/413/422 и мрежова грешка — { ok:false }, никога не хвърля', async () => {
