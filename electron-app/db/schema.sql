@@ -732,6 +732,19 @@ CREATE TABLE IF NOT EXISTS mzs_requests (
 );
 
 -- Одитна следа — кой служител какво е извършил
+-- Резултати от заявките на читателите през мобилното приложение (v2.4.81,
+-- онлайн достъп). Мостът връща при всяко изпращане заявките „удължи“; всяка се
+-- обработва веднъж и резултатът ѝ (done | rejected + причина) остава тук, за да
+-- се отговори същото при повторно получаване, без второ удължаване. Инертна без
+-- код за активация — никой не пише в нея; версията на базата не се вдига
+-- (същото правило като колоните online_* в readers/settings).
+CREATE TABLE IF NOT EXISTS online_request_results (
+  id     TEXT PRIMARY KEY,     -- идентификаторът на заявката от моста
+  status TEXT NOT NULL,        -- done | rejected
+  reason TEXT,                 -- краткият отказ на български (при rejected)
+  at     TEXT NOT NULL         -- кога е обработена (ISO)
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   ts      TEXT DEFAULT (datetime('now')),

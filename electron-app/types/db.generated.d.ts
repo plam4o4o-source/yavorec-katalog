@@ -466,6 +466,13 @@ interface DbNoticeLog {
   channel: string | null;
   loans_count: number | null;
 }
+/** Ред от таблица `online_request_results`. */
+interface DbOnlineRequestResults {
+  id: string;
+  status: string;
+  reason: string | null;
+  at: string;
+}
 /** Ред от таблица `periodical_issues`. */
 interface DbPeriodicalIssues {
   id: number;

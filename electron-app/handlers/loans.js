@@ -297,6 +297,56 @@ function checkReaderMayBorrow(db, readerId) {
   return r;
 }
 
+/* МОЖЕ ЛИ ДА СЕ ПРОДЪЛЖИ — ЕДНА ВРАТА ЗА ГИШЕТО И ЗА ПРИЛОЖЕНИЕТО (v2.4.81).
+   =====================================================================
+   Мобилното приложение на читателя показва „Удължи“ само когато гишето би
+   позволило същото, и заявката му се проверява наново тук, при обработката.
+   Ако правилата стояха на две места, рано или късно щяха да се разминат —
+   читателят вижда бутон, а библиотеката отказва, или обратното.
+   Правилата: заемането е отворено; броят продължения по правилото за
+   категорията (circRule; 0 = без лимит, NULL = 2); резервация от друг читател
+   без свободна бройка за нея (срещу СВОБОДНИТЕ бройки, както при заемане —
+   виж бележката в loans:extend). Просроченото заемане гишето продължава
+   (и начислява забавата), а приложението — не: начисляване на обезщетение
+   и наказание без библиотекар не е работа на телефона; читателят идва на
+   гишето. `reason` е краткият отказ за приложението; `message` — изречението
+   за екрана на гишето (същото, което стоеше в loans:extend). */
+const RENEW_REASONS = {
+  closed: 'не е намерена',
+  max: 'достигнат максимален брой удължавания',
+  hold: 'книгата е запазена от друг читател',
+  overdue: 'просрочена'
+};
+/** @typedef {{ok: true, rule: any, max: number, used: number} | {ok: false, code: string, reason: string, message: string}} RenewGateResult */
+/** @param {any} l ред от loans (поне reader_id, book_id, date_in, date_due, renewals)
+    @param {{circRule: Function, readerCategory: Function, activeHolds: Function, freeCopies: Function, today: Function}} h
+    @param {{allowOverdue?: boolean}} [opts]
+    @returns {RenewGateResult} */
+function renewGate(l, h, opts) {
+  const deny = (code, message) => /** @type {RenewGateResult} */ ({ ok: false, code, reason: RENEW_REASONS[code], message });
+  if (!l || l.date_in) return deny('closed', 'Заемането не е активно.');
+  const rule = h.circRule(h.readerCategory(l.reader_id));
+  const max = rule.extensions_count == null ? 2 : rule.extensions_count; // 0 = без лимит
+  const used = l.renewals || 0;
+  if (max && used >= max) return deny('max', 'Достигнат е лимитът от ' + max + ' продължения за това заемане.');
+  /* Резервацията се преценява срещу СВОБОДНИТЕ бройки, точно както при заемане
+     (consumeHoldOnCheckout в handlers/holds.js). Дотогава тук стоеше проверка на
+     ниво заглавие: при 5 екземпляра, 1 зает и 1 резервация трети читател можеше
+     да вземе бройка от рафта, но държащият не можеше да продължи своята — двете
+     места се разминаваха, след като заемането мина на бройки. Продължението
+     отнема една бройка от наличните, затова се отказва само когато свободните не
+     стигат за чакащите пред този читател. */
+  const others = h.activeHolds(l.book_id).filter(x => x.reader_id !== l.reader_id);
+  if (others.length && h.freeCopies(l.book_id) < others.length) {
+    return deny('hold', 'Книгата е резервирана от ' + others[0].reader_name + ' и няма свободна бройка за нея — ' +
+      'срокът не може да се продължи.');
+  }
+  if (!(opts && opts.allowOverdue) && l.date_due && l.date_due < h.today()) {
+    return deny('overdue', 'Срокът е изтекъл — продължението става на гишето.');
+  }
+  return { ok: true, rule, max, used };
+}
+
 /** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerLoansHandlers(ipcMain, deps) {
   const {
@@ -920,6 +970,55 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
       };
     })
   );
+  /* Помощниците на renewGate (v2.4.81) — с резервните пътища, които loans:extend
+     и дотук имаше за по-стар main.js без activeHolds/freeCopies. */
+  const renewHelpers = {
+    circRule, readerCategory, today,
+    activeHolds: (bookId) => activeHolds ? activeHolds(bookId) : (firstActiveHold(bookId) ? [firstActiveHold(bookId)] : []),
+    freeCopies: (bookId) => freeCopies ? freeCopies(bookId) : 0
+  };
+  /* Новият срок при продължение. Тръгва от по-късната от двете дати — стария
+     срок и днес. Дотук стоеше само `l.date_due`, а бутонът „Продължи“ стои тъкмо
+     на екрана „Просрочени“, където всяко заемане е с изтекъл срок: заемане със
+     срок 15.01, продължено на 20.02, получаваше нов срок 14.02 — пак в
+     миналото. Програмата казваше, че срокът е продължен, книгата се връщаше в
+     списъка на просрочените още в същия миг, а едно от позволените продължавания
+     беше изхабено. */
+  function renewedDue(l, rule, t) {
+    return nextWorkDay(addDays((l.date_due && l.date_due > t) ? l.date_due : t, rule.extension_days || 30));
+  }
+  /* „Може ли да се удължи“ за снимката към мобилното приложение (v2.4.81) —
+     същата врата като гишето, без просрочено. */
+  function canRenew(l) {
+    return renewGate(l, renewHelpers).ok;
+  }
+  /* „УДЪЛЖИ“ ОТ МОБИЛНОТО ПРИЛОЖЕНИЕ (v2.4.81). Заявката идва през моста
+     (handlers/online-access.js) с номер на заемане и читател; тук се проверява
+     наново, че заемането е негово и че вратата го пуска, и се прави ТОЧНО
+     каквото прави гишето при продължение без забава: нов срок от по-късната
+     дата + дните за продължение по правилото, до работен ден, renewals + 1,
+     събитие „подновяване“ за статистиката и ред в одитната следа с документа
+     и читателя. Никога не хвърля — отказът е отговор към приложението, не
+     грешка на библиотекаря. Транзакцията е .immediate() по същата причина, по
+     която е и в loans:extend (двойно натискане = две паралелни продължения). */
+  function renewFromApp(loanId, readerId) {
+    const db = getDb();
+    const tx = db.transaction(() => {
+      const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(loanId);
+      if (!l || String(l.reader_id) !== String(readerId)) return { status: 'rejected', reason: RENEW_REASONS.closed };
+      const gate = renewGate(l, renewHelpers);
+      if (!gate.ok) return { status: 'rejected', reason: gate.reason };
+      const t = today();
+      const newDue = renewedDue(l, gate.rule, t);
+      db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, gate.used + 1, l.id);
+      logAudit('Удължено от приложението', 'инв. № ' + (l.inv_number ?? '—') + ' — ' + l.title
+        + '; ' + readerTrace({ name: l.reader_name, card_no: l.card_no })
+        + '; заемане № ' + l.id + ' до ' + bgDate(newDue) + ' (' + (gate.used + 1) + (gate.max ? '/' + gate.max : '') + ')');
+      logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
+      return { status: 'done', dateDue: newDue, renewals: gate.used + 1 };
+    });
+    return tx.immediate();
+  }
   /* Повторен одит v2.4.0 (реаудит): тук по-рано НЯМАШЕ db.transaction(...).immediate()
      изобщо — проверката на лимита от продължения (used >= max) и записа на новия
      renewals ставаха с две отделни, невзаимно заключени stmt-та. Двама читатели,
@@ -947,33 +1046,15 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
            инвентарния номер, името на читателя и картата му, без втора заявка:
            данните и без това се четат в същата транзакция. */
         const l = db.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(id);
-        if (!l || l.date_in) throw new Error('Заемането не е активно.');
-        const s = circRule(readerCategory(l.reader_id));
-        const max = s.extensions_count == null ? 2 : s.extensions_count; // 0 = без лимит
-        const used = l.renewals || 0;
-        if (max && used >= max) throw new Error('Достигнат е лимитът от ' + max + ' продължения за това заемане.');
-        /* Резервацията се преценява срещу СВОБОДНИТЕ бройки, точно както при заемане
-           (consumeHoldOnCheckout в handlers/holds.js). Дотогава тук стоеше проверка на
-           ниво заглавие: при 5 екземпляра, 1 зает и 1 резервация трети читател можеше
-           да вземе бройка от рафта, но държащият не можеше да продължи своята — двете
-           места се разминаваха, след като заемането мина на бройки. Продължението
-           отнема една бройка от наличните, затова се отказва само когато свободните не
-           стигат за чакащите пред този читател. */
-        const holds = activeHolds ? activeHolds(l.book_id) : (firstActiveHold(l.book_id) ? [firstActiveHold(l.book_id)] : []);
-        const others = holds.filter(x => x.reader_id !== l.reader_id);
-        const free = freeCopies ? freeCopies(l.book_id) : 0;
-        if (others.length && free < others.length) {
-          const h = others[0];
-          throw new Error('Книгата е резервирана от ' + h.reader_name + ' и няма свободна бройка за нея — ' +
-            'срокът не може да се продължи.');
-        }
-        /* Продължението тръгва от по-късната от двете дати — стария срок и днес.
-           Дотук стоеше само `l.date_due`, а бутонът „Продължи“ стои тъкмо на
-           екрана „Просрочени“, където всяко заемане е с изтекъл срок: заемане със
-           срок 15.01, продължено на 20.02, получаваше нов срок 14.02 — пак в
-           миналото. Програмата казваше, че срокът е продължен, книгата се връщаше
-           в списъка на просрочените още в същия миг, а едно от позволените
-           продължавания беше изхабено. */
+        /* Лимитът и резервацията се преценяват в renewGate (v2.4.81) — СЪЩАТА
+           врата, през която минава и „Удължи“ от мобилното приложение на
+           читателя, за да не се разминат двете места. Гишето позволява
+           продължение на просрочено заемане (начислява забавата по-долу);
+           приложението — не. */
+        const gate = renewGate(l, renewHelpers, { allowOverdue: true });
+        if (!gate.ok) throw new Error(gate.message);
+        const { rule: s, max, used } = gate;
+        /* Новият срок — renewedDue по-горе (от по-късната от двете дати). */
         const t = today();
         /* НАТРУПАНОТО СЕ УРЕЖДА, ПРЕДИ СРОКЪТ ДА СЕ ПРЕНАПИШЕ (одит v2.4.24).
            Дотук продължението само отместваше date_due — а бутонът „Продължи“ стои
@@ -1011,7 +1092,7 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
           }
           suspendedUntil = applySuspension(l.reader_id, l.date_due, t);
         }
-        const newDue = nextWorkDay(addDays((l.date_due && l.date_due > t) ? l.date_due : t, s.extension_days || 30));
+        const newDue = renewedDue(l, s, t);
         db.prepare('UPDATE loans SET date_due = ?, renewals = ? WHERE id = ?').run(newDue, used + 1, id);
         /* Следата назовава ДОКУМЕНТА и ЧИТАТЕЛЯ (v2.4.61): дотук гласеше само
            „заемане № 12 до 2026-10-15 (1/2)“ — номер на ред от база, който на
@@ -1832,7 +1913,9 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
   // неизвадените домейни "Табло" и "Просрочени: напомняния".
   // effectiveDaysLate се връща по същата причина: напомнянията трябва да искат
   // ТОЧНО сумата, която после ще се начисли на гишето (виж loans:overdueByReader).
-  return { LOAN_SELECT, effectiveDaysLate };
+  // canRenew/renewFromApp (v2.4.81) — за снимката и заявките на мобилното
+  // приложение (handlers/online-access.js получава обвивка от main.js).
+  return { LOAN_SELECT, effectiveDaysLate, canRenew, renewFromApp };
 };
 
 /* Закачени за самата експортирана функция, а не подадени през deps — точно както
@@ -1853,3 +1936,6 @@ module.exports.overdueForRows = overdueForRows;
    виж holds:add в handlers/holds.js. */
 module.exports.checkReaderMayBorrow = checkReaderMayBorrow;
 module.exports.checkReaderActive = checkReaderActive;
+/* Вратата „може ли да се продължи“ и кратките откази за приложението (v2.4.81). */
+module.exports.renewGate = renewGate;
+module.exports.RENEW_REASONS = RENEW_REASONS;

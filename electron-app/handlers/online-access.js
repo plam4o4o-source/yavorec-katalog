@@ -14,6 +14,17 @@
 // — така не влиза в общата форма на Настройки, в диференца на одитната следа
 // и в „Пълен износ“ по случайност; записва се само през online:updateSettings
 // и никога не се връща към екрана (status връща само дали е зададен).
+//
+// ЗАЯВКИ ОТ ЧИТАТЕЛИТЕ (v2.4.81). Отговорът на моста при всяко изпращане носи
+// requests: [{id, type:"renew", readerId, cardNumber, loanId, inv, at}] —
+// натиснатото „Удължи“ в приложението. Те се обработват веднага след успешното
+// изпращане с renewFromApp от handlers/loans.js (същата врата като гишето) и
+// резултатът {id, status:"done"|"rejected", reason} тръгва към моста с ново,
+// незабавно изпращане (requestResults + обновените заемания). Всеки резултат се
+// пази в online_request_results, за да е обработката идемпотентна: мостът може
+// да повтори заявка (мрежата е прекъснала преди отговора ни), а тя не бива да
+// удължи втори път — връща се същият резултат. Нищо от това не се вика без
+// код за активация: стои вътре в syncOnce, след activated().
 const {
   generatePin, hashPin, verifyActivation, buildSnapshot, sendSnapshot
 } = require('../online-access');
@@ -28,6 +39,14 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
   /* Само за тестовете: ключ, с който да се проверява кодът за активация, вместо
      вградения на разработчика. main.js не подава нищо тук. */
   const verifyOpts = deps.activationPublicKey ? { publicKey: deps.activationPublicKey } : undefined;
+  /* Вратата и действието за „Удължи“ (v2.4.81) идват от handlers/loans.js, който
+     main.js регистрира ПО-КЪСНО — затова се подават като обвивка и се четат чак
+     при изпращане. Без тях (по-стар main.js, отделни тестове) canRenew е false
+     и заявките не се обработват. */
+  const loanTools = () => {
+    try { const t = typeof deps.loanTools === 'function' ? deps.loanTools() : null; return t || null; }
+    catch (e) { return null; }
+  };
 
   function settingsRow() {
     return getDb().prepare(`SELECT lib_name, org, online_bridge_url, online_upload_key, online_activation,
@@ -60,9 +79,69 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
      Едно по едно: ако вече тече изпращане, второто изчаква края му и тръгва
      веднага след това (промяната, която го е насрочила, може да е станала
      след сглобяването на снимката). Никога не хвърля. */
+  /* ---------------- Заявки от читателите ----------------
+     Таблицата се създава и от schema.sql; тук — идемпотентно, за база, отворена
+     от по-стара станция в обща мрежова папка (същото правило като колоните
+     online_* в main.js: без вдигане на user_version). */
+  let requestTableChecked = null;
+  function ensureRequestTable(db) {
+    if (requestTableChecked === db) return;
+    db.exec(`CREATE TABLE IF NOT EXISTS online_request_results (
+      id     TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      reason TEXT,
+      at     TEXT NOT NULL
+    )`);
+    requestTableChecked = db;
+  }
+  /** @param {any[]} requests @returns {{ results: OnlineRequestResult[], fresh: number }} */
+  function processRequests(requests) {
+    const db = getDb();
+    ensureRequestTable(db);
+    const tools = loanTools();
+    const seen = db.prepare('SELECT id, status, reason FROM online_request_results WHERE id = ?');
+    const save = db.prepare('INSERT OR IGNORE INTO online_request_results (id, status, reason, at) VALUES (?, ?, ?, ?)');
+    const consentingReader = db.prepare(`SELECT id, card_no FROM readers WHERE id = ? AND online_consent = 1
+      AND online_pin_hash IS NOT NULL AND TRIM(online_pin_hash) <> ''`);
+    /** @type {OnlineRequestResult[]} */
+    const results = [];
+    let fresh = 0;
+    for (const r of requests) {
+      const id = r && r.id != null ? String(r.id) : '';
+      if (!id) continue;
+      const prev = seen.get(id);
+      if (prev) {
+        results.push(prev.status === 'done' ? { id, status: 'done' } : { id, status: 'rejected', reason: prev.reason || '' });
+        continue;
+      }
+      let out;
+      /* Читателят трябва да е от снимката (съгласие + ПИН) и картата — неговата:
+         заявка за чужд читател или с чужда карта не стига до заемането. */
+      const rd = r.readerId != null ? consentingReader.get(String(r.readerId)) : null;
+      const cardOk = rd && (!r.cardNumber || !rd.card_no || String(r.cardNumber) === String(rd.card_no));
+      if (r.type !== 'renew') out = { status: 'rejected', reason: 'непознат вид заявка' };
+      else if (!rd || !cardOk) out = { status: 'rejected', reason: 'не е намерена' };
+      else if (!tools || typeof tools.renewFromApp !== 'function') out = { status: 'rejected', reason: 'удължаването от приложението не е налично' };
+      else {
+        try { out = tools.renewFromApp(r.loanId, r.readerId); }
+        catch (err) {
+          log('error', '[онлайн достъп] заявка ' + id + ' не се обработи: ' + (err && err.message));
+          out = { status: 'rejected', reason: 'грешка при обработката' };
+        }
+      }
+      const done = out && out.status === 'done';
+      save.run(id, done ? 'done' : 'rejected', done ? null : String((out && out.reason) || ''), new Date().toISOString());
+      fresh++;
+      results.push(done ? { id, status: 'done' } : { id, status: 'rejected', reason: String((out && out.reason) || '') });
+    }
+    return { results, fresh };
+  }
+  const MAX_FOLLOWUPS = 3;   // отговор → нови заявки → отговор …: таван на веригата в едно изпращане
+
   let inFlight = null;
   let rerun = false;
-  async function syncOnce(reason) {
+  /** @param {string} reason @param {{ requestResults?: OnlineRequestResult[], depth?: number }} [extra] */
+  async function syncOnce(reason, extra) {
     const s = settingsRow();
     const act = activated(s);
     if (!act) return { ok: false, skipped: true, error: 'не е активирано' };
@@ -70,8 +149,12 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
       return { ok: false, skipped: true, error: 'няма адрес на моста или ключ за качване' };
     }
     let body;
-    try { body = buildSnapshot(getDb(), s, new Date().toISOString(), verifyOpts); }
-    catch (err) {
+    try {
+      const tools = loanTools();
+      body = buildSnapshot(getDb(), s, new Date().toISOString(),
+        Object.assign({}, verifyOpts || {}, tools && typeof tools.canRenew === 'function' ? { canRenew: tools.canRenew } : {}));
+      if (extra && extra.requestResults) body.requestResults = extra.requestResults;
+    } catch (err) {
       const msg = 'Снимката не можа да се сглоби: ' + (err && err.message ? err.message : String(err));
       try { setSyncResult(s.online_last_sync || null, msg); } catch (e) { /* базата е заета — ще се повтори */ }
       log('error', '[онлайн достъп] ' + msg);
@@ -84,6 +167,23 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     } catch (e) { log('error', '[онлайн достъп] резултатът не се записа: ' + e.message); }
     if (res.ok) log('info', '[онлайн достъп] изпратена снимка (' + reason + '): ' + body.readers.length + ' читатели');
     else log('error', '[онлайн достъп] изпращането (' + reason + ') не успя: ' + res.error);
+    /* Заявките от читателите (v2.4.81): обработват се и резултатът тръгва
+       веднага с ново изпращане. Повторно получени (вече обработени) заявки се
+       отговарят, но не пораждат ново изпращане — иначе мост, който ги задържа
+       до потвърждение, би въртял веригата до безкрай. */
+    if (res.ok && Array.isArray(res.requests) && res.requests.length) {
+      const depth = (extra && extra.depth) || 0;
+      let processed = null;
+      try { processed = processRequests(res.requests); }
+      catch (err) { log('error', '[онлайн достъп] заявките не се обработиха: ' + (err && err.message)); }
+      if (processed && processed.results.length) {
+        log('info', '[онлайн достъп] заявки от приложението: ' + processed.results.length + ' (нови: ' + processed.fresh + ')');
+        if (processed.fresh > 0 && depth < MAX_FOLLOWUPS) {
+          const again = await syncOnce('отговор на заявки', { requestResults: processed.results, depth: depth + 1 });
+          return Object.assign({}, res, { requests: [], followUp: again });
+        }
+      }
+    }
     return res;
   }
   function sync(reason) {

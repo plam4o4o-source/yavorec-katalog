@@ -2382,7 +2382,11 @@ require('./handlers/gdpr')(ipcMain, {
 const { scheduleOnlineSync, startOnlineTimer, stopOnlineTimer, onlineActivated } = require('./handlers/online-access')(ipcMain, {
   getDb: () => db, run, logAudit, today, createDebouncer,
   getVersion: () => app.getVersion(),
-  log: (level, msg) => logToFile(level, msg)
+  log: (level, msg) => logToFile(level, msg),
+  /* v2.4.81: „може ли да се удължи“ и „удължи от приложението“ идват от
+     handlers/loans.js, регистриран по-долу (const в TDZ дотогава) — обвивка,
+     която се чете чак при изпращане, както и scheduleOnlineSync по-горе. */
+  loanTools: () => ({ canRenew: canRenewLoan, renewFromApp: renewLoanFromApp })
 });
 
 /* ---------------- Календар на библиотеката ----------------
@@ -2447,7 +2451,7 @@ const { firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, freeCopies
    монолита main.js на модули по домейн) — един от "големите пет".
    LOAN_SELECT се връща обратно, защото го ползват и все още неизвадените
    домейни "Табло" и "Просрочени: напомняния". */
-const { LOAN_SELECT, effectiveDaysLate } = require('./handlers/loans')(ipcMain, {
+const { LOAN_SELECT, effectiveDaysLate, canRenew: canRenewLoan, renewFromApp: renewLoanFromApp } = require('./handlers/loans')(ipcMain, {
   getDb: () => db, run, logAudit, today, logEvent, BOOK_SELECT, scheduleCatalogWrite,
   circRule, readerCategory, nextWorkDay, closedDaysBetween,
   firstActiveHold, consumeHoldOnCheckout, activateHoldOnReturn, normalizeScanCode,
@@ -2621,7 +2625,7 @@ require('./handlers/stats')(ipcMain, { getDb: () => db, run, yearOf, value, dnev
 
 // Полетата и обвивката {library, place, generated, items} трябва да съвпадат ТОЧНО с
 // формàта, който `inventar-biblioteka.html` и страницата page-katalog.html на сайта вече
-// очакват (кратки ключове inv/a/t/s/c/p/y/v/l/u/g/o/k/n/cv/av) — сайтът чете това по
+// очакват (кратки ключове inv/a/t/s/c/p/y/v/l/u/g/o/k/n/cv/av/d/i) — сайтът чете това по
 // живо от GitHub и не знае нищо за схемата на Electron версията.
 /* opacMap: вътрешна стойност → публичен надпис от номенклатурите (opac_label).
    Навън не трябва да се вижда вътрешният жаргон — затова отделът и езикът минават
@@ -2660,8 +2664,18 @@ function publicBookFields(b, opacMap) {
     av: (b.available > 0 && b.status === 'наличен') ? 1 : 0,
     // d = дата на постъпване: страницата извежда „Нови постъпления" сама от нея.
     // Старите версии на страницата не познават ключа и просто го подминават.
-    d: b.register_date || ''
+    d: b.register_date || '',
+    /* i = ISBN (v2.4.81). Сайтът и мобилното приложение го чакаха, а дотук
+       товарът изобщо не го носеше: books.isbn съществува (и „Книги“ търси по
+       него), но SELECT-ът по-долу не го теглеше и publicBookFields нямаше ключ
+       за него — тоест „празен ISBN за всяка книга“. Излиза нормализиран —
+       само цифри и X — както го търси четецът на баркодове; книга без ISBN
+       носи празен низ, както всички останали текстови ключове. */
+    i: publicIsbn(b.isbn)
   };
+}
+function publicIsbn(v) {
+  return String(v || '').toUpperCase().replace(/[^0-9X]/g, '');
 }
 function buildCatalogPayload() {
   /* НЕ NULL-безопасно, и това е нарочно — виж бележката при catalog:status в
@@ -2691,6 +2705,7 @@ function buildCatalogPayload() {
   const books = db.prepare(`
     SELECT b.inv_number, b.author, b.title, b.subtitle, b.city, b.publisher, b.year, b.language,
            b.udk, b.call_number, b.author_mark, b.department, b.keywords, b.annotation, b.cover_url, b.status, b.register_date,
+           b.isbn,
            c.name AS category_name,
            COALESCE(i.quantity, 0) - COALESCE(o.n, 0) - COALESCE(hz.n, 0) - COALESCE(mz.n, 0) AS available
     FROM books b
