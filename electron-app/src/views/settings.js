@@ -455,7 +455,7 @@ async function loadOnlineBox() {
   if (sum) sum.textContent = 'активиран · ' + pl(st.consentingReaders, 'читател със съгласие', 'читатели със съгласие');
   const status = st.lastError
     ? `<div class="note w" style="margin:8px 0">⚠ Последното изпращане не успя: ${esc(st.lastError)}</div>`
-    : (st.lastSync ? `<div class="hint" style="margin:8px 0">Последно изпратено: ${esc(fmtIsoDateTime(st.lastSync))}.</div>`
+    : (st.lastSync ? `<div class="hint" style="margin:8px 0">Последно изпратено: ${esc(fmtIsoDateTime(st.lastSync))}${onlineUnchangedNote(st)}.</div>`
       : '<div class="hint" style="margin:8px 0">Още не е изпращано.</div>');
   el.innerHTML = `
     <div class="note" style="margin:0 0 10px">✅ Активиран за <b>${esc(st.name || st.lib)}</b> (код <code>${esc(st.lib)}</code>),
@@ -475,6 +475,14 @@ async function loadOnlineBox() {
     </div>`;
 }
 window.loadOnlineBox = loadOnlineBox;
+/* v2.4.83: последната връзка с моста е била „без промени“ (снимката е същата
+   като последната пълна и не е пътувала отново) — това също е успешно
+   изпращане; бележката казва и кога е тръгнала последната пълна снимка. */
+/** @param {{ lastSync: string | null, lastFull?: string | null }} st */
+function onlineUnchangedNote(st) {
+  if (!st.lastFull || !st.lastSync || st.lastFull === st.lastSync) return '';
+  return ' (без промени; последна пълна снимка: ' + esc(fmtIsoDateTime(st.lastFull)) + ')';
+}
 /* ISO момент (UTC, от online_last_sync) → местна дата и час за екрана. */
 function fmtIsoDateTime(iso) {
   const t = Date.parse(iso);

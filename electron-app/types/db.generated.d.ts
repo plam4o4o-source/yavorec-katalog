@@ -645,6 +645,9 @@ interface DbSettings {
   online_activation: string | null;
   online_last_sync: string | null;
   online_last_error: string | null;
+  online_last_hash: string | null;
+  online_last_full: string | null;
+  online_bridge_features: string | null;
   lbl_mt: number | null;
   lbl_ml: number | null;
   lbl_gx: number | null;

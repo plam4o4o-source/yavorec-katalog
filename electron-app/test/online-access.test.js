@@ -273,7 +273,11 @@ test('sendSnapshot: заглавки и адрес по договора; 200 �
   const fetch = async (url, init) => { seen = { url, init }; return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
   const body = { library: 'yavorec', readers: [] };
   const r = await oa.sendSnapshot('https://chyavorec.org/api/invlib/', 'yavorec', 'KEY123', body, { fetch, version: '2.4.76' });
-  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [] });
+  /* v2.4.83: и features/needFull от отговора (мост без тях → null/false — по
+     стария начин) и размерът на изпратеното тяло. */
+  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [], features: null, needFull: false,
+    bytes: Buffer.byteLength(JSON.stringify(body)) });
+  assert.equal(seen.init.headers['Content-Encoding'], undefined, 'без opts.gzip — чист JSON, без компресия');
   assert.equal(seen.url, 'https://chyavorec.org/api/invlib/yavorec/sync');
   assert.equal(seen.init.method, 'POST');
   assert.equal(seen.init.headers.Authorization, 'Bearer KEY123');
@@ -288,7 +292,7 @@ test('sendSnapshot: заявките на читателите от отгово
   let r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, requests: reqs }) }) });
   assert.deepEqual(r.requests, reqs);
   r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => { throw new Error('not json'); } }) });
-  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [] });
+  assert.deepEqual(r, { ok: true, status: 200, error: null, requests: [], features: null, needFull: false, bytes: 2 });
   r = await oa.sendSnapshot('https://x.org/api', 'lib', 'k', {}, { fetch: async () => ({ ok: true, status: 200, json: async () => ({ requests: 'x' }) }) });
   assert.deepEqual(r.requests, []);
 });

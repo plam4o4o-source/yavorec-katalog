@@ -576,6 +576,14 @@ function initDb() {
     online_last_sync: 'TEXT',
     online_last_error: 'TEXT'
   });
+  /* Лекото изпращане към моста (v2.4.83): отпечатъкът на последната пълна
+     снимка, моментът ѝ и обявените от моста features. Същото правило — без
+     вдигане на user_version; по-стара станция просто не ги чете. */
+  ensureColumns('settings', {
+    online_last_hash: 'TEXT',
+    online_last_full: 'TEXT',
+    online_bridge_features: 'TEXT'
+  });
 
   /* Изявленията от schema.sql, които не минаха при първия опит, се опитват пак —
      сега липсващите колони вече са добавени от блоковете ensureColumns() по-горе.
@@ -1708,6 +1716,21 @@ ipcMain.handle('app:checkForUpdates', /** @returns {IpcReply<'app:checkForUpdate
    тръгне второ копие насред изхода. */
 ipcMain.handle('app:installUpdate', /** @returns {IpcReply<'app:installUpdate'>} */ () => run(() => {
   stopAutoBackupTimer();
+  stopOnlineTimer();
+  /* Насроченото изпращане към моста (v2.4.83) — същото като в
+     'window-all-closed': тръгва веднага и се чака най-много
+     ONLINE_QUIT_FLUSH_MS, после обновяването продължава. Без нищо насрочено
+     пътят е синхронен, както досега. */
+  let pendingOnline = null;
+  try { pendingOnline = flushOnlineSyncOnQuit(ONLINE_QUIT_FLUSH_MS); }
+  catch (err) { logToFile('error', 'Изпращането към моста преди обновяването — грешка: ' + err.message); }
+  if (pendingOnline) {
+    pendingOnline.then(finishInstallUpdate, finishInstallUpdate);
+    return;
+  }
+  finishInstallUpdate();
+}));
+function finishInstallUpdate() {
   /* Насроченият запис на онлайн каталога — също ПРЕДИ изхода, както в
      'window-all-closed' (v2.4.71, след С19): акт или заемане в последните
      секунди иначе оставаше невидимо в katalog.json до следващото пускане на
@@ -1719,7 +1742,7 @@ ipcMain.handle('app:installUpdate', /** @returns {IpcReply<'app:installUpdate'>}
   try { backupBeforeQuit(); }
   catch (err) { logToFile('error', 'Резервно копие преди обновяването — грешка: ' + err.message); }
   autoUpdater.quitAndInstall();
-}));
+}
 
 /* ---------------- Анонимно отчитане на инсталацията (v2.4.56) ----------------
    Целият механизъм, заедно с изчерпателния списък какво се изпраща и какво
@@ -1868,6 +1891,11 @@ app.whenReady().then(() => {
   /* v2.4.76: таймерът за онлайн достъпа на читателите тръгва само при валиден
      код за активация; иначе няма нито таймер, нито заявка навън. */
   if (onlineActivated()) startOnlineTimer();
+  /* v2.4.83: и едно пълно изпращане малко след старта (STARTUP_DELAY_MS в
+     handlers/online-access.js) — мобилното приложение вижда състоянието от
+     сутринта веднага, а не след първия интервал на таймера. Отложено, за да не
+     се бори с отварянето на прозореца; без активация не прави нищо. */
+  scheduleStartupOnlineSync();
   mainWindow = createWindow();
   initAutoUpdate(mainWindow);
   /* ДНЕВНОТО АВТОМАТИЧНО КОПИЕ — СЛЕД ПРОЗОРЕЦА (v2.4.64, измерване на старта).
@@ -2064,9 +2092,32 @@ app.whenReady().then(() => {
   app.exit(1);
 });
 
+/* Таванът на изчакването на изпращането към моста при затваряне и при
+   „Инсталирай и рестартирай“ (v2.4.83). */
+const ONLINE_QUIT_FLUSH_MS = 5000;
 app.on('window-all-closed', () => {
   stopAutoBackupTimer();
   stopOnlineTimer();
+  /* НАСРОЧЕНОТО ИЗПРАЩАНЕ КЪМ МОСТА (v2.4.83). Промяна от последната минута
+     (заемане, продължение, съобщение до читател) чакаше в отложеното изпращане
+     и при затваряне просто изчезваше — мобилното приложение я виждаше чак при
+     следващото пускане на програмата. Сега тръгва веднага, а затварянето я
+     чака най-много ONLINE_QUIT_FLUSH_MS (бавна връзка не бива да държи
+     програмата отворена) и чак след това продължава с каталога, копието и
+     затварянето на базата — изпращането чете от нея. Без нищо насрочено
+     (винаги — без код за активация) пътят е синхронен, точно както досега. */
+  let pendingOnline = null;
+  try { pendingOnline = flushOnlineSyncOnQuit(ONLINE_QUIT_FLUSH_MS); }
+  catch (err) { logToFile('error', 'Изпращането към моста при затваряне — грешка: ' + err.message); }
+  if (pendingOnline) {
+    pendingOnline.then(finishQuit, finishQuit);
+    return;
+  }
+  finishQuit();
+});
+/* Останалото от затварянето — непроменено от v2.4.82, само изнесено във
+   функция, за да може да изчака изпращането към моста по-горе. */
+function finishQuit() {
   // Само ако наистина има насрочен (debounced) запис (одит v2.4.27) — иначе всяко
   // затваряне пренаписваше многомегабайтния каталог в (мрежовата) папка и
   // произвеждаше git commit без промяна във фонда.
@@ -2098,7 +2149,7 @@ app.on('window-all-closed', () => {
   try { backupHandlers.noteCleanClose(); }
   catch (err) { console.error('Състоянието при затваряне не се записа:', err.message); }
   if (process.platform !== 'darwin') app.quit();
-});
+}
 
 /* ---------------- Помощни функции ---------------- */
 function friendlyDbError(err) {
@@ -2379,7 +2430,8 @@ require('./handlers/gdpr')(ipcMain, {
    промяна на гишето или в картона и на половин час по таймер. Регистрира се
    ПРЕДИ handlers/loans.js и handlers/readers.js ги ползват — но те получават
    обвивки (виж по-горе/по-долу), така че редът не е капан. */
-const { scheduleOnlineSync, startOnlineTimer, stopOnlineTimer, onlineActivated } = require('./handlers/online-access')(ipcMain, {
+const { scheduleOnlineSync, startOnlineTimer, stopOnlineTimer, onlineActivated,
+  scheduleStartupOnlineSync, flushOnlineSyncOnQuit } = require('./handlers/online-access')(ipcMain, {
   getDb: () => db, run, logAudit, today, createDebouncer,
   getVersion: () => app.getVersion(),
   log: (level, msg) => logToFile(level, msg),

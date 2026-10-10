@@ -11,6 +11,102 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.83
+
+**BG:** **Онлайн достъп за читатели: по-леко и по-често изпращане към моста.** Само при
+активиран онлайн достъп (код за активация) — за всяка друга библиотека програмата е същата
+като досега. Версията на базата не се вдига. С днешния мост (без `features` в отговора)
+изпращането е **точно както във v2.4.82**: пълна снимка, чист JSON, на 30 минути (единственото ново е полето `hash`, виж по-долу).
+
+- **„Без промени“.** Програмата пази sha256 отпечатък на снимката (каноничен JSON с
+  подредени ключове, без `generated`, `activation`, `requestResults` и самия `hash`). Ако мостът е обявил
+  `"unchanged"`, отпечатъкът е същият като на последната пълна снимка и тя е отпреди по-малко
+  от 6 часа, към моста отива само `{library, activation, unchanged: true, hash,
+  requestResults}` — заявките на читателите („удължи“, „прочетено“) се обменят, а снимката
+  не пътува. Пълна снимка има при всяка промяна, при стартиране, при „Изпрати сега“, поне
+  веднъж на 6 часа и веднага, ако мостът отговори `needFull: true` (тя носи и отговорите на
+  заявките от същото изпращане).
+- **Отпечатъкът и в пълната снимка.** Всяка пълна снимка носи и поле `hash` — мостът го пази
+  и отговаря с `needFull`, ако „без промени“ дойде с различен. Днешният мост полето го
+  пренебрегва (взима само познатите полета).
+- **Компресия.** Ако мостът е обявил `"gzip"`, тялото тръгва с `Content-Encoding: gzip` и
+  `Content-Type: application/octet-stream` (не JSON — хостингът на моста иначе би го
+  разчел сам; мостът отказва gzip + json с 415).
+- **Таймер.** 10 минути, ако мостът поддържа „без промени“ (проверката е евтина), иначе 30.
+- **Връщане назад без заклещване.** Отговор без `features` ги изчиства (следващото изпращане
+  е по стария начин); ако мост, обявил ги, откаже тялото с 400/415/422, същото изпращане се
+  повтаря веднага като пълна снимка без компресия. Смяна на адреса на моста или на ключа,
+  активиране и деактивиране нулират запомненото.
+- **При стартиране** — едно пълно изпращане около 8 секунди след пускането (да не се бори с
+  отварянето на прозореца). **При затваряне** (и при „Инсталирай и рестартирай“) чакащото
+  отложено изпращане тръгва веднага, а затварянето го чака най-много 5 секунди; без нищо
+  чакащо затварянето е синхронно, както досега.
+- **„Продължи“ на гишето** (`loans:extend`) вече насрочва изпращане — новият срок стига до
+  приложението до около минута, а не чак при следващия таймер.
+- **Настройки → Онлайн достъп:** „Последно изпратено“ е последната успешна връзка с моста;
+  ако тя е била „без промени“, след нея стои „(без промени; последна пълна снимка: …)“.
+- **Нови колони в `settings`:** `online_last_hash`, `online_last_full`,
+  `online_bridge_features` — в `schema.sql` и идемпотентно в `main.js` (както останалите
+  `online_*`), без вдигане на `user_version`.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + поредицата в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **2523 теста, 0 неуспешни** (преди: 2500).
+Нови тестове (`test/online-sync-v2483.test.js`): каноничният JSON и отпечатъкът (без
+изключените полета, независим от реда на ключовете, стабилен върху непроменена база, сменя
+се при заемане); пътят „без промени“ (тялото, 6-те часа, „Изпрати сега“, час в бъдещето);
+`needFull` (пълна веднага, отговорите на заявките в нея, забравен отпечатък при неуспех);
+мост без `features` — пълна снимка, JSON низ, 30 минути; само `"gzip"`; мост, върнат към
+стара версия (без `features`, отказ 422); нулиране при смяна на адреса/ключа; изпращане при
+стартиране; изчакване при затваряне (с таван и с вървящо изпращане); `loans:extend`
+насрочва изпращане; свързването в `main.js`; бележката „без промени“ в Настройки.
+
+**EN:** **Online reader access: lighter and more frequent syncing to the bridge.** Only with
+online access activated (activation code) — for any other library the program is unchanged.
+The database version is not raised. With today's bridge (no `features` in its response) the
+sync is **exactly as in v2.4.82**: full snapshot, plain JSON, every 30 minutes (the only addition is the `hash` field, see below).
+
+- **"Unchanged".** The program keeps a sha256 fingerprint of the snapshot (canonical JSON with
+  sorted keys, without `generated`, `activation`, `requestResults` and `hash` itself). If the bridge has
+  announced `"unchanged"`, the fingerprint equals that of the last full snapshot and that one
+  is less than 6 hours old, only `{library, activation, unchanged: true, hash,
+  requestResults}` is sent — readers' requests ("renew", "read") are still exchanged, the
+  snapshot does not travel. A full snapshot goes on every change, at startup, on "Send now",
+  at least every 6 hours, and immediately when the bridge answers `needFull: true` (it also
+  carries the answers to the requests of the same exchange).
+- **The fingerprint in the full snapshot too.** Every full snapshot also carries a `hash`
+  field — the bridge stores it and answers `needFull` if an "unchanged" arrives with a
+  different one. Today's bridge ignores the field (it takes only the fields it knows).
+- **Compression.** If the bridge has announced `"gzip"`, the body is sent with
+  `Content-Encoding: gzip` and `Content-Type: application/octet-stream` (not JSON — the
+  bridge's hosting would otherwise parse it itself; the bridge rejects gzip + json with 415).
+- **Timer.** 10 minutes when the bridge supports "unchanged" (the check is cheap), else 30.
+- **Rolling back without getting stuck.** A response without `features` clears them (the next
+  sync is the old way); if a bridge that announced them rejects the body with 400/415/422, the
+  same sync is retried at once as a full uncompressed snapshot. Changing the bridge address or
+  the upload key, activating and deactivating reset what was remembered.
+- **At startup** — one full sync about 8 seconds after launch (so it does not compete with
+  opening the window). **On quit** (and on "Install and restart") a pending debounced sync is
+  sent at once and quitting waits for it at most 5 seconds; with nothing pending quitting is
+  synchronous, as before.
+- **"Renew" at the desk** (`loans:extend`) now schedules a sync — the new due date reaches the
+  app within about a minute instead of at the next timer tick.
+- **Settings → Online access:** "Last sent" is the last successful contact with the bridge; if
+  it was "unchanged", it is followed by "(no changes; last full snapshot: …)".
+- **New `settings` columns:** `online_last_hash`, `online_last_full`,
+  `online_bridge_features` — in `schema.sql` and idempotently in `main.js` (like the other
+  `online_*`), without raising `user_version`.
+
+**Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia +
+the catalog page); `node --test` — **2523 tests, 0 failed** (before: 2500). New tests
+(`test/online-sync-v2483.test.js`): canonical JSON and the fingerprint (excluded fields, key
+order independence, stable on an unchanged database, changes on a loan); the "unchanged" path
+(the body, the 6 hours, "Send now", a future timestamp); `needFull` (full at once, request
+answers in it, fingerprint forgotten on failure); a bridge without `features` — full snapshot,
+JSON string, 30 minutes; `"gzip"` only; a bridge rolled back (no `features`, 422 rejection);
+reset on address/key change; startup sync; waiting on quit (with the cap and with a sync in
+flight); `loans:extend` schedules a sync; the wiring in `main.js`; the "unchanged" note in
+Settings.
+
 ## v2.4.82
 
 **BG:** **Онлайн достъп за читатели: лични съобщения от библиотеката до читател.** Само при
