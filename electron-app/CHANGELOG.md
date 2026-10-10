@@ -11,6 +11,90 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.82
+
+**BG:** **Онлайн достъп за читатели: лични съобщения от библиотеката до читател.** Само при
+активиран онлайн достъп (код за активация) — за всяка друга библиотека програмата е същата
+като досега. Версията на базата не се вдига.
+
+- **„Съобщения до читателя“ в картона на читателя.** Заглавие (по желание, до 120 знака),
+  текст (до 2000 знака) и „Изпрати“; под тях — изпратените съобщения със състояние
+  „Изпратено“ / „Прочетено на <дата>“ / „Оттеглено“ и бутон „Оттегли“ за неоттеглените.
+  Съобщението стига до мобилното приложение до около минута, докато InvLib е отворен и има
+  интернет, и се вижда само от този читател след вход с картата и ПИН-а. На читател без
+  онлайн достъп (съгласие + ПИН) формата не се показва, а обработчикът отказва изпращането с
+  ясна причина — той никога не би видял съобщението.
+- **Нова таблица `reader_messages`** (в `schema.sql` и идемпотентно от
+  `handlers/online-access.js` за база в обща мрежова папка, отворена от по-стара станция —
+  същото правило като `online_request_results`). Оттеглянето не трие реда, а отбелязва
+  `withdrawn_at`.
+- **Снимката към моста** носи за всеки вече включен читател `messages` — най-новите първи,
+  най-много 50, само неоттеглените и само от последните 180 дни (`messageId`, `title`,
+  `text`, `at`, `readAt`).
+- **Заявки „прочетено“ (`type: "messageRead"`).** Идват в същия масив `requests` като
+  „удължи“ и минават през същите проверки (съгласие + ПИН + картата); `read_at` се записва
+  веднъж (първият момент остава), отговорът `done` / `rejected` („съобщението не е
+  намерено“ — чужд читател, чужда карта, чуждо или липсващо съобщение) тръгва веднага и се
+  пази в `online_request_results` — повторно получена заявка получава същия отговор.
+  Непознат вид заявка се отказва, както досега.
+- **Одитна следа:** „Съобщение до читател“ и „Оттеглено съобщение до читател“ — с читателя,
+  номера и заглавието, но **без текста** (той е в `reader_messages` и отпада с читателя).
+  И двете действия са в списъка, който анонимизирането и заличаването по чл. 17 обезличават.
+- **Лични данни:** изтриването на читател и заличаването по искане на читателя трият и
+  неговите съобщения; „Анонимизиране“ трие съобщенията отпреди срока (броят влиза в „други
+  записи“). „Изтриване на всички данни“ включва `reader_messages`.
+
+**Проверено:** `npm run typecheck` минава; `node --test` — **2500 теста, 0 неуспешни** (преди: 2485).
+Нови тестове: съобщенията в снимката — ред, таван 50, без оттеглените и по-старите от 180 дни,
+база без таблицата (`test/online-access.test.js`); изпращане/оттегляне — отказ без онлайн
+достъп, задължителен текст, таваните 120/2000, следата без текста, насроченото изпращане;
+заявката `messageRead` — изпълнена, отказите (чужд читател/карта/съобщение), идемпотентност,
+бъдещ момент от телефона, база без таблицата (`test/handlers-online-access.test.js`);
+заличаване и анонимизиране (`test/handlers-gdpr.test.js`), изтриване на читател
+(`test/handlers-readers.test.js`); екранът в картона (`test/saobshteniya-v2482.test.js`).
+
+**EN:** **Online reader access: personal messages from the library to a reader.** Only with
+online access activated (activation code) — for any other library the program is unchanged.
+The database version is not raised.
+
+- **"Messages to the reader" on the reader card.** Title (optional, up to 120 characters),
+  text (up to 2000) and "Send"; below them the messages already sent, with the status
+  "Sent" / "Read on <date>" / "Withdrawn" and a "Withdraw" button for those not yet withdrawn.
+  A message reaches the mobile app within about a minute while InvLib is open and online,
+  and only that reader sees it after logging in with card and PIN. For a reader without
+  online access (consent + PIN) the form is not shown, and the handler refuses to send with a
+  clear reason — the reader would never see it.
+- **New table `reader_messages`** (in `schema.sql`, and created idempotently by
+  `handlers/online-access.js` for a shared network database opened by an older station — the
+  same rule as `online_request_results`). Withdrawing does not delete the row; it sets
+  `withdrawn_at`.
+- **The snapshot sent to the bridge** carries, for every reader already included,
+  `messages` — newest first, at most 50, not withdrawn, from the last 180 days only
+  (`messageId`, `title`, `text`, `at`, `readAt`).
+- **"Read" requests (`type: "messageRead"`).** They arrive in the same `requests` array as
+  "renew" and pass the same checks (consent + PIN + card); `read_at` is written once (the
+  first moment stays), the `done` / `rejected` answer ("message not found" — another reader,
+  another card, another reader's or a missing message) goes out at once and is stored in
+  `online_request_results` — a request received again gets the same answer. Unknown request
+  types are still rejected.
+- **Audit trail:** "Съобщение до читател" and "Оттеглено съобщение до читател" — with the
+  reader, the number and the title, but **without the text** (it lives in `reader_messages`
+  and goes with the reader). Both actions are in the list that anonymisation and erasure under
+  Art. 17 depersonalise.
+- **Personal data:** deleting a reader and erasure at the reader's request also delete their
+  messages; "Anonymise" deletes messages older than the cutoff (counted under "other
+  records"). "Delete all data" includes `reader_messages`.
+
+**Verified:** `npm run typecheck` passes; `node --test` — **2500 tests, 0 failed** (before: 2485). New
+tests: messages in the snapshot — order, cap of 50, no withdrawn or older than 180 days, a
+database without the table (`test/online-access.test.js`); send/withdraw — refusal without
+online access, required text, the 120/2000 limits, the audit entry without the text, the
+scheduled sync; the `messageRead` request — done, the rejections (other reader/card/message),
+idempotency, a future timestamp from the phone, a database without the table
+(`test/handlers-online-access.test.js`); erasure and anonymisation
+(`test/handlers-gdpr.test.js`), reader deletion (`test/handlers-readers.test.js`); the
+screen on the reader card (`test/saobshteniya-v2482.test.js`).
+
 ## v2.4.81
 
 **BG:** **Онлайн достъп за читатели: история на заеманията, „Удължи“ от приложението и

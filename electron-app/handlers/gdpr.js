@@ -46,7 +46,9 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
                      -- резервации: handlers/holds.js вписва името на читателя
                      'Заделена книга', 'Резервация', 'Отказана резервация', 'Изтекла резервация',
                      -- надомно обслужване: handlers/housebound.js
-                     'Обслужване по домовете', 'Посещение по домовете')`;
+                     'Обслужване по домовете', 'Посещение по домовете',
+                     -- лични съобщения до читател (v2.4.82): handlers/online-access.js
+                     'Съобщение до читател', 'Оттеглено съобщение до читател')`;
   /* ЗАЕМАНИЯТА — третият вид ред, и най-многобройният (v2.4.65, кръг 42, А7).
      ============================================================================
      (а) КАКВО СТАВАШЕ ДОТУК. `NAME_ACTIONS` изброяваше редовете, в които ЦЕЛИЯТ
@@ -133,7 +135,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
     `SELECT COUNT(*) AS n FROM mzs_requests WHERE date < @cutoff
        AND requester IS NOT NULL AND requester != '${ANON_MARK}'`,
     `SELECT COUNT(*) AS n FROM notice_log WHERE substr(ts, 1, 10) < @cutoff AND ${NOTICE_NOT_LIVE}`,
-    `SELECT COUNT(*) AS n FROM housebound_visits WHERE date < @cutoff AND reader_id != @anon`
+    `SELECT COUNT(*) AS n FROM housebound_visits WHERE date < @cutoff AND reader_id != @anon`,
+    /* Личните съобщения до читател (v2.4.82) — кореспонденция, не отчетност:
+       след срока отпадат изцяло (в снимката и без това пътуват само 180 дни). */
+    `SELECT COUNT(*) AS n FROM reader_messages WHERE substr(created_at, 1, 10) < @cutoff`
   ];
   const OTHER_UPDATES = [
     `UPDATE holds SET reader_id = @anon WHERE status IN ('изпълнена', 'отказана')
@@ -143,7 +148,8 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
     `UPDATE mzs_requests SET requester = '${ANON_MARK}'
        WHERE date < @cutoff AND requester IS NOT NULL AND requester != '${ANON_MARK}'`,
     `DELETE FROM notice_log WHERE substr(ts, 1, 10) < @cutoff AND ${NOTICE_NOT_LIVE}`,
-    `UPDATE housebound_visits SET reader_id = @anon WHERE date < @cutoff AND reader_id != @anon`
+    `UPDATE housebound_visits SET reader_id = @anon WHERE date < @cutoff AND reader_id != @anon`,
+    `DELETE FROM reader_messages WHERE substr(created_at, 1, 10) < @cutoff`
   ];
 
   ipcMain.handle('gdpr:candidates', /** @returns {IpcReply<'gdpr:candidates'>} */ () =>
@@ -253,8 +259,8 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
             : auditCleared + ' записа в одитната следа са обезличени') : '')
         + (searchCleared ? '; ' + (searchCleared === 1 ? '1 старо търсене е изтрито'
             : searchCleared + ' стари търсения са изтрити') : '')
-        + (otherCleared ? '; ' + (otherCleared === 1 ? '1 запис в резервации, предложения, МЗС, напомняния и посещения е обезличен'
-            : otherCleared + ' записа в резервации, предложения, МЗС, напомняния и посещения са обезличени') : ''));
+        + (otherCleared ? '; ' + (otherCleared === 1 ? '1 запис в резервации, предложения, МЗС, напомняния, посещения и лични съобщения е обезличен'
+            : otherCleared + ' записа в резервации, предложения, МЗС, напомняния, посещения и лични съобщения са обезличени') : ''));
       return { anonymized: n, auditCleared, searchCleared, otherCleared, cutoff };
     })
   );
@@ -610,6 +616,10 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         const visitsMoved = db.prepare('UPDATE housebound_visits SET reader_id = ? WHERE reader_id = ?')
           .run(anonId, id).changes;
         const noticesGone = db.prepare('DELETE FROM notice_log WHERE reader_id = ?').run(id).changes;
+        /* Личните съобщения до читателя (v2.4.82) — изтриват се, не се
+           прехвърлят: това е кореспонденция с човека, не статистика. (Каскадата
+           от readers би ги отнесла и сама; тук е изрично, за да се броят.) */
+        const messagesGone = db.prepare('DELETE FROM reader_messages WHERE reader_id = ?').run(id).changes;
         const suggCleared = db.prepare(`UPDATE suggestions
              SET reader_id = NULL,
                  reader_name = CASE WHEN reader_name IS NULL THEN NULL ELSE '${ANON_MARK}' END
@@ -725,7 +735,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         }
 
         const readerCleared = readerGone + loansMoved + accountMoved + eventsCleared + holdsMoved
-          + visitsMoved + noticesGone + suggCleared + suggByName + mzsCleared;
+          + visitsMoved + noticesGone + messagesGone + suggCleared + suggByName + mzsCleared;
         return { readerCleared, auditCleared, searchCleared, loansMoved, accountMoved, holdsCancelled,
           promoted: promoted.length, holdsActivated: promoted, mzsCleared, mzsSimilar,
           setAside: setAsideBooks.length };
@@ -763,7 +773,7 @@ module.exports = function registerGdprHandlers(ipcMain, deps) {
         + ' към служебния запис „' + ANON_READER_NAME + '“, за да не мръдне отчетността. '
         + 'Обезличени записа в одитната следа: ' + res.auditCleared + '; '
         + 'изтрити стари търсения: ' + res.searchCleared + '; '
-        + 'останали обезличени записа (резервации, предложения, МЗС, напомняния, посещения по домовете): '
+        + 'останали обезличени записа (резервации, предложения, МЗС, напомняния, посещения по домовете, лични съобщения): '
         + (res.readerCleared - res.loansMoved - res.accountMoved - 1) + '. '
         + (res.holdsCancelled
           ? 'Отказани активни резервации: ' + res.holdsCancelled

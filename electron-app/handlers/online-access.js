@@ -25,11 +25,28 @@
 // да повтори заявка (мрежата е прекъснала преди отговора ни), а тя не бива да
 // удължи втори път — връща се същият резултат. Нищо от това не се вика без
 // код за активация: стои вътре в syncOnce, след activated().
+//
+// ЛИЧНИ СЪОБЩЕНИЯ ДО ЧИТАТЕЛ (v2.4.82). Библиотекарят пише от картона на
+// читателя (online:sendMessage); съобщението се пази в reader_messages, пътува
+// в снимката (buildSnapshot → readers[].messages) и се вижда само от този
+// читател след вход. Отварянето му в приложението идва обратно като заявка
+// {type:"messageRead", readerId, cardNumber, messageId, at} в същия масив
+// requests и се обработва в processRequests със същите проверки като „удължи“
+// (съгласие + ПИН + картата) — read_at се записва веднъж (COALESCE) и отговорът
+// се пази в online_request_results. Съобщение до читател без онлайн достъп се
+// отказва още при писането: той никога не би го видял.
 const {
   generatePin, hashPin, verifyActivation, buildSnapshot, sendSnapshot
 } = require('../online-access');
 
 const PERIODIC_MS = 30 * 60 * 1000;   // редовно изпращане на половин час, само при активирано
+/* Таваните на личното съобщение (v2.4.82) — същите като на моста (договорът,
+   раздел 1): заглавие до 120 знака, текст до 2000. */
+const MESSAGE_TITLE_MAX = 120;
+const MESSAGE_TEXT_MAX = 2000;
+/* Колко съобщения показва картонът (най-новите първи). Читател с повече —
+   по-старите остават в базата, просто не се изчертават. */
+const MESSAGE_LIST_LIMIT = 200;
 
 /** @param {any} ipcMain @param {HandlerDeps} deps */
 module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
@@ -94,15 +111,46 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     )`);
     requestTableChecked = db;
   }
+  /* Личните съобщения (v2.4.82) — същото правило: schema.sql я създава при
+     всяко отваряне, а тук тя се осигурява и преди всяко ползване, за база в
+     обща мрежова папка, отворена от станция с по-стара версия. Без вдигане на
+     user_version. */
+  let messagesTableChecked = null;
+  function ensureMessagesTable(db) {
+    if (messagesTableChecked === db) return;
+    db.exec(`CREATE TABLE IF NOT EXISTS reader_messages (
+      id           INTEGER PRIMARY KEY,
+      reader_id    INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+      title        TEXT,
+      body         TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      read_at      TEXT,
+      withdrawn_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_reader_messages_reader ON reader_messages(reader_id);`);
+    messagesTableChecked = db;
+  }
+  /* Моментът „прочетено“ от заявката — ISO, ако се чете като дата и не е в
+     бъдещето (часовник на телефон, избързал с часове); иначе — сега. */
+  function readMoment(at) {
+    const now = Date.now();
+    const t = typeof at === 'string' && at ? Date.parse(at) : NaN;
+    return new Date(Number.isFinite(t) && t <= now ? t : now).toISOString();
+  }
   /** @param {any[]} requests @returns {{ results: OnlineRequestResult[], fresh: number }} */
   function processRequests(requests) {
     const db = getDb();
     ensureRequestTable(db);
+    ensureMessagesTable(db);
     const tools = loanTools();
     const seen = db.prepare('SELECT id, status, reason FROM online_request_results WHERE id = ?');
     const save = db.prepare('INSERT OR IGNORE INTO online_request_results (id, status, reason, at) VALUES (?, ?, ?, ?)');
     const consentingReader = db.prepare(`SELECT id, card_no FROM readers WHERE id = ? AND online_consent = 1
       AND online_pin_hash IS NOT NULL AND TRIM(online_pin_hash) <> ''`);
+    /* „Прочетено“ (v2.4.82): само съобщение на СЪЩИЯ читател; COALESCE пази
+       първия момент — повторно отваряне не го мести. */
+    const markRead = db.prepare(`UPDATE reader_messages SET read_at = COALESCE(read_at, ?)
+      WHERE id = ? AND reader_id = ?`);
     /** @type {OnlineRequestResult[]} */
     const results = [];
     let fresh = 0;
@@ -119,15 +167,32 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
          заявка за чужд читател или с чужда карта не стига до заемането. */
       const rd = r.readerId != null ? consentingReader.get(String(r.readerId)) : null;
       const cardOk = rd && (!r.cardNumber || !rd.card_no || String(r.cardNumber) === String(rd.card_no));
-      if (r.type !== 'renew') out = { status: 'rejected', reason: 'непознат вид заявка' };
-      else if (!rd || !cardOk) out = { status: 'rejected', reason: 'не е намерена' };
-      else if (!tools || typeof tools.renewFromApp !== 'function') out = { status: 'rejected', reason: 'удължаването от приложението не е налично' };
-      else {
-        try { out = tools.renewFromApp(r.loanId, r.readerId); }
-        catch (err) {
-          log('error', '[онлайн достъп] заявка ' + id + ' не се обработи: ' + (err && err.message));
-          out = { status: 'rejected', reason: 'грешка при обработката' };
+      if (r.type === 'renew') {
+        if (!rd || !cardOk) out = { status: 'rejected', reason: 'не е намерена' };
+        else if (!tools || typeof tools.renewFromApp !== 'function') out = { status: 'rejected', reason: 'удължаването от приложението не е налично' };
+        else {
+          try { out = tools.renewFromApp(r.loanId, r.readerId); }
+          catch (err) {
+            log('error', '[онлайн достъп] заявка ' + id + ' не се обработи: ' + (err && err.message));
+            out = { status: 'rejected', reason: 'грешка при обработката' };
+          }
         }
+      } else if (r.type === 'messageRead') {
+        /* Чужд читател, чужда карта, чуждо или липсващо съобщение — един и същ
+           отказ: приложението не бива да научава чии са другите номера. */
+        const msgId = r.messageId != null && /^\d+$/.test(String(r.messageId)) ? Number(r.messageId) : null;
+        if (!rd || !cardOk || msgId == null) out = { status: 'rejected', reason: 'съобщението не е намерено' };
+        else {
+          try {
+            const n = markRead.run(readMoment(r.at), msgId, rd.id).changes;
+            out = n ? { status: 'done' } : { status: 'rejected', reason: 'съобщението не е намерено' };
+          } catch (err) {
+            log('error', '[онлайн достъп] заявка ' + id + ' не се обработи: ' + (err && err.message));
+            out = { status: 'rejected', reason: 'грешка при обработката' };
+          }
+        }
+      } else {
+        out = { status: 'rejected', reason: 'непознат вид заявка' };
       }
       const done = out && out.status === 'done';
       save.run(id, done ? 'done' : 'rejected', done ? null : String((out && out.reason) || ''), new Date().toISOString());
@@ -316,6 +381,70 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     db.prepare('UPDATE readers SET online_pin_hash = NULL, online_pin_set_at = NULL WHERE id = ?').run(r.id);
     logAudit('Отменен ПИН за онлайн достъп', 'карта ' + (r.card_no || '') + ' — ' + r.name);
     scheduleSync();
+  }));
+
+  /* ---------------- Лични съобщения до читател (v2.4.82) ----------------
+     Списъкът е за картона: всички съобщения на читателя (и оттеглените, и
+     по-старите от 180 дни, които вече не пътуват), най-новите първи. */
+  const MESSAGE_COLS = 'id, reader_id, title, body, created_at, read_at, withdrawn_at';
+  ipcMain.handle('online:messages', /** @param {unknown} e @param {IpcArg<'online:messages'>} arg @returns {IpcReply<'online:messages'>} */ (e, arg) => run(() => {
+    requireActivated();
+    const db = getDb();
+    ensureMessagesTable(db);
+    return db.prepare(`SELECT ${MESSAGE_COLS} FROM reader_messages WHERE reader_id = ?
+      ORDER BY created_at DESC, id DESC LIMIT ${MESSAGE_LIST_LIMIT}`).all(arg.readerId);
+  }));
+
+  /* Изпращане: читателят трябва да има онлайн достъп (съгласие + ПИН) — иначе
+     съобщението не влиза в снимката и той никога не би го видял, а
+     библиотекарят би мислил, че е съобщил. В следата — кой читател, номерът и
+     заглавието на съобщението; самият текст НЕ (той е в reader_messages и
+     отпада с читателя, а следата се пази години). */
+  ipcMain.handle('online:sendMessage', /** @param {unknown} e @param {IpcArg<'online:sendMessage'>} arg @returns {IpcReply<'online:sendMessage'>} */ (e, arg) => run(() => {
+    requireActivated();
+    const db = getDb();
+    ensureMessagesTable(db);
+    const r = db.prepare('SELECT id, name, card_no, online_consent, online_pin_hash FROM readers WHERE id = ?').get(arg && arg.readerId);
+    if (!r) throw new Error('Читателят не е намерен.');
+    if (!r.online_consent || !r.online_pin_hash || !String(r.online_pin_hash).trim()) {
+      throw new Error('Читателят няма онлайн достъп (съгласие и ПИН) и няма да види съобщението. '
+        + 'Първо отбележете съгласието му за онлайн достъп и издайте ПИН.');
+    }
+    const clean = (v) => String(v == null ? '' : v).replace(/\r\n?/g, '\n').trim();
+    const title = clean(arg.title);
+    const text = clean(arg.text);
+    if (!text) throw new Error('Напишете текста на съобщението.');
+    if (title.length > MESSAGE_TITLE_MAX) {
+      throw new Error('Заглавието е твърде дълго: ' + title.length + ' знака (най-много ' + MESSAGE_TITLE_MAX + ').');
+    }
+    if (text.length > MESSAGE_TEXT_MAX) {
+      throw new Error('Текстът е твърде дълъг: ' + text.length + ' знака (най-много ' + MESSAGE_TEXT_MAX + ').');
+    }
+    const at = new Date().toISOString();
+    const id = db.prepare('INSERT INTO reader_messages (reader_id, title, body, created_at) VALUES (?, ?, ?, ?)')
+      .run(r.id, title || null, text, at).lastInsertRowid;
+    logAudit('Съобщение до читател', r.name + ' (карта ' + (r.card_no || '') + '): съобщение № ' + id
+      + (title ? ' „' + title + '“' : ' (без заглавие)'));
+    scheduleSync();
+    return db.prepare(`SELECT ${MESSAGE_COLS} FROM reader_messages WHERE id = ?`).get(id);
+  }));
+
+  /* Оттегляне: редът остава (картонът показва „Оттеглено“), а от следващата
+     снимка съобщението вече не пътува — мостът и приложението го губят. */
+  ipcMain.handle('online:withdrawMessage', /** @param {unknown} e @param {IpcArg<'online:withdrawMessage'>} arg @returns {IpcReply<'online:withdrawMessage'>} */ (e, arg) => run(() => {
+    requireActivated();
+    const db = getDb();
+    ensureMessagesTable(db);
+    const m = db.prepare(`SELECT m.id, m.title, m.withdrawn_at, r.name, r.card_no
+      FROM reader_messages m JOIN readers r ON r.id = m.reader_id WHERE m.id = ?`).get(arg && arg.id);
+    if (!m) throw new Error('Съобщението не е намерено.');
+    if (m.withdrawn_at) throw new Error('Съобщението вече е оттеглено.');
+    const at = new Date().toISOString();
+    db.prepare('UPDATE reader_messages SET withdrawn_at = ? WHERE id = ? AND withdrawn_at IS NULL').run(at, m.id);
+    logAudit('Оттеглено съобщение до читател', m.name + ' (карта ' + (m.card_no || '') + '): съобщение № ' + m.id
+      + (m.title ? ' „' + m.title + '“' : ''));
+    scheduleSync();
+    return { id: m.id, withdrawn_at: at };
   }));
 
   ipcMain.handle('online:syncNow', /** @returns {IpcAsyncReply<'online:syncNow'>} */ async () => {

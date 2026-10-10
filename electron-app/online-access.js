@@ -135,6 +135,13 @@ function readerStatus(r, validUntil, today) {
    за читатели, които и без това са в снимката, и носи само документа и
    датите — нищо ново от картона. */
 const HISTORY_LIMIT = 200;
+/* v2.4.82: личните съобщения от библиотеката (таблица reader_messages) — към
+   всеки читател от снимката `messages`: най-новите първи, най-много 50, само
+   неоттеглените и само изпратените през последните 180 дни (договорът с моста,
+   раздел 1). Старото съобщение не изчезва от картона в InvLib — просто вече не
+   пътува. `title` може да е празен низ; `readAt` е ISO момент или null. */
+const MESSAGES_LIMIT = 50;
+const MESSAGES_MAX_AGE_DAYS = 180;
 function buildSnapshot(db, settings, nowIso, opts) {
   const { isEncryptedField } = require('./pii-crypto');
   const s = settings || {};
@@ -158,6 +165,17 @@ function buildSnapshot(db, settings, nowIso, opts) {
      WHERE l.reader_id = ? AND l.date_in IS NOT NULL
      ORDER BY l.date_in DESC, l.id DESC
      LIMIT ${HISTORY_LIMIT}`);
+  /* Таблицата я има във всяка база, отворена от v2.4.82 (schema.sql); проверката
+     е само за да не падне снимката, ако някой я извика върху по-стара база. */
+  const hasMessages = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'reader_messages'").get();
+  const nowMs = Number.isFinite(Date.parse(now)) ? Date.parse(now) : Date.now();
+  const messagesSince = new Date(nowMs - MESSAGES_MAX_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const messagesByReader = hasMessages ? db.prepare(`
+    SELECT id, title, body, created_at, read_at
+      FROM reader_messages
+     WHERE reader_id = ? AND withdrawn_at IS NULL AND created_at >= ?
+     ORDER BY created_at DESC, id DESC
+     LIMIT ${MESSAGES_LIMIT}`) : null;
   const act = verifyActivation(s.online_activation, null, opts);
   return {
     library: act.ok ? act.lib : '',   // кодът на библиотеката идва само от подписания код за активация
@@ -194,7 +212,14 @@ function buildSnapshot(db, settings, nowIso, opts) {
           author: l.author || '',
           dateOut: l.date_out,
           dateIn: l.date_in
-        }))
+        })),
+        messages: messagesByReader ? messagesByReader.all(r.id, messagesSince).map(m => ({
+          messageId: String(m.id),
+          title: m.title || '',
+          text: m.body || '',
+          at: m.created_at,
+          readAt: m.read_at || null
+        })) : []
       };
     })
   };
@@ -229,9 +254,9 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
     });
     const status = res.status;
     if (res.ok) {
-      /* v2.4.81: отговорът на моста носи заявките на читателите (засега само
-         „удължи“) — handlers/online-access.js ги обработва след всяко успешно
-         изпращане. Тяло, което не е JSON или няма масив requests, значи „няма
+      /* v2.4.81: отговорът на моста носи заявките на читателите („удължи“; от
+         v2.4.82 и „прочетено“ за лично съобщение) — handlers/online-access.js
+         ги обработва след всяко успешно изпращане. Тяло, което не е JSON или няма масив requests, значи „няма
          заявки“, не грешка. */
       let requests = [];
       try { const j = await res.json(); if (j && Array.isArray(j.requests)) requests = j.requests; }
@@ -257,6 +282,6 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
 }
 
 module.exports = {
-  ACTIVATION_PUBLIC_KEY_B64, PIN_LENGTH, SEND_TIMEOUT_MS, HISTORY_LIMIT,
+  ACTIVATION_PUBLIC_KEY_B64, PIN_LENGTH, SEND_TIMEOUT_MS, HISTORY_LIMIT, MESSAGES_LIMIT, MESSAGES_MAX_AGE_DAYS,
   generatePin, hashPin, verifyPin, verifyActivation, buildSnapshot, sendSnapshot, addOneYear
 };

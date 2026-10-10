@@ -381,7 +381,8 @@ async function readerForm(id) {
       </div>
     </fieldset>
     </form>
-    ${online && online.activated ? onlineReaderBlockHtml(id, v) : ''}`,
+    ${online && online.activated ? onlineReaderBlockHtml(id, v) : ''}
+    ${online && online.activated && id ? '<fieldset id="onlineMsgFs"><legend>Съобщения до читателя</legend><div class="hint">Зареждане…</div></fieldset>' : ''}`,
     `<button class="btn" onclick="closeModal()">Отказ</button>
      ${id ? `<button class="btn" onclick="readerFormToAccount(${id})">Сметка</button>` : ''}
      ${/* „ПРАВО ДА БЪДА ЗАБРАВЕН“ — ОТ КАРТОНА НА ЧОВЕКА (v2.4.65).
@@ -406,6 +407,7 @@ async function readerForm(id) {
     // Отпечатъкът на реда към момента на отварянето — виж saveReader по-долу.
     if (r && r._rev) f.dataset.rev = r._rev;
     f.dataset.snapshot = JSON.stringify(formData('#readerF'));
+    if (online && online.activated && r) await onlineMessagesRefresh(id, r);
   }
 }
 /* ---------------- Онлайн достъп (мобилно приложение), v2.4.76 ----------------
@@ -444,7 +446,81 @@ async function onlineReaderBlockRefresh(id) {
   const fs = $('#onlineFs');
   if (!r || !fs) return;
   fs.outerHTML = onlineReaderBlockHtml(id, r);
+  await onlineMessagesRefresh(id, r);   // съгласието/ПИН-ът решават дали има форма за съобщение
 }
+/* ---------------- Лични съобщения до читателя, v2.4.82 ----------------
+   Също ИЗВЪН <form id="readerF"> и със свои канали (online:messages,
+   online:sendMessage, online:withdrawMessage) — „Изпрати“ и „Оттегли“ действат
+   веднага, без „Запиши“. Формата се показва само на читател с онлайн достъп
+   (съгласие + ПИН): друг не би видял съобщението, а обработчикът така или иначе
+   го отказва. Списъкът с вече изпратените стои винаги. */
+const MSG_TITLE_MAX = 120;
+const MSG_TEXT_MAX = 2000;
+/** @param {ReaderMessage} m */
+function onlineMessageStatus(m) {
+  if (m.withdrawn_at) return 'Оттеглено';
+  if (m.read_at) return 'Прочетено на ' + fmtIsoDateTime(m.read_at);
+  return 'Изпратено';
+}
+/** @param {Id} id @param {{ online_consent?: number | null; online_pin_hash?: string | null }} v @param {ReaderMessage[]} list */
+function onlineMessagesBlockHtml(id, v, list) {
+  const canSend = !!(v.online_consent && v.online_pin_hash);
+  const form = canSend ? `
+    <div class="hint" style="margin-bottom:6px">Съобщението стига до мобилното приложение до около минута, докато InvLib е
+      отворен и има интернет, и се вижда <b>само от този читател</b> след вход с картата и ПИН-а.</div>
+    <div class="field"><label>Заглавие <span class="fh">по желание, до ${MSG_TITLE_MAX} знака</span></label>
+      <input id="onlineMsgTitle" type="text" maxlength="${MSG_TITLE_MAX}"></div>
+    <div class="field"><label>Текст <span class="fh">до ${MSG_TEXT_MAX} знака</span></label>
+      <textarea id="onlineMsgText" rows="3" maxlength="${MSG_TEXT_MAX}"></textarea></div>
+    <div class="toolbar" style="margin:6px 0 0">
+      <button type="button" class="btn" onclick="onlineSendMessage(${id})">Изпрати</button>
+    </div>`
+    : `<div class="hint">Читателят още няма онлайн достъп (съгласие и ПИН по-горе). Съобщенията се виждат само в
+      мобилното приложение след вход, затова формата се появява, щом ПИН-ът бъде издаден.</div>`;
+  const rows = list.map(m => `<tr>
+      <td style="white-space:nowrap">${esc(fmtIsoDateTime(m.created_at))}</td>
+      <td>${m.title ? '<b>' + esc(m.title) + '</b><br>' : ''}<span style="white-space:pre-wrap">${esc(m.body)}</span></td>
+      <td style="white-space:nowrap">${esc(onlineMessageStatus(m))}</td>
+      <td>${m.withdrawn_at ? '' : `<button type="button" class="btn sm" onclick="onlineWithdrawMessage(${id}, ${m.id})">Оттегли</button>`}</td>
+    </tr>`).join('');
+  return `<fieldset id="onlineMsgFs"><legend>Съобщения до читателя</legend>${form}
+    ${list.length ? `<div class="wrap" style="margin-top:8px"><table>
+      <thead><tr><th>Изпратено</th><th>Съобщение</th><th>Състояние</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>` : '<div class="hint" style="margin-top:6px">Няма изпратени съобщения.</div>'}
+  </fieldset>`;
+}
+/** Пречертава блока със съобщенията по прясно прочетения картон `r`. */
+async function onlineMessagesRefresh(id, r) {
+  const fs = $('#onlineMsgFs');
+  if (!fs) return;
+  const list = await call(window.api.online.messages({ readerId: id }));
+  const cur = $('#onlineMsgFs');   // картонът може да е затворен междувременно
+  if (!cur || list == null) return;
+  cur.outerHTML = onlineMessagesBlockHtml(id, r, list);
+}
+async function onlineSendMessage(id) {
+  const titleEl = /** @type {HTMLInputElement|null} */ (document.getElementById('onlineMsgTitle'));
+  const textEl = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('onlineMsgText'));
+  const title = titleEl ? titleEl.value.trim() : '';
+  const text = textEl ? textEl.value.trim() : '';
+  if (!text) return toast('Напишете текста на съобщението.', 'err');
+  const res = await window.api.online.sendMessage({ readerId: id, title, text });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Съобщението е изпратено — читателят ще го види в приложението.', 'ok');
+  const r = await call(window.api.readers.get(id));
+  if (r) await onlineMessagesRefresh(id, r);
+}
+window.onlineSendMessage = onlineSendMessage;
+async function onlineWithdrawMessage(id, msgId) {
+  if (!await askConfirm('Да се оттегли ли съобщението? Читателят вече няма да го вижда в приложението.',
+    { kind: 'warn', title: 'Съобщение до читателя', okLabel: 'Оттегли' })) return;
+  const res = await window.api.online.withdrawMessage({ id: msgId });
+  if (!res.ok) return toast(res.error, 'err');
+  toast('Съобщението е оттеглено.', 'ok');
+  const r = await call(window.api.readers.get(id));
+  if (r) await onlineMessagesRefresh(id, r);
+}
+window.onlineWithdrawMessage = onlineWithdrawMessage;
 async function onlineConsentToggle(id, checked) {
   const gdpr = /** @type {HTMLInputElement|null} */ (document.querySelector('#readerF [name=gdpr_consent]'));
   if (checked && gdpr && !gdpr.checked) {

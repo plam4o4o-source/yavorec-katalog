@@ -216,3 +216,45 @@ test('gdpr: прагът минава точно по 1 януари — 31.12 �
   assert.notEqual(rows[before], readerId, '31 декември преди прага се анонимизира');
   assert.equal(rows[onCutoff], readerId, 'самата 1 януари на прага НЕ се анонимизира (условието е строго <)');
 });
+
+/* ---------------- Лични съобщения до читател (v2.4.82) ---------------- */
+test('gdpr:forgetReader изтрива личните съобщения на читателя (и следата за тях), а чуждите остават', async () => {
+  const { db, ipcMain } = setup();
+  const ins = db.prepare("INSERT INTO readers (name, card_no, registered_at, gdpr_consent) VALUES (?, ?, '2026-01-10', 1)");
+  const me = ins.run('Иван Иванов', 'R-0042').lastInsertRowid;
+  const other = ins.run('Мария Петрова', 'R-0077').lastInsertRowid;
+  const msg = db.prepare("INSERT INTO reader_messages (reader_id, title, body, created_at) VALUES (?, ?, ?, '2026-10-01T09:00:00.000Z')");
+  msg.run(me, 'Запазена книга', 'Книгата пристигна.');
+  msg.run(me, null, 'Второ, вече оттеглено.');
+  db.prepare("UPDATE reader_messages SET withdrawn_at = '2026-10-02T09:00:00.000Z' WHERE body LIKE 'Второ%'").run();
+  msg.run(other, null, 'Чуждо.');
+  const audit = db.prepare("INSERT INTO audit_log (ts, action, detail) VALUES ('2026-10-01 09:00:00', ?, ?)");
+  audit.run('Съобщение до читател', 'Иван Иванов (карта R-0042): съобщение № 1 „Запазена книга“');
+  audit.run('Оттеглено съобщение до читател', 'Иван Иванов (карта R-0042): съобщение № 2');
+  audit.run('Съобщение до читател', 'Мария Петрова (карта R-0077): съобщение № 3 (без заглавие)');
+  const res = await ipcMain.invoke('gdpr:forgetReader', { id: me });
+  assert.equal(res.ok, true, res.error);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reader_messages WHERE reader_id = ?').get(me).n, 0);
+  assert.deepEqual(db.prepare('SELECT body FROM reader_messages').all(), [{ body: 'Чуждо.' }]);
+  const rows = db.prepare("SELECT action, detail FROM audit_log WHERE action LIKE '%ъобщение до читател' ORDER BY id").all();
+  assert.equal(rows[0].detail, '[анонимизирано по GDPR]');
+  assert.equal(rows[1].detail, '[анонимизирано по GDPR]');
+  assert.match(rows[2].detail, /^Мария Петрова/, 'следата за другия читател не е пипната');
+  assert.ok(res.data.readerCleared >= 3, 'броят включва и двете съобщения');
+});
+
+test('gdpr:anonymize изтрива и личните съобщения отпреди срока — и ги брои в gdpr:candidates', async () => {
+  const { db, ipcMain } = setup();
+  db.prepare('UPDATE settings SET anonymize_years = 1 WHERE id = 1').run();
+  const y = new Date().getFullYear();
+  const r = db.prepare("INSERT INTO readers (name, card_no) VALUES ('Читател', 'R-1')").run().lastInsertRowid;
+  const msg = db.prepare('INSERT INTO reader_messages (reader_id, body, created_at) VALUES (?, ?, ?)');
+  msg.run(r, 'Старо', (y - 3) + '-05-01T10:00:00.000Z');
+  msg.run(r, 'Ново', y + '-01-02T10:00:00.000Z');
+  const c = await ipcMain.invoke('gdpr:candidates');
+  assert.equal(c.data.otherCount, 1);
+  const res = await ipcMain.invoke('gdpr:anonymize');
+  assert.equal(res.ok, true, res.error);
+  assert.equal(res.data.otherCleared, 1);
+  assert.deepEqual(db.prepare('SELECT body FROM reader_messages').all(), [{ body: 'Ново' }]);
+});

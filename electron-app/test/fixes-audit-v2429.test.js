@@ -138,7 +138,7 @@ test('gdpr:candidates брои и gdpr:anonymize обезличава резер
   assert.equal(q('SELECT reader_id FROM housebound_visits WHERE date = ?', old).reader_id, anon.id, 'старото посещение е прехвърлено на служебния запис');
   assert.equal(q('SELECT reader_id FROM housebound_visits WHERE date = ?', recent).reader_id, r, 'новото остава');
   assert.equal((await ok('gdpr:candidates')).otherCount, 0, 'след анонимизирането няма какво повече');
-  assert.match(lastAudit().detail, /5 записа в резервации, предложения, МЗС, напомняния и посещения са обезличени/);
+  assert.match(lastAudit().detail, /5 записа в резервации, предложения, МЗС, напомняния, посещения и лични съобщения са обезличени/);
 });
 
 /* ==================================================================
@@ -725,12 +725,12 @@ test('Настройки → Лични данни: подсказката и в
   const { window } = dom; await settle();
   window.document.body.insertAdjacentHTML('beforeend', '<div id="anonHint"></div>');
   await window.loadAnonHint(); await settle();
-  assert.match(window.document.getElementById('anonHint').textContent, /3 записа в резервации, предложения, МЗС, напомняния и посещения/);
+  assert.match(window.document.getElementById('anonHint').textContent, /3 записа в резервации, предложения, МЗС, напомняния, посещения и лични съобщения/);
   let asked = '';
   window.confirm = (m) => { asked = m; return true; };
   const toasts = []; window.toast = (m) => toasts.push(m);
   await window.runAnonymize(); await settle();
-  assert.match(asked, /3 записа в резервации, предложения, МЗС, напомняния и посещения по домовете губят името/);
+  assert.match(asked, /3 записа в резервации, предложения, МЗС, напомняния, посещения по домовете и лични съобщения губят името/);
   assert.equal(dom.calls['gdpr.anonymize'].length, 1, 'бутонът не е заключен само от заеманията');
   assert.match(toasts.join('|'), /3 други записа/);
 });

@@ -521,6 +521,16 @@ interface DbPersons {
   note: string | null;
   created_at: string | null;
 }
+/** Ред от таблица `reader_messages`. */
+interface DbReaderMessages {
+  id: number;
+  reader_id: number;
+  title: string | null;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+  withdrawn_at: string | null;
+}
 /** Ред от таблица `reader_registrations`. */
 interface DbReaderRegistrations {
   id: number;
