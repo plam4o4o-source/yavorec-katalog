@@ -67,7 +67,8 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 test('регистрира всички канали online:*', () => {
   const { ipcMain } = setup();
   for (const ch of ['online:status', 'online:activate', 'online:deactivate', 'online:updateSettings',
-    'online:setReaderConsent', 'online:issuePin', 'online:revokePin', 'online:syncNow']) {
+    'online:setReaderConsent', 'online:issuePin', 'online:revokePin', 'online:syncNow',
+    'online:messages', 'online:sendMessage', 'online:withdrawMessage']) {
     assert.ok(ipcMain.has(ch), ch);
   }
 });
@@ -81,7 +82,10 @@ test('БЕЗ активация: status е { activated:false }, каналите
     ['online:updateSettings', { online_bridge_url: 'https://x.org', online_upload_key: 'k' }],
     ['online:setReaderConsent', { readerId, consent: true }],
     ['online:issuePin', { readerId }],
-    ['online:revokePin', { readerId }]
+    ['online:revokePin', { readerId }],
+    ['online:messages', { readerId }],
+    ['online:sendMessage', { readerId, text: 'Здравейте' }],
+    ['online:withdrawMessage', { id: 1 }]
   ]) {
     const r = ipcMain.invoke(ch, arg);
     assert.equal(r.ok, false, ch);
@@ -476,4 +480,172 @@ test('БЕЗ активация и без обвивка към гишето н�
   assert.equal(c2[0].readers[0].loans[0].canRenew, false);
   assert.deepEqual(c2[1].requestResults, [{ id: 'q-9', status: 'rejected', reason: 'удължаването от приложението не е налично' }]);
   assert.equal(s.db.prepare('SELECT renewals FROM loans WHERE id = ?').get(id2).renewals, 0);
+});
+
+/* ======================================================================
+   v2.4.82 — лични съобщения до читател: каналите от картона и заявките
+   „прочетено“ от приложението (договорът с моста, раздели 1 и 2). */
+function setupMessages(opts) {
+  const t = setupWithLoans(opts);
+  const { db, readerId } = t;
+  /* Втори читател С онлайн достъп — за „чуждото съобщение“. */
+  const other = db.prepare(`INSERT INTO readers (name, card_no, registered_at, gdpr_consent, online_consent, online_pin_hash)
+    VALUES ('Мария Петрова', 'R-0077', ?, 1, 1, ?)`).run(localDate(), require('../online-access').hashPin('333333')).lastInsertRowid;
+  const send = (o) => t.ipcMain.invoke('online:sendMessage', Object.assign({ readerId }, o));
+  return Object.assign(t, { other, send });
+}
+
+test('online:sendMessage: отказ за читател без онлайн достъп (без съгласие или без ПИН) — с ясна причина и без запис', () => {
+  const t = setupMessages();
+  const { db, ipcMain, noGdpr, auditLog } = t;
+  const n0 = auditLog.length;
+  const noPin = db.prepare("INSERT INTO readers (name, card_no, registered_at, gdpr_consent, online_consent) VALUES ('Без ПИН', 'R-0003', ?, 1, 1)")
+    .run(localDate()).lastInsertRowid;
+  for (const readerId of [noGdpr, noPin]) {
+    const r = ipcMain.invoke('online:sendMessage', { readerId, text: 'Здравейте' });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /няма онлайн достъп .*няма да види съобщението/);
+  }
+  assert.match(ipcMain.invoke('online:sendMessage', { readerId: 999999, text: 'x' }).error, /не е намерен/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reader_messages').get().n, 0);
+  assert.equal(auditLog.length, n0, 'нищо в следата');
+  /* Оттеглен ПИН: вече изпратеното остава, ново не може. */
+  assert.equal(t.send({ text: 'Първо' }).ok, true);
+  ipcMain.invoke('online:revokePin', { readerId: t.readerId });
+  assert.match(t.send({ text: 'Второ' }).error, /няма онлайн достъп/);
+  assert.equal(ipcMain.invoke('online:messages', { readerId: t.readerId }).data.length, 1);
+});
+
+test('online:sendMessage: текстът е задължителен, заглавието — по желание; изрязване; таван 120/2000 знака', () => {
+  const t = setupMessages();
+  const { db } = t;
+  assert.match(t.send({ text: '   \n ' }).error, /Напишете текста/);
+  assert.match(t.send({ title: 'x'.repeat(121), text: 'ок' }).error, /Заглавието е твърде дълго: 121 знака \(най-много 120\)/);
+  assert.match(t.send({ text: 'я'.repeat(2001) }).error, /Текстът е твърде дълъг: 2001 знака \(най-много 2000\)/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reader_messages').get().n, 0);
+  const ok = t.send({ title: '  ' + 'з'.repeat(120) + '  ', text: '  ' + 'я'.repeat(2000) + '\n' });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(ok.data.title.length, 120);
+  assert.equal(ok.data.body.length, 2000);
+  const noTitle = t.send({ text: '  Ред 1\r\nРед 2  ' });
+  assert.equal(noTitle.data.title, null, 'празно заглавие се пази като NULL');
+  assert.equal(noTitle.data.body, 'Ред 1\nРед 2');
+  assert.equal(noTitle.data.reader_id, t.readerId);
+  assert.ok(Date.parse(noTitle.data.created_at) > 0);
+  assert.equal(noTitle.data.read_at, null);
+  assert.equal(noTitle.data.withdrawn_at, null);
+});
+
+test('online:sendMessage / online:withdrawMessage: следа без текста, насрочено изпращане, списък с най-новите първи', async () => {
+  const t = setupMessages({ debounceMs: 60000 });
+  const { db, ipcMain, auditLog, readerId } = t;
+  const a = t.send({ title: 'Запазена книга', text: 'Книгата пристигна, вземете я до петък.' }).data;
+  const sent = auditLog.filter(x => x.action === 'Съобщение до читател');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].detail, 'Иван Иванов (карта R-0042): съобщение № ' + a.id + ' „Запазена книга“');
+  assert.ok(!sent[0].detail.includes('пристигна'), 'текстът не влиза в одитната следа');
+  assert.equal(ipcMain.invoke('online:status').data.pending, true, 'изпращането към моста е насрочено');
+  db.prepare("UPDATE reader_messages SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = ?").run(a.id);
+  const b = t.send({ text: 'Второ' }).data;
+  assert.deepEqual(ipcMain.invoke('online:messages', { readerId }).data.map(m => m.id), [b.id, a.id], 'най-новото първо');
+  assert.deepEqual(ipcMain.invoke('online:messages', { readerId: t.other }).data, [], 'чуждите не се виждат');
+  /* Оттегляне */
+  const w = ipcMain.invoke('online:withdrawMessage', { id: a.id });
+  assert.equal(w.ok, true, w.error);
+  assert.equal(w.data.id, a.id);
+  assert.ok(Date.parse(w.data.withdrawn_at) > 0);
+  assert.equal(db.prepare('SELECT withdrawn_at FROM reader_messages WHERE id = ?').get(a.id).withdrawn_at, w.data.withdrawn_at);
+  const wa = auditLog.filter(x => x.action === 'Оттеглено съобщение до читател');
+  assert.equal(wa.length, 1);
+  assert.match(wa[0].detail, /^Иван Иванов \(карта R-0042\): съобщение № \d+ „Запазена книга“$/);
+  assert.match(ipcMain.invoke('online:withdrawMessage', { id: a.id }).error, /вече е оттеглено/);
+  assert.match(ipcMain.invoke('online:withdrawMessage', { id: 999999 }).error, /не е намерено/);
+  assert.equal(ipcMain.invoke('online:messages', { readerId }).data.length, 2, 'оттегленото остава в картона');
+  /* Оттегленото не пътува; изпратеното — да. */
+  const { calls, fetch } = bridge([]);
+  await withFetch(fetch, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  const me = calls[0].readers.find(r => r.cardNumber === 'R-0042');
+  assert.deepEqual(me.messages.map(m => m.messageId), [String(b.id)]);
+  assert.deepEqual(me.messages[0], { messageId: String(b.id), title: '', text: 'Второ', at: b.created_at, readAt: null });
+  t.api.stopOnlineTimer();
+});
+
+test('заявка messageRead: done и read_at от `at`; чужд читател/чужда карта/чуждо или липсващо съобщение — отказ; отговорът тръгва веднага с readAt в снимката', async () => {
+  const t = setupMessages();
+  const { db, ipcMain, readerId, other } = t;
+  const mine = t.send({ title: 'Здравейте', text: 'Лично' }).data;
+  const theirs = ipcMain.invoke('online:sendMessage', { readerId: other, text: 'Чуждо' }).data;
+  const AT = new Date(Date.now() - 60 * 60 * 1000).toISOString();   // преди час — момент от миналото, както от телефона
+  const req = (id, o) => Object.assign({ id, type: 'messageRead', readerId: String(readerId), cardNumber: 'R-0042', messageId: String(mine.id), at: AT }, o);
+  const { calls, fetch } = bridge([
+    req('m-ok'),
+    req('m-theirs', { messageId: String(theirs.id) }),
+    req('m-none', { messageId: '999999' }),
+    req('m-bad', { messageId: 'abc' }),
+    req('m-card', { cardNumber: 'R-9999' }),
+    req('m-other-reader', { readerId: String(other), cardNumber: 'R-0077' }),   // мое съобщение, заявено от друг читател
+    req('m-kind', { type: 'messageDelete' })
+  ]);
+  await withFetch(fetch, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  assert.equal(calls.length, 2, 'снимка + незабавен отговор');
+  assert.deepEqual(calls[1].requestResults, [
+    { id: 'm-ok', status: 'done' },
+    { id: 'm-theirs', status: 'rejected', reason: 'съобщението не е намерено' },
+    { id: 'm-none', status: 'rejected', reason: 'съобщението не е намерено' },
+    { id: 'm-bad', status: 'rejected', reason: 'съобщението не е намерено' },
+    { id: 'm-card', status: 'rejected', reason: 'съобщението не е намерено' },
+    { id: 'm-other-reader', status: 'rejected', reason: 'съобщението не е намерено' },
+    { id: 'm-kind', status: 'rejected', reason: 'непознат вид заявка' }
+  ]);
+  assert.equal(db.prepare('SELECT read_at FROM reader_messages WHERE id = ?').get(mine.id).read_at, AT);
+  assert.equal(db.prepare('SELECT read_at FROM reader_messages WHERE id = ?').get(theirs.id).read_at, null, 'чуждото не е пипнато');
+  const me = calls[1].readers.find(r => r.cardNumber === 'R-0042');
+  assert.equal(me.messages[0].readAt, AT, 'следващата снимка носи „прочетено“');
+  assert.equal(ipcMain.invoke('online:messages', { readerId }).data[0].read_at, AT, 'картонът го вижда');
+});
+
+test('заявка messageRead: идемпотентна — повторената получава същия отговор, а нова за същото съобщение не мести първия момент', async () => {
+  const t = setupMessages();
+  const { db, ipcMain, readerId } = t;
+  const m = t.send({ text: 'Лично' }).data;
+  const AT = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const q = { id: 'r-1', type: 'messageRead', readerId: String(readerId), cardNumber: 'R-0042', messageId: String(m.id), at: AT };
+  const calls = [];
+  const fetch = async (url, init) => { calls.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ ok: true, requests: [q] }) }; };
+  await withFetch(fetch, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  assert.equal(calls.length, 2, 'снимка + един отговор; повторената заявка не върти веригата');
+  assert.deepEqual(calls[1].requestResults, [{ id: 'r-1', status: 'done' }]);
+  await withFetch(fetch, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  assert.equal(calls.length, 3, 'вече обработена — без ново изпращане');
+  assert.deepEqual(db.prepare("SELECT id, status, reason FROM online_request_results WHERE id = 'r-1'").all(), [{ id: 'r-1', status: 'done', reason: null }]);
+  /* Друга заявка (друг id) за същото съобщение, по-късно — done, но read_at остава първият. */
+  const q2 = Object.assign({}, q, { id: 'r-2', at: new Date(Date.now() - 60 * 1000).toISOString() });
+  const { calls: c2, fetch: f2 } = bridge([q2]);
+  await withFetch(f2, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  assert.deepEqual(c2[1].requestResults, [{ id: 'r-2', status: 'done' }]);
+  assert.equal(db.prepare('SELECT read_at FROM reader_messages WHERE id = ?').get(m.id).read_at, AT);
+  /* Момент в бъдещето или неразчетим → „сега“, не бъдеща дата. */
+  const m2 = t.send({ text: 'Второ' }).data;
+  const before = Date.now();
+  const { fetch: f3 } = bridge([Object.assign({}, q, { id: 'r-3', messageId: String(m2.id), at: '2099-01-01T00:00:00.000Z' })]);
+  await withFetch(f3, async () => { assert.equal((await ipcMain.invoke('online:syncNow')).ok, true); });
+  const ra = Date.parse(db.prepare('SELECT read_at FROM reader_messages WHERE id = ?').get(m2.id).read_at);
+  assert.ok(ra >= before - 1000 && ra <= Date.now() + 1000, 'бъдещ момент от телефона се заменя със „сега“');
+});
+
+test('reader_messages се създава и върху по-стара база без таблицата (обща мрежова папка, без user_version)', async () => {
+  const t = setupMessages();
+  const { db, ipcMain, readerId } = t;
+  db.exec('DROP TABLE reader_messages');
+  const v0 = db.pragma('user_version', { simple: true });
+  assert.deepEqual(ipcMain.invoke('online:messages', { readerId }).data, []);
+  assert.equal(t.send({ text: 'Здравейте' }).ok, true);
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_reader_messages_reader'").get(), 'и индексът');
+  assert.equal(db.pragma('user_version', { simple: true }), v0, 'версията на базата не е вдигната');
+  /* Заявка messageRead върху база, на която таблицата пак липсва — отказ, не срив. */
+  const t2 = setupMessages();
+  t2.db.exec('DROP TABLE reader_messages');
+  const { calls, fetch } = bridge([{ id: 'x-1', type: 'messageRead', readerId: String(t2.readerId), cardNumber: 'R-0042', messageId: '1', at: 'x' }]);
+  await withFetch(fetch, async () => { assert.equal((await t2.ipcMain.invoke('online:syncNow')).ok, true); });
+  assert.deepEqual(calls[1].requestResults, [{ id: 'x-1', status: 'rejected', reason: 'съобщението не е намерено' }]);
 });

@@ -227,6 +227,46 @@ test('buildSnapshot: криптирано име (ако някога се па�
   assert.equal(snap.readers[0].fullName, null);
 });
 
+/* ---------------- Лични съобщения (v2.4.82) ---------------- */
+test('buildSnapshot: messages — най-новите първи, до 50, без оттеглените и по-старите от 180 дни; само за читателите от снимката', () => {
+  const db = freshDb();
+  const ids = seed(db);
+  const now = '2026-10-10T12:00:00.000Z';
+  const ins = db.prepare('INSERT INTO reader_messages (reader_id, title, body, created_at, read_at, withdrawn_at) VALUES (?, ?, ?, ?, ?, ?)');
+  const at = (daysAgo, h) => new Date(Date.parse(now) - daysAgo * 86400000 - (h || 0) * 3600000).toISOString();
+  const fresh = ins.run(ids.active, 'Запазена книга', 'Книгата пристигна, вземете я до петък.', at(1), null, null).lastInsertRowid;
+  const read = ins.run(ids.active, null, 'Прочетено вече.', at(2), '2026-10-09T08:00:00.000Z', null).lastInsertRowid;
+  ins.run(ids.active, 'Оттеглено', 'Не трябва да пътува.', at(0, 1), null, '2026-10-10T11:00:00.000Z');
+  const edge = ins.run(ids.active, null, 'Точно 179 дни.', at(179), null, null).lastInsertRowid;
+  ins.run(ids.active, null, 'Твърде старо.', at(181), null, null);
+  ins.run(ids.noPin, 'Без ПИН', 'Не е в снимката.', at(1), null, null);
+  const snap = oa.buildSnapshot(db, {}, now);
+  const a = snap.readers.find(r => r.cardNumber === 'R-0042');
+  assert.deepEqual(a.messages, [
+    { messageId: String(fresh), title: 'Запазена книга', text: 'Книгата пристигна, вземете я до петък.', at: at(1), readAt: null },
+    { messageId: String(read), title: '', text: 'Прочетено вече.', at: at(2), readAt: '2026-10-09T08:00:00.000Z' },
+    { messageId: String(edge), title: '', text: 'Точно 179 дни.', at: at(179), readAt: null }
+  ]);
+  assert.deepEqual(snap.readers.find(r => r.cardNumber === 'R-0003').messages, [], 'читател без съобщения — празен масив');
+  assert.ok(!JSON.stringify(snap).includes('Не е в снимката'), 'читател без ПИН не е в снимката, нито съобщенията му');
+  assert.equal(oa.MESSAGES_MAX_AGE_DAYS, 180);
+});
+
+test('buildSnapshot: messages — най-много 50; без таблицата (по-стара база) снимката не пада', () => {
+  const db = freshDb();
+  const ids = seed(db);
+  const ins = db.prepare('INSERT INTO reader_messages (reader_id, body, created_at) VALUES (?, ?, ?)');
+  for (let i = 0; i < 60; i++) ins.run(ids.active, 'Съобщение ' + i, new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString());
+  const a = oa.buildSnapshot(db, {}, '2026-10-10T12:00:00.000Z').readers.find(r => r.cardNumber === 'R-0042');
+  assert.equal(oa.MESSAGES_LIMIT, 50);
+  assert.equal(a.messages.length, 50);
+  assert.equal(a.messages[0].text, 'Съобщение 59', 'най-новото първо');
+  assert.equal(a.messages[49].text, 'Съобщение 10');
+  db.exec('DROP TABLE reader_messages');
+  const b = oa.buildSnapshot(db, {}, '2026-10-10T12:00:00.000Z').readers.find(r => r.cardNumber === 'R-0042');
+  assert.deepEqual(b.messages, []);
+});
+
 /* ---------------- Изпращане ---------------- */
 test('sendSnapshot: заглавки и адрес по договора; 200 → ok', async () => {
   let seen = null;

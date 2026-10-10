@@ -189,6 +189,20 @@ test('readers:delete removes the row', async () => {
   assert.equal(row, undefined);
 });
 
+test('readers:delete изтрива и личните съобщения до читателя (v2.4.82)', async () => {
+  const { db, ipcMain } = setup();
+  const id = (await ipcMain.invoke('readers:create', { name: 'За изтриване', gdpr_consent: 1 })).data;
+  const keep = (await ipcMain.invoke('readers:create', { name: 'Остава', gdpr_consent: 1 })).data;
+  const msg = db.prepare("INSERT INTO reader_messages (reader_id, body, created_at) VALUES (?, ?, '2026-10-01T09:00:00.000Z')");
+  msg.run(id, 'Едно');
+  msg.run(id, 'Две');
+  msg.run(keep, 'Чуждо');
+  const res = await ipcMain.invoke('readers:delete', id);
+  assert.equal(res.ok, true, res.error);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reader_messages WHERE reader_id = ?').get(id).n, 0);
+  assert.deepEqual(db.prepare('SELECT body FROM reader_messages').all(), [{ body: 'Чуждо' }]);
+});
+
 test('readers:list without a query returns all readers ordered by name, masked via maskReaderRows', async () => {
   let maskedCount = 0;
   const { ipcMain } = setup({ maskReaderRows: (rows) => { maskedCount = rows.length; return rows; } });

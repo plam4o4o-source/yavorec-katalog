@@ -433,6 +433,13 @@ interface OnlineSnapshotHistoryItem {
   loanId: string; inv: number | null; title: string; author: string; dateOut: IsoDate; dateIn: IsoDate;
 }
 
+/** Лично съобщение от библиотеката до читател (reader_messages, v2.4.82). */
+interface ReaderMessage extends DbReaderMessages {}
+/** Лично съобщение в снимката за моста (buildSnapshot; договорът, раздел 1). */
+interface OnlineSnapshotMessage {
+  messageId: string; title: string; text: string; at: string; readAt: string | null;
+}
+
 /** Колона от Дневника (DNEVNIK_FIELDS в handlers/dnevnik.js) — 30 в Раздел А и 36 в Раздел Б. */
 type DnevnikField =
   | 'a_hours' | 'a_age_u14' | 'a_age_15_18' | 'a_age_19_28' | 'a_age_o28'
@@ -1469,6 +1476,11 @@ interface IpcContract {
   'online:issuePin': { args: [{ readerId: Id }]; result: { pin: string; cardNumber: string; setAt: IsoDate } };
   'online:revokePin': { args: [{ readerId: Id }]; result: void };
   'online:syncNow': { args: []; result: { generated: string | null } };
+  /** Личните съобщения на читателя за картона — всички (и оттеглените), най-новите първи (v2.4.82). */
+  'online:messages': { args: [{ readerId: Id }]; result: ReaderMessage[] };
+  /** Отказва се, ако читателят няма онлайн достъп (съгласие + ПИН) — той не би го видял. */
+  'online:sendMessage': { args: [{ readerId: Id; title?: string | null; text: string }]; result: ReaderMessage };
+  'online:withdrawMessage': { args: [{ id: Id }]; result: { id: number; withdrawn_at: string } };
 
   /* ---- Защита на ЕГН/№ ЛК (handlers/pdp.js) ---- */
   'pdp:status': { args: []; result: PdpStatus };

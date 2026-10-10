@@ -345,6 +345,12 @@ interface InvLibApi {
     revokePin: IpcMethod<'online:revokePin'>;
     /** канал „online:syncNow“ */
     syncNow: IpcMethod<'online:syncNow'>;
+    /** канал „online:messages“ */
+    messages: IpcMethod<'online:messages'>;
+    /** канал „online:sendMessage“ */
+    sendMessage: IpcMethod<'online:sendMessage'>;
+    /** канал „online:withdrawMessage“ */
+    withdrawMessage: IpcMethod<'online:withdrawMessage'>;
   };
   av: {
     /** канал „av:categories“ */

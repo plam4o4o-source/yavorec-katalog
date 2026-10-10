@@ -731,7 +731,6 @@ CREATE TABLE IF NOT EXISTS mzs_requests (
   date_returned TEXT
 );
 
--- Одитна следа — кой служител какво е извършил
 -- Резултати от заявките на читателите през мобилното приложение (v2.4.81,
 -- онлайн достъп). Мостът връща при всяко изпращане заявките „удължи“; всяка се
 -- обработва веднъж и резултатът ѝ (done | rejected + причина) остава тук, за да
@@ -745,6 +744,28 @@ CREATE TABLE IF NOT EXISTS online_request_results (
   at     TEXT NOT NULL         -- кога е обработена (ISO)
 );
 
+-- Лични съобщения от библиотеката до читател (v2.4.82, онлайн достъп).
+-- Библиотекарят пише съобщение от картона на читателя; то пътува в снимката
+-- към моста (buildSnapshot в online-access.js — най-новите 50, неоттеглени, не
+-- по-стари от 180 дни) и се вижда САМО от този читател след вход в мобилното
+-- приложение. „Прочетено“ идва обратно като заявка messageRead (processRequests
+-- в handlers/online-access.js). Нищо не се изтрива при оттегляне — отбелязва се
+-- withdrawn_at, за да остане видимо в картона какво е било изпратено. Със
+-- заличаването на читателя (readers:delete, gdpr:forgetReader) редовете му
+-- отпадат. Инертна без код за активация; версията на базата не се вдига (таблицата
+-- се създава идемпотентно и от handlers/online-access.js за обща мрежова база).
+CREATE TABLE IF NOT EXISTS reader_messages (
+  id           INTEGER PRIMARY KEY,
+  reader_id    INTEGER NOT NULL REFERENCES readers(id) ON DELETE CASCADE,
+  title        TEXT,                 -- по желание, до 120 знака
+  body         TEXT NOT NULL,        -- текстът, до 2000 знака
+  created_at   TEXT NOT NULL,        -- кога е изпратено (ISO, UTC)
+  read_at      TEXT,                 -- кога читателят го е отворил (ISO) — от приложението
+  withdrawn_at TEXT                  -- кога библиотекарят го е оттеглил (ISO)
+);
+CREATE INDEX IF NOT EXISTS idx_reader_messages_reader ON reader_messages(reader_id);
+
+-- Одитна следа — кой служител какво е извършил
 CREATE TABLE IF NOT EXISTS audit_log (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   ts      TEXT DEFAULT (datetime('now')),

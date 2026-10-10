@@ -672,6 +672,9 @@ module.exports = function registerReadersHandlers(ipcMain, deps) {
         : require('./loans').activateHoldOnReturn;
       const holdsActivated = [];
       db.transaction(() => {
+        /* Личните съобщения до читателя (v2.4.82) си отиват с него — изрично,
+           а не само по каскадата от readers. */
+        db.prepare('DELETE FROM reader_messages WHERE reader_id = ?').run(id);
         db.prepare('DELETE FROM readers WHERE id = ?').run(id);
         if (typeof activate === 'function') {
           for (const bookId of setAside) {

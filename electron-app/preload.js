@@ -270,7 +270,11 @@ contextBridge.exposeInMainWorld('api', {
     setReaderConsent: invoke('online:setReaderConsent'),
     issuePin: invoke('online:issuePin'),
     revokePin: invoke('online:revokePin'),
-    syncNow: invoke('online:syncNow')
+    syncNow: invoke('online:syncNow'),
+    /* Лични съобщения до читател (v2.4.82) — от картона на читателя. */
+    messages: invoke('online:messages'),
+    sendMessage: invoke('online:sendMessage'),
+    withdrawMessage: invoke('online:withdrawMessage')
   },
   av: {
     categories: invoke('av:categories'),
