@@ -35,11 +35,43 @@
 // (съгласие + ПИН + картата) — read_at се записва веднъж (COALESCE) и отговорът
 // се пази в online_request_results. Съобщение до читател без онлайн достъп се
 // отказва още при писането: той никога не би го видял.
+//
+// ЛЕКО ИЗПРАЩАНЕ (v2.4.83, договорът с моста — раздел InvLib). Мостът обявява в
+// отговора си `features` (["gzip", "unchanged"]); те се пазят в
+// settings.online_bridge_features и важат от следващото изпращане:
+//   • "unchanged" — ако отпечатъкът на снимката (snapshotHash в online-access.js)
+//     е същият като на последната ПЪЛНА изпратена и тя е отпреди по-малко от 6
+//     часа, тръгва само {library, activation, unchanged, hash, requestResults}:
+//     заявките на читателите се обменят, а снимката не пътува. Пълна снимка има
+//     при промяна, при стартиране, при „Изпрати сега“, поне веднъж на 6 часа и
+//     веднага, ако мостът отговори `needFull: true` (няма снимка при себе си).
+//     Таймерът тогава е на 10 минути (евтино), иначе — на 30, както досега.
+//   • "gzip" — тялото тръгва компресирано (Content-Encoding: gzip).
+// МОСТ БЕЗ `features` (по-стар) ⇒ всичко е както до v2.4.82: пълна снимка, чист
+// JSON, на 30 минути — запомнените features се изчистват от първия такъв
+// отговор. Ако мост, обявил ги, след това откаже тялото (400/415/422 — напр.
+// върнат към по-стара версия), features се забравят и същото изпращане се
+// повтаря веднага по стария начин; програмата не остава заклещена.
+// Отпечатъкът, моментът на последната пълна снимка и features са в settings
+// (идемпотентни колони в main.js, без вдигане на user_version) и се нулират при
+// смяна на адреса на моста или ключа, при активиране и при деактивиране.
 const {
-  generatePin, hashPin, verifyActivation, buildSnapshot, sendSnapshot
+  generatePin, hashPin, verifyActivation, buildSnapshot, sendSnapshot, snapshotHash, unchangedBody
 } = require('../online-access');
 
 const PERIODIC_MS = 30 * 60 * 1000;   // редовно изпращане на половин час, само при активирано
+/* v2.4.83: мостът поддържа „без промени“ ⇒ редовната проверка е евтина (едно
+   малко тяло) и върви на 10 минути — заявките от приложението чакат по-малко. */
+const PERIODIC_FAST_MS = 10 * 60 * 1000;
+/* Пълна снимка поне веднъж на толкова, дори без промяна в базата — предпазна
+   мрежа, ако мостът по някаква причина е загубил или повредил своята. */
+const FULL_EVERY_MS = 6 * 60 * 60 * 1000;
+/* Изпращането при стартиране чака толкова след старта, за да не се бори с
+   отварянето на прозореца и първите екрани за диска и процесора. */
+const STARTUP_DELAY_MS = 8 * 1000;
+/* Отказ на тялото от мост, който е обявил features — повтаря се веднага по
+   стария начин (пълна снимка, чист JSON) и features се забравят. */
+const LEGACY_FALLBACK_STATUSES = [400, 415, 422];
 /* Таваните на личното съобщение (v2.4.82) — същите като на моста (договорът,
    раздел 1): заглавие до 120 знака, текст до 2000. */
 const MESSAGE_TITLE_MAX = 120;
@@ -67,7 +99,24 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
 
   function settingsRow() {
     return getDb().prepare(`SELECT lib_name, org, online_bridge_url, online_upload_key, online_activation,
-      online_last_sync, online_last_error FROM settings WHERE id = 1`).get() || {};
+      online_last_sync, online_last_error, online_last_hash, online_last_full, online_bridge_features
+      FROM settings WHERE id = 1`).get() || {};
+  }
+  /* Запомнените features на моста — JSON масив от низове; всичко друго
+     (NULL, повреден низ) е „няма“ — тоест поведението до v2.4.82. */
+  /** @param {unknown} raw @returns {string[]} */
+  function parseFeatures(raw) {
+    if (!raw) return [];
+    try {
+      const a = JSON.parse(String(raw));
+      return Array.isArray(a) ? a.filter(f => typeof f === 'string') : [];
+    } catch (e) { return []; }
+  }
+  /* Нулиране на лекото изпращане — следващото е пълна снимка по стария начин,
+     докато мостът не обяви features отново. */
+  function resetBridgeState() {
+    getDb().prepare(`UPDATE settings SET online_last_hash = NULL, online_last_full = NULL,
+      online_bridge_features = NULL WHERE id = 1`).run();
   }
   /* Единствената врата. Връща проверения товар на кода или null. Не хвърля —
      вика се при всяко насрочване и от таймера. */
@@ -205,63 +254,139 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
 
   let inFlight = null;
   let rerun = false;
-  /** @param {string} reason @param {{ requestResults?: OnlineRequestResult[], depth?: number }} [extra] */
+  let rerunFull = false;
+  /* При затваряне (flushOnQuit): след изчакването никое ново изпращане не
+     тръгва, а закъснял отговор не пише в базата — тя вече е затворена. */
+  let closing = false;
+  /** @param {OnlineRequestResult[] | undefined} a @param {OnlineRequestResult[] | undefined} b
+      @returns {OnlineRequestResult[]} */
+  function mergeResults(a, b) {
+    const byId = new Map();
+    for (const r of [...(a || []), ...(b || [])]) byId.set(r.id, r);
+    return [...byId.values()];
+  }
+  /** @param {string} reason
+      @param {{ requestResults?: OnlineRequestResult[], depth?: number, forceFull?: boolean, legacy?: boolean }} [extra] */
   async function syncOnce(reason, extra) {
+    const o = extra || {};
     const s = settingsRow();
     const act = activated(s);
     if (!act) return { ok: false, skipped: true, error: 'не е активирано' };
     if (!s.online_bridge_url || !s.online_upload_key) {
       return { ok: false, skipped: true, error: 'няма адрес на моста или ключ за качване' };
     }
-    let body;
+    /* legacy: повторението след отказано тяло — без gzip и без „без промени“. */
+    const features = o.legacy ? [] : parseFeatures(s.online_bridge_features);
+    let body, hash;
     try {
       const tools = loanTools();
       body = buildSnapshot(getDb(), s, new Date().toISOString(),
         Object.assign({}, verifyOpts || {}, tools && typeof tools.canRenew === 'function' ? { canRenew: tools.canRenew } : {}));
-      if (extra && extra.requestResults) body.requestResults = extra.requestResults;
+      hash = snapshotHash(body);
+      /* Отпечатъкът пътува и в ПЪЛНАТА снимка: мостът го пази и отговаря с
+         needFull, ако „без промени“ дойде с друг. По-стар мост полето го
+         пренебрегва (взима само познатите полета). */
+      body.hash = hash;
+      if (o.requestResults) body.requestResults = o.requestResults;
     } catch (err) {
       const msg = 'Снимката не можа да се сглоби: ' + (err && err.message ? err.message : String(err));
       try { setSyncResult(s.online_last_sync || null, msg); } catch (e) { /* базата е заета — ще се повтори */ }
       log('error', '[онлайн достъп] ' + msg);
       return { ok: false, status: 0, error: msg };
     }
-    const res = await sendSnapshot(s.online_bridge_url, act.lib, s.online_upload_key, body, { version: appVersion() });
+    /* „Без промени“ — само ако мостът го е обявил, отпечатъкът е същият като на
+       последната пълна снимка, тя е отпреди по-малко от 6 часа (час в бъдещето —
+       сменен часовник — се брои за стар) и изпращането не е изрично пълно. */
+    const lastFullMs = s.online_last_full ? Date.parse(s.online_last_full) : NaN;
+    const fullAge = Date.now() - lastFullMs;
+    const unchanged = features.includes('unchanged') && !o.forceFull && !!s.online_last_hash
+      && s.online_last_hash === hash && Number.isFinite(lastFullMs) && fullAge >= 0 && fullAge < FULL_EVERY_MS;
+    const gzip = features.includes('gzip');
+    const sendBody = unchanged ? unchangedBody(body, hash, o.requestResults) : body;
+    const res = await sendSnapshot(s.online_bridge_url, act.lib, s.online_upload_key, sendBody, { version: appVersion(), gzip });
+    if (closing) return res;
+    /* Мостът, обявил features, отказа тялото — най-вероятно е върнат към по-стара
+       версия. Забравят се и се повтаря веднага по стария начин. */
+    if (!res.ok && !o.legacy && (gzip || unchanged) && LEGACY_FALLBACK_STATUSES.includes(res.status)) {
+      log('error', '[онлайн достъп] мостът отказа ' + (unchanged ? 'тялото „без промени“' : 'компресираното тяло')
+        + ' (' + res.error + ') — повтаря се с пълна снимка без компресия');
+      try { resetBridgeState(); } catch (e) { log('error', '[онлайн достъп] състоянието на моста не се нулира: ' + e.message); }
+      if (periodic) startPeriodicTimer();
+      return syncOnce(reason, Object.assign({}, o, { legacy: true, forceFull: true }));
+    }
+    const needFull = !!(res.ok && unchanged && res.needFull);
     try {
-      if (res.ok) setSyncResult(body.generated, null);
-      else setSyncResult(s.online_last_sync || null, res.error);
+      if (res.ok) {
+        const featuresJson = res.features && res.features.length ? JSON.stringify(res.features) : null;
+        if (!unchanged) {
+          getDb().prepare(`UPDATE settings SET online_last_sync = ?, online_last_error = NULL, online_last_hash = ?,
+            online_last_full = ?, online_bridge_features = ? WHERE id = 1`).run(body.generated, hash, body.generated, featuresJson);
+        } else if (needFull) {
+          /* Мостът няма снимка: отпечатъкът се забравя, за да е пълно и
+             следващото изпращане, ако това веднага след него не успее. */
+          getDb().prepare(`UPDATE settings SET online_last_hash = NULL, online_bridge_features = ? WHERE id = 1`).run(featuresJson);
+        } else {
+          /* „Без промени“ е успешна връзка с моста — „Последно изпратено“ на
+             екрана е този момент; моментът на пълната снимка остава. */
+          getDb().prepare(`UPDATE settings SET online_last_sync = ?, online_last_error = NULL, online_bridge_features = ? WHERE id = 1`)
+            .run(new Date().toISOString(), featuresJson);
+        }
+        if (periodic) startPeriodicTimer();   // 10 или 30 минути според features
+      } else setSyncResult(s.online_last_sync || null, res.error);
     } catch (e) { log('error', '[онлайн достъп] резултатът не се записа: ' + e.message); }
-    if (res.ok) log('info', '[онлайн достъп] изпратена снимка (' + reason + '): ' + body.readers.length + ' читатели');
+    if (res.ok && unchanged) log('info', '[онлайн достъп] без промени (' + reason + ')' + (needFull ? ' — мостът иска пълна снимка' : ''));
+    else if (res.ok) {
+      log('info', '[онлайн достъп] изпратена снимка (' + reason + '): ' + body.readers.length + ' читатели'
+        + (gzip ? ', ' + Math.round((res.bytes || 0) / 1024) + ' КБ компресирано' : ''));
+    }
     else log('error', '[онлайн достъп] изпращането (' + reason + ') не успя: ' + res.error);
+    if (!res.ok) return res;
     /* Заявките от читателите (v2.4.81): обработват се и резултатът тръгва
        веднага с ново изпращане. Повторно получени (вече обработени) заявки се
        отговарят, но не пораждат ново изпращане — иначе мост, който ги задържа
        до потвърждение, би въртял веригата до безкрай. */
-    if (res.ok && Array.isArray(res.requests) && res.requests.length) {
-      const depth = (extra && extra.depth) || 0;
-      let processed = null;
+    const depth = o.depth || 0;
+    let processed = null;
+    if (Array.isArray(res.requests) && res.requests.length) {
       try { processed = processRequests(res.requests); }
       catch (err) { log('error', '[онлайн достъп] заявките не се обработиха: ' + (err && err.message)); }
       if (processed && processed.results.length) {
         log('info', '[онлайн достъп] заявки от приложението: ' + processed.results.length + ' (нови: ' + processed.fresh + ')');
-        if (processed.fresh > 0 && depth < MAX_FOLLOWUPS) {
-          const again = await syncOnce('отговор на заявки', { requestResults: processed.results, depth: depth + 1 });
-          return Object.assign({}, res, { requests: [], followUp: again });
-        }
       }
+    }
+    /* needFull (v2.4.83): мостът няма снимка — пълната тръгва веднага и носи
+       отговорите от това изпращане и на току-що получените заявки. Само в
+       отговор на „без промени“: пълното изпращане никога не поражда второ. */
+    if (needFull) {
+      const rr = mergeResults(o.requestResults, processed ? processed.results : []);
+      const again = await syncOnce('пълна снимка по искане на моста',
+        rr.length ? { forceFull: true, requestResults: rr, depth: depth + 1 } : { forceFull: true, depth: depth + 1 });
+      return Object.assign({}, res, { requests: [], followUp: again });
+    }
+    if (processed && processed.fresh > 0 && depth < MAX_FOLLOWUPS) {
+      const again = await syncOnce('отговор на заявки', { requestResults: processed.results, depth: depth + 1 });
+      return Object.assign({}, res, { requests: [], followUp: again });
     }
     return res;
   }
-  function sync(reason) {
-    if (inFlight) { rerun = true; return inFlight; }
+  /** @param {string} reason @param {{ forceFull?: boolean }} [opts] */
+  function sync(reason, opts) {
+    if (closing) return Promise.resolve({ ok: false, skipped: true, error: 'програмата се затваря' });
+    const forceFull = !!(opts && opts.forceFull);
+    if (inFlight) { rerun = true; if (forceFull) rerunFull = true; return inFlight; }
     inFlight = (async () => {
-      try { return await syncOnce(reason); }
+      try { return await syncOnce(reason, forceFull ? { forceFull: true } : undefined); }
       catch (err) {
         /* syncOnce не хвърля по замисъл; това е последната мрежа. */
         log('error', '[онлайн достъп] неочаквана грешка: ' + (err && err.message));
         return { ok: false, status: 0, error: err && err.message };
       } finally {
         inFlight = null;
-        if (rerun) { rerun = false; sync('повторно след промяна'); }
+        if (rerun) {
+          const full = rerunFull;
+          rerun = false; rerunFull = false;
+          sync('повторно след промяна', full ? { forceFull: true } : undefined);
+        }
       }
     })();
     return inFlight;
@@ -273,7 +398,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
      празно и евтино (един SELECT на ред 1 от settings). */
   const DEBOUNCE_MS = typeof deps.debounceMs === 'number' ? deps.debounceMs : 60 * 1000;
   const debouncer = typeof deps.createDebouncer === 'function'
-    ? deps.createDebouncer(() => { sync('след промяна'); }, DEBOUNCE_MS)
+    ? deps.createDebouncer(() => sync('след промяна'), DEBOUNCE_MS)   // flush() връща обещанието (flushOnQuit)
     : null;
   function scheduleSync() {
     if (!debouncer) return false;
@@ -281,14 +406,67 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     debouncer.schedule();
     return true;
   }
+  /* Таймерът (v2.4.83): 10 минути, ако мостът е обявил "unchanged", иначе 30.
+     Повторно повикване при вървящ таймер го пренастройва само ако интервалът
+     се е сменил — така syncOnce го вика след всеки отговор на моста. */
+  /** @type {ReturnType<typeof setInterval> | null} */
   let periodic = null;
+  let periodicMs = 0;
+  function periodicInterval() {
+    try { return parseFeatures(settingsRow().online_bridge_features).includes('unchanged') ? PERIODIC_FAST_MS : PERIODIC_MS; }
+    catch (e) { return PERIODIC_MS; }
+  }
   function startPeriodicTimer() {
-    if (periodic) return;
-    periodic = setInterval(() => { if (activated()) sync('по таймер'); }, PERIODIC_MS);
+    const ms = periodicInterval();
+    if (periodic && periodicMs === ms) return;
+    if (periodic) clearInterval(periodic);
+    periodic = setInterval(() => { if (activated()) sync('по таймер'); }, ms);
+    periodicMs = ms;
     if (periodic.unref) periodic.unref();
   }
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let startupTimer = null;
   function stopPeriodicTimer() {
-    if (periodic) { clearInterval(periodic); periodic = null; }
+    if (periodic) { clearInterval(periodic); periodic = null; periodicMs = 0; }
+    if (startupTimer) { clearTimeout(startupTimer); startupTimer = null; }
+  }
+  /* Изпращане при стартиране (v2.4.83) — пълна снимка, няколко секунди след
+     старта (виж STARTUP_DELAY_MS). Без активация — нищо. */
+  /** @param {number} [delayMs] */
+  function scheduleStartupSync(delayMs) {
+    if (startupTimer || closing) return false;
+    if (!activated()) return false;
+    startupTimer = setTimeout(() => {
+      startupTimer = null;
+      if (activated()) sync('при стартиране', { forceFull: true });
+    }, typeof delayMs === 'number' ? delayMs : STARTUP_DELAY_MS);
+    if (startupTimer.unref) startupTimer.unref();
+    return true;
+  }
+  /* ПРИ ЗАТВАРЯНЕ (v2.4.83). Насрочено (отложено) изпращане — промяна от
+     последната минута, напр. заемане или отговор на съобщение — тръгва веднага,
+     а затварянето го чака най-много capMs; вървящо изпращане също се изчаква в
+     същия таван. Без нищо чакащо връща null и затварянето продължава както
+     досега, синхронно. Обещанието връща true, ако изпращането е приключило, и
+     false при изтекъл таван; никога не хвърля. След него нищо ново не тръгва. */
+  /** @param {number} capMs @returns {Promise<boolean> | null} */
+  function flushOnQuit(capMs) {
+    const pending = !!(debouncer && debouncer.pending());
+    if (!pending && !inFlight) return null;
+    if (pending && debouncer) {
+      try { debouncer.flush(); }
+      catch (e) { log('error', '[онлайн достъп] изпращането при затваряне не тръгна: ' + (e && e.message)); }
+    }
+    const drain = (async () => { while (inFlight) { try { await inFlight; } catch (e) { /* sync не хвърля */ } } return true; })();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let cap;
+    const timeout = new Promise(r => { cap = setTimeout(() => r(false), capMs); });
+    return Promise.race([drain, timeout]).then((done) => {
+      clearTimeout(cap);
+      closing = true;
+      if (!done) log('error', '[онлайн достъп] изпращането при затваряне не приключи до ' + Math.round(capMs / 1000) + ' секунди — прекъснато');
+      return /** @type {boolean} */ (done);
+    });
   }
 
   /* ---------------- Канали ---------------- */
@@ -302,6 +480,10 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
       hasUploadKey: !!s.online_upload_key,
       lastSync: s.online_last_sync || null,
       lastError: s.online_last_error || null,
+      /* v2.4.83: моментът на последната ПЪЛНА снимка; различен от lastSync ⇒
+         последната връзка е била „без промени“. */
+      lastFull: s.online_last_full || null,
+      bridgeFeatures: parseFeatures(s.online_bridge_features),
       consentingReaders: consentingCount(),
       pending: !!(debouncer && debouncer.pending())
     };
@@ -312,6 +494,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     const v = verifyActivation(token, null, verifyOpts);
     if (!v.ok) throw new Error(v.error);
     getDb().prepare('UPDATE settings SET online_activation = ?, online_last_error = NULL WHERE id = 1').run(token);
+    resetBridgeState();   // v2.4.83: нов код може да е за друга библиотека — първото изпращане е пълно
     logAudit('Онлайн достъп за читатели', 'активиран с код за библиотека „' + v.lib + '“ (' + (v.name || '') + '), валиден до ' + v.exp);
     startPeriodicTimer();
     return { lib: v.lib, name: v.name, exp: v.exp };
@@ -321,6 +504,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     const s = settingsRow();
     /* Без проверка на срока: изтекъл код също трябва да може да се махне. */
     getDb().prepare('UPDATE settings SET online_activation = NULL, online_last_error = NULL WHERE id = 1').run();
+    resetBridgeState();
     stopPeriodicTimer();
     if (s.online_activation) logAudit('Онлайн достъп за читатели', 'деактивиран; програмата спира да изпраща снимки към моста');
   }));
@@ -333,6 +517,13 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     /* Празен ключ във формата = „не го сменяй“ — полето никога не показва
        записания ключ, така че празно значи само, че не е въведен нов. */
     const key = o && typeof o.online_upload_key === 'string' ? o.online_upload_key.trim() : '';
+    /* v2.4.83: друг мост (или друг ключ) не знае нашата снимка и може да не
+       поддържа features — следващото изпращане е пълно, по стария начин. */
+    const prevUrl = String(db.prepare('SELECT online_bridge_url FROM settings WHERE id = 1').get().online_bridge_url || '');
+    if (key || prevUrl !== url) {
+      resetBridgeState();
+      if (periodic) startPeriodicTimer();
+    }
     if (key) db.prepare('UPDATE settings SET online_bridge_url = ?, online_upload_key = ? WHERE id = 1').run(url || null, key);
     else db.prepare('UPDATE settings SET online_bridge_url = ? WHERE id = 1').run(url || null);
     logAudit('Онлайн достъп за читатели', 'настройки: адрес на моста ' + (url || '—') + (key ? '; ключът за качване е сменен' : ''));
@@ -452,7 +643,7 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
       requireActivated();
       const s = settingsRow();
       if (!s.online_bridge_url || !s.online_upload_key) throw new Error('Попълнете адреса на моста и ключа за качване.');
-      const res = await sync('ръчно');
+      const res = await sync('ръчно', { forceFull: true });   // „Изпрати сега“ — винаги пълна снимка
       if (!res.ok) return { ok: false, error: res.error || 'Изпращането не успя.' };
       return { ok: true, data: { generated: settingsRow().online_last_sync } };
     } catch (err) {
@@ -460,5 +651,11 @@ module.exports = function registerOnlineAccessHandlers(ipcMain, deps) {
     }
   });
 
-  return { scheduleOnlineSync: scheduleSync, startOnlineTimer: startPeriodicTimer, stopOnlineTimer: stopPeriodicTimer, syncOnline: sync, onlineActivated: () => !!activated() };
+  return {
+    scheduleOnlineSync: scheduleSync, startOnlineTimer: startPeriodicTimer, stopOnlineTimer: stopPeriodicTimer,
+    syncOnline: sync, onlineActivated: () => !!activated(),
+    scheduleStartupOnlineSync: scheduleStartupSync, flushOnlineSyncOnQuit: flushOnQuit,
+    /** Текущият интервал на таймера в ms (0 — спрян); за тестовете и дневника. */
+    onlineTimerMs: () => (periodic ? periodicMs : 0)
+  };
 };

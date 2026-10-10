@@ -1109,7 +1109,13 @@ module.exports = function registerLoansHandlers(ipcMain, deps) {
         logEvent('подновяване', { bookId: l.book_id, readerId: l.reader_id });
         return { date_due: newDue, renewals: used + 1, max, daysLate: lateNow, fine: addedFine, suspendedUntil };
       });
-      return tx.immediate();
+      const out = tx.immediate();
+      /* Новият срок (и брой продължения) стига до мобилното приложение на
+         читателя (v2.4.83) — дотук продължението на гишето се виждаше там чак
+         при следващото изпращане по таймер. Извън транзакцията, както при
+         заемане и връщане; без код за активация е празно. */
+      scheduleOnlineSync();
+      return out;
     })
   );
 

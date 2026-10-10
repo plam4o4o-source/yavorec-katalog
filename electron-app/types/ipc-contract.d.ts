@@ -412,6 +412,10 @@ type OnlineStatus =
   | {
     activated: true; lib: string; name: string; exp: IsoDate; bridgeUrl: string; hasUploadKey: boolean;
     lastSync: string | null; lastError: string | null; consentingReaders: number; pending: boolean;
+    /** Моментът на последната ПЪЛНА снимка (v2.4.83); различен от lastSync ⇒ последната връзка е „без промени“. */
+    lastFull: string | null;
+    /** Обявеното от моста в последния му отговор (напр. ["gzip", "unchanged"]); празно — по стария начин. */
+    bridgeFeatures: string[];
   };
 
 /** Отговор към моста за заявка на читател от мобилното приложение (v2.4.81,

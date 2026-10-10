@@ -22,6 +22,7 @@
    Договорът с моста (полета, хеш, код за активация) е описан в бележката към
    разработката на моста; тук се спазва буквално, без свои имена на полета. */
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 /* Публичният ключ на разработчика (SPKI DER, base64). Същият стои и в моста —
    той проверява кода още веднъж при всяко изпращане. Тестовете подават свой
@@ -225,13 +226,67 @@ function buildSnapshot(db, settings, nowIso, opts) {
   };
 }
 
+/* ---------------- Отпечатък на снимката (v2.4.83) ----------------
+   sha256 върху КАНОНИЧНИЯ JSON на тялото (ключовете на всеки обект подредени,
+   без празни места) БЕЗ `generated`, `activation` и `requestResults`: първото
+   се сменя при всяко сглобяване, второто е подписът, а не данните, а третото
+   е отговор на заявки, не съдържание на снимката (самото поле `hash`, което
+   пълната снимка носи, също е извън — то е резултатът). Тоест две сглобявания върху
+   непроменена база дават един и същ отпечатък, а всяка промяна, която стига
+   до приложението (заемане, срок, съобщение, „прочетено“, име на библиотеката),
+   го сменя. По него handlers/online-access.js решава дали да прати пълната
+   снимка или само лекото „без промени“ (договорът с моста, раздел InvLib/1).
+   Подредбата на ключовете е нарочна: отпечатъкът не бива да зависи от реда, в
+   който кодът е сглобил полетата — иначе безобидно пренареждане в
+   buildSnapshot би пратило пълна снимка на всяка инсталация „за нищо“. */
+const HASH_EXCLUDED_KEYS = ['generated', 'activation', 'requestResults', 'hash'];
+function canonicalJson(v) {
+  if (v === null || typeof v !== 'object') {
+    /* undefined (поле без стойност) и функции JSON.stringify пропуска в обект и
+       прави на null в масив — тук същото, за да е отпечатъкът на изпратеното. */
+    const j = JSON.stringify(v);
+    return j === undefined ? 'null' : j;
+  }
+  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
+  const keys = Object.keys(v).filter(k => v[k] !== undefined && typeof v[k] !== 'function').sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalJson(v[k])).join(',') + '}';
+}
+function snapshotHash(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  /** @type {Record<string, unknown>} */
+  const rest = {};
+  for (const k of Object.keys(b)) if (!HASH_EXCLUDED_KEYS.includes(k)) rest[k] = b[k];
+  return crypto.createHash('sha256').update(canonicalJson(rest), 'utf8').digest('hex');
+}
+/* Лекото тяло „без промени“ (мостът с features "unchanged"): снимката на моста
+   не се презаписва, но заявките се обменят — затова requestResults пътуват и
+   тук (празен масив, ако няма). Няма `readers` и `generated`. */
+function unchangedBody(body, hash, requestResults) {
+  return {
+    library: body.library,
+    activation: body.activation,
+    unchanged: true,
+    hash,
+    requestResults: Array.isArray(requestResults) ? requestResults : []
+  };
+}
+
 /* ---------------- Изпращане ----------------
    Никога не хвърля — резултатът отива в online_last_error и в дневника, а не
    в диалог пред библиотекаря (изпращането е фоново). 20 секунди таван: по
    бавна връзка в читалище заявката не бива да виси до безкрай.
    При успех връща и `requests` — заявките на читателите от отговора на моста
-   (виж бележката долу). */
+   (виж бележката долу).
+   v2.4.83: opts.gzip — тялото тръгва компресирано (`Content-Encoding: gzip`);
+   handlers/online-access.js го подава само ако мостът е обявил "gzip" в
+   `features`. Отговорът връща и `features` (масив от низове или null, ако
+   мостът не ги обявява — тогава всичко е както до v2.4.82) и `needFull`. */
 const SEND_TIMEOUT_MS = 20000;
+/** @param {any} j @returns {string[] | null} */
+function featuresFrom(j) {
+  if (!j || !Array.isArray(j.features)) return null;
+  return j.features.filter(/** @param {unknown} f */ (f) => typeof f === 'string' && f.length > 0 && f.length <= 40).slice(0, 20);
+}
 async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
   const base = String(bridgeUrl || '').trim().replace(/\/+$/, '');
   if (!/^https:\/\//i.test(base)) return { ok: false, status: 0, error: 'Адресът на моста трябва да започва с https://.' };
@@ -242,14 +297,26 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeoutMs) || SEND_TIMEOUT_MS);
   try {
+    /** @type {Record<string, string>} */
+    const headers = {
+      'Authorization': 'Bearer ' + uploadKey,
+      'Content-Type': 'application/json; charset=utf-8',
+      'User-Agent': 'InvLib/' + ((opts && opts.version) || '0')
+    };
+    const json = JSON.stringify(body);
+    /** @type {string | Uint8Array} */
+    let payload = json;
+    if (opts && opts.gzip) {
+      payload = new Uint8Array(zlib.gzipSync(Buffer.from(json, 'utf8')));
+      headers['Content-Encoding'] = 'gzip';
+      /* НЕ application/json: хостингът на моста (Vercel) разчита такова тяло сам,
+         преди мостът да го разархивира, и мостът отказва gzip + json с 415. */
+      headers['Content-Type'] = 'application/octet-stream';
+    }
     const res = await fetchFn(base + '/' + encodeURIComponent(library) + '/sync', {
       method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + uploadKey,
-        'Content-Type': 'application/json; charset=utf-8',
-        'User-Agent': 'InvLib/' + ((opts && opts.version) || '0')
-      },
-      body: JSON.stringify(body),
+      headers,
+      body: payload,
       signal: ctrl.signal
     });
     const status = res.status;
@@ -259,9 +326,18 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
          ги обработва след всяко успешно изпращане. Тяло, което не е JSON или няма масив requests, значи „няма
          заявки“, не грешка. */
       let requests = [];
-      try { const j = await res.json(); if (j && Array.isArray(j.requests)) requests = j.requests; }
+      /** @type {string[] | null} */
+      let features = null;
+      let needFull = false;
+      try {
+        const j = await res.json();
+        if (j && Array.isArray(j.requests)) requests = j.requests;
+        features = featuresFrom(j);
+        needFull = !!(j && j.needFull === true);
+      }
       catch (e) { /* мост без заявки или с празно тяло */ }
-      return { ok: true, status, error: null, requests };
+      return { ok: true, status, error: null, requests, features, needFull,
+        bytes: typeof payload === 'string' ? Buffer.byteLength(payload, 'utf8') : payload.length };
     }
     let detail = '';
     try { const j = await res.json(); detail = j && (j.message || j.error) ? String(j.message || j.error) : ''; }
@@ -283,5 +359,6 @@ async function sendSnapshot(bridgeUrl, library, uploadKey, body, opts) {
 
 module.exports = {
   ACTIVATION_PUBLIC_KEY_B64, PIN_LENGTH, SEND_TIMEOUT_MS, HISTORY_LIMIT, MESSAGES_LIMIT, MESSAGES_MAX_AGE_DAYS,
-  generatePin, hashPin, verifyPin, verifyActivation, buildSnapshot, sendSnapshot, addOneYear
+  generatePin, hashPin, verifyPin, verifyActivation, buildSnapshot, sendSnapshot, addOneYear,
+  canonicalJson, snapshotHash, unchangedBody, HASH_EXCLUDED_KEYS
 };

@@ -956,7 +956,13 @@ CREATE TABLE IF NOT EXISTS settings (
   online_upload_key TEXT,
   online_activation TEXT,
   online_last_sync  TEXT,
-  online_last_error TEXT
+  online_last_error TEXT,
+  -- Лекото изпращане към моста (v2.4.83): sha256 на последната пълна снимка
+  -- (без generated/activation/requestResults), моментът ѝ (ISO) и обявените от
+  -- моста features (JSON масив, напр. ["gzip","unchanged"]; NULL = по стария начин).
+  online_last_hash       TEXT,
+  online_last_full       TEXT,
+  online_bridge_features TEXT
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
