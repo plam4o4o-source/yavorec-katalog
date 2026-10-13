@@ -21,8 +21,8 @@ async function renderAuth() {
       <div class="grid g3">
         ${fld('Поле', 'authField', { type: 'select', allowEmpty: false, val: AUTH_FIELD,
           opts: Object.entries(f).map(([v, t]) => ({ v, t: t[0].toUpperCase() + t.slice(1) })) })}
-        <div class="field"><label>Как се търсят дубликати</label>
-          <select name="authLoose">
+        <div class="field"><label for="authLooseSel">Как се търсят дубликати</label>
+          <select id="authLooseSel" name="authLoose">
             <option value="0" ${!AUTH_LOOSE ? 'selected' : ''}>Разместени думи („Вазов, Иван“ = „Иван Вазов“)</option>
             <option value="1" ${AUTH_LOOSE ? 'selected' : ''}>И съкратени имена („И. Вазов“ = „Иван Вазов“)</option>
           </select>

@@ -10,11 +10,11 @@ async function renderPeriodika() {
   $('#view').innerHTML = `
     <div class="note">Картотека на периодичните издания и постъпилите броеве към всяко от тях (кардекс).</div>
     <div class="toolbar"><button class="btn pri" onclick="periodicalForm()">+ Ново периодично издание</button>
-      <select id="perPrintYear" title="Година на абонаментния списък за печат">${
+      <select id="perPrintYear" aria-label="Година на абонаментния списък за печат" title="Година на абонаментния списък за печат">${
         years.map(y => `<option ${y === curYear ? 'selected' : ''}>${y}</option>`).join('')}</select>
       <button class="btn" onclick="printPeriodikaYear()">Печат / PDF</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Заглавие</th><th>Периодичност</th><th>Издател</th>
-      <th>ISSN</th><th>Отдел</th><th>Броеве</th><th>Инвентирани комплекти</th><th>Следващ очакван брой</th><th></th></tr></thead><tbody>
+      <th>ISSN</th><th>Отдел</th><th>Броеве</th><th>Инвентирани комплекти</th><th>Следващ очакван брой</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
     ${list.length ? list.map(p => `<tr><td>${esc(p.title)}</td><td>${esc(p.freq || '')}</td><td>${esc(p.publisher || '')}</td>
       <td class="num">${esc(p.issn || '')}</td><td>${esc(p.department || '')}</td><td class="num">${p.issue_count}</td>
       <td class="num">${periodicalVolumesHtml(p)}</td>
@@ -325,7 +325,7 @@ async function openPeriodical(id, year) {
           общата машинка с прозоречния рендер (виж коментара при
           PER_ISSUES_PAGE_SIZE по-горе), а не с p.issues.map(...) наведнъж. */''}
     ${p.issues.length ? `<div class="wrap" style="max-height:240px"><table class="ledger"><thead><tr>
-      <th>Брой</th><th>Дата</th><th>Цена</th><th></th></tr></thead><tbody id="perIssuesBody"></tbody>
+      <th>Брой</th><th>Дата</th><th>Цена</th><th><span class="vh">Действия</span></th></tr></thead><tbody id="perIssuesBody"></tbody>
       </table></div>
       <div class="toolbar" id="perIssuesMore" style="justify-content:center;margin-top:6px"></div>`
       : `<div class="hint">${total ? 'За избраната година няма вписани броеве — изберете друга година.' : 'Все още няма вписани броеве.'}</div>`}`,
@@ -502,7 +502,7 @@ function periodicalVolumesSection(p) {
       инвентарен номер</b> (чл. 16). Докато комплектът не е инвентиран, изданието не влиза нито в КДБФ Част № 1,
       нито в отчета за фонда.</div>
     ${vols.length ? `<div class="wrap" style="max-height:200px"><table class="ledger"><thead><tr>
-      <th>Година</th><th>Броеве</th><th>Стойност</th><th>Във фонда</th><th></th></tr></thead>
+      <th>Година</th><th>Броеве</th><th>Стойност</th><th>Във фонда</th><th><span class="vh">Действия</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`
       : '<div class="hint">Годините се появяват тук, щом бъде вписан първият брой.</div>'}
   </fieldset>`;

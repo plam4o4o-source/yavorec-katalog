@@ -145,7 +145,7 @@ function booksFundEmpty() {
 function booksRowsHtml(shown) {
   return shown.length ? shown.map(b => `
     <tr data-id="${b.id}">
-      <td><input type="checkbox" class="bkChk" data-id="${b.id}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
+      <td><input type="checkbox" class="bkChk" data-id="${b.id}" aria-label="Избери инв. № ${esc(String(b.inv_number ?? b.id))}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
       <td class="num">${b.inv_number ?? ''}</td>
       <td>${esc(b.title)}${b.series ? ` <span class="hint">— ${esc(b.series)}${b.series_no ? ', ' + esc(b.series_no) : ''}</span>` : ''}</td>
       <td>${esc(b.author || '')}</td>
@@ -330,16 +330,16 @@ async function renderBooks() {
       <input type="search" id="bSearch" list="dl_searchBooks" placeholder="Търсене по заглавие, автор, сигнатура, УДК, издателство, ключова дума, ISBN, баркод или инв. №…" value="${esc(BOOKS_QUERY)}">
       ${/* Веднага след търсенето — на същото място, както в „Читатели“ (v2.4.50). */''}
       <button class="btn pri" onclick="bookForm()">+ Нова книга</button>
-      <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
+      <select onchange="BOOKS_SORT=this.value;BOOKS_RENDER_LIMIT=BOOKS_PAGE_SIZE;renderBooks()" aria-label="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)" title="Подредба — сигнатурата се нарежда правилно („Ч-9“ преди „Ч-84“)">
         <option value="title" ${BOOKS_SORT === 'title' ? 'selected' : ''}>По заглавие</option>
         <option value="cn" ${BOOKS_SORT === 'cn' ? 'selected' : ''}>По сигнатура</option>
         <option value="inv" ${BOOKS_SORT === 'inv' ? 'selected' : ''}>По инв. №</option>
       </select>
-      <select id="bDeptFilter" onchange="BOOKS_FILTER_DEPT=this.value;booksFilterChanged()" title="Филтър по отдел / местонахождение">
+      <select id="bDeptFilter" onchange="BOOKS_FILTER_DEPT=this.value;booksFilterChanged()" aria-label="Филтър по отдел / местонахождение" title="Филтър по отдел / местонахождение">
         <option value="">— всички отдели —</option>
         ${deptOpts.map(d => `<option value="${esc(d)}" ${BOOKS_FILTER_DEPT === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
       </select>
-      <select id="bCatFilter" onchange="BOOKS_FILTER_CAT=this.value;booksFilterChanged()" title="Филтър по вид документ (категория)">
+      <select id="bCatFilter" onchange="BOOKS_FILTER_CAT=this.value;booksFilterChanged()" aria-label="Филтър по вид документ (категория)" title="Филтър по вид документ (категория)">
         <option value="">— всички категории —</option>
         ${(window._CATS || []).map(c => `<option value="${c.id}" ${String(BOOKS_FILTER_CAT) === String(c.id) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>
@@ -349,14 +349,14 @@ async function renderBooks() {
         title="Добавя маркираните документи в тематична витрина на онлайн каталога">Във витрина…</button>
     </div>
     <div class="wrap"><table class="ledger">
-      <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" onchange="toggleBookSelAll(this.checked)"
+      <thead><tr><th style="width:26px"><input type="checkbox" id="chkAll" aria-label="Избери всички намерени" onchange="toggleBookSelAll(this.checked)"
         ${!BOOKS_WINDOWED && filtered.length && filtered.every(b => BOOKS_SELECTED.has(b.id)) ? 'checked' : ''}></th>
         <th>Инв. №</th><th>Заглавие</th><th>Автор</th><th title="Сигнатурата; ако полето е празно — УДК и авторски знак">Сигнатура</th><th>Категория</th><th>Отдел</th><th>Год.</th><th>Състояние</th><th>Наличност</th>
         ${/* class="actsCell" (v2.4.56): клетката с действията се залепва за десния
              ръб при хоризонтално превъртане (виж table.ledger td.actsCell в
              style.css). Без същия клас върху ЗАГЛАВНАТА клетка горният ред се
              разминава с тялото — тялото се залепва, заглавието бяга. */''}
-        <th class="actsCell" style="width:90px"></th></tr></thead>
+        <th class="actsCell" style="width:90px"><span class="vh">Действия</span></th></tr></thead>
       <tbody id="bBody">${booksRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="bMore" style="justify-content:center">${

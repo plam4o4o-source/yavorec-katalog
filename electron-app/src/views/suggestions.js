@@ -9,7 +9,7 @@ async function renderSuggestions() {
     получено (закача се към партида в „Постъпления") или отказано. Директен канал „какво наистина искат хората",
     вместо покупки на сляпо.</div>
     <div class="toolbar">
-      <select onchange="SUGG_STATUS=this.value;renderSuggestions()">
+      <select aria-label="Състояние на предложенията" onchange="SUGG_STATUS=this.value;renderSuggestions()">
         <option value="">Всички състояния</option>
         ${SUGG_STATUSES.map(st => `<option value="${st}" ${SUGG_STATUS === st ? 'selected' : ''}>${esc(st)}</option>`).join('')}
       </select>
@@ -17,7 +17,7 @@ async function renderSuggestions() {
       <button class="btn pri" onclick="suggestionForm()">+ Ново предложение</button>
     </div>
     <div class="wrap"><table class="ledger"><thead><tr>
-      <th>Дата</th><th>Автор, заглавие</th><th>Читател</th><th>Бележка</th><th>Състояние</th><th style="width:260px"></th>
+      <th>Дата</th><th>Автор, заглавие</th><th>Читател</th><th>Бележка</th><th>Състояние</th><th style="width:260px"><span class="vh">Действия</span></th>
     </tr></thead><tbody>
     ${rows.length ? rows.map(s => `<tr>
       <td class="num">${bg(s.date)}</td>

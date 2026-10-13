@@ -126,7 +126,8 @@ function dnevnikGroups(cols) {
 function dnevnikGroupHeadHtml(cols, firstLabel, groups, short) {
   const g = groups || dnevnikGroups(cols);
   if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return '';
-  return `<tr><th>${esc(firstLabel || '')}</th>${
+  /* Горната лява клетка: празна на екрана, но с име за екранния четец (v2.4.84). */
+  return `<tr><th>${firstLabel ? esc(firstLabel) : '<span class="vh">Ден</span>'}</th>${
     g.map(([l, n]) => `<th colspan="${n}" style="text-align:center">${esc(short ? dnevnikShortLabel(l) : l)}</th>`).join('')}</tr>`;
 }
 /* На хартия колоните са заковани за листа (table-layout:fixed), затова пояснението
@@ -299,10 +300,14 @@ async function renderDnevnik() {
      утрешният ред стои точно под днешния и един Tab стига до него. */
   const futureAttr = (row) => row.date > todayStr
     ? ' readonly title="Денят още не е настъпил — Дневникът се попълва за днешния и минали дни"' : '';
+  /* Име за екранен четец на всяка клетка (v2.4.84): ден и колона — дотук
+     полетата бяха без име (axe: „label“ — critical). */
+  const colName = (k) => { const c = DNEVNIK_A_COLS.concat(DNEVNIK_B_COLS).find(x => x[0] === k); return c ? c[1].replace(/<[^>]*>/g, '') : k; };
+  const cellAria = (row, k) => ` aria-label="${esc(String(+row.date.slice(8, 10)) + ' — ' + colName(k))}"`;
   const cellHtml = (row, k) => {
     if (k.startsWith('$')) return `<td class="num calc">${dnevnikCell(row, k)}</td>`;
     if (k === 'a_hours' || k === 'b_hours') {
-      return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"${futureAttr(row)}
+      return `<td><input class="dnvCell hrs" type="text" value="${hhmm(row[k])}" placeholder="0:00"${futureAttr(row)}${cellAria(row, k)}
         data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
     }
     /* КЛЕТКАТА Е ТЕКСТОВА, А НЕ <input type="number"> (одит v2.4.65, находка Б17).
@@ -317,7 +322,7 @@ async function renderDnevnik() {
        обработчикът отказва втори път, вече като граница (handlers/dnevnik.js).
        inputmode="numeric" пази цифровата клавиатура там, където има такава;
        колоната „Часове“ е текстова по същата причина още отпреди. */
-    return `<td><input class="dnvCell" type="text" inputmode="numeric" value="${row[k] || 0}"${futureAttr(row)}
+    return `<td><input class="dnvCell" type="text" inputmode="numeric" value="${row[k] || 0}"${futureAttr(row)}${cellAria(row, k)}
       data-date="${row.date}" data-field="${k}" onchange="dnevnikSaveCell(this)"></td>`;
   };
   /* ЗАТВОРЕНИЯТ ДЕН СЕ ВИЖДА В ТАБЛИЦАТА (одит v2.4.65, находка В3).
@@ -355,8 +360,8 @@ async function renderDnevnik() {
     <div class="note ${r.daysFilled ? '' : 'd'}" style="margin-top:0">${esc(dnevnikCoverageNote(r))}${
       r.days.some(d => d.closed) ? ' Дните, отбелязани „·затв.“, са затворени по календара на библиотеката.' : ''}</div>
     <div class="toolbar">
-      <select onchange="DNEVNIK_YEAR=parseInt(this.value,10);renderDnevnik()">${years.map(x => `<option value="${x}" ${x === y ? 'selected' : ''}>${x}</option>`).join('')}</select>
-      <select onchange="DNEVNIK_MONTH=parseInt(this.value,10);renderDnevnik()">${MESETSI.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
+      <select aria-label="Година" onchange="DNEVNIK_YEAR=parseInt(this.value,10);renderDnevnik()">${years.map(x => `<option value="${x}" ${x === y ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <select aria-label="Месец" onchange="DNEVNIK_MONTH=parseInt(this.value,10);renderDnevnik()">${MESETSI.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
       <div style="display:flex;gap:6px">
         <button class="btn sm ${DNEVNIK_TAB === 'a' ? 'pri' : ''}" onclick="DNEVNIK_TAB='a';renderDnevnik()">Раздел А · Читатели и посещения</button>
         <button class="btn sm ${DNEVNIK_TAB === 'b' ? 'pri' : ''}" onclick="DNEVNIK_TAB='b';renderDnevnik()">Раздел Б · Заети материали</button>

@@ -24,7 +24,7 @@ async function renderAnalytics() {
       <button class="btn pri" onclick="analyticForm()">+ Ново описание</button>
       <input type="search" id="anlQ" placeholder="Търсене по заглавие, автор, ключови думи, източник…"
         value="${esc(ANL_Q)}" oninput="anlSearch(this.value)">
-      <select onchange="anlYear(this.value)">
+      <select aria-label="Година" onchange="anlYear(this.value)">
         <option value="">— всички години —</option>
         ${(years || []).map(y => `<option value="${esc(y.year)}" ${ANL_YEAR === y.year ? 'selected' : ''}>
           ${esc(y.year)} (${y.n})</option>`).join('')}
@@ -100,7 +100,7 @@ function analyticsListHtml(rows) {
     ${rows.length ? `<div class="wrap"><table class="ledger"><thead><tr>
       <th>Автор и заглавие</th><th style="width:26%">Източник</th><th style="width:110px">УДК</th>
       <th style="width:70px">Год.</th>
-      <th style="width:90px">Стр.</th><th style="width:130px"></th></tr></thead>
+      <th style="width:90px">Стр.</th><th style="width:130px"><span class="vh">Действия</span></th></tr></thead>
       <tbody id="anlBody"></tbody></table></div>
       <div class="toolbar" id="anlMore" style="justify-content:center"></div>`
     : `<div class="empty"><h3>Няма описани статии</h3>

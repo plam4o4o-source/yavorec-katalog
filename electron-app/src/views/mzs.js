@@ -88,7 +88,7 @@ async function renderMzs() {
          дубликат е по двойката (handlers/mzs.js). Голото „№ 1" в списъка сочи към
          толкова заявки, колкото години има регистърът. -->
     <div class="wrap"><table class="ledger"><thead><tr><th>№/год.</th><th>Дата</th><th>Посока</th><th>Партньор</th>
-      <th>Документ</th><th>Заявител</th><th>Статус</th><th></th></tr></thead><tbody id="mzsBody"></tbody>
+      <th>Документ</th><th>Заявител</th><th>Статус</th><th><span class="vh">Действия</span></th></tr></thead><tbody id="mzsBody"></tbody>
     </table></div>
     <div class="toolbar" id="mzsMore" style="justify-content:center"></div>`;
   renderMzsBody();

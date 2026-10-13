@@ -108,7 +108,7 @@ async function renderOver(keepWindow) {
       <button class="btn" onclick="printOverdueNotices()">Печат на напомняния / PDF</button>
     </div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Читател</th><th>Инв. №</th><th>Заглавие</th>
-      <th>Срок</th><th>Дни</th><th>Обезщетение</th><th style="width:260px"></th></tr></thead>
+      <th>Срок</th><th>Дни</th><th>Обезщетение</th><th style="width:260px"><span class="vh">Действия</span></th></tr></thead>
       <tbody id="ovBody"></tbody></table></div>
     <div class="toolbar" id="ovMore" style="justify-content:center"></div>
     <div id="ovLost"></div>`;
@@ -155,7 +155,7 @@ async function paintLostPanel() {
         <b>${due ? 'несъбрани ' + mny(due) : 'събрани всички'}</b>.` : ''}</div>
     <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
       <th>Инв. №</th><th>Заглавие</th><th>Читател</th><th>Отбелязан</th><th>Уреждане</th>
-      <th>Обезщетение</th><th>Събрано</th><th style="width:190px"></th></tr></thead><tbody>
+      <th>Обезщетение</th><th>Събрано</th><th style="width:190px"><span class="vh">Действия</span></th></tr></thead><tbody>
       ${rows.map(r => `<tr>
         <td class="num">${r.inv_number ?? ''}</td>
         <td>${esc(r.title)}</td>

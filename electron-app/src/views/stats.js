@@ -20,7 +20,7 @@ async function renderStats() {
   const onTimePct = totalReturned ? Math.round(r.returnedOnTime / totalReturned * 100) : 0;
   $('#view').innerHTML = `
     <div class="toolbar">
-      <select onchange="STATS_YEAR=this.value;renderStats()">
+      <select aria-label="Година" onchange="STATS_YEAR=this.value;renderStats()">
         ${/* текущата и няколко назад — годишният отчет се прави за минала година */
           yearOptions(y).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
       </select>

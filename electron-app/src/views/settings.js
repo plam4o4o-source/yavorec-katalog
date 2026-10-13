@@ -140,7 +140,7 @@ async function renderSetup() {
       ${setupHow('Списъкът е общ за всички компютри, свързани към тази база данни. Изборът „кой служител работи в момента“ (долу вляво в лентата) е локален за всеки компютър и записва избраното име в одитната следа при всяко действие.')}
       <div class="toolbar"><button class="btn pri" onclick="employeeForm()">+ Нов служител</button></div>
       ${employees && employees.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
-        <th>Име</th><th>Състояние</th><th></th></tr></thead><tbody>
+        <th>Име</th><th>Състояние</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
         ${employees.map(e => `<tr><td>${esc(e.name)}</td>
           <td>${e.active ? '<span class="badge ok">активен</span>' : '<span class="badge warn">неактивен</span>'}</td>
           <td>
@@ -303,7 +303,7 @@ async function renderSetup() {
         <button class="btn" onclick="restoreBackupBrowse()">Възстанови от файл…</button>
       </div>
       ${backups && backups.length ? `<div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
-        <th>Файл</th><th>Дата и час</th><th>Размер</th><th>Вид</th><th></th></tr></thead><tbody>
+        <th>Файл</th><th>Дата и час</th><th>Размер</th><th>Вид</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
         ${backups.map(b => `<tr><td style="font-family:var(--mono);font-size:12px">${esc(b.name)}</td>
           <td class="num">${fmtDateTime(b.mtime)}</td><td class="num">${fmtBytes(b.size)}</td>
           <td>${b.auto ? '<span class="badge">автоматично</span>' : '<span class="badge ok">ръчно</span>'}
@@ -1029,7 +1029,7 @@ async function loadCircRulesBox() {
   if (!rules) { box.textContent = 'Правилата не се заредиха.'; return; }
   box.innerHTML = rules.length ? `
     <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-      <th>Категория</th>${CIRC_RULE_FIELDS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th style="width:80px"></th>
+      <th>Категория</th>${CIRC_RULE_FIELDS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th style="width:80px"><span class="vh">Действия</span></th>
     </tr></thead><tbody>
     ${rules.map(r => `<tr><td><b>${esc(r.category)}</b></td>
       ${CIRC_RULE_FIELDS.map(([k]) => `<td class="num">${r[k] == null ? '<span class="hint">общото</span>' : r[k]}</td>`).join('')}
@@ -1670,7 +1670,7 @@ async function runDataChecks() {
         ${f.todo ? `<br><b>Какво да направите:</b> ${esc(f.todo)}` : ''}
       </div>
       ${(f.list && f.list.length) ? `<div class="wrap" style="max-height:220px"><table class="ledger">
-        <thead><tr><th>Инв. №</th><th>Заглавие</th><th>Записана дата</th><th></th></tr></thead><tbody>
+        <thead><tr><th>Инв. №</th><th>Заглавие</th><th>Записана дата</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
         ${f.list.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${esc(r.title || '')}</td>
           <td class="num">${esc(r.register_date || '— няма —')}</td>
           <td><button class="btn sm" onclick="invBookEdit(${r.id})">Поправи датата</button></td></tr>`).join('')}
@@ -1685,7 +1685,7 @@ async function runDataChecks() {
       най-вероятно от внесена стара база. Разделянето създава по един запис на екземпляр със следващите свободни
       инвентарни номера; <b>броят документи и стойността на фонда остават същите</b>.</div>
       <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th>
-        <th>Бройки</th><th>Заети</th><th></th></tr></thead><tbody>
+        <th>Бройки</th><th>Заети</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
       ${many.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td>
         <td class="num">${r.quantity}</td><td class="num">${r.open_loans || 0}</td>
         <td><button class="btn sm" onclick="splitBookCopies(${r.id})">Раздели на ${r.quantity} записа</button></td></tr>`).join('')}
@@ -1697,7 +1697,7 @@ async function runDataChecks() {
       <div class="note d" style="margin-top:0">Документът е вписан в инвентарната книга, но с бройка 0 не влиза в нито един
       сбор на фонда (КДБФ, инвентарна книга, табло) и не може да се заема. Ако документът е във фонда, бройката трябва да е 1;
       ако не е — той се отчислява с акт, не с нула.</div>
-      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th></th></tr></thead><tbody>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
       ${zero.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td><td>${esc(r.status || '')}</td>
         <td><button class="btn sm" onclick="setBookLendable(${r.id})">Върни бройката на 1</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
@@ -1712,7 +1712,7 @@ async function runDataChecks() {
       ${orphanDeacc.length === 1 ? 'го броят' : 'ги броят'}: едно и също число излиза различно на два екрана.
       Ако документите наистина са отчислени, съставете акт от „Отчисляване“ — сканирайте ги там както всеки друг
       документ; ако не са — върнете ги във фонда.</div>
-      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>От дата</th><th></th></tr></thead><tbody>
+      <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>От дата</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
       ${orphanDeacc.map(r => `<tr><td class="num">${r.inv_number ?? '—'}</td><td>${nameOf(r)}</td>
         <td>${r.status_date ? bg(r.status_date) : '—'}</td>
         <td><button class="btn sm" onclick="clearOrphanDeaccession(${r.id})">Върни във фонда</button></td></tr>`).join('')}
@@ -1723,7 +1723,7 @@ async function runDataChecks() {
       <div class="note d" style="margin-top:0">Сканирането намира <b>първия</b> от тях — може да завери или отчисли
       грешния физически екземпляр. Отворете документите и оставете баркода само на един (или дайте нови етикети).</div>
       ${dups.map(g => `<div style="margin-bottom:10px"><b>Баркод ${esc(g.barcode)}</b>
-        <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th></th></tr></thead><tbody>
+        <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th><th>Състояние</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
         ${g.books.map(b => `<tr><td class="num">${b.inv_number ?? '—'}</td><td>${nameOf(b)}</td><td>${esc(b.status || '')}</td>
           <td><button class="btn sm" onclick="invBookEdit(${b.id})">Отвори</button></td></tr>`).join('')}
         </tbody></table></div></div>`).join('')}`
@@ -1749,7 +1749,7 @@ function authorMarkAuditHtml(a, nameOf) {
     затова нищо не се променя само: отворете реда и решете.
     ${a.mismatchedTotal > a.mismatched.length ? 'Показани са първите ' + a.mismatched.length + '.' : ''}</div>
     <div class="wrap"><table class="ledger"><thead><tr><th>Инв. №</th><th>Автор и заглавие</th>
-      <th>Знак</th><th>По фамилия</th><th></th></tr></thead><tbody>
+      <th>Знак</th><th>По фамилия</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
     ${a.mismatched.map(b => `<tr><td class="num">${b.inv_number ?? '—'}</td><td>${nameOf(b)}</td>
       <td>${esc(b.author_mark || '')}</td><td>${esc(b.basis || '')} → „${esc(b.expected)}“</td>
       <td><button class="btn sm" onclick="invBookEdit(${b.id})">Отвори</button></td></tr>`).join('')}

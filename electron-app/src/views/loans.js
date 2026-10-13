@@ -192,7 +192,7 @@ async function renderCirc() {
     if (myHolds.length) {
       table += `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Резервации на този читател</h3>
         <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Инв. №</th><th>Заглавие</th><th>Заявена</th><th>Състояние</th><th style="width:110px"></th></tr></thead><tbody>
+        <th>Инв. №</th><th>Заглавие</th><th>Заявена</th><th>Състояние</th><th style="width:110px"><span class="vh">Действия</span></th></tr></thead><tbody>
         ${myHolds.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
           <td class="num">${bg(tsDay(h.placed_at))}</td>
           <td>${h.status === 'заделена' ? '<span class="badge ok">заделена — чака взимане</span>' : '<span class="badge">чака</span>'}</td>
@@ -202,7 +202,7 @@ async function renderCirc() {
     if (openMine.length) {
       table += `<div class="card" style="margin-top:16px"><h3 style="margin-top:0">Заети от този читател</h3>
         <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead><tr>
-        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th>Продължения</th><th style="width:250px"></th></tr></thead><tbody>
+        <th>Инв. №</th><th>Заглавие</th><th>Зает</th><th>Срок</th><th>Продължения</th><th style="width:250px"><span class="vh">Действия</span></th></tr></thead><tbody>
         ${openMine.map(l => `<tr><td class="num">${l.inv_number ?? ''}</td><td>${esc(l.title)}</td>
           <td class="num">${bg(l.date_out)}</td>
           <td class="num ${l.date_due && l.date_due < today() ? 'warn' : ''}">${bg(l.date_due) || '—'}</td>

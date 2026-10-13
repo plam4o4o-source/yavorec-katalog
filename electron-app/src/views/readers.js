@@ -218,11 +218,11 @@ async function renderReaders() {
             пренасяше и „+ Нова книга“ оставаше само̀ на втори ред, а в
             „Читатели“ стоеше между филтрите — едно и също нещо на две места. */''}
       <button class="btn pri" onclick="readerForm()">+ Нов читател</button>
-      <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;readersFilterChanged()" title="Филтър по категория">
+      <select id="rCatFilter" onchange="READERS_FILTER_CAT=this.value;readersFilterChanged()" aria-label="Филтър по категория" title="Филтър по категория">
         <option value="">— всички категории —</option>
         ${KATEG.map(k => `<option value="${esc(k)}" ${READERS_FILTER_CAT === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
       </select>
-      <select id="rStatusFilter" onchange="READERS_FILTER_STATUS=this.value;readersFilterChanged()" title="Филтър по състояние">
+      <select id="rStatusFilter" onchange="READERS_FILTER_STATUS=this.value;readersFilterChanged()" aria-label="Филтър по състояние" title="Филтър по състояние">
         <option value="">— всички —</option>
         <option value="активен" ${READERS_FILTER_STATUS === 'активен' ? 'selected' : ''}>активен</option>
         <option value="прекратен" ${READERS_FILTER_STATUS === 'прекратен' ? 'selected' : ''}>прекратен</option>
@@ -230,12 +230,12 @@ async function renderReaders() {
       ${/* v2.4.65 — виж дългата бележка при readers:list в handlers/readers.js:
             без този филтър заварените читатели без отбелязано съгласие можеха да
             се намерят само по един, на гишето, при отказано заемане. */''}
-      <select id="rConsentFilter" onchange="readersConsentFilter(this.value)" title="Филтър по съгласие по чл. 47, ал. 2 / на родител">
+      <select id="rConsentFilter" onchange="readersConsentFilter(this.value)" aria-label="Филтър по съгласие по чл. 47, ал. 2 / на родител" title="Филтър по съгласие по чл. 47, ал. 2 / на родител">
         <option value="">— съгласие: всички —</option>
         <option value="no" ${READERS_FILTER_CONSENT === 'no' ? 'selected' : ''}>без отбелязано съгласие</option>
         <option value="yes" ${READERS_FILTER_CONSENT === 'yes' ? 'selected' : ''}>с отбелязано съгласие</option>
       </select>
-      <select id="rReregFilter" onchange="readersReregFilter(this.value)" title="Филтър по пререгистрация — както „Дължими пререгистрации“ на таблото">
+      <select id="rReregFilter" onchange="readersReregFilter(this.value)" aria-label="Филтър по пререгистрация — както „Дължими пререгистрации“ на таблото" title="Филтър по пререгистрация — както „Дължими пререгистрации“ на таблото">
         <option value="">— пререгистрация: всички —</option>
         <option value="due" ${READERS_FILTER_REREG === 'due' ? 'selected' : ''}>дължима пререгистрация (до 14 дни)</option>
       </select>
@@ -275,7 +275,7 @@ async function renderReaders() {
             което style.css хваща `th.actsCell` за фона и слоя (z-index) —
             заглавният ред трябва да е НАД тялото, иначе първият ред минава
             върху него при вертикално превъртане. */''}
-      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th class="actsCell"></th></tr></thead>
+      <thead><tr><th>Име</th><th>Телефон</th><th>Карта №</th><th>Категория</th><th>Състояние</th><th title="Заети документи в момента; „!“ — има просрочени">Заети</th><th class="actsCell"><span class="vh">Действия</span></th></tr></thead>
       <tbody id="rBody">${readersRowsHtml(shown)}</tbody>
     </table></div>
     <div class="toolbar" id="rMore" style="justify-content:center">${
@@ -485,7 +485,7 @@ function onlineMessagesBlockHtml(id, v, list) {
     </tr>`).join('');
   return `<fieldset id="onlineMsgFs"><legend>Съобщения до читателя</legend>${form}
     ${list.length ? `<div class="wrap" style="margin-top:8px"><table>
-      <thead><tr><th>Изпратено</th><th>Съобщение</th><th>Състояние</th><th></th></tr></thead>
+      <thead><tr><th>Изпратено</th><th>Съобщение</th><th>Състояние</th><th><span class="vh">Действия</span></th></tr></thead>
       <tbody>${rows}</tbody></table></div>` : '<div class="hint" style="margin-top:6px">Няма изпратени съобщения.</div>'}
   </fieldset>`;
 }

@@ -182,7 +182,7 @@ async function loadShelvesBox() {
      непубликуваният ред не е грешка, която да се крие, а нещо за разчистване. */
   box.innerHTML = shelves.length ? `
     <div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
-      <tr><th>Витрина</th><th>На сайта</th><th style="width:230px"></th></tr></thead><tbody>
+      <tr><th>Витрина</th><th>На сайта</th><th style="width:230px"><span class="vh">Действия</span></th></tr></thead><tbody>
       ${shelves.map(sh => `<tr><td><b>${esc(sh.name)}</b>${sh.stale
         ? ` <span class="badge warn" title="Редове, които стоят във витрината, но не се публикуват — отчислени или служебни документи. Отворете витрината, за да ги махнете.">+${sh.stale} непубликувани</span>` : ''}</td>
         <td class="num">${sh.n}</td>
@@ -235,7 +235,7 @@ async function openShelf(id) {
             „отчислен“ само по себе си не казва на библиотекарката къде да
             търси документа, ако сметне, че е сгрешено. */''}
       ${items.length ? `<div class="wrap" style="border:0;box-shadow:none"><table class="ledger"><thead>
-        <tr><th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>На сайта</th><th style="width:100px"></th></tr></thead><tbody>
+        <tr><th>Инв. №</th><th>Заглавие</th><th>Автор</th><th>На сайта</th><th style="width:100px"><span class="vh">Действия</span></th></tr></thead><tbody>
         ${items.map(b => `<tr><td class="num">${b.inv_number ?? ''}</td><td>${esc(b.title)}</td>
           <td>${esc(b.author || '')}</td>
           <td>${b.published ? '<span class="badge ok">да</span>'

@@ -13,7 +13,7 @@ function categoriesCardHtml(cats) {
     и излизат в справките и в онлайн каталога.</div>
     <div class="toolbar"><button class="btn pri" onclick="categoryForm()">+ Нова категория</button></div>
     ${cats && cats.length ? `<div class="wrap"><table class="ledger">
-      <thead><tr><th>Име</th><th style="width:150px"></th></tr></thead><tbody>
+      <thead><tr><th>Име</th><th style="width:150px"><span class="vh">Действия</span></th></tr></thead><tbody>
       ${cats.map(c => `<tr><td>${esc(c.name)}</td>
         <td><button class="btn sm" onclick="categoryForm(${c.id}, '${jsq(c.name)}')">Редакция</button>
             <button class="btn sm dgr" onclick="deleteCategory(${c.id})">Изтрий</button></td></tr>`).join('')}
