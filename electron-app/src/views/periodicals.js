@@ -163,7 +163,7 @@ function perVolumeYearOptionsHtml(date, selected) {
     .map(([v, t, title]) => `<option value="${v}" title="${title}" ${v === want ? 'selected' : ''}>${v} г.${t}</option>`).join('');
 }
 function perVolumeYearField(date) {
-  return `<div class="field"><label>Годишен комплект <span class="fh">към коя година се подвързва броят</span></label>
+  return `<div class="field"><label for="perIssueVolYear">Годишен комплект <span class="fh">към коя година се подвързва броят</span></label>
     <select name="volume_year" id="perIssueVolYear" onchange="this.dataset.chosen='1'">${perVolumeYearOptionsHtml(date)}</select>
     <span class="hint" id="perIssueVolHint"></span></div>`;
 }
@@ -279,7 +279,7 @@ async function openPeriodical(id, year) {
   const yearsList = p.issue_years || [];
   const shown = p.issues.length;
   const total = p.issue_total == null ? shown : p.issue_total;
-  const yearSel = `<select id="perIssueYear" onchange="openPeriodical(${id}, this.value)">
+  const yearSel = `<select id="perIssueYear" aria-label="Година на броевете" onchange="openPeriodical(${id}, this.value)">
       ${yearsList.map(y => `<option value="${esc(y.year)}" ${String(y.year) === String(p.issue_year) ? 'selected' : ''}
         >${esc(y.year)} г. (${y.n})</option>`).join('')}
       ${yearsList.some(y => String(y.year) === String(p.issue_year)) ? ''
