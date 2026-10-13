@@ -50,7 +50,7 @@ for full detail.
   за догрузване на редове, ползван от 11 раздела — оставени като възможност.
 
 **Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
-Europe/Sofia + страницата на каталога); `node --test` — **@@N@@ теста, 0 неуспешни** (преди: 2523).
+Europe/Sofia + страницата на каталога); `node --test` — **2534 теста, 0 неуспешни** (преди: 2523).
 Нов тест `test/dostapnost-v2484.test.js`: етикетите на fld() и на истинската форма „Нова книга“
 (етикет без for не минава), всяко падащо меню в изгледите, етикет без for над поле, празните
 заглавни клетки и котвата на скрития текст, имената в „Книги“ и Дневника, превъртащите се
@@ -92,7 +92,7 @@ Nothing changes in the data or in how the program is used; the database version 
   risk the shared row-loading mechanism used by 11 sections — left as an option.
 
 **Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia +
-the catalog page); `node --test` — **@@N@@ tests, 0 failed** (before: 2523). New test
+the catalog page); `node --test` — **2534 tests, 0 failed** (before: 2523). New test
 `test/dostapnost-v2484.test.js`: labels of fld() and of the real "New book" form (a label
 without `for` fails), every drop-down in the views, a label without `for` above a field, empty
 header cells and the hidden text's anchor, names in "Books" and the Daily log, scrolling
