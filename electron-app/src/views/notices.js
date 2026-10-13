@@ -27,13 +27,13 @@ async function openReminders() {
               r.email_note ? ` <span class="hint">(${esc(r.email_note)})</span>` : ''} ·
             Телефон: <b>${r.phone ? esc(r.phone) : '— няма записан —'}</b>
           </div>
-          <label class="fh">Писмо по електронна поща</label>
+          <label class="fh" for="remB${i}">Писмо по електронна поща</label>
           <textarea class="remText" id="remB${i}" rows="9">${esc(r.body)}</textarea>
           <div class="toolbar" style="margin-top:6px">
             <button class="btn pri" onclick="remMail(${i})" ${r.email ? '' : 'disabled'}>Отвори в пощата</button>
             <button class="btn" onclick="remCopy('remB${i}', ${i}, 'копиране')">Копирай писмото</button>
           </div>
-          <label class="fh" style="margin-top:10px;display:block">Кратък текст за SMS</label>
+          <label class="fh" for="remS${i}" style="margin-top:10px;display:block">Кратък текст за SMS</label>
           <textarea class="remText" id="remS${i}" rows="2">${esc(r.sms)}</textarea>
           <div class="toolbar" style="margin-top:6px">
             <button class="btn" onclick="remCopy('remS${i}', ${i}, 'SMS')">Копирай SMS-а</button>

@@ -969,7 +969,7 @@ fieldset legend{font-size:11px; text-transform:uppercase; letter-spacing:.08em; 
 .userBadge.unset{border-style:dashed; color:var(--ink2); font-weight:500}
 /* Видимо само за екранен четец (v2.4.84) — напр. „Действия“ в празната заглавна
    клетка на колоната с бутони. */
-.vh{position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
+.vh{position:absolute !important; top:0; left:0; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
 /* Знакът на разработчика (v2.4.70) — малък, в дъното на лентата; златото се чете и
    на тъмната, и на светлата лента, затова не се оцветява по темата. Редът с
    авторството е само в „Настройки“ (v2.4.79). */
@@ -1791,7 +1791,7 @@ table.ledger.oditTable td:nth-child(3) .badge{white-space:nowrap}
    • скелетът при зареждане се появява след 0,15 s — бързият раздел не мига. */
 @keyframes enterBar{from{transform:scaleX(0)}}
 @keyframes enterSpark{from{transform:scaleY(0)}}
-@keyframes enterRing{from{stroke-dasharray:0 999}}
+@keyframes enterRing{from{stroke-dasharray:0 999; opacity:0} 12%{opacity:1}}
 @keyframes enterKpi{from{opacity:0; transform:translateY(8px)}}
 @keyframes loadIn{from{opacity:0}}
 @keyframes skelShine{to{background-position:-220% 0}}
@@ -1808,6 +1808,9 @@ table.ledger.oditTable td:nth-child(3) .badge{white-space:nowrap}
   #view[data-enter] .kpi:nth-child(3){animation-delay:.1s}
   #view[data-enter] .kpi:nth-child(4){animation-delay:.15s}
 }
+/* При „намалено движение“ нищо не се движи, но скелетът пак чака 0,15 s
+   (мигновена поява, без преливане) — бързият раздел не мига и тук. */
+@media (prefers-reduced-motion: reduce){ .viewLoading{animation:loadIn 1ms .15s both} }
 .viewFailed .btn{margin-left:auto}
 
 /* Анулиран акт за отчисляване (v2.4.56). Редът НЕ изчезва — актът е документ по

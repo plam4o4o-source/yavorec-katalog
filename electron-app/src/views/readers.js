@@ -468,9 +468,9 @@ function onlineMessagesBlockHtml(id, v, list) {
   const form = canSend ? `
     <div class="hint" style="margin-bottom:6px">Съобщението стига до мобилното приложение до около минута, докато InvLib е
       отворен и има интернет, и се вижда <b>само от този читател</b> след вход с картата и ПИН-а.</div>
-    <div class="field"><label>Заглавие <span class="fh">по желание, до ${MSG_TITLE_MAX} знака</span></label>
+    <div class="field"><label for="onlineMsgTitle">Заглавие <span class="fh">по желание, до ${MSG_TITLE_MAX} знака</span></label>
       <input id="onlineMsgTitle" type="text" maxlength="${MSG_TITLE_MAX}"></div>
-    <div class="field"><label>Текст <span class="fh">до ${MSG_TEXT_MAX} знака</span></label>
+    <div class="field"><label for="onlineMsgText">Текст <span class="fh">до ${MSG_TEXT_MAX} знака</span></label>
       <textarea id="onlineMsgText" rows="3" maxlength="${MSG_TEXT_MAX}"></textarea></div>
     <div class="toolbar" style="margin:6px 0 0">
       <button type="button" class="btn" onclick="onlineSendMessage(${id})">Изпрати</button>

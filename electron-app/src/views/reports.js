@@ -82,13 +82,13 @@ function reportBodyHtml(r) {
       <div class="note ${r.daysRecorded ? '' : 'd'}" style="margin-bottom:10px">${reportCoverageNote(r)}</div>
       <div class="card"><h3 style="margin-top:0">А. Читатели и посещения</h3>
         <div class="wrap" tabindex="0" role="region" aria-label="А. Читатели и посещения — таблица, превърта се хоризонтално"><table class="ledger" style="font-size:11px"><thead>
-        ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS)}
+        ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS, '', undefined, false, 'Период')}
         <tr><th><span class="vh">Период</span></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_A_COLS)}</tbody></table></div>
       </div>
       <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Б. Заети материали</h3>
         <div class="wrap" tabindex="0" role="region" aria-label="Б. Заети материали — таблица, превърта се хоризонтално"><table class="ledger" style="font-size:11px"><thead>
-        ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
+        ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS, '', undefined, false, 'Период')}
         <tr><th><span class="vh">Период</span></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table></div>
         ${/* Същото обяснение и на екрана, не само на хартията (находка В4). */
@@ -217,7 +217,7 @@ function reportPrintHtml(r) {
           ? ` · част ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
         <table class="dnvPrint"><colgroup><col style="width:11%">${
           page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
-        ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
+        ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true, 'Период')}
         <tr><th><span class="vh">Период</span></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups,
           [page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0) ? noteB : ''])}</div>`).join('');

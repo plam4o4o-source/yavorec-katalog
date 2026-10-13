@@ -739,7 +739,7 @@ async function loadAvEditors() {
   const [cats, opts] = await Promise.all([call(window.api.av.categories()), call(window.api.av.options())]);
   if (!cats || !opts) { box.textContent = 'Номенклатурите не се заредиха.'; return; }
   box.innerHTML = Object.entries(cats).map(([key, label]) => `
-    <div class="field" style="margin-top:10px"><label>${esc(label)}</label>
+    <div class="field" style="margin-top:10px"><label for="av_${key}">${esc(label)}</label>
       <textarea id="av_${key}" rows="${Math.max(3, (opts[key] || []).length + 1)}" spellcheck="false"
         style="font-family:var(--mono);font-size:12.5px">${esc((opts[key] || [])
           .map(o => o.value + (o.opac_label ? ' | ' + o.opac_label : '')).join('\n'))}</textarea>

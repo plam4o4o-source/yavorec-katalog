@@ -145,7 +145,7 @@ function booksFundEmpty() {
 function booksRowsHtml(shown) {
   return shown.length ? shown.map(b => `
     <tr data-id="${b.id}">
-      <td><input type="checkbox" class="bkChk" data-id="${b.id}" aria-label="Избери инв. № ${esc(String(b.inv_number ?? b.id))}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
+      <td><input type="checkbox" class="bkChk" data-id="${b.id}" aria-label="${b.inv_number != null && b.inv_number !== '' ? 'Избери инв. № ' + esc(String(b.inv_number)) : 'Избери: ' + esc(String(b.title || 'документ без заглавие'))}" onchange="toggleBookSel(${b.id},this.checked)" ${BOOKS_SELECTED.has(b.id) ? 'checked' : ''}></td>
       <td class="num">${b.inv_number ?? ''}</td>
       <td>${esc(b.title)}${b.series ? ` <span class="hint">— ${esc(b.series)}${b.series_no ? ', ' + esc(b.series_no) : ''}</span>` : ''}</td>
       <td>${esc(b.author || '')}</td>
@@ -585,8 +585,8 @@ async function bookForm(id, presetAcqId, prefill) {
               записване (books:update пази непратена бройка), защото сплескването
               му до 1 би отнело документи от фонда тихо. */
           (id && v.quantity != null && Number(v.quantity) !== 1)
-          ? `<div class="field"><label>Екземпляри под този номер</label>
-              <input type="text" value="${esc(String(v.quantity))} — стар запис" disabled>
+          ? `<div class="field"><label for="bkf_qty">Екземпляри под този номер</label>
+              <input id="bkf_qty" type="text" value="${esc(String(v.quantity))} — стар запис" disabled>
               <span class="fh" style="color:#b00">Един инвентарен номер отговаря на един екземпляр. Поправя се от „Настройки“ → „Проверка на данните“; записването тук не променя бройката.</span></div>`
           /* Не е поле за въвеждане, а изречение: в четириколонната мрежа надписът
              „1 — един инвентарен номер, един екземпляр“ се реже с 93 px и се чете
@@ -600,8 +600,8 @@ async function bookForm(id, presetAcqId, prefill) {
         ${fld('Постоянно място', 'permanent_location', { type: 'select',
           opts: avSelectOpts(AV.location, [], v.permanent_location), val: v.permanent_location || '',
           emptyLabel: '— без отбелязване —' })}
-        <div class="field"><label>Последно видяна</label>
-          <input value="${v.datelastseen ? esc(bg(tsDay(v.datelastseen))) : '—'}" disabled
+        <div class="field"><label for="bkf_seen">Последно видяна</label>
+          <input id="bkf_seen" value="${v.datelastseen ? esc(bg(tsDay(v.datelastseen))) : '—'}" disabled
             title="Попълва се само от сканиране при инвентаризация"></div>
       </div>
       <div class="hint" style="margin-top:-4px">„Постоянно място“ пази рафта/шкафа, докато документът е временно
@@ -625,9 +625,9 @@ async function bookForm(id, presetAcqId, prefill) {
       </div>
       <div class="grid gIsbn">
         ${fld('Том / част', 'volume', { val: v.volume || '' })}
-        <div class="field"><label>ISBN / ISSN</label>
+        <div class="field"><label for="bkf_isbn">ISBN / ISSN</label>
           <div class="isbnRow">
-            <input name="isbn" value="${esc(v.isbn || '')}" onchange="bookIsbnCheck(this)">
+            <input id="bkf_isbn" name="isbn" value="${esc(v.isbn || '')}" onchange="bookIsbnCheck(this)">
             <button type="button" class="btn" id="isbnBtn" onclick="isbnLookup()"
               title="Изтегля данните за книгата от Google Books и Open Library">Търси</button>
             <button type="button" class="btn" id="sruBtn" onclick="sruLookup()"
@@ -639,16 +639,16 @@ async function bookForm(id, presetAcqId, prefill) {
         ${fld('Език', 'language', { type: 'select', opts: avSelectOpts(AV.language, EZICI, v.language), val: v.language })}
       </div>
       <div class="grid g4">
-        <div class="field"><label>УДК</label>
+        <div class="field"><label for="bkf_udk">УДК</label>
           <div class="isbnRow">
-            <input name="udk" value="${esc(v.udk || '')}" list="dl_udk">
+            <input id="bkf_udk" name="udk" value="${esc(v.udk || '')}" list="dl_udk">
             <button type="button" class="btn" onclick="udkPicker()"
               title="Избор от таблицата на УДК">Избери…</button>
           </div>
         </div>
-        <div class="field"><label>Авторски знак</label>
+        <div class="field"><label for="bkf_amark">Авторски знак</label>
           <div class="isbnRow">
-            <input name="author_mark" value="${esc(v.author_mark || '')}">
+            <input id="bkf_amark" name="author_mark" value="${esc(v.author_mark || '')}">
             <button type="button" class="btn" id="amBtn" onclick="authorMarkSuggest()"
               title="Предлага знака по фамилията — по таблицата, внесена в Настройки → Фонд">Предложи</button>
           </div>
@@ -669,9 +669,9 @@ async function bookForm(id, presetAcqId, prefill) {
               съвпадаща стойност избира първата — и всяко записване на картона на
               отчислен документ мълчаливо би го върнало като „наличен". */
           v.status === 'отчислен'
-          ? `<div class="field"><label>Състояние <span class="fh">променя се само с акт</span></label>
+          ? `<div class="field"><label for="bkf_status">Състояние <span class="fh">променя се само с акт</span></label>
               <input type="hidden" name="status" value="отчислен">
-              <input type="text" value="отчислен${v.status_date ? ' — от ' + bg(v.status_date) : ''}" disabled>
+              <input id="bkf_status" type="text" value="отчислен${v.status_date ? ' — от ' + bg(v.status_date) : ''}" disabled>
               <span class="fh">Връщане във фонда става само с анулиране на акта: „Отчисляване“ → отваряте акта → „Анулирай акта“.</span></div>`
           : fld('Състояние', 'status', { type: 'select', opts: ['наличен', 'липсващ', 'изгубен', 'за реставрация'], val: v.status, allowEmpty: false,
               hint: v.status_date ? 'от ' + bg(v.status_date) : '' })}

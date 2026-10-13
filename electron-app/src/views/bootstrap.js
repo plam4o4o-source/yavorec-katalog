@@ -36,6 +36,8 @@ const RENDERERS = {
   analytics: renderAnalytics, persons: renderPersons, chronicle: renderChronicle,
   stats: renderStats, reports: renderReports, catalog: renderCatalog, labels: renderLabels, odit: renderOdit, setup: renderSetup
 };
+/** Брояч на влизанията в раздел — виж data-enter в route(). */
+let ENTER_SEQ = 0;
 async function route() {
   /* #раздел/подраздел (v2.4.27, A10): „#setup/lichni“ отваря Настройки и превърта
      до секцията — таблото и картонът на читателя вече не оставят библиотекаря
@@ -91,8 +93,11 @@ async function route() {
        таблото, смяна на годината): атрибутът стои колкото трае движението и се
        маха. Самото движение е в style.css, изключено при „намалено движение“. */
     if (v && VIEW === мой) {
-      v.dataset.enter = '1';
-      setTimeout(() => { if (VIEW === мой) delete v.dataset.enter; }, 1100);
+      /* Жетон за всяко влизане: бързо „Статистика → Табло → Статистика“ не
+         бива да остави таймера на първото влизане да спре движението на второто. */
+      const жетон = String(++ENTER_SEQ);
+      v.dataset.enter = жетон;
+      setTimeout(() => { if (v.dataset.enter === жетон) delete v.dataset.enter; }, 1100);
     }
   } finally {
     /* Рендерът не е сложил нищо върху мястото: значи е излязъл по тихия път.

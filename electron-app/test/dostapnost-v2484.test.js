@@ -52,11 +52,16 @@ test('Д1 — fld(): етикетът е свързан с полето (for/id)
 test('Д1 — формата на нова книга: всяко поле с етикет има име за екранен четец', async () => {
   await h.go('books');
   await h.clickButton('+ Нова книга', '#view');
-  const fields = [...h.document.querySelectorAll('#modal .field')].filter(f => f.querySelector('label') && f.querySelector('input,select,textarea'));
+  const CTL = 'input:not([type="hidden"]),select,textarea';
+  const fields = [...h.document.querySelectorAll('#modal .field')].filter(f => f.querySelector('label') && f.querySelector(CTL));
   assert.ok(fields.length >= 10, 'формата има полета: ' + fields.length);
   for (const f of fields) {
-    const l = f.querySelector('label'), c = f.querySelector('input,select,textarea');
+    const l = f.querySelector('label'), c = f.querySelector(CTL);
+    /* И двете празни („“ === „“) НЕ е връзка — така първата версия на теста
+       пропускаше ISBN, УДК и авторския знак (намерено при прегледа). */
+    assert.ok(l.htmlFor, 'етикет „' + l.textContent.trim() + '“ има for');
     assert.equal(l.htmlFor, c.id, 'етикет „' + l.textContent.trim() + '“');
+    assert.ok(c.labels && c.labels.length >= 1, 'полето под „' + l.textContent.trim() + '“ знае етикета си');
   }
   h.window.closeModal();
 });
@@ -78,17 +83,39 @@ test('Д2 — всяко падащо меню в изгледите има им
   assert.deepEqual(bad, []);
 });
 
+test('Д1 — в изгледите няма етикет без for точно над поле (ръчно писаните форми)', () => {
+  const bad = [];
+  const re = /<label(?![^>]*\bfor=)[^>]*>((?:(?!<\/label>)[\s\S]){0,200})<\/label>\s*(?:<div[^>]*>\s*)?<(input|select|textarea)(?![^>]*type="hidden")[^>]*>/g;
+  for (const [f, s] of viewSrc) for (const m of s.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(re)) {
+    // етикетът обвива полето — написано направо или като готово падащо меню (${yearSel})
+    if (/<(input|select|textarea)\b|\$\{\w*Sel\}/.test(m[1])) continue;
+    bad.push(f + ': ' + m[0].slice(0, 90));
+  }
+  assert.deepEqual(bad, []);
+});
+
 test('Д3 — няма празни заглавни клетки над колоните с бутони', () => {
   const bad = [];
   for (const [f, s] of viewSrc) for (const m of s.matchAll(/<th(?:\s[^>]*)?><\/th>/g)) bad.push(f + ': ' + m[0]);
   assert.deepEqual(bad, []);
-  assert.match(CSS, /\.vh\{position:absolute !important; width:1px; height:1px;[^}]*clip:rect\(0 0 0 0\)/, '.vh — видимо само за четеца');
+  const vh = (CSS.match(/\.vh\{[^}]*\}/) || [''])[0];
+  assert.match(vh, /position:absolute !important/);
+  assert.match(vh, /clip:rect\(0 0 0 0\)/, '.vh — видимо само за четеца');
+  /* Котвата горе вляво е задължителна (намерено при прегледа): без нея скритото
+     „Действия“ в непозиционирана клетка под ръба на #main разширяваше целия
+     прозорец и той получаваше излишни ленти за превъртане. */
+  assert.match(vh, /top:0; left:0/, '.vh не излиза извън превъртащата се област');
+  // Скритото име горе вляво отговаря на колоната под него: „Число“ в Дневника, „Период“ в справката.
+  assert.match(h.window.eval('dnevnikGroupHeadHtml(DNEVNIK_A_COLS)'), /<th><span class="vh">Число<\/span><\/th>/);
+  const rep = viewSrc.find(x => x[0] === 'reports.js')[1];
+  assert.equal((rep.match(/dnevnikGroupHeadHtml\([^)]*'Период'\)/g) || []).length, 3);
 });
 
 test('Д4 — отметките в „Книги“ и клетките на Дневника имат имена', async () => {
   const s = (f) => viewSrc.find(x => x[0] === f)[1];
   assert.match(s('books.js'), /id="chkAll" aria-label="Избери всички намерени"/);
-  assert.match(s('books.js'), /class="bkChk"[^>]*aria-label="Избери инв\. № /);
+  assert.match(s('books.js'), /class="bkChk"[^>]*aria-label="\$\{[^}]*'Избери инв\. № '/);
+  assert.match(s('books.js'), /'Избери: ' \+ esc\(/, 'без инв. № — по заглавие, не по вътрешния номер в базата');
   await h.go('dnevnik');
   const cells = [...h.document.querySelectorAll('#view input.dnvCell')];
   assert.ok(cells.length > 100);
@@ -105,7 +132,8 @@ test('Д5 — хоризонтално превъртащите се табли�
 test('Скелет при зареждане: надписът остава за четеца, лентите се появяват със закъснение', async () => {
   const w = h.window;
   await h.go('dash');
-  w.eval('window.__orig = RENDERERS.books; RENDERERS.books = () => new Promise(r => { window.__go = r; });');
+  w.eval(`window.__orig = RENDERERS.books; RENDERERS.books = () => new Promise(r => { window.__go = () => {
+    document.getElementById('view').innerHTML = '<p>готово</p>'; r(); }; });`);
   w.location.hash = '#books';                 // route() тръгва от смяната на адреса
   await E.sleep(40);
   const l = h.document.querySelector('#view .viewLoading');
@@ -115,13 +143,16 @@ test('Скелет при зареждане: надписът остава за
   assert.equal(l.querySelectorAll('.skel[aria-hidden="true"] i').length, 5);
   w.eval('RENDERERS.books = window.__orig;');
   w.__go(); await h.settle();
+  assert.equal(h.document.querySelector('#view').textContent, 'готово', 'скелетът изчезва, остава съдържанието');
   assert.match(CSS, /@media \(prefers-reduced-motion: no-preference\)\{\s*\.viewLoading\{animation:loadIn \.25s \.15s both\}/, 'бързият раздел не мига');
+  // и при „намалено движение“ — същото закъснение, но мигновена поява
+  assert.match(CSS, /@media \(prefers-reduced-motion: reduce\)\{\s*\.viewLoading\{animation:loadIn 1ms \.15s both\}/);
 });
 
 test('Движението е само при влизане в раздела и само без „намалено движение“', async () => {
   await h.go('stats');
   const v = h.document.querySelector('#view');
-  assert.equal(v.dataset.enter, '1', 'влизане в раздела');
+  assert.ok(v.dataset.enter, 'влизане в раздела');
   await E.sleep(1250);
   assert.equal(v.dataset.enter, undefined, 'после — без движение при вътрешно пречертаване');
   const block = CSS.match(/@media \(prefers-reduced-motion: no-preference\)\{([\s\S]*?)\n\}/)[1];
@@ -131,4 +162,26 @@ test('Движението е само при влизане в раздела �
   const outside = CSS.replace(block, '');
   assert.doesNotMatch(outside, /animation:enter(Bar|Spark|Ring|Kpi)/, 'нито едно движение извън блока');
   for (const k of ['enterBar', 'enterSpark', 'enterRing', 'enterKpi', 'loadIn', 'skelShine']) assert.match(CSS, new RegExp('@keyframes ' + k + '\\{'));
+});
+
+test('Бързо „Статистика → Табло → Статистика“: таймерът на първото влизане не спира движението на второто', async () => {
+  const w = h.window;
+  const v = h.document.querySelector('#view');
+  const orig = w.setTimeout;
+  /** @type {Function[]} */
+  const held = [];
+  w.setTimeout = (fn, ms, ...a) => (ms === 1100 ? (held.push(fn), 0) : orig.call(w, fn, ms, ...a));
+  try {
+    await h.go('stats'); await h.go('dash'); await h.go('stats');
+    assert.equal(held.length, 3, 'три влизания — три таймера');
+    held[0](); held[1]();
+    assert.ok(v.dataset.enter, 'старите таймери не пипат новото влизане');
+    held[2]();
+    assert.equal(v.dataset.enter, undefined, 'собственият таймер го маха');
+  } finally { w.setTimeout = orig; }
+});
+
+test('Пръстенът не показва точка на дванайсет часа преди да тръгне', () => {
+  assert.match(CSS, /@keyframes enterRing\{from\{stroke-dasharray:0 999; opacity:0\}/);
+  assert.match(CSS, /#view\[data-enter\] \.ringSvg circle \+ circle\{animation:enterRing [^}]* both\}/, 'и през закъснението (fill both)');
 });

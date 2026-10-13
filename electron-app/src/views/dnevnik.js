@@ -123,11 +123,11 @@ const DNEVNIK_B_GROUPS = [
 function dnevnikGroups(cols) {
   return cols === DNEVNIK_B_COLS ? DNEVNIK_B_GROUPS : DNEVNIK_A_GROUPS;
 }
-function dnevnikGroupHeadHtml(cols, firstLabel, groups, short) {
+function dnevnikGroupHeadHtml(cols, firstLabel, groups, short, hiddenFirst) {
   const g = groups || dnevnikGroups(cols);
   if (g.reduce((s, [, n]) => s + n, 0) !== cols.length) return '';
   /* Горната лява клетка: празна на екрана, но с име за екранния четец (v2.4.84). */
-  return `<tr><th>${firstLabel ? esc(firstLabel) : '<span class="vh">Ден</span>'}</th>${
+  return `<tr><th>${firstLabel ? esc(firstLabel) : `<span class="vh">${esc(hiddenFirst || 'Число')}</span>`}</th>${
     g.map(([l, n]) => `<th colspan="${n}" style="text-align:center">${esc(short ? dnevnikShortLabel(l) : l)}</th>`).join('')}</tr>`;
 }
 /* На хартия колоните са заковани за листа (table-layout:fixed), затова пояснението
@@ -302,8 +302,8 @@ async function renderDnevnik() {
     ? ' readonly title="Денят още не е настъпил — Дневникът се попълва за днешния и минали дни"' : '';
   /* Име за екранен четец на всяка клетка (v2.4.84): ден и колона — дотук
      полетата бяха без име (axe: „label“ — critical). */
-  const colName = (k) => { const c = DNEVNIK_A_COLS.concat(DNEVNIK_B_COLS).find(x => x[0] === k); return c ? c[1].replace(/<[^>]*>/g, '') : k; };
-  const cellAria = (row, k) => ` aria-label="${esc(String(+row.date.slice(8, 10)) + ' — ' + colName(k))}"`;
+  const colNames = new Map(DNEVNIK_A_COLS.concat(DNEVNIK_B_COLS).map(([k, l]) => [k, l]));
+  const cellAria = (row, k) => ` aria-label="${esc(String(+row.date.slice(8, 10)) + ' — ' + (colNames.get(k) || k))}"`;
   const cellHtml = (row, k) => {
     if (k.startsWith('$')) return `<td class="num calc">${dnevnikCell(row, k)}</td>`;
     if (k === 'a_hours' || k === 'b_hours') {
@@ -492,8 +492,8 @@ async function dnevnikRefreshTotals() {
    поименно всичко, което не е цяло неотрицателно число — точно както клетката. */
 function dnevnikGroup(title, fields, row) {
   return `<fieldset><legend>${esc(title)}</legend><div class="grid g4">
-    ${fields.map(([k, l]) => `<div class="field"><label>${esc(l)}</label>
-      <input type="text" inputmode="numeric" name="${k}" data-label="${esc(l)}" value="${row[k] || 0}"
+    ${fields.map(([k, l]) => `<div class="field"><label for="dnvF_${k}">${esc(l)}</label>
+      <input id="dnvF_${k}" type="text" inputmode="numeric" name="${k}" data-label="${esc(l)}" value="${row[k] || 0}"
         data-saved="${row[k] || 0}" oninput="dnevnikPreview()"></div>`).join('')}
     </div></fieldset>`;
 }
@@ -521,8 +521,8 @@ async function dnevnikDayForm(date) {
     <div class="cards" id="dnvPreview" style="margin-bottom:12px"></div>
     <h3 style="font-size:14px">Раздел А — читатели и посещения</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
-      <input type="text" name="a_hours_hhmm" value="${hhmm(row.a_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
+      <div class="field"><label for="dnvF_a_hours">Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
+      <input id="dnvF_a_hours" type="text" name="a_hours_hhmm" value="${hhmm(row.a_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По възраст', [['a_age_u14', 'До 14 г.'], ['a_age_15_18', '15–18 г.'], ['a_age_19_28', '19–28 г.'], ['a_age_o28', 'Над 28 г.']], row)}
     ${dnevnikGroup('По пол', [['a_sex_boys', 'Мъже — деца'], ['a_sex_men', 'Мъже — възрастни'], ['a_sex_girls', 'Жени — деца'], ['a_sex_women', 'Жени — възрастни']], row)}
@@ -535,8 +535,8 @@ async function dnevnikDayForm(date) {
     ${dnevnikGroup('Посещения', [['a_visit_home', 'В заемна за дома'], ['a_visit_child', 'Деца до 14 г.'], ['a_visit_reading', 'В читалня'], ['a_visit_internet', 'Интернет']], row)}
     <h3 style="font-size:14px">Раздел Б — заети материали</h3>
     <fieldset><legend>Часове на обслужване</legend>
-      <div class="field"><label>Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
-      <input type="text" name="b_hours_hhmm" value="${hhmm(row.b_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
+      <div class="field"><label for="dnvF_b_hours">Часове („8“, „7:30“ или „7,5“ — запетаята е дроб от часа)</label>
+      <input id="dnvF_b_hours" type="text" name="b_hours_hhmm" value="${hhmm(row.b_hours)}" placeholder="8:00" oninput="dnevnikPreview()"></div>
     </fieldset>
     ${dnevnikGroup('По вид', [['b_type_books', 'Книги'], ['b_type_period', 'Периодични издания'], ['b_type_graphic', 'Графични издания'],
       ['b_type_carto', 'Картографски издания'], ['b_type_music', 'Нотни издания'], ['b_type_audio', 'Аудио-касети'],

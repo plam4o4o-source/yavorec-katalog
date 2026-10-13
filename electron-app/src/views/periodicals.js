@@ -317,7 +317,7 @@ async function openPeriodical(id, year) {
     ${periodicalVolumesSection(p)}
     <div class="toolbar" style="margin:8px 0 4px">
       <label>Година: ${yearSel}</label>
-      <input id="perIssueSearch" type="search" placeholder="търсене по № на брой или дата" oninput="filterIssueRows()">
+      <input id="perIssueSearch" type="search" aria-label="Търсене в броевете" placeholder="търсене по № на брой или дата" oninput="filterIssueRows()">
       <span class="hint" id="perIssueCount" data-total="${total}" data-year="${esc(String(p.issue_year))}"
         >${issueCountLabel(shown, shown, shown, p.issue_year, total)}</span>
     </div>
