@@ -5,7 +5,7 @@ function linksPanelHtml(fromKind, fromId, links) {
     летописа, които се отнасят до този запис.</div>
     <div id="linkList">${linkListHtml(links)}</div>
     <div class="grid g3" style="margin-top:10px">
-      <div class="field"><label>Вид</label>
+      <div class="field"><label for="lnkKind">Вид</label>
         <select id="lnkKind" onchange="lnkSearch()">
           <option value="книга">Документ от фонда</option>
           <option value="статия">Статия (аналитично описание)</option>
@@ -13,9 +13,9 @@ function linksPanelHtml(fromKind, fromId, links) {
           <option value="летопис">Запис в летописа</option>
           <option value="периодика">Периодично издание</option>
         </select></div>
-      <div class="field"><label>Търсене</label>
+      <div class="field"><label for="lnkQ">Търсене</label>
         <input id="lnkQ" placeholder="заглавие, автор, инв. №…" oninput="lnkSearch()"></div>
-      <div class="field"><label>Намерени</label>
+      <div class="field"><label for="lnkPick">Намерени</label>
         <select id="lnkPick"><option value="">— въведете търсене —</option></select></div>
     </div>
     <button class="btn pri" onclick="lnkAdd('${fromKind}', ${fromId})">Свържи</button>

@@ -6,7 +6,7 @@ async function renderHolds(tabs) {
     <div class="toolbar"><button class="btn pri" onclick="holdPrompt()">+ Нова резервация</button></div>
     ${!rows.length ? '<div class="empty"><h3>Няма активни резервации</h3><p>Резервирайте заета книга, докато читателят чака за нея.</p></div>' : `
     <div class="wrap"><table class="ledger"><thead><tr>
-      <th>Инв. №</th><th>Заглавие</th><th>Читател</th><th>Заявена</th><th>Състояние</th><th style="width:110px"></th>
+      <th>Инв. №</th><th>Заглавие</th><th>Читател</th><th>Заявена</th><th>Състояние</th><th style="width:110px"><span class="vh">Действия</span></th>
     </tr></thead><tbody>
       ${rows.map(h => `<tr><td class="num">${h.inv_number ?? ''}</td><td>${esc(h.title)}</td>
         <td>${esc(h.reader_name)} <span class="hint">(${esc(h.card_no || '')})</span></td>

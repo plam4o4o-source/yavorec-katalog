@@ -12,10 +12,10 @@ async function renderReports() {
   const def = catalog.find(c => c.id === id);
   $('#view').innerHTML = `
     <div class="toolbar">
-      <select id="repSel" onchange="REPORT_ID=this.value;renderReports()">
+      <select id="repSel" aria-label="Справка" onchange="REPORT_ID=this.value;renderReports()">
         ${catalog.map(c => `<option value="${c.id}" ${c.id === id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}
       </select>
-      ${def && def.needsYear ? `<select onchange="REPORT_YEAR=this.value;renderReports()">
+      ${def && def.needsYear ? `<select aria-label="Година" onchange="REPORT_YEAR=this.value;renderReports()">
         ${/* текущата и няколко назад — справките се подават и за минали години */
           yearOptions(y).map(x => `<option ${x === y ? 'selected' : ''}>${x}</option>`).join('')}
       </select>` : ''}
@@ -81,15 +81,15 @@ function reportBodyHtml(r) {
     return `
       <div class="note ${r.daysRecorded ? '' : 'd'}" style="margin-bottom:10px">${reportCoverageNote(r)}</div>
       <div class="card"><h3 style="margin-top:0">А. Читатели и посещения</h3>
-        <div class="wrap"><table class="ledger" style="font-size:11px"><thead>
-        ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS)}
-        <tr><th></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        <div class="wrap" tabindex="0" role="region" aria-label="А. Читатели и посещения — таблица, превърта се хоризонтално"><table class="ledger" style="font-size:11px"><thead>
+        ${dnevnikGroupHeadHtml(DNEVNIK_A_COLS, '', undefined, false, 'Период')}
+        <tr><th><span class="vh">Период</span></th>${DNEVNIK_A_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_A_COLS)}</tbody></table></div>
       </div>
       <div class="card" style="margin-top:16px"><h3 style="margin-top:0">Б. Заети материали</h3>
-        <div class="wrap"><table class="ledger" style="font-size:11px"><thead>
-        ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS)}
-        <tr><th></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        <div class="wrap" tabindex="0" role="region" aria-label="Б. Заети материали — таблица, превърта се хоризонтално"><table class="ledger" style="font-size:11px"><thead>
+        ${dnevnikGroupHeadHtml(DNEVNIK_B_COLS, '', undefined, false, 'Период')}
+        <tr><th><span class="vh">Период</span></th>${DNEVNIK_B_COLS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(DNEVNIK_B_COLS)}</tbody></table></div>
         ${/* Същото обяснение и на екрана, не само на хартията (находка В4). */
           dnevnikTotalsNoteB(r.totals) ? `<div class="hint" style="margin-top:8px">${esc(dnevnikTotalsNoteB(r.totals))}</div>` : ''}
@@ -217,8 +217,8 @@ function reportPrintHtml(r) {
           ? ` · част ${i + 1} от ${pages.length} — ${esc(page.groups.map(dnevnikShortLabel0).join(', '))}` : ''}</div>
         <table class="dnvPrint"><colgroup><col style="width:11%">${
           page.cols.map(() => `<col style="width:${(89 / page.cols.length).toFixed(3)}%">`).join('')}</colgroup><thead>
-        ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true)}
-        <tr><th></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
+        ${dnevnikGroupHeadHtml(page.cols, '', page.groups, true, 'Период')}
+        <tr><th><span class="vh">Период</span></th>${page.cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead>
         <tbody>${rowHtml(page.cols)}</tbody></table>${dnevnikNotesHtml(page.groups,
           [page.groups && page.groups.some(([l]) => l.indexOf('съдържание') >= 0) ? noteB : ''])}</div>`).join('');
     };

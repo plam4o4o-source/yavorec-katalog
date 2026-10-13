@@ -127,7 +127,7 @@ function importScansModal(sessionId) {
     програмата не гадае дали това е един номер, или два.</div>
     <label class="hint" style="display:block;margin-bottom:6px">Файл от телефона:
       <input type="file" id="scanFile" accept=".txt,text/plain" onchange="importScansFile(this)"></label>
-    <textarea id="scanPaste" class="remText" rows="12" placeholder="1024&#10;1025&#10;1026&#10;…"></textarea>
+    <textarea id="scanPaste" class="remText" rows="12" aria-label="Сканирани инвентарни номера — по един на ред" placeholder="1024&#10;1025&#10;1026&#10;…"></textarea>
     <div class="hint" style="margin-top:6px">Вече сканираните в тази сесия се пропускат, а
     непознатите номера се изброяват отделно, за да се проверят.</div>`,
     `<button class="btn" onclick="closeModal()">Отказ</button>

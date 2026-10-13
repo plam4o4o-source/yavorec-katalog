@@ -188,7 +188,7 @@ async function renderInvBook() {
     </div>
     <div class="wrap"><table class="ledger ibTable">
       <thead><tr><th class="nowrap">Дата</th><th class="nowrap">Инв. №</th><th>Проверки</th><th>Автор и заглавие</th><th>Год.</th><th>Цена</th>
-        <th>№ / дата<br>в КДБФ</th><th>Сигнатура</th><th>№ / дата<br>на акт</th><th>Състояние</th><th style="width:90px"></th></tr></thead>
+        <th>№ / дата<br>в КДБФ</th><th>Сигнатура</th><th>№ / дата<br>на акт</th><th>Състояние</th><th style="width:90px"><span class="vh">Действия</span></th></tr></thead>
       <tbody id="ibBody"></tbody>
     </table></div>
     <div class="toolbar" id="ibMore" style="justify-content:center"></div>`;

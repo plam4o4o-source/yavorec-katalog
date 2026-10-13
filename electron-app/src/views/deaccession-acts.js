@@ -32,14 +32,14 @@ async function renderActs() {
       <button class="btn pri" onclick="actForm()">+ Нов акт за отчисляване</button>
       <button class="btn" onclick="actForm(null, 1)">+ Нов проект</button>
       ${years.length ? `<label style="margin-left:auto">Година:
-        <select onchange="setActsYear(this.value)">
+        <select aria-label="Година" onchange="setActsYear(this.value)">
           <option value="всички"${ACTS_YEAR === 'всички' ? ' selected' : ''}>всички</option>
           ${years.map(y => `<option value="${y}"${ACTS_YEAR === y ? ' selected' : ''}>${y}</option>`).join('')}
         </select></label>` : ''}
     </div>
     ${drafts.length ? `<h3 style="margin:14px 0 6px">Проекти (още не са актове)</h3>
     <div class="wrap"><table class="ledger"><thead><tr><th>Проект №</th><th>Дата</th><th>Причина</th>
-      <th>Заглавия</th><th>Поправен</th><th></th></tr></thead><tbody>
+      <th>Заглавия</th><th>Поправен</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
     ${drafts.map(d => `<tr><td class="num">${d.id}</td><td class="num">${bg(d.date) || '—'}</td>
       <td>${d.reason_code ? 'т. ' + d.reason_code + '. ' : ''}${esc(d.reason_text || '— без причина —')}</td>
       <td class="num">${d.title_count}</td><td class="num" style="font-size:12px">${esc(d.updated_at ? tsDay(d.updated_at) + ' ' + tsTime(d.updated_at) : '')}</td>
@@ -48,7 +48,7 @@ async function renderActs() {
     </tbody></table></div>` : ''}
     ${drafts.length ? '<h3 style="margin:18px 0 6px">Съставени актове</h3>' : ''}
     <div class="wrap"><table class="ledger"><thead><tr><th>Акт №</th><th>Дата</th><th>Причина</th>
-      <th>Брой</th><th>Стойност</th><th>Начин</th><th></th></tr></thead><tbody>
+      <th>Брой</th><th>Стойност</th><th>Начин</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
     ${rows.length ? rows.map(a => `<tr${a.revoked_at ? ' class="revokedRow"' : ''}><td class="num">${a.no} / ${a.year}</td>
       <td class="num">${bg(a.date)}</td>
       <td>т. ${a.reason_code}. ${esc(a.reason_text)}${a.revoked_at
@@ -326,7 +326,7 @@ function drawActList() {
   const el = $('#actList'); if (!el) return;
   if (!ACT_LIST.length) { el.innerHTML = '<div class="hint">Списъкът е празен. Въведете инвентарните номера за отчисляване.</div>'; return; }
   el.innerHTML = `<div class="wrap" style="max-height:220px"><table class="ledger"><thead><tr>
-    <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th></th></tr></thead><tbody>
+    <th>Инв. №</th><th>Автор, заглавие</th><th>Год.</th><th>Цена</th><th><span class="vh">Действия</span></th></tr></thead><tbody>
     ${ACT_LIST.map((l, n) => `<tr><td class="num">${l.inv_number}</td>
     <td>${esc(authorTitleText(l.author, l.title))}${actLegacyCopies(l) > 1
       ? `<br><span class="badge warn">${actLegacyCopies(l)} екземпляра под един номер</span>

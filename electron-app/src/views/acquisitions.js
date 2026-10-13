@@ -56,7 +56,7 @@ async function renderAcq() {
     винаги с първичен счетоводен документ.</div>
     <div class="toolbar"><button class="btn pri" onclick="acqForm()">+ Нова партида</button></div>
     <div class="wrap"><table class="ledger"><thead><tr><th>№/год.</th><th>Дата</th><th>Откъде</th><th>Как</th>
-      <th>Документ</th><th>Брой</th><th>Инвентирани</th><th>Стойност</th><th></th></tr></thead>
+      <th>Документ</th><th>Брой</th><th>Инвентирани</th><th>Стойност</th><th><span class="vh">Действия</span></th></tr></thead>
       <tbody id="acqBody"></tbody></table></div>
     <div class="toolbar" id="acqMore" style="justify-content:center"></div>`;
   paintAcqRows(false);

@@ -1100,19 +1100,25 @@ function initSavedIndicator() {
 }
 
 /* Бърз конструктор на форма-поле, за да не се повтаря разметката за всяко поле. */
+/* ЕТИКЕТЪТ Е СВЪРЗАН С ПОЛЕТО (v2.4.84, достъпност). Дотук <label> стоеше до
+   полето, без for/id — на екрана изглеждаше еднакво, но екранен четец обявяваше
+   „поле за текст“ без име, за всяко поле във всяка форма на програмата (axe:
+   „label“ — critical). Щракване върху етикета вече слага и курсора в полето. */
+let FLD_SEQ = 0;
 function fld(label, name, opts) {
   opts = opts || {};
   const val = opts.val ?? '';
+  const fid = 'fld_' + String(name).replace(/[^\w-]/g, '_') + '_' + (++FLD_SEQ);
   if (opts.type === 'select') {
     const options = (opts.opts || []).map(o => {
       const v = typeof o === 'object' ? o.v : o, t = typeof o === 'object' ? o.t : o;
       return `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(t)}</option>`;
     }).join('');
-    return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label><select name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
+    return `<div class="field"><label for="${fid}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label><select id="${fid}" name="${name}" ${opts.req ? 'required' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''}>
       ${opts.allowEmpty !== false ? `<option value="">${esc(opts.emptyLabel || '—')}</option>` : ''}${options}</select></div>`;
   }
   if (opts.type === 'textarea') {
-    return `<div class="field"><label>${esc(label)}</label><textarea name="${name}" rows="${opts.rows || 3}">${esc(val)}</textarea></div>`;
+    return `<div class="field"><label for="${fid}">${esc(label)}</label><textarea id="${fid}" name="${name}" rows="${opts.rows || 3}">${esc(val)}</textarea></div>`;
   }
   if (opts.type === 'checkbox') {
     return `<label class="chk"><input type="checkbox" name="${name}" ${val ? 'checked' : ''}><span>${label}</span></label>`;
@@ -1123,8 +1129,8 @@ function fld(label, name, opts) {
   // opts.req (v1.70.0): освен HTML атрибута required, добавя и видима звездичка
   // в етикета — преди това нямаше никакво визуално обозначение (виж
   // firstMissingRequired() по-долу за защо самият required не стига).
-  return `<div class="field"><label>${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
-    <input name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
+  return `<div class="field"><label for="${fid}">${esc(label)}${opts.req ? ' <b class="req" aria-hidden="true">*</b>' : ''}${opts.hint ? ' <span class="fh">' + opts.hint + '</span>' : ''}</label>
+    <input id="${fid}" name="${name}" type="${type}" ${opts.step ? 'step="' + opts.step + '"' : ''} ${opts.req ? 'required' : ''}
       ${opts.min != null ? 'min="' + esc(String(opts.min)) + '"' : ''} ${opts.onchange ? `onchange="${opts.onchange}"` : ''} ${opts.onkey ? `onkeydown="${opts.onkey}"` : ''}
       ${opts.list ? `list="dl_${opts.list}"` : ''} ${opts.disabled ? 'disabled' : ''}
       ${/* readonly, а НЕ disabled (v2.4.56): disabled полето не влиза във formData(),

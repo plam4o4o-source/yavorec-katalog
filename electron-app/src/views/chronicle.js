@@ -17,7 +17,7 @@ async function renderChronicle() {
       <button class="btn pri" onclick="chronicleForm()">+ Нов запис</button>
       <input type="search" placeholder="Търсене по събитие, описание, участници…"
         value="${esc(CHR_Q)}" oninput="chrSearch(this.value)">
-      <select onchange="chrYear(this.value)">
+      <select aria-label="Година" onchange="chrYear(this.value)">
         <option value="">— всички години —</option>
         ${(years || []).map(y => `<option value="${esc(y.year)}" ${CHR_YEAR === y.year ? 'selected' : ''}>
           ${esc(y.year)} (${y.n})</option>`).join('')}

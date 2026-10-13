@@ -33,7 +33,7 @@ async function accountModal(readerId) {
       <button class="btn sm pri" onclick="payAccount(${readerId})">Плащане…</button>
     </div>
     <div class="wrap" style="margin-top:10px"><table class="ledger"><thead><tr>
-      <th>Дата</th><th>Вид</th><th>Сума</th><th>Бележка</th><th style="width:130px"></th></tr></thead><tbody>
+      <th>Дата</th><th>Вид</th><th>Сума</th><th>Бележка</th><th style="width:130px"><span class="vh">Действия</span></th></tr></thead><tbody>
       ${acc.lines.length ? acc.lines.map(l => `<tr><td class="num">${bg(l.date)}</td>
         <td>${esc(l.type || l.kind)}</td>
         <td class="num" style="color:${l.amount > 0 ? 'var(--red)' : 'var(--green)'}">${l.amount > 0 ? '+' : ''}${mny(l.amount)}</td>

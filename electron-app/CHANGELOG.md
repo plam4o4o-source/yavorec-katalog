@@ -11,6 +11,94 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.84
+
+**BG:** **Цялостен преглед: достъпност, графика в движение, измерване на скоростта.**
+Нищо в данните и в работата с програмата не се променя; версията на базата не се вдига.
+
+- **Как беше проверено.** Всички раздели бяха отворени в истински Chromium с голяма база
+  (400 книги, читатели, заемания), при процесор, забавен 4 пъти, във всяка от 7-те цветови
+  теми, с автоматичната проверка за достъпност axe-core. Преди поправките тя намираше
+  критични и сериозни пропуски; след тях — **нито един критичен, сериозен или дребен**
+  в нито една тема. Остава само подредбата на заглавията в картите (умерено, виж по-долу).
+- **Полетата във формите имат име.** Етикетът стоеше до полето, но не беше свързан с него —
+  екранният четец (NVDA, Разказвач) казваше само „поле за текст“. Сега всяко поле, направено
+  от общия помощник за форми (почти всички форми), и ръчно писаните (ISBN/ISSN, УДК, авторски
+  знак, онлайн съобщение до читател, дневният формуляр на Дневника, списъците в Настройки,
+  писмо/SMS в напомнянията) са свързани с етикета си; щракване върху етикета слага курсора в полето.
+- **Падащите менюта имат име** (година, месец, справка, филтри, състояние на предложенията).
+- **Колоните с бутони** имат заглавие „Действия“, невидимо на екрана, но прочитано от
+  четеца; първата колона на годишната справка — „Период“, на Дневника — „Число“.
+- **Отметките в „Книги“** („Избери инв. № …“, „Избери всички намерени“) и **всяка клетка на
+  Дневника** („5 — Читалня“: ден и колона) имат име.
+- **Широките таблици в „Готови справки“** се превъртат и от клавиатурата.
+- **Скелет при зареждане.** Докато раздел се зарежда, на мястото му се вижда сив скелет на
+  таблицата с бавен отблясък. Появява се след 0,15 s — бърз раздел изобщо не мига.
+- **Движение при влизане в раздел** (под секунда): плочките с числата излизат една след друга,
+  лентите на графиките растат, пръстените се затварят, стълбчетата на таблото се вдигат.
+  Само при влизане, не при всяко пречертаване (сканиране, смяна на годината); само с
+  transform/opacity — нищо не се размества. **При изключено „Показване на анимации“ в
+  Windows** (Настройки → Достъпност → Визуални ефекти) нищо не се движи.
+- **Независим преглед на кода** намери и беше поправено: скритият надпис „Действия“ в тесен
+  прозорец разширяваше целия прозорец (излишни ленти за превъртане в четири раздела —
+  проверено в Chromium преди и след); бързо „Статистика → Табло → Статистика“ спираше
+  движението на второто влизане; точка на пръстена преди да тръгне.
+- **Скорост — измерена, без промяна.** Разделите се отварят за 0,07–0,24 s при 4 пъти
+  забавен процесор, стартът — около 0,8 s. Големите таблици (300 реда) — 0,74–0,87 s;
+  почти цялото време е подреждането на таблицата от браузъра. Опитаните начини да се ускори
+  (частично рисуване, заковани ширини на колоните) печелят 20–55 %, но рискуват общия механизъм
+  за догрузване на редове, ползван от 11 раздела — оставени като възможност.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **2534 теста, 0 неуспешни** (преди: 2523).
+Нов тест `test/dostapnost-v2484.test.js`: етикетите на fld() и на истинската форма „Нова книга“
+(етикет без for не минава), всяко падащо меню в изгледите, етикет без for над поле, празните
+заглавни клетки и котвата на скрития текст, имената в „Книги“ и Дневника, превъртащите се
+таблици, скелетът, движението само при влизане и само без „намалено движение“, бързото
+повторно влизане, пръстенът.
+
+**EN:** **Full review: accessibility, motion graphics, speed measurement.**
+Nothing changes in the data or in how the program is used; the database version is not raised.
+
+- **How it was checked.** Every section was opened in real Chromium with a large database
+  (400 books, readers, loans), with the CPU throttled 4×, in each of the 7 colour themes, with
+  the axe-core accessibility checker. Before the fixes it found critical and serious issues;
+  after them — **no critical, serious or minor issue** in any theme. Only the heading order in
+  cards remains (moderate, see below).
+- **Form fields have names.** The label stood next to the field but was not linked to it —
+  a screen reader (NVDA, Narrator) only said "edit text". Now every field made by the shared
+  form helper (almost every form) and the hand-written ones (ISBN/ISSN, UDC, author mark,
+  online message to a reader, the Daily log day form, the lists in Settings, the reminder
+  letter/SMS) are linked to their labels; clicking the label puts the cursor in the field.
+- **Drop-down menus have names** (year, month, report, filters, suggestion status).
+- **Button columns** have a header "Действия" (Actions), invisible on screen but read by the
+  screen reader; the first column of the annual report is "Период", of the Daily log "Число".
+- **Checkboxes in "Books"** and **every Daily log cell** ("5 — Читалня": day and column) have names.
+- **Wide tables in "Ready reports"** can be scrolled from the keyboard.
+- **Loading skeleton.** While a section loads, a grey table skeleton with a slow shimmer is
+  shown. It appears after 0.15 s — a fast section does not flash at all.
+- **Motion on entering a section** (under a second): number tiles come in one after another,
+  chart bars grow, rings close, dashboard columns rise. Only on entering, not on every
+  re-render (scanning, changing the year); transform/opacity only — nothing shifts. **With
+  "Show animations" turned off in Windows** (Settings → Accessibility → Visual effects)
+  nothing moves.
+- **An independent code review** found, and these were fixed: the hidden "Действия" text in a
+  narrow window widened the whole window (extra scrollbars in four sections — checked in
+  Chromium before and after); a quick "Stats → Dashboard → Stats" stopped the second entry's
+  motion; a dot on the ring before it starts.
+- **Speed — measured, unchanged.** Sections open in 0.07–0.24 s with a 4× slower CPU, startup
+  about 0.8 s. Large tables (300 rows) take 0.74–0.87 s; almost all of it is the browser's
+  table layout. The approaches tried (partial painting, fixed column widths) gain 20–55 % but
+  risk the shared row-loading mechanism used by 11 sections — left as an option.
+
+**Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia +
+the catalog page); `node --test` — **2534 tests, 0 failed** (before: 2523). New test
+`test/dostapnost-v2484.test.js`: labels of fld() and of the real "New book" form (a label
+without `for` fails), every drop-down in the views, a label without `for` above a field, empty
+header cells and the hidden text's anchor, names in "Books" and the Daily log, scrolling
+tables, the skeleton, motion only on entering and only without "reduced motion", the quick
+re-entry, the ring.
+
 ## v2.4.83
 
 **BG:** **Онлайн достъп за читатели: по-леко и по-често изпращане към моста.** Само при
