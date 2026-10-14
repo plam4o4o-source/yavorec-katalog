@@ -70,6 +70,11 @@ function makeExecFile(overrides = {}) {
     if (key.startsWith('add ')) return cb(null, '', '');
     if (key.startsWith('commit ')) return cb(null, 'main abc1234] ...', '');
     if (key.startsWith('push ')) return cb(null, '', '');
+    /* v2.4.85: клонът `katalog` се сглобява с водопроводните команди — тук с
+       предвидими отпечатъци (blob/tree/commit). */
+    if (key.startsWith('hash-object ')) return cb(null, 'b'.repeat(40) + '\n', '');
+    if (key === 'mktree') return cb(null, 'c'.repeat(40) + '\n', '');
+    if (key.startsWith('commit-tree ')) return cb(null, 'd'.repeat(40) + '\n', '');
     cb(null, '', '');
   };
 }
@@ -135,7 +140,12 @@ test('catalog:status reports fund counts, git status and a suggested repo name',
   // isGitRepo(folder) short-circuits on `folder && ...`, so an unset (null) folder
   // returns null itself rather than a coerced false — original code's behavior, preserved.
   assert.equal(result.data.isGitRepo, null);
-  assert.equal(result.data.rawUrl, 'https://raw.githubusercontent.com/u/r/main/katalog.json');
+  /* v2.4.85: сайтът чете клона `katalog`, в който програмата публикува; main
+     получава каталога веднъж дневно (rawUrlMain). */
+  assert.equal(result.data.rawUrl, 'https://raw.githubusercontent.com/u/r/katalog/katalog.json');
+  assert.equal(result.data.rawUrlMain, 'https://raw.githubusercontent.com/u/r/main/katalog.json');
+  assert.equal(result.data.cdnUrl, 'https://cdn.jsdelivr.net/gh/u/r@katalog/katalog.json');
+  assert.equal(result.data.publishBranch, 'katalog');
   assert.match(result.data.suggestedRepo, /-katalog$/);
 });
 

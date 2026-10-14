@@ -106,8 +106,9 @@ const REPO = path.join(WORK, 'kat');
 const FILE = path.join(REPO, 'katalog.json');
 const kat = () => JSON.parse(fs.readFileSync(FILE, 'utf8'));
 const item = (inv) => kat().items.find(i => i.inv === inv);
-/* Какво е качено „в GitHub“: katalog.json от върха на клона в отдалеченото хранилище. */
-const pushed = () => JSON.parse(execFileSync('git', ['--git-dir', REMOTE, 'show', 'main:katalog.json'], { encoding: 'utf8' }));
+/* Какво е качено „в GitHub“: katalog.json от върха на клона в отдалеченото хранилище.
+   От v2.4.85 сайтът чете клона `katalog` (main получава каталога веднъж дневно). */
+const pushed = () => JSON.parse(execFileSync('git', ['--git-dir', REMOTE, 'show', 'katalog:katalog.json'], { encoding: 'utf8' }));
 const pushedItem = (inv) => pushed().items.find(i => i.inv === inv);
 const IDS = {};
 
@@ -125,8 +126,19 @@ test('Б0. подготовка: истинският main.js, хранилищ�
     }
     return realSetInterval(fn, ms, ...rest);
   };
+  /* v2.4.85: и публикуването 45 s след старта се улавя (и не се пуска) — иначе
+     на бавна машина то тръгва насред теста и заема изключителния участък. */
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = function (fn, ms, ...rest) {
+    if (ms === 45 * 1000) {
+      const dummy = realSetTimeout(() => {}, 1 << 30);
+      if (dummy && typeof dummy.unref === 'function') dummy.unref();
+      return dummy;
+    }
+    return realSetTimeout(fn, ms, ...rest);
+  };
   try { h = await E.bootApp(); }
-  finally { global.setInterval = realSetInterval; }
+  finally { global.setInterval = realSetInterval; global.setTimeout = realSetTimeout; }
   assert.equal(typeof autoPushTick, 'function', 'таймерът за автоматично публикуване не беше пуснат от main.js');
 
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', REMOTE]);
@@ -183,7 +195,7 @@ test('М5: автоматичното публикуване генерира ka
 });
 
 test('М5: спрян от предпазителя запис — старият файл НЕ се качва, а причината стои в лентата', async () => {
-  const before = execFileSync('git', ['--git-dir', REMOTE, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+  const before = execFileSync('git', ['--git-dir', REMOTE, 'rev-parse', 'katalog'], { encoding: 'utf8' }).trim();
   // Другата станция „отчислява“ 8 от 10 — точно пробната/непълна база, от която пази предпазителят.
   const b = new Database(h.dbPath);
   b.pragma('busy_timeout = 5000');
@@ -195,7 +207,7 @@ test('М5: спрян от предпазителя запис — стария�
     assert.ok(st.error, 'спреният запис не стигна до лентата на „Онлайн каталог“');
     assert.match(st.error, /СПРЯН/);
     assert.match(st.error, /НЕ качи стария файл/);
-    assert.equal(execFileSync('git', ['--git-dir', REMOTE, 'rev-parse', 'main'], { encoding: 'utf8' }).trim(), before,
+    assert.equal(execFileSync('git', ['--git-dir', REMOTE, 'rev-parse', 'katalog'], { encoding: 'utf8' }).trim(), before,
       'при спрян запис не бива да се качва нищо');
     assert.equal(kat().items.length, 10, 'публикуваният katalog.json остава непроменен');
   } finally {

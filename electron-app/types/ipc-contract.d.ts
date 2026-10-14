@@ -1106,7 +1106,11 @@ interface IpcContract {
   /* ---- Онлайн каталог (handlers/catalog.js) ---- */
   'catalog:autoPushStatus': {
     args: [];
-    result: { at: string | null; error: string | null; okAt: string | null; write: CatalogWriteState | null };
+    /** `failures` — поредни провали; `nextTryAt` — кога е следващият автоматичен опит (v2.4.85). */
+    result: {
+      at: string | null; error: string | null; okAt: string | null;
+      failures: number; nextTryAt: string | null; write: CatalogWriteState | null;
+    };
   };
   /** `data` е избраната папка; състоянието на връзката и първият запис — ДО него (`extra`). */
   'catalog:chooseFolder': {
@@ -1122,8 +1126,8 @@ interface IpcContract {
   'catalog:exportCsv': { args: []; result: string };
   'catalog:exportDc': { args: []; result: { path: string; count: number; excluded: number } };
   'catalog:exportMarc': { args: []; result: { path: string; count: number; excluded: number } };
-  /** Без данни; `committed` — имало ли е промяна за публикуване. */
-  'catalog:gitPublishNow': { args: []; result: void; extra: { committed: boolean } };
+  /** Без данни; `committed` — имало ли е промяна за публикуване; `branch` — къде е публикувано (v2.4.85). */
+  'catalog:gitPublishNow': { args: []; result: void; extra: { committed: boolean; branch?: string } };
   /** null — няма свързана папка. */
   'catalog:remoteCheck': { args: []; result: { mismatch: boolean; remote: CatalogRemoteSlug | null } | null };
   'catalog:status': {
@@ -1132,7 +1136,11 @@ interface IpcContract {
       folder: string | null; total: number; available: number;
       /** null — няма свързана папка. */
       isGitRepo: boolean | null;
-      rawUrl: string | null; ghUser: string | null; ghRepo: string | null; ghBranch: string | null;
+      /** Адресът, от който чете сайтът — клонът `publishBranch` (v2.4.85: `katalog`, в резервен режим — gh_branch). */
+      rawUrl: string | null;
+      /** Дневното копие в gh_branch и резервният адрес през jsDelivr (v2.4.85). */
+      rawUrlMain: string | null; cdnUrl: string | null; publishBranch: string;
+      ghUser: string | null; ghRepo: string | null; ghBranch: string | null;
       suggestedRepo: string; libName: string;
     };
   };

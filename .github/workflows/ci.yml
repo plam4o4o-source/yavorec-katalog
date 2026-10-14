@@ -7,9 +7,22 @@ name: CI — тестове при всеки push/PR
 # pull request, независимо от клона — за да не се качи чупещ ред, без някой
 # изобщо да е разбрал.
 
+# ОНЛАЙН КАТАЛОГЪТ НЕ ПУСКА ТЕСТОВЕТЕ (v2.4.85).
+# Програмата в библиотеката публикува katalog.json сама: в клона `katalog`
+# (един commit, подменян с push --force) и веднъж дневно в main. Дотук всяко
+# такова качване в main пускаше цялата поредица (~8 минути на две машини) за
+# файл с данни, в който няма нито ред код. Затова:
+#   • клонът `katalog` не пуска нищо (branches-ignore);
+#   • push, който сменя САМО katalog.json, не пуска нищо (paths-ignore) —
+#     push с код и каталог заедно пуска проверката както досега;
+#   • commit-ите на програмата носят и `[skip ci]` — за по-стари копия на
+#     този файл и за всеки друг workflow.
 on:
-  push: {}
-  pull_request: {}
+  push:
+    branches-ignore: [katalog]
+    paths-ignore: ['katalog.json']
+  pull_request:
+    paths-ignore: ['katalog.json']
 
 permissions:
   contents: read
