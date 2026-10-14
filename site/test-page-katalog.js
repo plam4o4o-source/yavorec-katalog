@@ -44,8 +44,8 @@ try {
 const targetPath = process.argv[2] || path.join(__dirname, 'page-katalog.html');
 const html = fs.readFileSync(targetPath, 'utf8');
 
-const GITHUB_URL = 'https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/main/katalog.json';
-const JSDELIVR_URL = 'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@main/katalog.json';
+const GITHUB_URL = 'https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/katalog/katalog.json';
+const JSDELIVR_URL = 'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@katalog/katalog.json';
 
 function jsonResponse(obj, ok, status) {
   return Promise.resolve({

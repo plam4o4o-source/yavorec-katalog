@@ -40,15 +40,215 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     : (flushCatalogWrite && typeof flushCatalogWrite.lastWrite === 'function'
       ? flushCatalogWrite.lastWrite : () => null);
 
-  function gitRun(folder, args) {
+  /* ПУБЛИКУВАНЕ В ОТДЕЛЕН КЛОН „katalog“ (v2.4.85).
+     =====================================================================
+     (а) КАКВО СТАВАШЕ. Всяко заемане и връщане сменя наличността (`av`) в
+         katalog.json, а таймерът на 5 минути правеше `git add/commit/push` в
+         `main` при всяка такава промяна — 41 автоматични commit-а за няколко
+         дни, всеки от които пускаше и пълната проверка в CI (~8 минути на две
+         машини). Хранилището растеше с по един многомегабайтов файл на commit,
+         а историята на кода се губеше между редовете „Автоматично обновяване“.
+     (б) ЗАЩО Е ГРЕШНО. Каталогът е ГЕНЕРИРАН файл: историята му не носи нищо
+         (базата е източникът), а всеки commit в `main` струва място завинаги,
+         минути на CI и шум в историята, която разработчикът и одитът четат.
+     (в) ЗАЩО ТОЧНО ТАКА. Каталогът отива в клон `katalog`, който държи САМО
+         katalog.json и е ЕДИН-ЕДИНСТВЕН commit без родител, подменян всеки
+         път (push --force) — хранилището не расте, колкото и да се публикува.
+         Commit-ът се сглобява с „водопроводните“ команди на git (hash-object
+         → mktree → commit-tree), които НЕ пипат работното копие: нито index,
+         нито изтегления клон — тоест нищо, което ръчна работа в папката или
+         прекъснат git може да обърка. `main` продължава да получава
+         katalog.json (за по-старите версии на сайта и приложението и за всеки
+         друг, който чете оттам), но най-много веднъж на ден — при първото
+         успешно публикуване за деня — и само ако съдържанието е различно;
+         commit-ът носи `[skip ci]`. Ако GitHub откаже клона (права, защитени
+         клонове), програмата се връща към стария път само през `main`, казва го
+         веднъж в одитната следа и опитва клона наново на следващия ден.
+     Състоянието (последно качен blob/commit, датата на дневното обновяване на
+     `main`, резервният режим) се пази в .git/invlib-katalog.json — в самото
+     работно копие, извън всичко, което git публикува. */
+  const PUBLISH_BRANCH = 'katalog';
+  const PUBLISH_REF = 'refs/heads/' + PUBLISH_BRANCH;
+  const STATE_FILE = 'invlib-katalog.json';
+  /* Ритъмът (v2.4.85). Промените по ФОНДА (нова, редактирана, отчислена книга)
+     излизат при следващия цикъл на таймера (до 5 минути), а само наличността
+     (заемане/връщане на гишето) — най-много веднъж на 30 минути: „налична“ в
+     онлайн каталога никога не е обещание за запазване (виж „ДВЕ СКОРОСТИ“ в
+     main.js), а всяко качване е няколко мегабайта по мрежата на читалището. */
+  const AUTO_PUSH_INTERVAL_MS = 5 * 60 * 1000;
+  const CIRC_PUBLISH_MS = 30 * 60 * 1000;
+  const STARTUP_PUBLISH_MS = 45 * 1000;
+  /* Таймерът тиктака на 5 минути, а сравнението с „30 минути“ / „следващ опит“
+     иначе би пропускало цял цикъл заради милисекунди закъснение. */
+  const TICK_SLACK_MS = 30 * 1000;
+  // Заключване (*.lock), оставено от убит git, се маха чак когато е на поне толкова.
+  const STALE_LOCK_MS = 2 * 60 * 1000;
+  /* ИЗМЕНЕНИЯТА ОТ ГИШЕТО ДО ПУБЛИКУВАНЕТО (v2.4.85). main.js казва какви
+     промени са влезли във файла и още не са публикувани — { fund, circ } (виж
+     CATALOG_PUBLISH_DIRT там). Старите тестови обвръзки без тази зависимост
+     получават „фонд“ — неизвестната промяна се публикува веднага, а не се бави,
+     точно както при scheduleCatalogWrite() без вид. */
+  const catalogChanges = deps.catalogChanges && typeof deps.catalogChanges.take === 'function'
+    ? deps.catalogChanges
+    : { peek: () => ({ fund: true, circ: false }), take: () => ({ fund: true, circ: false }), restore: () => {} };
+
+  /* ФОНОВИЯТ GIT НИКОГА НЕ ОТВАРЯ ПРОЗОРЦИ (v2.4.85). Без тези две променливи
+     изтекъл токен караше git (и Git Credential Manager) да поиска потребител и
+     парола — от процес без конзола, на всеки 5 минути, докато библиотекарката
+     работи на гишето. GIT_TERMINAL_PROMPT=0 спира въпроса в конзолата,
+     GCM_INTERACTIVE=never — прозореца за вход; вместо тях git връща грешка, а
+     програмата я превежда (виж AUTH_RE по-долу). */
+  function gitEnv() {
+    return Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' });
+  }
+  /** @type {Set<any>} */
+  const RUNNING_GIT = new Set();
+  let QUIT_ABANDONED = false;
+  /** @param {string} folder @param {string[]} args @param {string} [input] - подава се на stdin (git mktree)
+      @returns {Promise<{ ok: boolean, code: any, stdout: string, stderr: string }>} */
+  function gitRun(folder, args, input) {
     return new Promise((resolve) => {
-      execFile('git', args, { cwd: folder, windowsHide: true, timeout: 30000 }, (error, stdout, stderr) => {
-        resolve({ ok: !error, code: error ? error.code : 0, stdout: (stdout || '').trim(), stderr: (stderr || '').trim() });
+      /* След изтеклия таван при затваряне (publishOnQuit) не тръгва нов git —
+         прекъснатото публикуване просто довършва веригата си с грешки. */
+      if (QUIT_ABANDONED) {
+        resolve({ ok: false, code: 'ABANDONED', stdout: '', stderr: 'прекъснато при затваряне на програмата' });
+        return;
+      }
+      /** @type {any} */
+      let child = null;
+      child = execFile('git', args, { cwd: folder, windowsHide: true, timeout: 30000, env: gitEnv() }, (error, stdout, stderr) => {
+        if (child) RUNNING_GIT.delete(child);
+        resolve({ ok: !error, code: error ? error.code : 0, stdout: (stdout || '').toString().trim(), stderr: (stderr || '').toString().trim() });
       });
+      if (child && typeof child === 'object') {
+        RUNNING_GIT.add(child);
+        if (child.stdin) {
+          // Процес, който вече е приключил, връща EPIPE на stdin — не бива да събаря програмата.
+          child.stdin.on('error', () => {});
+          child.stdin.end(input != null ? input : undefined);
+        }
+      }
     });
+  }
+  /* ОТКАЗАН ДОСТЪП — С ИМЕ (v2.4.85). Изтекъл или отнет токен до момента
+     излизаше като суровото „fatal: Authentication failed for …“ или „could not
+     read Username … terminal prompts disabled“ — английски текст, който не
+     казва на библиотекарката какво да направи. */
+  const AUTH_RE = /Authentication failed|could not read (Username|Password)|terminal prompts disabled|Invalid username or (password|token)|Permission to \S+ denied|Permission denied \(publickey|\b403\b/i;
+  const AUTH_MESSAGE = 'GitHub отказа достъпа до хранилището — обновете достъпа до GitHub на този компютър: отворете '
+    + 'папката на хранилището в Git Bash (или в командния ред) и изпълнете веднъж „git push“ — ще бъдете помолени да '
+    + 'влезете в GitHub отново (най-често токенът е изтекъл или е отнет). Автоматичното публикуване нарочно не отваря '
+    + 'прозорци за вход.';
+  // Отказ на самия клон (права, защитени клонове, правила на хранилището) — не мрежа и не изтекъл достъп.
+  const REJECT_RE = /\[remote rejected\]|\[rejected\]|hook declined|protected branch|GH0\d\d|not allowed|refusing/i;
+  /** @param {string} prefix @param {{ stdout: string, stderr: string }} r @param {string} fallback */
+  function gitError(prefix, r, fallback) {
+    const raw = (r.stderr || r.stdout || '').trim();
+    if (AUTH_RE.test(raw)) return AUTH_MESSAGE + ' (' + raw.split('\n').filter(Boolean).slice(-1)[0] + ')';
+    return prefix + ': ' + (raw || fallback);
   }
   function isGitRepo(folder) {
     return folder && fs.existsSync(path.join(folder, '.git'));
+  }
+  /* Истинската папка на git. Обикновено е `.git`, но при работно дърво (git
+     worktree) и подмодул `.git` е ФАЙЛ с ред „gitdir: …“. */
+  /** @param {string} folder @returns {string | null} */
+  function gitDirOf(folder) {
+    const p = path.join(folder, '.git');
+    try {
+      const st = fs.statSync(p);
+      if (st.isDirectory()) return p;
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(p, 'utf8'));
+      if (m) return path.resolve(folder, m[1]);
+    } catch (e) { /* няма .git — проверява се другаде */ }
+    return null;
+  }
+  /** @param {string} folder */
+  function readPubState(folder) {
+    try {
+      const gd = gitDirOf(folder);
+      if (!gd) return {};
+      const st = JSON.parse(fs.readFileSync(path.join(gd, STATE_FILE), 'utf8'));
+      return st && typeof st === 'object' ? st : {};
+    } catch (e) { return {}; }
+  }
+  /** @param {string} folder @param {any} st */
+  function writePubState(folder, st) {
+    try {
+      const gd = gitDirOf(folder);
+      if (!gd) return;
+      const f = path.join(gd, STATE_FILE);
+      fs.writeFileSync(f + '.tmp', JSON.stringify(st, null, 1), 'utf8');
+      fs.renameSync(f + '.tmp', f);
+    } catch (e) {
+      // Без паметта следващото публикуване просто качва пак — не е повод да се спре.
+      console.error('Онлайн каталог — състоянието на публикуването не се записа:', e.message);
+    }
+  }
+  /* Ред в одитната следа, който НЕ бива да спре публикуването — при затваряне
+     базата може вече да е затворена. */
+  function safeAudit(detail) {
+    try { logAudit('Онлайн каталог', detail); }
+    catch (err) { console.error('Онлайн каталог — редът в следата не се записа:', err.message); }
+  }
+  /* ВЪЗСТАНОВЯВАНЕ СЛЕД ПРЕКЪСНАТ GIT (v2.4.85).
+     (а) КАКВО СТАВАШЕ. git, убит насред работа (таймаутът от 30 s, спрян ток,
+         затваряне на програмата), оставя .git/index.lock или започнат rebase.
+         Rebase-ът се прекратяваше само когато САМ върне грешка; при убит процес
+         не се прекратяваше нищо — и ВСЯКО следващо публикуване падаше на
+         „index.lock: File exists“ или „rebase in progress“. Завинаги.
+     (б) ЗАЩО Е ГРЕШНО. Сайтът замръзва без край, а единственият изход е ръчна
+         работа в .git — нещо, което от библиотекарката не може да се иска.
+     (в) ЗАЩО ТОЧНО ТАКА. В началото на всяко публикуване (вече в изключителния
+         участък — нашият git не тече) се махат заключванията на git (*.lock в
+         .git и под .git/refs), по-стари от 2 минути: толкова не държи
+         заключване нито един жив git, а по-младо може да е на ръчна команда
+         в същия миг. Започнат rebase/am/merge се прекратява със --abort —
+         katalog.json е изцяло генериран, няма ръчна работа, която да се загуби. */
+  /** @param {string} folder @returns {Promise<string[]>} */
+  async function recoverInterruptedGit(folder) {
+    const gd = gitDirOf(folder);
+    if (!gd) return [];
+    const done = [];
+    const now = Date.now();
+    /** @type {string[]} */
+    const locks = [];
+    try {
+      for (const name of fs.readdirSync(gd)) if (name.endsWith('.lock')) locks.push(path.join(gd, name));
+    } catch (e) { /* недостъпна папка — git ще каже сам */ }
+    /** @param {string} dir @param {number} depth */
+    const walk = (dir, depth) => {
+      if (depth > 12) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p, depth + 1);
+        else if (e.name.endsWith('.lock')) locks.push(p);
+      }
+    };
+    walk(path.join(gd, 'refs'), 0);
+    for (const f of locks) {
+      try {
+        if (now - fs.statSync(f).mtimeMs < STALE_LOCK_MS) continue;
+        fs.unlinkSync(f);
+        done.push('махнато заключване ' + path.relative(gd, f).split(path.sep).join('/'));
+      } catch (e) { /* изчезнало междувременно или заключено от Windows — следващият път */ }
+    }
+    if (fs.existsSync(path.join(gd, 'rebase-merge')) || fs.existsSync(path.join(gd, 'rebase-apply'))) {
+      const am = fs.existsSync(path.join(gd, 'rebase-apply', 'applying'));
+      const r = await gitRun(folder, am ? ['am', '--abort'] : ['rebase', '--abort']);
+      done.push((am ? 'прекратен започнат git am' : 'прекратен започнат rebase') + (r.ok ? '' : ' (неуспешно: ' + (r.stderr || r.stdout) + ')'));
+    }
+    if (fs.existsSync(path.join(gd, 'MERGE_HEAD'))) {
+      const r = await gitRun(folder, ['merge', '--abort']);
+      done.push('прекратено започнато сливане' + (r.ok ? '' : ' (неуспешно: ' + (r.stderr || r.stdout) + ')'));
+    }
+    if (done.length) {
+      console.log('Онлайн каталог — възстановяване след прекъснат git:', done.join('; '));
+      safeAudit('възстановяване след прекъсната git операция в „' + folder + '“: ' + done.join('; ') + '.');
+    }
+    return done;
   }
   // Разчита "потребител/хранилище" от адреса на origin — и за https, и за ssh адрес.
   async function gitRemoteSlug(folder) {
@@ -71,9 +271,97 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     const mismatch = slug.user.toLowerCase() !== u.toLowerCase() || slug.repo.toLowerCase() !== r.toLowerCase();
     return { slug, mismatch };
   }
-  /** @typedef {{ ok: true, data: undefined, committed: boolean } | { ok: false, error: string }} GitPublishResult */
-  /** @returns {Promise<GitPublishResult>} */
-  async function gitPublish(folder) {
+  /* Старият път — commit на katalog.json в изтегления клон (обикновено main) и
+     push. От v2.4.85 се ползва за дневното обновяване на `main` и като резервен
+     път, ако GitHub откаже клона `katalog`. */
+  /** @param {string} folder @param {string} branch
+      @returns {Promise<{ ok: true, committed: boolean, pushed: boolean } | { ok: false, error: string }>} */
+  async function publishToCheckedOutBranch(folder, branch) {
+    const add = await gitRun(folder, ['add', 'katalog.json']);
+    if (!add.ok) return { ok: false, error: gitError('git add', add, 'грешка') };
+    /* `[skip ci]` (v2.4.85): обновяването на каталога не е промяна в кода —
+       проверката в CI (~8 минути на две машини) за него не казва нищо. */
+    const commit = await gitRun(folder, ['commit', '-m', 'Автоматично обновяване на каталога — ' + new Date().toISOString() + ' [skip ci]']);
+    const nothing = !commit.ok && /nothing to commit|nothing added to commit|no changes added/i.test(commit.stdout + commit.stderr);
+    if (!commit.ok && !nothing) {
+      return { ok: false, error: gitError('git commit', commit, 'грешка') };
+    }
+    /* НИЩО НОВО — НИКАКЪВ PUSH (v2.4.85). Дотук след „nothing to commit“
+       следваше push на всеки 5 минути — мрежова заявка, която нищо не качва.
+       Push остава само ако клонът е ПРЕД отдалечения (commit от провален по-рано
+       опит) или отдалеченият още не е известен (първо публикуване). */
+    if (nothing) {
+      const head = await gitRun(folder, ['rev-parse', 'HEAD']);
+      const up = await gitRun(folder, ['rev-parse', '@{u}']);
+      if (head.ok && up.ok && head.stdout === up.stdout) return { ok: true, committed: false, pushed: false };
+    }
+
+    let push = await gitRun(folder, ['push', '-u', 'origin', branch]);
+
+    // Отхвърлен push (non-fast-forward) означава, че хранилището е било обновено отдругаде —
+    // друг работен компютър, който също публикува каталога, или промяна направена в GitHub.
+    // Това е нормално, а не грешка: изтегляме новото състояние, пренасяме нашия commit върху
+    // него и опитваме пак. При разминаване в katalog.json печели нашата версия, защото файлът
+    // е изцяло генериран от тази база данни — няма ръчни редакции, които да се загубят.
+    if (!push.ok && /rejected|non-fast-forward|fetch first|behind/i.test(push.stderr) && !AUTH_RE.test(push.stderr)) {
+      const fetch = await gitRun(folder, ['fetch', 'origin', branch]);
+      if (!fetch.ok) return { ok: false, error: gitError('git fetch', fetch, 'грешка при изтегляне от GitHub') };
+
+      const rebase = await gitRun(folder, ['rebase', '-X', 'theirs', 'origin/' + branch]);
+      if (!rebase.ok) {
+        await gitRun(folder, ['rebase', '--abort']);
+        return { ok: false, error: 'Хранилището е обновено отдругаде и промените не можаха да се обединят ' +
+          'автоматично. Отворете папката на хранилището и изпълнете „git pull“ ръчно, после опитайте пак. ' +
+          '(' + (rebase.stderr || rebase.stdout || '') + ')' };
+      }
+      push = await gitRun(folder, ['push', 'origin', branch]);
+    }
+
+    if (!push.ok) return { ok: false, error: gitError('git push', push, 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
+    return { ok: true, committed: commit.ok, pushed: true };
+  }
+  /* Клонът `katalog`: един commit без родител с единствения файл katalog.json.
+     `manual` — „Публикувай сега“: качва и непроменено съдържание (същия commit,
+     ако още го има — тоест без нов commit), за да поправи клон, пипнат отвън. */
+  /** @param {string} folder @param {any} st @param {{ manual?: boolean }} o
+      @returns {Promise<{ ok: true, blob: string, commit: string, changed: boolean, pushed: boolean }
+        | { ok: false, error: string, auth?: boolean, rejected?: boolean }>} */
+  async function publishKatalogBranch(folder, st, o) {
+    const h = await gitRun(folder, ['hash-object', 'katalog.json']);
+    if (!h.ok || !/^[0-9a-f]{40,64}$/.test(h.stdout)) return { ok: false, error: gitError('git hash-object', h, 'katalog.json не се чете') };
+    let blob = h.stdout;
+    const changed = st.blob !== blob;
+    // Нищо ново спрямо последно каченото — няма push (v2.4.85, виж AUTO_PUSH по-долу).
+    if (!o.manual && st.mode !== 'main' && !changed && st.commit) {
+      return { ok: true, blob, commit: st.commit, changed: false, pushed: false };
+    }
+    let commit = null;
+    if (!changed && st.commit) {
+      const e = await gitRun(folder, ['cat-file', '-e', st.commit + '^{commit}']);
+      if (e.ok) commit = st.commit;
+    }
+    if (!commit) {
+      const w = await gitRun(folder, ['hash-object', '-w', 'katalog.json']);
+      if (!w.ok || !/^[0-9a-f]{40,64}$/.test(w.stdout)) return { ok: false, error: gitError('git hash-object', w, 'katalog.json не се записва в .git') };
+      blob = w.stdout;
+      const tree = await gitRun(folder, ['mktree'], '100644 blob ' + blob + '\tkatalog.json\n');
+      if (!tree.ok || !/^[0-9a-f]{40,64}$/.test(tree.stdout)) return { ok: false, error: gitError('git mktree', tree, 'грешка') };
+      const c = await gitRun(folder, ['commit-tree', tree.stdout, '-m', 'Онлайн каталог — ' + new Date().toISOString() + ' [skip ci]']);
+      if (!c.ok || !/^[0-9a-f]{40,64}$/.test(c.stdout)) return { ok: false, error: gitError('git commit-tree', c, 'грешка') };
+      commit = c.stdout;
+    }
+    const push = await gitRun(folder, ['push', '--force', 'origin', commit + ':' + PUBLISH_REF]);
+    if (!push.ok) {
+      const raw = push.stderr + '\n' + push.stdout;
+      return { ok: false, auth: AUTH_RE.test(raw), rejected: REJECT_RE.test(raw) && !AUTH_RE.test(raw),
+        error: gitError('git push (клон ' + PUBLISH_BRANCH + ')', push, 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
+    }
+    return { ok: true, blob, commit, changed, pushed: true };
+  }
+  /** @typedef {{ ok: true, data: undefined, committed: boolean, branch?: string } | { ok: false, error: string }} GitPublishResult */
+  /** @param {string} folder @param {{ manual?: boolean, quit?: boolean }} [opts] @returns {Promise<GitPublishResult>} */
+  async function gitPublish(folder, opts) {
+    const o = opts || {};
     if (!isGitRepo(folder)) return { ok: false, error: 'Папката не е git хранилище (липсва .git). Клонирайте хранилището с "git clone" веднъж, преди да я свържете тук.' };
 
     const db = getDb();
@@ -86,52 +374,75 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         '. Публикуването е спряно, за да не се презапише чужд каталог. ' +
         'Проверете дали сте клонирали собственото си хранилище.' };
     }
+    await recoverInterruptedGit(folder);
 
     const branchRes = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
-    const branch = branchRes.ok && branchRes.stdout ? branchRes.stdout : 'main';
+    const branch = branchRes.ok && branchRes.stdout && branchRes.stdout !== 'HEAD' ? branchRes.stdout : 'main';
 
     /* Локална самоличност ПРЕДИ първия commit. Одит v2.4.14: на свеж компютър
        без глобална git конфигурация `git commit` отказва и връща собствения си
        текст за user.email — съобщение, което стига до библиотекаря дословно,
        звучи като счупена програма и не се оправя от само себе си при следващите
        опити. Стойностите са локални за работното копие (--local), не пипат нищо
-       друго на компютъра, и се задават само ако липсват. */
+       друго на компютъра, и се задават само ако липсват. (И commit-tree за
+       клона `katalog` иска същата самоличност.) */
     const who = await gitRun(folder, ['config', '--local', '--get', 'user.email']);
     if (!who.ok || !who.stdout) {
       await gitRun(folder, ['config', '--local', 'user.email', 'invlib@localhost']);
       await gitRun(folder, ['config', '--local', 'user.name', 'InvLib']);
     }
-    const add = await gitRun(folder, ['add', 'katalog.json']);
-    if (!add.ok) return { ok: false, error: 'git add: ' + (add.stderr || 'грешка') };
-    const commit = await gitRun(folder, ['commit', '-m', 'Автоматично обновяване на каталога — ' + new Date().toISOString()]);
-    if (!commit.ok && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
-      return { ok: false, error: 'git commit: ' + (commit.stderr || commit.stdout || 'грешка') };
+
+    const st = readPubState(folder);
+    const today = localDate();
+    /* Резервен режим (GitHub е отказал клона): стария път през изтегления клон,
+       а клонът `katalog` се опитва наново веднъж на ден. Изтеглен клон с името
+       `katalog` (ръчна настройка) не се презаписва с принудителен push. */
+    const useKatalog = branch !== PUBLISH_BRANCH && (st.mode !== 'main' || st.fallbackDate !== today);
+    if (!useKatalog) {
+      const m = await publishToCheckedOutBranch(folder, branch);
+      if (!m.ok) return m;
+      LAST_CONTENT_PUSH_AT = m.pushed ? Date.now() : LAST_CONTENT_PUSH_AT;
+      return { ok: true, data: undefined, committed: m.committed, branch };
     }
 
-    let push = await gitRun(folder, ['push', '-u', 'origin', branch]);
-
-    // Отхвърлен push (non-fast-forward) означава, че хранилището е било обновено отдругаде —
-    // друг работен компютър, който също публикува каталога, или промяна направена в GitHub.
-    // Това е нормално, а не грешка: изтегляме новото състояние, пренасяме нашия commit върху
-    // него и опитваме пак. При разминаване в katalog.json печели нашата версия, защото файлът
-    // е изцяло генериран от тази база данни — няма ръчни редакции, които да се загубят.
-    if (!push.ok && /rejected|non-fast-forward|fetch first|behind/i.test(push.stderr)) {
-      const fetch = await gitRun(folder, ['fetch', 'origin', branch]);
-      if (!fetch.ok) return { ok: false, error: 'git fetch: ' + (fetch.stderr || 'грешка при изтегляне от GitHub') };
-
-      const rebase = await gitRun(folder, ['rebase', '-X', 'theirs', 'origin/' + branch]);
-      if (!rebase.ok) {
-        await gitRun(folder, ['rebase', '--abort']);
-        return { ok: false, error: 'Хранилището е обновено отдругаде и промените не можаха да се обединят ' +
-          'автоматично. Отворете папката на хранилището и изпълнете „git pull“ ръчно, после опитайте пак. ' +
-          '(' + (rebase.stderr || rebase.stdout || '') + ')' };
+    const k = await publishKatalogBranch(folder, st, o);
+    if (!k.ok) {
+      if (!k.rejected) return { ok: false, error: k.error };
+      /* GitHub отказа клона, но не и достъпа: старият път през `main`. Ако и той
+         падне — това е общ проблем (мрежа, достъп) и се казва неговата грешка. */
+      const m = await publishToCheckedOutBranch(folder, branch);
+      if (!m.ok) return m;
+      const first = !st.fallbackNoted;
+      Object.assign(st, { mode: 'main', fallbackDate: today, fallbackNoted: true, mainDate: today });
+      writePubState(folder, st);
+      if (first) {
+        safeAudit('GitHub не прие отделния клон „' + PUBLISH_BRANCH + '“ (' + k.error + '). Каталогът се публикува по стария '
+          + 'начин — в клона „' + branch + '“ (сайтът чете …/' + branch + '/katalog.json). Програмата опитва клона наново '
+          + 'веднъж на ден; това съобщение не се повтаря.');
       }
-      push = await gitRun(folder, ['push', 'origin', branch]);
+      console.error('Онлайн каталог — клонът ' + PUBLISH_BRANCH + ' е отказан, публикувано в ' + branch + ':', k.error);
+      LAST_CONTENT_PUSH_AT = m.pushed ? Date.now() : LAST_CONTENT_PUSH_AT;
+      return { ok: true, data: undefined, committed: m.committed, branch };
     }
-
-    if (!push.ok) return { ok: false, error: 'git push: ' + (push.stderr || 'грешка — проверете интернет връзката и удостоверяването пред GitHub') };
-    // data: undefined — както при run() за канал без данни (catalog:gitPublishNow → void); committed стои до него.
-    return { ok: true, data: undefined, committed: commit.ok };
+    if (st.mode === 'main') {
+      safeAudit('клонът „' + PUBLISH_BRANCH + '“ вече се приема от GitHub — каталогът отново се публикува там.');
+    }
+    Object.assign(st, { mode: PUBLISH_BRANCH, blob: k.blob, commit: k.commit });
+    if (k.pushed) { st.pushedAt = new Date().toISOString(); LAST_CONTENT_PUSH_AT = Date.now(); }
+    writePubState(folder, st);
+    /* ВЕДНЪЖ ДНЕВНО И В `main` — за по-старите версии на сайта и на
+       приложението, които още четат оттам. Провал тук не проваля публикуването:
+       сайтът чете клона `katalog`, а `main` се опитва пак при следващия цикъл. */
+    if (st.mainDate !== today) {
+      const m = await publishToCheckedOutBranch(folder, branch);
+      if (m.ok) {
+        st.mainDate = today;
+        writePubState(folder, st);
+      } else {
+        console.error('Онлайн каталог — дневното обновяване на клона ' + branch + ' не успя:', m.error);
+      }
+    }
+    return { ok: true, data: undefined, committed: !!k.changed, branch: PUBLISH_BRANCH };
   }
   /* Последният провал на автоматичното публикуване, за да може интерфейсът да го
      покаже. Дотук грешката отиваше САМО в конзолата — а в готово приложение никой
@@ -146,6 +457,44 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     LAST_AUTO_PUSH.error = error || null;
     if (!error) LAST_AUTO_PUSH.okAt = now;
   }
+  /* ПРОВАЛИТЕ — САМО ПРИ ПРОМЯНА НА СЪСТОЯНИЕТО, И ВСЕ ПО-РЯДКО (v2.4.85).
+     (а) КАКВО СТАВАШЕ. Без интернет всеки цикъл (12 на час) пишеше ред
+         „автоматичното публикуване се провали“ в одитната следа и пускаше git
+         по мрежата отново — ден без връзка оставяше ~100 еднакви реда, които
+         заглушават истинските.
+     (б) ЗАЩО Е ГРЕШНО. Одитната следа е за „какво се случи“: първият провал и
+         възстановяването са събития, а сто повторения на едното — не.
+     (в) ЗАЩО ТОЧНО ТАКА. Ред се пише при ПРЕХОДА: работеше → спря (с грешката,
+         веднъж) и спря → тръгна отново. Докато не върви, опитите се разреждат:
+         5, 10, 20, 40 минути, после веднъж на час. Успех или „Публикувай сега“
+         връщат нормалния ритъм. Червената лента в „Онлайн каталог“ показва
+         последната грешка през цялото време, както досега. */
+  let FAILS = 0;
+  let NEXT_TRY_AT = 0;
+  /** @param {number} n - поредни провали */
+  function backoffMs(n) {
+    return Math.min(60, 5 * Math.pow(2, Math.max(0, n - 1))) * 60 * 1000;
+  }
+  /** @param {GitPublishResult} r @param {string} who */
+  function notePublishOutcome(r, who) {
+    if (r.ok) {
+      if (FAILS > 0) {
+        safeAudit('публикуването в GitHub отново минава (' + who + ', след ' + FAILS
+          + (FAILS === 1 ? ' неуспешен опит' : ' неуспешни опита') + ').');
+      }
+      FAILS = 0;
+      NEXT_TRY_AT = 0;
+      noteAutoPush(null);
+      return;
+    }
+    FAILS++;
+    NEXT_TRY_AT = Date.now() + backoffMs(FAILS);
+    noteAutoPush(r.error);
+    if (FAILS === 1) {
+      safeAudit(who + ' в GitHub се провали: ' + r.error + ' Програмата опитва пак след 5 минути, а докато не върви — '
+        + 'все по-рядко (до веднъж на час); при възстановяване в следата излиза нов ред.');
+    }
+  }
   /* Едно публикуване в даден момент (одит v2.4.24). Таймерът на всеки 5 минути и
      бутонът „Публикувай сега“ пускаха git в ЕДНО И СЪЩО работно копие, без нищо да
      ги разделя, а gitPublish вериги до осем execFile-а по 30 секунди — прозорецът е
@@ -156,14 +505,19 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      katalog.json и програмата съветваше библиотекаря да изпълни „git pull“ ръчно —
      инструкция, която няма да помогне, защото хранилището изобщо не е изостанало. */
   let PUBLISHING = false;
-  /** @returns {Promise<GitPublishResult>} */
-  async function gitPublishExclusive(folder) {
+  /** @type {Promise<GitPublishResult> | null} */
+  let PUBLISHING_PROMISE = null;
+  let LAST_CONTENT_PUSH_AT = 0;
+  /** @param {string} folder @param {{ manual?: boolean, quit?: boolean }} [opts] @returns {Promise<GitPublishResult>} */
+  async function gitPublishExclusive(folder, opts) {
     if (PUBLISHING) {
       return { ok: false, error: 'Публикуване вече тече — изчакайте няколко секунди и опитайте пак.' };
     }
     PUBLISHING = true;
-    try { return await gitPublish(folder); }
-    finally { PUBLISHING = false; }
+    try {
+      PUBLISHING_PROMISE = gitPublish(folder, opts).catch((err) => ({ ok: /** @type {false} */ (false), error: err.message }));
+      return await PUBLISHING_PROMISE;
+    } finally { PUBLISHING = false; PUBLISHING_PROMISE = null; }
   }
   /* ПРОМЕНИ ОТ ДРУГО РАБОТНО МЯСТО СТИГАТ ДО САЙТА (v2.4.71, кръг 45, М5).
      =====================================================================
@@ -208,81 +562,109 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     return now.v == null || DB_SEEN.db !== now.db || DB_SEEN.v !== now.v;
   }
   function rememberDbSeen(seen) { DB_SEEN = seen; }
+  /** @type {ReturnType<typeof setInterval> | null} */
   let AUTO_PUSH_TIMER = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let STARTUP_PUSH_TIMER = null;
+  /* Един цикъл на автоматичното публикуване. `startup` — първото публикуване
+     ~45 s след пускане (v2.4.85): без ритъма за наличността и без изчакването
+     след провал — програмата току-що е тръгнала и сайтът трябва да научи
+     състоянието от сутринта, а не след 5 минути. */
+  /** @param {{ startup?: boolean }} [opts] */
+  async function autoPushTick(opts) {
+    const o = opts || {};
+    try {
+      const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
+      if (!s || !s.catalog_folder) {
+        // Папката вече не е свързана — няма какво да се публикува, значи няма и
+        // за какво да предупреждаваме. Иначе червената лента оставаше завинаги
+        // за каталог, който вече не се публикува изобщо.
+        noteAutoPush(null);
+        return;
+      }
+      /* СВЪРЗАНА, НО НЕДОСТЪПНА ПАПКА НЕ Е „ВСИЧКО Е НАРЕД“ (v2.4.69, кръг 44, К3).
+         (а) Дотук и този случай минаваше през noteAutoPush(null): изключен
+             мрежов диск прави папката „не git хранилище“ (няма .git, защото
+             няма нищо) и таймерът МАХАШЕ червената лента на всеки 5 минути.
+         (б) Точно тогава сайтът спира да се обновява — лентата трябва да
+             стои, а не да изчезва.
+         (в) Липсваща папка е грешка с ясен изход; съществуваща папка без .git
+             остава както досега (екранът вече казва „не е git хранилище“ в
+             картата на папката и дава точната команда). */
+      if (!fs.existsSync(s.catalog_folder)) {
+        noteAutoPush('Папката на онлайн каталога „' + s.catalog_folder + '“ е недостъпна (изключен мрежов диск, '
+          + 'преместена или изтрита папка) — каталогът нито се записва, нито се публикува. Свържете диска или '
+          + 'изберете папката наново от „Онлайн каталог“.');
+        return;
+      }
+      if (!isGitRepo(s.catalog_folder)) {
+        noteAutoPush(null);
+        return;
+      }
+      // Ако точно сега тече ръчно публикуване, този цикъл се пропуска мълчаливо —
+      // ръчното ще качи същото. Затова тук няма noteAutoPush за отказа.
+      if (PUBLISHING) return;
+      // v2.4.85: след провал — изчакване 5, 10, 20 … 60 минути (виж notePublishOutcome).
+      if (!o.startup && FAILS > 0 && Date.now() + TICK_SLACK_MS < NEXT_TRY_AT) return;
+      const elsewhere = changedElsewhere();
+      /* v2.4.85: само наличност (гишето) — най-много веднъж на 30 минути от
+         последното истинско качване. Промяна от друго работно място е с
+         неизвестен вид и затова минава веднага, както промяната по фонда. */
+      const dirt = catalogChanges.peek();
+      if (!o.startup && !elsewhere && dirt.circ && !dirt.fund && LAST_CONTENT_PUSH_AT
+        && Date.now() - LAST_CONTENT_PUSH_AT + TICK_SLACK_MS < CIRC_PUBLISH_MS) return;
+      // М5 (виж коментара при DB_SEEN): промяна от друго работно място → нов katalog.json преди качването.
+      if (elsewhere) {
+        const seen = dataVersionNow();
+        const w = flushCatalogWrite() || {};
+        if (w.blocked || (!w.written && w.error)) {
+          const why = writeProblemText(w);
+          console.error('Автоматично публикуване — katalog.json не е генериран наново:', why);
+          noteAutoPush(why + ' Автоматичното публикуване НЕ качи стария файл; опитва отново след 5 минути.');
+          return;
+        }
+        rememberDbSeen(seen);
+      }
+      const taken = catalogChanges.take();
+      const r = await gitPublishExclusive(s.catalog_folder);
+      if (!r.ok) catalogChanges.restore(taken);
+      if (r.ok && r.committed) console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
+      if (!r.ok) console.error('Автоматично публикуване в GitHub — грешка:', r.error);
+      notePublishOutcome(r, 'автоматичното публикуване');
+    } catch (err) {
+      console.error('Автоматично публикуване в GitHub — грешка:', err.message);
+      noteAutoPush(err.message);
+    }
+  }
   function startAutoPushTimer() {
     if (AUTO_PUSH_TIMER) return;
-    AUTO_PUSH_TIMER = setInterval(async () => {
-      try {
-        const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get();
-        if (!s || !s.catalog_folder) {
-          // Папката вече не е свързана — няма какво да се публикува, значи няма и
-          // за какво да предупреждаваме. Иначе червената лента оставаше завинаги
-          // за каталог, който вече не се публикува изобщо.
-          noteAutoPush(null);
-          return;
-        }
-        /* СВЪРЗАНА, НО НЕДОСТЪПНА ПАПКА НЕ Е „ВСИЧКО Е НАРЕД“ (v2.4.69, кръг 44, К3).
-           (а) Дотук и този случай минаваше през noteAutoPush(null): изключен
-               мрежов диск прави папката „не git хранилище“ (няма .git, защото
-               няма нищо) и таймерът МАХАШЕ червената лента на всеки 5 минути.
-           (б) Точно тогава сайтът спира да се обновява — лентата трябва да
-               стои, а не да изчезва.
-           (в) Липсваща папка е грешка с ясен изход; съществуваща папка без .git
-               остава както досега (екранът вече казва „не е git хранилище“ в
-               картата на папката и дава точната команда). */
-        if (!fs.existsSync(s.catalog_folder)) {
-          noteAutoPush('Папката на онлайн каталога „' + s.catalog_folder + '“ е недостъпна (изключен мрежов диск, '
-            + 'преместена или изтрита папка) — каталогът нито се записва, нито се публикува. Свържете диска или '
-            + 'изберете папката наново от „Онлайн каталог“.');
-          return;
-        }
-        if (!isGitRepo(s.catalog_folder)) {
-          noteAutoPush(null);
-          return;
-        }
-        // Ако точно сега тече ръчно публикуване, този цикъл се пропуска мълчаливо —
-        // ръчното ще качи същото. Затова тук няма noteAutoPush за отказа.
-        if (PUBLISHING) return;
-        // М5 (виж коментара при DB_SEEN): промяна от друго работно място → нов katalog.json преди качването.
-        if (changedElsewhere()) {
-          const seen = dataVersionNow();
-          const w = flushCatalogWrite() || {};
-          if (w.blocked || (!w.written && w.error)) {
-            const why = writeProblemText(w);
-            console.error('Автоматично публикуване — katalog.json не е генериран наново:', why);
-            noteAutoPush(why + ' Автоматичното публикуване НЕ качи стария файл; опитва отново след 5 минути.');
-            return;
-          }
-          rememberDbSeen(seen);
-        }
-        const r = await gitPublishExclusive(s.catalog_folder);
-        if (r.ok && r.committed) {
-          console.log('Автоматично публикувано в GitHub:', s.catalog_folder);
-          noteAutoPush(null);
-        } else if (r.ok) {
-          noteAutoPush(null); // нямало е промяна за публикуване — това е успех
-        } else {
-          console.error('Автоматично публикуване в GitHub — грешка:', r.error);
-          noteAutoPush(r.error);
-          logAudit('Онлайн каталог', 'автоматичното публикуване се провали: ' + r.error);
-        }
-      } catch (err) {
-        console.error('Автоматично публикуване в GitHub — грешка:', err.message);
-        noteAutoPush(err.message);
-      }
-    }, 5 * 60 * 1000);
+    AUTO_PUSH_TIMER = setInterval(() => autoPushTick(), AUTO_PUSH_INTERVAL_MS);
+    /* ПЪРВОТО ПУБЛИКУВАНЕ — МАЛКО СЛЕД ПУСКАНЕ (v2.4.85). Дотук първото идваше
+       чак след 5 минути, а промени от вчера (затваряне без мрежа, друго работно
+       място) чакаха още толкова. Отложено с 45 s, за да не се бори с отварянето
+       на прозореца и с дневното копие; unref — не държи процеса жив. */
+    if (!STARTUP_PUSH_TIMER) {
+      STARTUP_PUSH_TIMER = setTimeout(() => { STARTUP_PUSH_TIMER = null; return autoPushTick({ startup: true }); }, STARTUP_PUBLISH_MS);
+      if (STARTUP_PUSH_TIMER && typeof STARTUP_PUSH_TIMER.unref === 'function') STARTUP_PUSH_TIMER.unref();
+    }
   }
   // Изгледът „Онлайн каталог“ пита оттук и показва предупреждение, ако последният
   // опит е бил неуспешен.
   /* `write` (v2.4.69, К3/К1): последният опит за запис на katalog.json —
      { at, ok, blocked, error, published, now, message, folder } или null.
      Публикуването и записът са две различни неща: успешен `git push` на стария
-     файл не значи, че сайтът е актуален, затова екранът ги показва поотделно. */
-  ipcMain.handle('catalog:autoPushStatus', /** @returns {IpcReply<'catalog:autoPushStatus'>} */ () => run(() => Object.assign({}, LAST_AUTO_PUSH, { write: catalogWriteState() })));
+     файл не значи, че сайтът е актуален, затова екранът ги показва поотделно.
+     `failures`/`nextTryAt` (v2.4.85): колко поредни провала и кога е следващият
+     автоматичен опит — за лентата „Автоматичното публикуване не е успяло“. */
+  ipcMain.handle('catalog:autoPushStatus', /** @returns {IpcReply<'catalog:autoPushStatus'>} */ () => run(() => Object.assign({}, LAST_AUTO_PUSH, {
+    failures: FAILS, nextTryAt: FAILS > 0 && NEXT_TRY_AT ? new Date(NEXT_TRY_AT).toISOString() : null,
+    write: catalogWriteState()
+  })));
   function stopAutoPushTimer() {
     if (AUTO_PUSH_TIMER) { clearInterval(AUTO_PUSH_TIMER); AUTO_PUSH_TIMER = null; }
+    if (STARTUP_PUSH_TIMER) { clearTimeout(STARTUP_PUSH_TIMER); STARTUP_PUSH_TIMER = null; }
   }
-  /* ---------------- ЗАТВАРЯНЕ С НЕПУБЛИКУВАНИ ПРОМЕНИ (v2.4.57) ----------------
+  /* ---------------- ЗАТВАРЯНЕ С НЕПУБЛИКУВАНИ ПРОМЕНИ (v2.4.57, v2.4.85) ----------------
      Какво е ставало дотук: main.js при 'window-all-closed' викаше
      stopAutoPushTimer() ПРЕДИ flushCatalogWrite(). Тоест katalog.json се записва
      в работното копие, но `git push` не се изпълнява — той има само две пътеки,
@@ -295,19 +677,17 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
      сайтът я няма. Разминаването може да трае дни (празници, отпуска) и
      единственото място, където изобщо личи, е конзолата, която никой не отваря.
 
-     Защо поправката е ИМЕННО ТАКАВА, а не синхронен push при затваряне:
-     публикуването е верига от до осем git команди по мрежа, всяка с таймаут 30
-     секунди (виж gitPublish по-горе) — при бавен или недостъпен GitHub
-     затварянето на програмата би увиснало за минути, с прозорец, който не се
-     затваря и не казва защо. Това е по-лошо от закъснялото публикуване: то
-     изглежда като повредена програма и води до изключване на тока с отворена
-     база. Затова тук НЕ се пуска git при затваряне. Вместо това се проверява
-     СИНХРОННО и без нито една мрежова операция дали има какво да се публикува
-     (само датата на файла срещу последното успешно публикуване в тази сесия) и
-     ако има — библиотекарят СЕ УВЕДОМЯВА, а причината остава в дневника.
-     Проверката не пита git нарочно: `git status` е пак подпроцес, а единственото,
-     което ни трябва, е „променян ли е katalog.json след последното успешно
-     публикуване“ — на този въпрос отговаря самата файлова система. */
+     v2.4.57 не пускаше git при затваряне (верига от мрежови команди с таймаути
+     от по 30 s би задържала затварянето минути), а показваше СИНХРОНЕН диалог
+     при всяко непубликувано — тоест почти всеки натоварен ден.
+     v2.4.85: при затваряне публикуването СЕ ПУСКА, във фонов режим и с ТАВАН
+     (publishOnQuit по-долу, 12 s в main.js — CATALOG_QUIT_PUBLISH_MS): копието
+     и затварянето на базата чакат най-много толкова, после продължават, а
+     недовършеният git се спира. Диалогът остава само за случая, в който
+     публикуването при затваряне НЕ успее или не стигне до края си. Проверката
+     „има ли какво“ не пита git: единственото, което ни трябва, е „променян ли е
+     katalog.json след последното успешно публикуване“ — на този въпрос
+     отговаря самата файлова система. */
   const SESSION_START = Date.now();
   function unpublishedCatalogChange() {
     const s = getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get() || {};
@@ -319,12 +699,67 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
        „нямаше какво да се публикува“ — виж noteAutoPush). Ако такова няма,
        отправната точка е пускането на програмата: файл, пипнат след старта и
        непубликуван оттогава, е точно случаят, който търсим. Промени от предишни
-       сесии не се броят — за тях е следващият таймер, а не диалог при изход. */
+       сесии не се броят — за тях е публикуването след старта, а не затварянето. */
     const since = LAST_AUTO_PUSH.okAt ? Date.parse(LAST_AUTO_PUSH.okAt) : SESSION_START;
     if (!(mtime > since)) return null;
     return { folder: s.catalog_folder, at: new Date(mtime).toISOString() };
   }
+  /** @type {{ started: boolean, done: boolean, ok: boolean, error: string | null, capMs: number }} */
+  const QUIT_PUBLISH = { started: false, done: false, ok: false, error: null, capMs: 0 };
+  /* Публикуване при затваряне (v2.4.85). Без какво да се публикува връща null —
+     затварянето продължава синхронно, точно както досега. Иначе обещание, което
+     се изпълнява с true/false (успяло / не успяло или не стигнало до края в
+     capMs) и никога не хвърля. Таймерите се спират ВЕДНАГА — по време на
+     изчакването не бива да тръгне нов цикъл. Вървящо публикуване (на таймера
+     или на бутона) се изчаква в същия таван, после се проверява дали е качило
+     всичко. */
+  /** @param {number} capMs @returns {Promise<boolean> | null} */
+  function publishOnQuit(capMs) {
+    stopAutoPushTimer();
+    let folder = null;
+    try {
+      const pending = unpublishedCatalogChange();
+      if (pending) folder = pending.folder;
+      else if (PUBLISHING) folder = (getDb().prepare('SELECT catalog_folder FROM settings WHERE id = 1').get() || {}).catalog_folder || null;
+    } catch (err) {
+      console.error('Публикуване при затваряне — проверката не мина:', err.message);
+      return null;
+    }
+    if (!folder) return null;
+    Object.assign(QUIT_PUBLISH, { started: true, done: false, ok: false, error: null, capMs });
+    const work = (async () => {
+      while (PUBLISHING_PROMISE) { try { await PUBLISHING_PROMISE; } catch (e) { /* не хвърля */ } }
+      if (QUIT_ABANDONED) return null;
+      if (!unpublishedCatalogChange()) return /** @type {GitPublishResult} */ ({ ok: true, data: undefined, committed: false });
+      return gitPublishExclusive(folder, { quit: true });
+    })().catch((err) => /** @type {GitPublishResult} */ ({ ok: false, error: err.message }));
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let cap;
+    /** @type {Promise<null>} */
+    // Без unref: таванът ТРЯБВА да удари, дори git да виси и нищо друго да не държи процеса.
+    const timeout = new Promise((r) => { cap = setTimeout(() => r(null), capMs); });
+    return Promise.race([work, timeout]).then((r) => {
+      clearTimeout(cap);
+      if (!r) {
+        QUIT_ABANDONED = true;
+        // Недовършеният git се спира: затварянето продължава, а остатъкът (заключване
+        // в .git) се почиства при следващото публикуване — виж recoverInterruptedGit.
+        for (const c of RUNNING_GIT) { try { c.kill(); } catch (e) { /* вече е приключил */ } }
+        QUIT_PUBLISH.error = 'публикуването не приключи до ' + Math.round(capMs / 1000) + ' секунди';
+        console.error('Публикуване при затваряне: ' + QUIT_PUBLISH.error + ' — прекъснато');
+        return false;
+      }
+      QUIT_PUBLISH.done = true;
+      QUIT_PUBLISH.ok = !!r.ok;
+      QUIT_PUBLISH.error = r.ok ? null : r.error;
+      try { notePublishOutcome(r, 'публикуването при затваряне'); }
+      catch (err) { console.error('Публикуване при затваряне:', err.message); }
+      return !!r.ok;
+    }, () => false);
+  }
   function warnUnpublishedCatalogOnQuit() {
+    // Публикуването при затваряне е минало — няма за какво да се предупреждава.
+    if (QUIT_PUBLISH.started && QUIT_PUBLISH.done && QUIT_PUBLISH.ok) return null;
     let pending = null;
     try {
       pending = unpublishedCatalogChange();
@@ -336,16 +771,18 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
       return null;
     }
     if (!pending) return null;
+    const why = QUIT_PUBLISH.started
+      ? 'опитът за публикуване при затваряне не успя (' + (QUIT_PUBLISH.error || 'неизвестна причина') + ')'
+      : 'програмата се затваря, преди да ги е публикувала';
     const text = 'Промените по фонда са записани в папката на онлайн каталога, но НЕ са публикувани в GitHub — '
-      + 'публикуването се изпълнява на всеки 5 минути и при натискане на „Публикувай сега“, а програмата се затваря сега. '
-      + 'Докато не се публикуват, сайтът показва стария каталог. При следващото пускане на програмата публикуването '
-      + 'тръгва само след няколко минути; ако промяната е спешна (например отчислени книги), отворете програмата и '
-      + 'натиснете „Онлайн каталог“ → „Публикувай сега“.';
+      + why + '. Докато не се публикуват, сайтът показва стария каталог. При следващото пускане програмата '
+      + 'публикува сама след по-малко от минута; ако промяната е спешна (например отчислени книги), отворете '
+      + 'програмата и натиснете „Онлайн каталог“ → „Публикувай в GitHub сега“.';
     try { logAudit('Онлайн каталог', 'ВНИМАНИЕ при затваряне: ' + text); }
     catch (err) { console.error('Дневникът при затваряне:', err.message); }
     /* Диалогът е СИНХРОНЕН и нарочно: това е последното нещо, което програмата
        има да каже, и след него процесът си отива. Показва се само когато има
-       какво да се публикува, тоест не при всяко затваряне. */
+       какво да се публикува и публикуването при затваряне не е успяло. */
     try {
       if (dialog && typeof dialog.showMessageBoxSync === 'function') {
         dialog.showMessageBoxSync({
@@ -358,10 +795,28 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     } catch (err) { console.error('Съобщение при затваряне:', err.message); }
     return text;
   }
-  function ghRawUrl(s) {
-    const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim(), b = (s.gh_branch || 'main').trim() || 'main';
+  /* Адресите, от които сайтът чете (v2.4.85). Каталогът се публикува в клона
+     `katalog`; `gh_branch` (обикновено main) е клонът на работното копие, който
+     се обновява веднъж дневно. В резервен режим (GitHub е отказал клона) —
+     адресът на `gh_branch`, защото тогава само там е актуалното. */
+  /** @param {any} s @param {string} [branch] */
+  function ghRawUrl(s, branch) {
+    const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim();
+    const b = branch || (s.gh_branch || 'main').trim() || 'main';
     if (!u || !r) return null;
     return `https://raw.githubusercontent.com/${u}/${r}/${b}/katalog.json`;
+  }
+  /** @param {any} s @param {string} branch */
+  function cdnUrl(s, branch) {
+    const u = (s.gh_user || '').trim(), r = (s.gh_repo || '').trim();
+    if (!u || !r) return null;
+    return `https://cdn.jsdelivr.net/gh/${u}/${r}@${branch}/katalog.json`;
+  }
+  /** @param {string | null} folder @param {any} s @returns {string} */
+  function publishBranchFor(folder, s) {
+    const main = (s.gh_branch || 'main').trim() || 'main';
+    if (folder && isGitRepo(folder) && readPubState(folder).mode === 'main') return main;
+    return PUBLISH_BRANCH;
   }
   // Предлага име на хранилище по името на библиотеката — на латиница, с тирета, защото
   // GitHub не приема кирилица и интервали в имената на хранилища.
@@ -412,9 +867,13 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
         WHERE b.status = 'наличен' AND COALESCE(b.department,'') != 'служебен'
           AND COALESCE(i.quantity, 0) - COALESCE(o.n, 0) - COALESCE(hz.n, 0) - COALESCE(mz.n, 0) > 0
       `).get().n;
+      /* v2.4.85: сайтът чете клона, в който програмата публикува (`katalog`, а в
+         резервен режим — gh_branch); `rawUrlMain` е дневното копие в gh_branch. */
+      const pb = publishBranchFor(s.catalog_folder, s);
       return {
         folder: s.catalog_folder || null, total: pub, available: avail,
-        isGitRepo: isGitRepo(s.catalog_folder), rawUrl: ghRawUrl(s),
+        isGitRepo: isGitRepo(s.catalog_folder), rawUrl: ghRawUrl(s, pb),
+        rawUrlMain: ghRawUrl(s), cdnUrl: cdnUrl(s, pb), publishBranch: pb,
         ghUser: s.gh_user, ghRepo: s.gh_repo, ghBranch: s.gh_branch,
         suggestedRepo: suggestRepoName(s), libName: s.lib_name || s.org || ''
       };
@@ -566,13 +1025,25 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     try { assertCatalogWriteOk(w); }
     catch (err) { noteAutoPush(err.message); return { ok: false, error: err.message }; }
     rememberDbSeen(seen);   // М5: файлът току-що е сглобен от базата — таймерът няма нужда да го прави пак
-    const r = await gitPublishExclusive(s.catalog_folder);
-    if (r.ok) logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.committed ? '' : ' (нямаше промяна)'));
+    /* v2.4.85: бутонът връща нормалния ритъм — изчакването след провали се
+       нулира (виж notePublishOutcome); ред за възстановяването се пише само
+       ако преди това наистина не е вървяло. */
+    const prevFails = FAILS;
+    FAILS = 0;
+    NEXT_TRY_AT = 0;
+    const taken = catalogChanges.take();
+    const r = await gitPublishExclusive(s.catalog_folder, { manual: true });
+    if (!r.ok) catalogChanges.restore(taken);
+    if (r.ok) {
+      logAudit('Онлайн каталог', 'публикувано в GitHub' + (r.branch ? ' (клон ' + r.branch + ')' : '')
+        + (r.committed ? '' : ' (нямаше промяна)') + (prevFails ? ' — след ' + prevFails
+          + (prevFails === 1 ? ' неуспешен автоматичен опит' : ' неуспешни автоматични опита') : ''));
+    }
     /* И ръчното публикуване обновява състоянието — иначе предупреждението за
        провалено автоматично публикуване продължава да твърди, че каталогът на
        сайта е стар, точно след като библиотекарят го е публикувал по бутона,
        който самото предупреждение му препоръчва. */
-    noteAutoPush(r.ok ? null : r.error);
+    notePublishOutcome(r, 'публикуването по бутона');
     return r;
   });
   /* `{ force: true }` (v2.4.69, К1) — изходът от предпазителя: екранът го праща
@@ -928,5 +1399,5 @@ module.exports = function registerCatalogHandlers(ipcMain, deps) {
     }
   });
 
-  return { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit };
+  return { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit, publishOnQuit };
 };

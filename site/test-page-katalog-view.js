@@ -24,7 +24,7 @@ try { JSDOM = require('jsdom').JSDOM; } catch (e) {
 const file = process.argv[2] || path.join(__dirname, 'page-katalog.html');
 const N = parseInt(process.argv[3] || '15000', 10);
 const html = fs.readFileSync(file, 'utf8');
-const GITHUB = 'https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/main/katalog.json';
+const GITHUB = 'https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/katalog/katalog.json';
 
 /* Синтетичен фонд с формата на истинския: множество екземпляри на заглавие,
    празни полета, повредени редове, кирилица. */

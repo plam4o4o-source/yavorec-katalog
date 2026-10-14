@@ -554,7 +554,9 @@ test('main.js: изпращане при стартиране и колонит�
 test('main.js: при затваряне и при „Инсталирай и рестартирай“ насроченото изпращане се изчаква ПРЕДИ затварянето на базата', () => {
   const quit = MAIN.slice(MAIN.indexOf("app.on('window-all-closed'"));
   const iFlush = quit.indexOf('flushOnlineSyncOnQuit(ONLINE_QUIT_FLUSH_MS)');
-  const iThen = quit.indexOf('pendingOnline.then(finishQuit, finishQuit)');
+  /* v2.4.85: изпращането към моста и публикуването на каталога се чакат
+     заедно (успоредно), после finishQuit — виж katalog-objava-v2485.test.js. */
+  const iThen = quit.indexOf('Promise.all(pendingQuit).then(finishQuit, finishQuit)');
   const fin = MAIN.slice(MAIN.indexOf('function finishQuit()'));
   assert.ok(iFlush > 0 && iThen > iFlush);
   assert.ok(fin.indexOf('flushCatalogWrite()') > 0 && fin.indexOf('backupBeforeQuit()') > 0 && fin.indexOf('db.close()') > 0,

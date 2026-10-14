@@ -2095,6 +2095,10 @@ app.whenReady().then(() => {
 /* Таванът на изчакването на изпращането към моста при затваряне и при
    „Инсталирай и рестартирай“ (v2.4.83). */
 const ONLINE_QUIT_FLUSH_MS = 5000;
+/* Таванът на публикуването на онлайн каталога при затваряне (v2.4.85) — тече
+   УСПОРЕДНО с изпращането към моста, тоест затварянето чака най-много толкова
+   общо, не сбора от двете. */
+const CATALOG_QUIT_PUBLISH_MS = 12000;
 app.on('window-all-closed', () => {
   stopAutoBackupTimer();
   stopOnlineTimer();
@@ -2109,8 +2113,21 @@ app.on('window-all-closed', () => {
   let pendingOnline = null;
   try { pendingOnline = flushOnlineSyncOnQuit(ONLINE_QUIT_FLUSH_MS); }
   catch (err) { logToFile('error', 'Изпращането към моста при затваряне — грешка: ' + err.message); }
-  if (pendingOnline) {
-    pendingOnline.then(finishQuit, finishQuit);
+  /* ПУБЛИКУВАНЕ НА КАТАЛОГА ПРИ ЗАТВАРЯНЕ (v2.4.85). Дотук при затваряне
+     katalog.json само се записваше, а непубликуваното се казваше със синхронен
+     диалог — почти всеки натоварен ден (виж publishOnQuit в handlers/catalog.js).
+     Сега насроченото се записва ВЕДНАГА, публикуването тръгва във фонов режим
+     (и спира таймерите си), а затварянето го чака най-много
+     CATALOG_QUIT_PUBLISH_MS; диалогът остава само ако то не успее. Без нищо за
+     публикуване пътят е синхронен, както досега. */
+  let pendingCatalog = null;
+  try {
+    if (catalogWriteDebouncer.pending()) flushCatalogWrite();
+    pendingCatalog = publishOnQuit(CATALOG_QUIT_PUBLISH_MS);
+  } catch (err) { logToFile('error', 'Публикуването на онлайн каталога при затваряне — грешка: ' + err.message); }
+  const pendingQuit = [pendingOnline, pendingCatalog].filter(Boolean);
+  if (pendingQuit.length) {
+    Promise.all(pendingQuit).then(finishQuit, finishQuit);
     return;
   }
   finishQuit();
@@ -2131,7 +2148,10 @@ function finishQuit() {
      warnUnpublishedCatalogOnQuit в handlers/catalog.js — там е и обяснението защо
      при затваряне НЕ се пуска git: мрежова верига с таймаути би задържала
      затварянето минути и би изглеждала като повредена програма), и чак накрая се
-     спира таймерът. */
+     спира таймерът. v2.4.85: публикуването при затваряне вече е минало (или е
+     изтекъл таванът му) в 'window-all-closed' — записът тук хваща само промяна,
+     насрочена по време на изчакването (напр. от отговора на моста), а
+     предупреждението излиза само ако публикуването не е успяло. */
   warnUnpublishedCatalogOnQuit();
   stopAutoPushTimer();
   /* Последно копие за деня — ПРЕДИ db.close(), докато връзката още работи (копието
@@ -3137,6 +3157,7 @@ function writeCatalogIfConfigured(opts) {
       catch (e) { Object.assign(CATALOG_LAST_TEXT, { file: null, hash: null }); }
     }
     rememberPublishedCount(file, n);
+    moveWrittenKindsToPublish();   // v2.4.85 — виж CATALOG_PUBLISH_DIRT
     return noteCatalogWrite({ written: true, published, now: n,
       forced: !!(opts && opts.force) && published > 0 && (n === 0 || n < published * CATALOG_SHRINK_RATIO) }, folder);
   } catch (err) {
@@ -3202,7 +3223,45 @@ function writeCatalogIfConfigured(opts) {
 const CATALOG_WRITE_CIRCULATION = 'circulation';
 const CATALOG_WRITE_DEBOUNCE_FUND_MS = 4000;
 const CATALOG_WRITE_DEBOUNCE_CIRC_MS = 90000;
-const CATALOG_WRITE_STATE = { pending: false };
+/* fund/circ (v2.4.85): какви промени чакат записа — виж CATALOG_PUBLISH_DIRT. */
+const CATALOG_WRITE_STATE = { pending: false, fund: false, circ: false };
+/* ВИДЪТ НА ПРОМЯНАТА СТИГА ДО ПУБЛИКУВАНЕТО (v2.4.85).
+   (а) Дотук двете скорости спираха до файла: веднъж записан, katalog.json се
+       качваше в GitHub на следващия 5-минутен цикъл, все едно дали е сменена
+       наличността на една книга или е вписана цяла партида — тоест commit и
+       push на всеки 5 минути през целия работен ден на гишето.
+   (б) Всяко качване е няколко мегабайта по мрежата на читалището, а
+       наличността на сайта не е обещание за запазване (виж по-долу).
+   (в) Видовете се трупат при насрочването (CATALOG_WRITE_STATE) и минават тук
+       ЧАК КОГАТО записът във файла е минал — публикуването вижда точно това,
+       което е във файла, а не насрочено, но още незаписано. handlers/catalog.js
+       ги взима преди качване (take) и ги връща при провал (restore): само
+       наличност се качва най-много веднъж на 30 минути, фондът — при следващия
+       цикъл. Промяна без вид (по-старите модули, друго работно място) се
+       публикува веднага. */
+const CATALOG_PUBLISH_DIRT = { fund: false, circ: false };
+const catalogChanges = {
+  peek: () => ({ fund: CATALOG_PUBLISH_DIRT.fund, circ: CATALOG_PUBLISH_DIRT.circ }),
+  take() {
+    const k = this.peek();
+    CATALOG_PUBLISH_DIRT.fund = false;
+    CATALOG_PUBLISH_DIRT.circ = false;
+    return k;
+  },
+  /** @param {{ fund?: boolean, circ?: boolean } | null | undefined} k */
+  restore(k) {
+    if (!k) return;
+    if (k.fund) CATALOG_PUBLISH_DIRT.fund = true;
+    if (k.circ) CATALOG_PUBLISH_DIRT.circ = true;
+  }
+};
+// Записът е минал — натрупаните видове вече са във файла и чакат публикуване.
+function moveWrittenKindsToPublish() {
+  if (CATALOG_WRITE_STATE.fund) CATALOG_PUBLISH_DIRT.fund = true;
+  if (CATALOG_WRITE_STATE.circ) CATALOG_PUBLISH_DIRT.circ = true;
+  CATALOG_WRITE_STATE.fund = false;
+  CATALOG_WRITE_STATE.circ = false;
+}
 // Изпълнява се от двата таймера: пише САМО ако има ненаписана промяна.
 function runPendingCatalogWrite() {
   if (!CATALOG_WRITE_STATE.pending) return { written: false };
@@ -3222,8 +3281,8 @@ const catalogCircWriter = createDebouncer(runPendingCatalogWrite, CATALOG_WRITE_
 function scheduleCatalogWrite(kind) {
   CATALOG_WRITE_STATE.pending = true;
   dropCatalogPayloadCache();   // старият товар вече не отговаря на базата — освобождава и паметта
-  if (kind === CATALOG_WRITE_CIRCULATION) catalogCircWriter.schedule();
-  else catalogFundWriter.schedule();
+  if (kind === CATALOG_WRITE_CIRCULATION) { CATALOG_WRITE_STATE.circ = true; catalogCircWriter.schedule(); }
+  else { CATALOG_WRITE_STATE.fund = true; catalogFundWriter.schedule(); }
 }
 /* Ръчните действия и изходът: пише СИНХРОННО и връща резултата (writeNow и
    gitPublishNow го показват на библиотекаря — вж. assertCatalogWriteOk в
@@ -3284,7 +3343,9 @@ require('./handlers/shelves')(ipcMain, {
    Името на зависимостта остава buildCatalogPayload: за handlers/catalog.js това
    е „дай ми товара на каталога“, а откъде идва — кеширан или пресметнат — е
    работа на main.js. */
-const { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit } = require('./handlers/catalog')(ipcMain, {
+/* catalogChanges (v2.4.85) — видът на записаните, но непубликувани промени
+   (виж CATALOG_PUBLISH_DIRT); publishOnQuit — публикуването при затваряне. */
+const { startAutoPushTimer, stopAutoPushTimer, warnUnpublishedCatalogOnQuit, publishOnQuit } = require('./handlers/catalog')(ipcMain, {
   getDb: () => db, run, logAudit, dialog, getMainWindow: () => mainWindow, fs, path, execFile,
-  csvCell, flushCatalogWrite, buildCatalogPayload: catalogPayloadNow, catalogJsonText
+  csvCell, flushCatalogWrite, buildCatalogPayload: catalogPayloadNow, catalogJsonText, catalogChanges
 });
