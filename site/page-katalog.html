@@ -368,14 +368,18 @@
    по който каталогът СТИГА дотук, е същият и се пази от същите осем сценария
    в site/test-page-katalog.js. */
 var STATIC=[{"inv":1,"a":"Вазова, Вера","t":"Иван Вазов и неговите близки","s":"Спомени","c":"София","p":"F.P.A","y":"1994","v":"книга","l":"български","u":"886.7(092)(093.3)","g":"886.7/Г 13","o":"за възрастни","k":"","n":"Писма Стихотворения от Иван Вазов и посветени на поета","cv":"","av":1},{"inv":2,"a":"Габе, Дора Петрова; Шишкова, Магдалена","t":"Светът е тайна","s":"Поезия & проза","c":"София","p":"Унив. изд. Св. Климент Охридски","y":"1994","v":"книга","l":"български","u":"886.7-8","g":"886.7/Г 13","o":"за възрастни","k":"","n":"","cv":"","av":1},{"inv":3,"a":"Славейков, Пенчо","t":"На острова на блаженните","s":"Антология","c":"София","p":"Хемус","y":"1949","v":"книга","l":"български","u":"886.7-1","g":"886.7/С 42","o":"за възрастни","k":"","n":"","cv":"","av":1}], STATIC_GEN="25.07.2026";
-var LIVE_URL="https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/main/katalog.json";
+var LIVE_URL="https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/katalog/katalog.json";
 /* Каталогът идва от GitHub, качван автоматично от библиотечния компютър.
    raw.githubusercontent.com изпраща правилното CORS заглавие сам — не са нужни
    чужди прокита, каквито изискваше OneDrive. jsDelivr е независим резервен път
    (друга инфраструктура), в случай че GitHub временно има проблем. */
 var SOURCES=[
   {url:LIVE_URL,label:'GitHub'},
-  {url:'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@main/katalog.json',label:'jsDelivr (резервен път)'}
+  {url:'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@katalog/katalog.json',label:'jsDelivr (резервен път)'},
+  /* Клонът „katalog“ (InvLib 2.4.85+) се обновява при всяка промяна; „main“ —
+     най-много веднъж на ден, само за по-стари инсталации. Затова е последен. */
+  {url:'https://raw.githubusercontent.com/plam4o4o-source/yavorec-katalog/main/katalog.json',label:'GitHub (main)'},
+  {url:'https://cdn.jsdelivr.net/gh/plam4o4o-source/yavorec-katalog@main/katalog.json',label:'jsDelivr (main)'}
 ];
 var FT_BASE="Народно читалище „Васил Левски – 1922\" · с. Яворец, общ. Габрово";
 /* Дискретен кредит на софтуера — винаги последен ред във футъра, независимо
