@@ -11,6 +11,119 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.85
+
+**BG:** **Онлайн каталог: отделен клон `katalog`, по-рядко и по-чисто публикуване.** Само за
+библиотеки със свързан онлайн каталог (работна папка — `git clone` на хранилището). Версията на
+базата не се вдига; нищо в данните не се променя.
+
+- **Клонът `katalog`.** Всяко заемане и връщане сменя наличността в `katalog.json`, а програмата
+  правеше `git commit` + `push` в `main` на всеки 5 минути — десетки commit-а на ден, всеки с
+  пълната проверка в CI. Сега каталогът отива в клона **`katalog`**, който държи **само
+  `katalog.json`** и е **един-единствен commit без родител**, подменян при всяко публикуване
+  (`push --force`) — хранилището не расте. Commit-ът се сглобява с `git hash-object` →
+  `git mktree` → `git commit-tree`, без да се пипа работната папка. Публичният адрес става
+  `https://raw.githubusercontent.com/<потребител>/<хранилище>/katalog/katalog.json` (резервен:
+  `https://cdn.jsdelivr.net/gh/<потребител>/<хранилище>@katalog/katalog.json`); екранът
+  „Онлайн каталог“ показва точните адреси.
+- **`main` — веднъж дневно.** За по-старите версии на сайта и на приложението `main` получава
+  `katalog.json` при първото успешно публикуване за деня и **само ако съдържанието е различно**,
+  с `[skip ci]` в съобщението. **Сайт, който още чете `…/main/katalog.json`, трябва да мине към
+  новия адрес** — иначе наличността там изостава с до един ден.
+- **Резервен път.** Ако GitHub откаже клона (права, защитени клонове, правила), програмата
+  публикува по стария начин в `main`, казва го **веднъж** в одитната следа и опитва клона отново
+  на следващия ден. Отказан достъп (изтекъл токен) не е отказан клон и не превключва нищо.
+- **Ритъм.** Промените по фонда (нова, редактирана, отчислена книга) — при следващия цикъл (до 5
+  минути), както досега; **само наличност** (гишето) — **най-много веднъж на 30 минути**. Видът на
+  промяната идва от отложения запис в main.js и стига до публикуването чак когато е записан във
+  файла; промяна от друго работно място (неизвестен вид) излиза веднага.
+- **Без промяна — без push.** Автоматичното публикуване сравнява каченото съдържание (blob) и не
+  прави нищо, ако е същото; в `main` след „nothing to commit“ вече няма празен `git push`.
+- **Без интернет — без поток от редове.** Одитната следа записва само прехода: спряло (с грешката,
+  веднъж) и тръгнало отново. Докато не върви, опитите се разреждат: 5, 10, 20, 40 минути, после
+  веднъж на час; червената бележка в „Онлайн каталог“ казва кога е следващият опит.
+  „Публикувай в GitHub сега“ опитва веднага и връща нормалния ритъм.
+- **Прекъснат git се почиства сам.** В началото на всяко публикуване: заключвания (`*.lock` в
+  `.git` и под `.git/refs`), по-стари от 2 минути, се махат; започнат rebase/am/merge се
+  прекратява (`--abort`). Дотук убит git (таймаут, спрян ток) спираше всички следващи публикувания.
+- **Никакви прозорци за парола.** Всяка git команда върви с `GIT_TERMINAL_PROMPT=0` и
+  `GCM_INTERACTIVE=never`. Отказан достъп (Authentication failed, 403, could not read Username)
+  излиза със съобщение **„обновете достъпа до GitHub“** и точните стъпки.
+- **Публикуване малко след пускане и при затваряне.** Първото публикуване е ~45 s след старта
+  (дотук — след 5 минути). При затваряне непубликуваното се публикува във фонов режим, успоредно с
+  изпращането към моста, с **таван 12 s** — копието и затварянето на базата не чакат повече, а
+  недовършеният git се спира. Предупреждението при затваряне излиза **само ако** това публикуване
+  не успее или не стигне до края.
+- **CI.** `ci.yml` не се пуска за клона `katalog`, нито за push/PR, който сменя само
+  `katalog.json`; commit-ите на програмата носят и `[skip ci]`. Другите workflow-и (издание по
+  таг, страницата на скенера по свои пътища, VirusTotal след изданието) и без това не се пускаха.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **2545 теста, 0 неуспешни** (преди: 2534).
+Нов тест `test/katalog-objava-v2485.test.js` — с истински git срещу локално „отдалечено“
+хранилище: клонът `katalog` е един commit без родител само с `katalog.json`, подменян; `main` —
+веднъж на ден и само при промяна; `[skip ci]`; без промяна — без push; отказан клон → `main`,
+казано веднъж, и връщане към клона на следващия ден. С подставен git: променливите на средата на
+всяка команда, съобщението при отказан достъп, почистването на заключвания и rebase/merge,
+изчакването 5/10/20/40/60/60 минути и редовете в следата само при преход, 30-те минути за
+наличността, публикуването при старт, при затваряне (успех, изтекъл таван, провал), пътят на
+вида промяна в main.js и тригерите в ci.yml. Обновени: `handlers-catalog`, `katalog-v2471`
+(сайтът чете `katalog`), `online-sync-v2483` (общото изчакване при затваряне).
+
+**EN:** **Online catalogue: a separate `katalog` branch, rarer and cleaner publishing.** Only for
+libraries with a connected online catalogue (working folder — a `git clone` of the repository).
+The database version is not raised; nothing in the data changes.
+
+- **The `katalog` branch.** Every loan and return changes availability in `katalog.json`, and the
+  program made a `git commit` + `push` to `main` every 5 minutes — dozens of commits a day, each
+  running the full CI suite. The catalogue now goes to the **`katalog`** branch, which holds
+  **only `katalog.json`** as a **single parentless commit** replaced on every publish
+  (`push --force`) — the repository does not grow. The commit is built with `git hash-object` →
+  `git mktree` → `git commit-tree`, without touching the working copy. The public address becomes
+  `https://raw.githubusercontent.com/<user>/<repo>/katalog/katalog.json` (fallback:
+  `https://cdn.jsdelivr.net/gh/<user>/<repo>@katalog/katalog.json`); the "Online catalogue"
+  screen shows the exact addresses.
+- **`main` — once a day.** For older versions of the site and the app, `main` receives
+  `katalog.json` on the first successful publish of the day and **only if the content differs**,
+  with `[skip ci]` in the message. **A site still reading `…/main/katalog.json` must switch to the
+  new address** — otherwise availability there lags by up to a day.
+- **Fallback.** If GitHub refuses the branch (permissions, protected branches, rules), the program
+  publishes the old way to `main`, says so **once** in the audit trail and retries the branch the
+  next day. Denied access (expired token) is not a refused branch and switches nothing.
+- **Cadence.** Fund changes (new, edited, withdrawn book) — on the next cycle (up to 5 minutes), as
+  before; **availability only** (the desk) — **at most once every 30 minutes**. The kind of change
+  comes from the deferred write in main.js and reaches publishing only once written to the file;
+  a change from another workstation (unknown kind) goes out at once.
+- **No change — no push.** Automatic publishing compares the uploaded content (blob) and does
+  nothing if it is the same; in `main` there is no longer an empty `git push` after "nothing to commit".
+- **Offline — no flood of rows.** The audit trail records only the transition: stopped (with the
+  error, once) and working again. While failing, attempts back off: 5, 10, 20, 40 minutes, then
+  hourly; the red note in "Online catalogue" says when the next attempt is. "Publish to GitHub
+  now" tries at once and restores the normal cadence.
+- **An interrupted git cleans up after itself.** At the start of every publish: locks (`*.lock` in
+  `.git` and under `.git/refs`) older than 2 minutes are removed; an in-progress rebase/am/merge is
+  aborted. Until now a killed git (timeout, power cut) stopped every later publish.
+- **No password windows.** Every git command runs with `GIT_TERMINAL_PROMPT=0` and
+  `GCM_INTERACTIVE=never`. Denied access (Authentication failed, 403, could not read Username)
+  shows the message **"обновете достъпа до GitHub"** (update GitHub access) with exact steps.
+- **Publishing soon after start and at quit.** The first publish is ~45 s after start (until now —
+  after 5 minutes). At quit, unpublished changes are published in the background, in parallel with
+  the bridge upload, with a **12 s cap** — backup and closing the database wait no longer, and an
+  unfinished git is stopped. The quit warning appears **only if** that publish fails or does not finish.
+- **CI.** `ci.yml` does not run for the `katalog` branch, nor for a push/PR changing only
+  `katalog.json`; the program's commits also carry `[skip ci]`. The other workflows (release on
+  tag, scanner page on its own paths, VirusTotal after a release) did not run anyway.
+
+**Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia + the
+catalog page); `node --test` — **2545 tests, 0 failed** (before: 2534). New test
+`test/katalog-objava-v2485.test.js` — with real git against a local "remote": the `katalog`
+branch is one parentless commit with only `katalog.json`, replaced; `main` once a day and only on
+change; `[skip ci]`; no change — no push; refused branch → `main`, said once, and back to the
+branch the next day. With a stubbed git: environment variables on every command, the denied-access
+message, cleaning locks and rebase/merge, the 5/10/20/40/60/60-minute back-off and audit rows only
+on transitions, the 30 minutes for availability, publishing at start, at quit (success, cap
+expired, failure), the change-kind path in main.js and the ci.yml triggers.
+
 ## v2.4.84
 
 **BG:** **Цялостен преглед: достъпност, графика в движение, измерване на скоростта.**

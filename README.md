@@ -28,7 +28,9 @@
 
 Това хранилище съдържа и публичния онлайн каталог
 ([пример на chyavorec.org](https://chyavorec.org)), захранван от
-`katalog.json`, който самата програма публикува тук при всяка промяна.
+`katalog.json`, който самата програма публикува тук при всяка промяна — от
+v2.4.85 в отделния клон `katalog` (един commit, подменян всеки път), а в `main`
+веднъж дневно.
 
 Уебсайт на самата програма: **[invlib.com](https://invlib.com/)**.
 
@@ -115,7 +117,7 @@ git clone https://github.com/plam4o4o-source/yavorec-katalog.git
 cd yavorec-katalog/electron-app
 npm install        # включва electron-rebuild за better-sqlite3
 npm start          # стартира програмата в режим за разработка
-npm test           # node:test — всички тестове (2520+)
+npm test           # node:test — всички тестове (2540+)
 ```
 
 Изисквания за разработка: Node.js 22+, npm. За build на Windows
