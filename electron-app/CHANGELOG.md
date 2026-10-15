@@ -46,9 +46,9 @@ for full detail.
   натоварване) е премахнато.
 
 **Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
-Europe/Sofia + страницата на каталога); `node --test` — **@@N@@ теста, 0 неуспешни** (преди:
-@@P@@); целият набор и на 30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 и 29.02.2028 —
-@@S@@. Нови тестове: `test/izvestiya-v2486.test.js` (CSS + Chromium: щракването през
+Europe/Sofia + страницата на каталога); `node --test` — **2548 теста, 0 неуспешни** (преди:
+2545); целият набор и на 30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 и 29.02.2028 —
+без неуспешен тест, освен петте, които под изкуствения часовник по необходимост грешат (два в Chromium и три, които сравняват времето на току-що записан файл с часовника). Нови тестове: `test/izvestiya-v2486.test.js` (CSS + Chromium: щракването през
 известието стига до бутона; без поправката отива в контейнера), `test/raboten-den-chromium.test.js`
 (работният ден по-горе).
 
@@ -76,8 +76,8 @@ over time.** The database version is not raised; nothing in the data changes.
   checking anything now checks; a start-up race in two dashboard tests is removed.
 
 **Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia + the
-catalog page); `node --test` — **@@N@@ tests, 0 failed** (before: @@P@@); the whole suite also on
-30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 and 29.02.2028 — @@S@@. New tests:
+catalog page); `node --test` — **2548 tests, 0 failed** (before: 2545); the whole suite also on
+30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 and 29.02.2028 — no failures apart from the five that necessarily mislead under a fake clock (two in Chromium and three that compare a freshly written file's time with the clock). New tests:
 `test/izvestiya-v2486.test.js`, `test/raboten-den-chromium.test.js`.
 
 ## v2.4.85
