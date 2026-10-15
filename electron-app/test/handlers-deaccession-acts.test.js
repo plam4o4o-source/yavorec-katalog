@@ -12,6 +12,7 @@ const registerDeaccessionActsHandlers = require('../handlers/deaccession-acts');
 /* BOOK_SELECT — истинският от handlers/books.js (виж test/helpers/prod-values.js).
    Преписаното копие беше без quantity/available. */
 const { BOOK_SELECT, normalizeScanCode } = require('./helpers/prod-values.js');
+const { localToday } = require('./helpers/local-day');
 
 
 /* Хигиена на временните папки. node --test не чисти нищо след себе си, а всяка
@@ -152,13 +153,19 @@ test('deaccessionActs:nextNo returns max(no)+1 per year', async () => {
 test('deaccessionActs:revoke restores books to наличен and MARKS the act revoked (never deletes it)', async () => {
   const { db, ipcMain, scheduleCalls } = setup();
   const bookId = insertBook(db, { inv_number: 20 });
+  /* Актът е от ДНЕС, не от '2026-08-01': от 2027 г. нататък 2026 е ПРИКЛЮЧЕНА
+     година и анулирането на акт от нея иска изрично потвърждение
+     (confirmClosedYear, v2.4.61) — revoked.ok излизаше false без грешка в
+     програмата. Тук се проверява обикновеното анулиране в текущата година. */
+  const actDay = localToday();
+  const actYear = actDay.slice(0, 4);
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-08-01', reason_code: 1, reason_text: 'грешка', committee1: 'А', committee3: 'В' },
+    act: { no: 1, date: actDay, reason_code: 1, reason_text: 'грешка', committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   });
   scheduleCalls.length = 0;
   const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
-  assert.equal(revoked.ok, true);
+  assert.equal(revoked.ok, true, revoked.error);
   assert.equal(scheduleCalls.length, 1);
 
   const book = db.prepare('SELECT status, deaccession_act_id FROM books WHERE id=?').get(bookId);
@@ -176,6 +183,6 @@ test('deaccessionActs:revoke restores books to наличен and MARKS the act 
   assert.ok(act.revoked_at, 'и носи дата на анулиране');
   assert.equal(act.revoke_reason, 'сгрешен акт (тест)', 'заедно с основанието, което се чете от проверяващ');
   assert.equal(act.no, 1, 'номерът остава зает');
-  const next = await ipcMain.invoke('deaccessionActs:nextNo', '2026');
+  const next = await ipcMain.invoke('deaccessionActs:nextNo', actYear);
   assert.equal(next.data, 2, 'номерът на анулирания акт НЕ се дава на следващия — чл. 35');
 });
