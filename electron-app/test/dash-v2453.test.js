@@ -141,9 +141,18 @@ const DASH = (over) => Object.assign({
   today: { dueReminders: 0, reregDue: 0, longOverdue: 0, dnevnikFilled: true, isTodayOpen: true }
 }, over || {});
 
+/* Стартът на страницата не бива да презапише таблото: с празни настройки тя
+   отваря „Настройки“ (#setup) по събитие hashchange, което под натоварване идва
+   СЛЕД нашия renderDash() и подменя #view (тестът по-долу падаше с „undefined“
+   за показателя). Библиотеката има име — стартът отваря самото табло — и
+   renderDash() се вика едва след като стартовият рендер е готов. */
 async function renderDashDom(data) {
-  const dom = buildDom({ 'dashboard.full': data, 'settings.get': {} });
-  await settle();
+  const dom = buildDom({ 'dashboard.full': data, 'settings.get': { lib_name: 'Тестова библиотека' } });
+  const t0 = Date.now();
+  while (!dom.window.document.querySelector('#view .normCard')) {
+    assert.ok(Date.now() - t0 < 15000, 'стартовият рендер на таблото не завърши');
+    await settle();
+  }
   await dom.window.renderDash();
   await settle();
   return dom.window.document;
@@ -193,9 +202,12 @@ test('темпото „N документа на месец“ е ТОЧНОТ�
   const d = await renderDashDom(DASH({ inventoryScannedYear: 313, inventoryTarget: 1200 }));
   const card = d.querySelector('#view .normCard');
   const txt = card.textContent.replace(/\s+/g, ' ');
-  const m = /Остават (\d+) дни до 31 декември — по (\d+) документа на месец/.exec(txt);
+  /* „1 ден“ / „N дни“ — на 30 декември изгледът правилно казва „Остават 1 ден“
+     и твърдото „дни“ тук падаше. Думата се проверява срещу числото. */
+  const m = /Остават (\d+) (ден|дни) до 31 декември — по (\d+) документа на месец/.exec(txt);
   assert.ok(m, 'изречението за темпото трябва да го има: ' + txt);
-  const daysLeft = Number(m[1]), perMonth = Number(m[2]);
+  assert.equal(m[2], m[1] === '1' ? 'ден' : 'дни', 'числото и думата трябва да се съгласуват');
+  const daysLeft = Number(m[1]), perMonth = Number(m[3]);
   /* Независимо преизчисление, копие на формулата в renderDash() — целта на
      този тест е да провери, че renderDash() я приложи ВЯРНО за тези числа, не
      да сравни формулата със себе си, затова датите се вземат от истинския
