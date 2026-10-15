@@ -11,6 +11,75 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.86
+
+**BG:** **Цялостна проверка на работата: известията вече наистина не пречат на бутоните; тестовете
+не се чупят с времето.** Версията на базата не се вдига; нищо в данните не се променя.
+
+- **Поправка: известията и бутоните под тях.** Защитата от v2.4.69 правеше самото известие
+  „прозрачно“ за мишката, но щракването падаше в кутията около известията — и тя го хващаше.
+  В истинския прозорец предупреждението горе в центъра покриваше „+ Нова книга“ и бутоните на
+  гишето и те не отговаряха, докато то не изчезне. Сега и горните, и долните известия пропускат
+  щракването навсякъде, освен върху **×**. Намерено при пълен работен ден в истински Chromium
+  (тестовете в jsdom нямат подредба на страницата и не можеха да го видят).
+- **Как беше проверено.**
+  - Работен ден на гишето в истински Chromium, от празна база, само през екрана: първо пускане
+    и служител, 4 читатели, 5 книги, заемане по баркод и по инв. №, резервация и заделяне при
+    връщане със забава, продължение от „Просрочени“, годишна такса, плащане и квитанция,
+    партида и КДБФ, акт за отчисляване, Дневник, справки и печат, резервно копие (отваря се и е
+    цяло), проверка на данните, одитна следа, всичките 24 раздела — 16 от 16 стъпки, без грешка
+    в екрана. Остава като постоянен тест.
+  - Инвентаризация с телефон: изкуствена камера с 15 етикета — 14 номера за 35 s без повторения,
+    внос, протокол, приложението без интернет.
+  - Печатът в истински Chromium (етикети Avery, карти, подписи на един лист, страниците на
+    Дневника): 16 проверки, които дотук се пропускаха, защото не намираха Chromium — всички минават;
+    баркодовете от цял лист етикети се четат от два независими декодера.
+  - **Целият набор тестове с изкуствен часовник** (libfaketime) на бъдещи дати до 29.02.2028.
+- **Тестовете вече не се чупят с времето.** 22 тестови файла разчитаха на днешния ден:
+  падежи и забави, които попадат на празник (Коледа, Великден, 1 и 6 май, 22 септември),
+  дати като 14.03 на текущата година (през януари–март са „в бъдещето“ и програмата правилно ги
+  отказва), актове от 2026 г., които през 2027 г. са от приключена година, „Остават 1 ден“ вместо
+  „дни“. Без поправката CI щеше да почервенее около Коледа и почти непрекъснато през януари–март
+  2027 г. — и да спре всяко издание. В програмата грешка не беше намерена: във всеки случай тя е
+  постъпвала правилно. Попътно: тест, който от 2027 г. щеше да минава, без да проверява нищо,
+  вече проверява; състезание при старта на таблото в два теста (падаше 4 от 8 пъти под
+  натоварване) е премахнато.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **@@N@@ теста, 0 неуспешни** (преди:
+@@P@@); целият набор и на 30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 и 29.02.2028 —
+@@S@@. Нови тестове: `test/izvestiya-v2486.test.js` (CSS + Chromium: щракването през
+известието стига до бутона; без поправката отива в контейнера), `test/raboten-den-chromium.test.js`
+(работният ден по-горе).
+
+**EN:** **Full working check: notifications really no longer block buttons; tests no longer break
+over time.** The database version is not raised; nothing in the data changes.
+
+- **Fix: notifications and the buttons under them.** The v2.4.69 protection made the toast itself
+  click-through, but the click then fell into the toast container, which caught it. In the real
+  window the warning at the top centre covered "+ New book" and the circulation desk buttons, and
+  they did not respond until it disappeared. Now both containers let clicks through everywhere
+  except on **×**. Found during a full working day in real Chromium (jsdom has no layout).
+- **How it was checked.** A circulation working day in real Chromium from an empty database,
+  through the screen only (first run, readers, books, loans by barcode and number, holds,
+  overdue renewal, annual fee, payment and receipt, batch and KDBF, deaccession act, Daily log,
+  reports and printing, backup, data check, audit trail, all 24 sections) — 16/16 steps, kept as
+  a permanent test; phone inventory with a fake camera; 16 real-Chromium print checks that had
+  been skipped because they could not find Chromium — all pass; the whole suite under a fake clock
+  (libfaketime) on future dates up to 29.02.2028.
+- **Tests no longer break over time.** 22 test files depended on today's date: due dates
+  and lateness hitting holidays, dates such as 14 March of the current year (in the future in
+  January–March, rightly refused by the program), acts from 2026 that are in a closed year in
+  2027, "1 ден" vs "дни". Without the fix CI would have gone red around Christmas and almost
+  continuously in January–March 2027, blocking every release. No program bug was found — in
+  every case the program behaved correctly. Also: a test that would have passed from 2027 without
+  checking anything now checks; a start-up race in two dashboard tests is removed.
+
+**Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia + the
+catalog page); `node --test` — **@@N@@ tests, 0 failed** (before: @@P@@); the whole suite also on
+30.12.2026, 04.01.2027, 03.03.2027, 22.09.2027 and 29.02.2028 — @@S@@. New tests:
+`test/izvestiya-v2486.test.js`, `test/raboten-den-chromium.test.js`.
+
 ## v2.4.85
 
 **BG:** **Онлайн каталог: отделен клон `katalog`, по-рядко и по-чисто публикуване.** Само за
