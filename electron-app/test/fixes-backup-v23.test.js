@@ -268,7 +268,13 @@ test('autoStatus брои некриптираните дневни копия, 
   const s = setup();
   try {
     fs.mkdirSync(s.backupsDir, { recursive: true });
-    ['auto-2026-07-01.db', 'auto-2026-07-02.db'].forEach(f => fs.copyFileSync(s.dbPath, path.join(s.backupsDir, f)));
+    /* Дните са спрямо ДНЕС, не заковани (дотук 01 и 02.07.2026): правилото за
+       пазене държи дневните копия 30 дни, а след това от един месец остава едно.
+       От около Нова година двете юлски копия се сливаха в едно и тестът падаше,
+       без програмата да е сгрешила. */
+    const { localToday } = require('./helpers/local-day');
+    const dayBefore = (n) => { const d = new Date(localToday() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
+    [dayBefore(2), dayBefore(1)].forEach(d => fs.copyFileSync(s.dbPath, path.join(s.backupsDir, 'auto-' + d + '.db')));
     s.handlers.autoBackupIfNeeded(); // и днешното — също в чист текст
     const st = (await s.ipcMain.invoke('backup:autoStatus')).data;
     assert.equal(st.plainDailyCount, 3,
