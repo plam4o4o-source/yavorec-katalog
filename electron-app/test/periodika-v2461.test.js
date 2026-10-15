@@ -502,7 +502,17 @@ test.before(async () => {
   await h.window.loadSettingsCache();
   view.trud = (await h.api.periodicals.create({ title: 'Труд', freq: 'ежедневно', issn: '1313-7719', department: 'периодика' })).data;
   for (let i = 1; i <= 4; i++) await h.api.periodicalIssues.add({ periodical_id: view.trud, issue_no: 'м' + i, date: YY1 + '-04-0' + i, price: 0.85 });
-  for (let i = 1; i <= 2; i++) await h.api.periodicalIssues.add({ periodical_id: view.trud, issue_no: 'т' + i, date: YY + '-02-0' + i, price: 0.85 });
+  /* Тазгодишните броеве — 01 и 02.02, но не по-късно от днес. През януари
+     02.02 е в БЪДЕЩЕТО: програмата правилно отказва брой с бъдеща дата на
+     постъпване, а отказът тук не се проверяваше — кардексът оставаше без нито
+     един брой за YY и се отваряше на YY1 (4 реда вместо 2), а редът за YY с
+     бутона „Инвентирай годишния комплект“ (находка 22) липсваше. На 1 януари
+     двата броя са от днес, с различни номера. Вписването вече се и проверява. */
+  for (let i = 1; i <= 2; i++) {
+    const d = YY + '-02-0' + i;
+    const r = await h.api.periodicalIssues.add({ periodical_id: view.trud, issue_no: 'т' + i, date: d < T ? d : T, price: 0.85 });
+    assert.ok(r && r.ok, 'тазгодишен брой т' + i + ': ' + (r && r.error));
+  }
 });
 test.after(() => { if (h) h.stop(); });
 

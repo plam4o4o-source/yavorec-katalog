@@ -43,13 +43,16 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const { APP_DIR, freshDb, fakeIpcMain, runDep, cleanupTmpDirs } = require('./helpers/audit-fixtures');
 const { BOOK_SELECT, normalizeScanCode, pctRequired, naturalLoss } = require('./helpers/prod-values');
+const { localToday } = require('./helpers/local-day');
 
 test.after(cleanupTmpDirs);
 
 /* Всички засегнати модули върху ЕДНА база. Нарочно заедно: смисълът на кръга е,
    че ЕДНО действие (съставянето на акта) трябва да се види в седем други места —
    проверка само върху deaccession-acts би минала и ако витрината не се чисти. */
-function setup(prefix) {
+/* `over` подменя части от deps — например истинския часовник вместо
+   фиксирания 04.08.2026 (виж теста „сканиран, после отчислен“). */
+function setup(prefix, over) {
   const { db } = freshDb(prefix || 'inv-otch-v2457-');
   const audit = [];
   const deps = {
@@ -60,6 +63,7 @@ function setup(prefix) {
     ftsQuery: (q) => q, cnSortKey: () => '', diffFields: () => [],
     scheduleCatalogWrite: () => {}, flushCatalogWrite: () => ({ written: true })
   };
+  Object.assign(deps, over || {});
   const ipcMain = fakeIpcMain();
   for (const m of ['deaccession-acts', 'shelves', 'links', 'analytics',
     'inventory-sessions', 'authorities', 'books']) {
@@ -383,19 +387,28 @@ test('„сканиран, после отчислен“: екранът и п�
      за изпълнена („проверени 1 от 1“), а подписаният протокол за същата сесия
      гласеше „проверени 0“. Числото на екрана е това, по което библиотекарката
      решава дали да продължи; протоколът е това, което се подписва. */
-  const { db, ipcMain } = setup();
-  const y = String(new Date().getFullYear());
+  /* ДВА ЧАСОВНИКА В ЕДИН ТЕСТ. inventorySessions:requirement брои сканиранията
+     за ТЕКУЩАТА година по истинския часовник (new Date()), а актът отказва дата
+     след deps.today() — във файла тя е фиксирана на 04.08.2026. Дотук сесията и
+     актът бяха в истинската година и от 2027 г. актът (01.04.2027) падаше като
+     „в бъдещето“ спрямо 04.08.2026. Затова тук deps.today е истинският ден, а
+     сесията (10.03) и актът (01.04) са от тази година, но не по-късно от днес —
+     на 1 януари и двете са днес: сканиран и отчислен в един ден. */
+  const T = localToday();
+  const { db, ipcMain } = setup(undefined, { today: () => T, yearOf: (d) => (d || T).slice(0, 4) });
+  const y = T.slice(0, 4);
+  const upTo = (d) => (d > T ? T : d);
   const scannedThenOff = addBook(db, { inv_number: 1, title: 'Сканирана и отчислена' });
   const stays = addBook(db, { inv_number: 2, title: 'Остава във фонда' });
 
   const sessionId = ok(ipcMain.invoke('inventorySessions:start',
-    { date: y + '-03-10', scope: 'по чл. 40, т. 2', committee1: 'А', committee2: 'Б', committee3: 'В' }), 'сесия');
+    { date: upTo(y + '-03-10'), scope: 'по чл. 40, т. 2', committee1: 'А', committee2: 'Б', committee3: 'В' }), 'сесия');
   ok(ipcMain.invoke('inventorySessions:scan', { sessionId, code: '1' }), 'сканиране 1');
   ok(ipcMain.invoke('inventorySessions:scan', { sessionId, code: '2' }), 'сканиране 2');
   assert.equal(ok(ipcMain.invoke('inventorySessions:requirement'), 'преди акта').scannedYear, 2,
     'преди акта и двете се броят');
 
-  ok(ipcMain.invoke('deaccessionActs:create', { act: ACT({ date: y + '-04-01' }), bookIds: [scannedThenOff] }), 'акт');
+  ok(ipcMain.invoke('deaccessionActs:create', { act: ACT({ date: upTo(y + '-04-01') }), bookIds: [scannedThenOff] }), 'акт');
 
   const req = ok(ipcMain.invoke('inventorySessions:requirement'), 'екранът');
   const closed = ok(ipcMain.invoke('inventorySessions:close', { sessionId, mode: 'representative' }), 'протоколът');

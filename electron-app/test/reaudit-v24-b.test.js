@@ -32,6 +32,7 @@ const registerDeaccessionActsHandlers = require('../handlers/deaccession-acts');
 const registerBackupHandlers = require('../handlers/backup');
 const { BOOK_SELECT, normalizeScanCode, pctRequired, naturalLoss } = require('./helpers/prod-values.js');
 const { startMainApp } = require('./helpers/main-app.js');
+const { localToday } = require('./helpers/local-day');
 
 const tmpDirs = [];
 function mkTmpDir(prefixPath) {
@@ -188,10 +189,14 @@ function insertBook(db, overrides = {}) {
     .run(b.inv_number, b.title, b.status, b.price).lastInsertRowid;
 }
 /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
-   отказва по чл. 35 — затова всеки утвърден акт в този файл носи комисия. */
+   отказва по чл. 35 — затова всеки утвърден акт в този файл носи комисия.
+   Актът е от ДНЕС, не от '2026-08-21': от 2027 г. нататък 2026 е ПРИКЛЮЧЕНА
+   година и анулирането на акт от нея иска изрично потвърждение
+   (confirmClosedYear, v2.4.61) — анулирането отказваше без грешка в програмата.
+   Книгите тук са без дата на вписване, затова днешният акт е винаги допустим. */
 function actPayload(overrides = {}) {
   return Object.assign({
-    no: 1, date: '2026-08-21', order_no: null, reason_code: 1, reason_text: 'амортизация',
+    no: 1, date: localToday(), order_no: null, reason_code: 1, reason_text: 'амортизация',
     disposal: null, attach: null, committee1: 'А', committee2: null, committee3: 'В'
   }, overrides);
 }

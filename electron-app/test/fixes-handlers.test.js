@@ -586,11 +586,19 @@ test('стара база (сол по стария образец) продъл
    книгата се водеше свободна, макар да е у читателя.
    =========================================================================== */
 
+/* Актовете в двата теста долу са от ДНЕС, а не от '2026-06-01': от 2027 г.
+   нататък 2026 е ПРИКЛЮЧЕНА година и анулирането на акт от нея иска изрично
+   потвърждение (confirmClosedYear, v2.4.61) — анулирането отказваше без грешка
+   в програмата. Тук се проверяват заеманията, не приключената година. Заемането
+   е отпреди 30 дни — винаги преди датата на акта. */
+const { localToday, localDayOff } = require('./helpers/local-day');
+
 test('анулирането на акт отваря обратно заеманията, закрити принудително от него', async () => {
   const { db, ipcMain } = setupDeacc();
+  const actDay = localToday();
   const bookId = db.prepare("INSERT INTO books (inv_number, title, status) VALUES (31, 'Невърната', 'наличен')").run().lastInsertRowid;
   const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
-  const loanId = lendBook(db, { bookId, readerId, dateOut: '2025-11-01' });
+  const loanId = lendBook(db, { bookId, readerId, dateOut: localDayOff(30) });
 
   /* v2.4.61: причината е т. 5 („повредени или невърнати от ползватели“), а не
      т. 6 — текстът тук винаги е описвал точно нея, но кодът беше на липсите от
@@ -598,14 +606,14 @@ test('анулирането на акт отваря обратно заема�
      приема само по т. 5; по всяка друга причина се отказва, защото комисията не
      може да опише документ, който не е виждала. */
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 1, date: '2026-06-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели', committee1: 'А', committee3: 'В' },
+    act: { no: 1, date: actDay, reason_code: 5, reason_text: 'повредени или невърнати от ползватели', committee1: 'А', committee3: 'В' },
     bookIds: [bookId]
   });
   assert.equal(created.ok, true, created.error);
-  assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId).date_in, '2026-06-01');
+  assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId).date_in, actDay);
 
   const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
-  assert.equal(revoked.ok, true);
+  assert.equal(revoked.ok, true, revoked.error);
   const loan = db.prepare('SELECT date_in FROM loans WHERE id=?').get(loanId);
   assert.equal(loan.date_in, null, 'заемът трябва да е отворен обратно — книгата реално е у читателя');
   assert.equal(db.prepare('SELECT status FROM books WHERE id=?').get(bookId).status, 'наличен');
@@ -613,16 +621,22 @@ test('анулирането на акт отваря обратно заема�
 
 test('анулирането не отваря заемане, което е било върнато нормално в деня на акта', async () => {
   const { db, ipcMain } = setupDeacc();
+  const actDay = localToday();
   const bookId = db.prepare("INSERT INTO books (inv_number, title, status) VALUES (32, 'Върната и отчислена', 'наличен')").run().lastInsertRowid;
   const readerId = db.prepare("INSERT INTO readers (name) VALUES ('Читател')").run().lastInsertRowid;
   // Читателят връща повредената книга, същия ден тя се отчислява с акт.
-  const returnedLoan = lendBook(db, { bookId, readerId, dateOut: '2026-05-01', dateIn: '2026-06-01' });
+  const returnedLoan = lendBook(db, { bookId, readerId, dateOut: localDayOff(30), dateIn: actDay });
 
   const created = await ipcMain.invoke('deaccessionActs:create', {
-    act: { no: 2, date: '2026-06-01', reason_code: 3, reason_text: 'износени', committee1: 'А', committee3: 'В' }, bookIds: [bookId]
+    act: { no: 2, date: actDay, reason_code: 3, reason_text: 'износени', committee1: 'А', committee3: 'В' }, bookIds: [bookId]
   });
-  await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
-  assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(returnedLoan).date_in, '2026-06-01',
+  assert.equal(created.ok, true, created.error);
+  /* Анулирането ТРЯБВА да е минало — иначе твърдението долу минава празно: при
+     акт от приключена година анулирането отказваше и заемането си оставаше
+     затворено не защото програмата го пази, а защото нищо не беше пипнато. */
+  const revoked = await ipcMain.invoke('deaccessionActs:revoke', created.data, { reason: 'сгрешен акт (тест)' });
+  assert.equal(revoked.ok, true, revoked.error);
+  assert.equal(db.prepare('SELECT date_in FROM loans WHERE id=?').get(returnedLoan).date_in, actDay,
     'нормално върнат документ не бива да се „отзаема“ обратно');
 });
 

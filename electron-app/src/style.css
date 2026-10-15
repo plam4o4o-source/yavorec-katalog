@@ -1344,6 +1344,12 @@ table.dnvPrint th{font-size:7pt; line-height:1.15}
 body:has(#printPreview.on) #toasts, body:has(.veil.on) #toasts{bottom:calc(3vh + 84px)}
 .toast{pointer-events:none}
 .toast .tx{pointer-events:auto}
+/* И САМИТЕ КОНТЕЙНЕРИ (v2.4.86). Без това защитата по-горе не стигаше до бутона:
+   щракване върху известие с pointer-events:none пада към родителя му, а #toasts и
+   #toastsTop са кутии с размера на известията — и хващаха мишката те. В истински
+   Chromium предупреждението горе в центъра покриваше „+ Нова книга“ и бутоните
+   на гишето, докато не изчезне (jsdom няма подредба и не можеше да го види). */
+#toasts, #toastsTop{pointer-events:none}
 #toastsTop{
   position:fixed; top:78px; left:50%; transform:translateX(-50%);
   display:flex; flex-direction:column; gap:10px; z-index:100; max-width:560px; width:max-content;

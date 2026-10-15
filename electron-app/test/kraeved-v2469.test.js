@@ -149,8 +149,13 @@ test('Л2: брой от края на декември, получен през
   await h.settle();
   const sel = h.$('#issueF [name=volume_year]');
   assert.ok(sel, 'формата за брой има избор „Годишен комплект“');
+  /* 03.01 и 04.01.Y, но не по-късно от днес: на 1–3 януари те са в БЪДЕЩЕТО и
+     програмата правилно отказва брой с бъдеща дата на постъпване. Годината на
+     датата и така е Y — а тестът пази точно избора на ГОДИНАТА на комплекта. */
+  const d250 = Y + '-01-03' < T ? Y + '-01-03' : T;
+  const d1 = Y + '-01-04' < T ? Y + '-01-04' : T;
   // Датата се сменя на 03.01 — изборът следва годината ѝ, миналата е на една стрелка.
-  h.type('#issueF [name=date]', Y + '-01-03');
+  h.type('#issueF [name=date]', d250);
   assert.equal(sel.value, Y, 'по подразбиране — годината на датата');
   assert.ok(Array.from(sel.options).some(o => o.value === Y1), 'миналата година е в избора');
   h.type('#issueF [name=volume_year]', Y1);
@@ -159,12 +164,12 @@ test('Л2: брой от края на декември, получен през
   await h.clickButton('Добави брой', '#modal');
   await h.settle();
   const row = q('SELECT date, volume_year FROM periodical_issues WHERE periodical_id = ? AND issue_no = ?', pid, '250');
-  assert.equal(row.date, Y + '-01-03', 'датата на постъпване остава истинската');
+  assert.equal(row.date, d250, 'датата на постъпване остава истинската');
   assert.equal(String(row.volume_year), Y1, 'годината на комплекта — избраната');
   // Обикновеният брой без пипане на избора — в годината на датата.
   await h.window.openPeriodical(pid, Y);
   await h.waitFor(() => h.$('#issueF'), 'кардексът');
-  h.type('#issueF [name=date]', Y + '-01-04');
+  h.type('#issueF [name=date]', d1);
   h.type('#issueF [name=issue_no]', '1');
   h.type('#issueF [name=price]', '1,30');
   await h.clickButton('Добави брой', '#modal');
@@ -186,7 +191,11 @@ test('Л2: брой от края на декември, получен през
 
 test('Л2: година на комплекта на повече от година от датата се отказва', async () => {
   const pid = ok(await h.api.periodicals.create({ title: 'Седмичник Л2', freq: 'седмично' }), 'издание');
-  const err = bad(await h.api.periodicalIssues.add({ periodical_id: pid, issue_no: '5', date: Y + '-02-01', volume_year: String(Number(Y) - 3) }), 'три години назад');
+  /* Датата е 01.02.Y, но не по-късно от днес: през януари 01.02 е в бъдещето и
+     пръв се обаждаше отказът за бъдеща дата на постъпване, а не проверката на
+     годината на комплекта, която този тест пази. Годината на датата и така е Y. */
+  const d = Y + '-02-01' < T ? Y + '-02-01' : T;
+  const err = bad(await h.api.periodicalIssues.add({ periodical_id: pid, issue_no: '5', date: d, volume_year: String(Number(Y) - 3) }), 'три години назад');
   assert.match(err, /не може да е от комплекта/);
 });
 

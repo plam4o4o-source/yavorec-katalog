@@ -437,7 +437,14 @@ test('Д16: търсачката за връзки намира записа в 
 test('Д18: текущата година не е „приключен регистър“; „2,5“ посещения се отказва, а не става 25', async () => {
   const pid = ok(await h.api.periodicals.create({ title: 'Идно Д18', freq: 'месечно' }), 'издание');
   const next = String(Number(Y) + 1);
-  const e1 = bad(await h.api.periodicalVolumes.register({ periodical_id: pid, year: next, register_date: T }), 'комплект за ' + next);
+  /* Датата на вписване е в ТЕКУЩАТА година, но преди 1 декември. През декември
+     програмата правилно приема комплекта за идната година (абонаментът се плаща
+     и получава тогава — долната граница е 1.12 на предходната година, виж
+     minRegister в handlers/periodicals.js), тоест с register_date: T тестът
+     падаше на 30.12 с „прието е, а не биваше“. Твърдението е за съобщението
+     при отказ от ОТВОРЕНИЯ регистър на текущата година — 30.11 е в него. */
+  const regDate = T < Y + '-12-01' ? T : Y + '-11-30';
+  const e1 = bad(await h.api.periodicalVolumes.register({ periodical_id: pid, year: next, register_date: regDate }), 'комплект за ' + next);
   assert.match(e1, new RegExp('КДБФ за ' + Y + ' г\\., а комплектът за ' + next));
   assert.doesNotMatch(e1, /приключен/, 'регистърът за текущата година е отворен');
   const e2 = bad(await h.api.periodicalVolumes.register({ periodical_id: pid, year: Y, register_date: Y1 + '-06-01', price: 3 }), 'минала година');

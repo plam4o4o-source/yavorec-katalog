@@ -59,6 +59,18 @@ let h;                 // харнесът — едно приложение и 
 const T = E.today();
 const Y = T.slice(0, 4);
 const ids = {};        // каквото един тест създава и следващият ползва
+/* ФИКСТУРИТЕ НЕ БИВА ДА СА В БЪДЕЩЕТО. Партидите, документите, заеманията и
+   актите стоят в ТЕКУЩАТА година (КДБФ и справките се печатат по години), но
+   дата като 14.03 през януари още не е настъпила — и програмата правилно
+   отказва партида, заемане или акт с бъдеща дата („… е в бъдещето“). Тогава
+   „0. подготовка“ падаше и след нея всички разпечатки. Затова всяка дата е
+   „ДД.ММ от тази година, но не по-късно от днес“: редът между тях се пази
+   (партида ≤ вписване ≤ акт), а на 1 януари всички стават днес. */
+const D = (md) => { const d = Y + '-' + md; return d > T ? T : d; };
+/* Просроченото заемане (за напомнителните писма) трябва да е с падеж СТРОГО
+   преди днес — на 1 – 2 януари това значи миналата година. Срокът си остава 14 дни. */
+const OVER_DUE = Y + '-02-03' < E.addDays(T, -14) ? Y + '-02-03' : E.addDays(T, -14);
+const OVER_OUT = E.addDays(OVER_DUE, -14);
 
 test.before(async () => { h = await E.bootApp(); });
 test.after(() => {
@@ -101,12 +113,12 @@ test('0. подготовка: партиди, фонд, читател, зае�
 
   // Партида с фактура (чл. 14) + три документа по нея.
   ids.acq = ok(await h.api.acquisitions.create({
-    no: 1, date: Y + '-03-14', how: 'закупуване', from_source: 'Книжарница „Хеликон“ ЕООД',
-    doc_type: 'фактура', doc_no: '0000012345', doc_date: Y + '-03-12', total_count: 3, sum: '75.50'
+    no: 1, date: D('03-14'), how: 'закупуване', from_source: 'Книжарница „Хеликон“ ЕООД',
+    doc_type: 'фактура', doc_no: '0000012345', doc_date: D('03-12'), total_count: 3, sum: '75.50'
   }), 'партида с фактура');
   const mk = async (inv, title, price, extra) => {
     const d = ok(await h.api.books.create(Object.assign({
-      inv_number: inv, title, author: 'Авторов, А.', register_date: Y + '-03-14', price,
+      inv_number: inv, title, author: 'Авторов, А.', register_date: D('03-14'), price,
       acquisition_id: ids.acq, department: 'Заемна', status: 'наличен', year: 2020,
       publisher: 'Изд. Проба', city: 'София', udk: '886.7-31', author_mark: 'А 22'
     }, extra || {})), 'документ инв. № ' + inv);
@@ -120,21 +132,21 @@ test('0. подготовка: партиди, фонд, читател, зае�
   // Дарение (чл. 6, ал. 5) и придобиване без първичен документ (чл. 3, ал. 2).
   const committee = { committee1: 'Мария Иванова', committee2: 'Петър Петров', committee3: 'Елена Георгиева' };
   ids.acqDon = ok(await h.api.acquisitions.create(Object.assign({
-    no: 2, date: Y + '-04-02', how: 'дарение', from_source: 'Стефан Дарителов',
+    no: 2, date: D('04-02'), how: 'дарение', from_source: 'Стефан Дарителов',
     donor_address: 'гр. Габрово, ул. „Априловска“ 12', doc_type: 'договор за дарение',
-    doc_no: '3', doc_date: Y + '-04-01', total_count: 1, sum: '12'
+    doc_no: '3', doc_date: D('04-01'), total_count: 1, sum: '12'
   }, committee)), 'партида-дарение');
   ids.acqNoDoc = ok(await h.api.acquisitions.create(Object.assign({
-    no: 3, date: Y + '-05-06', how: 'дарение', from_source: 'анонимен дарител',
+    no: 3, date: D('05-06'), how: 'дарение', from_source: 'анонимен дарител',
     doc_type: 'без документ', total_count: 1
   }, committee)), 'партида без документ');
 
   // Читател + две заемания: едно просрочено (за писмата), едно текущо (за разписката).
   ids.reader = ok(await h.api.readers.create({
     name: 'Иван Читателов', card_no: '0042', category: 'възрастен', address: 'с. Яворец, ул. „Първа“ 5',
-    phone: '0888123456', birth_date: '1980-05-05', gdpr_consent: 1, registered_at: Y + '-01-15', status: 'активен'
+    phone: '0888123456', birth_date: '1980-05-05', gdpr_consent: 1, registered_at: OVER_OUT < D('01-15') ? OVER_OUT : D('01-15'), status: 'активен'
   }), 'читател');
-  ok(await h.api.loans.checkout({ reader_id: ids.reader, book_id: ids.b3, date_out: Y + '-01-20', date_due: Y + '-02-03' }), 'просрочено заемане');
+  ok(await h.api.loans.checkout({ reader_id: ids.reader, book_id: ids.b3, date_out: OVER_OUT, date_due: OVER_DUE }), 'просрочено заемане');
   ok(await h.api.loans.checkout({ reader_id: ids.reader, book_id: ids.b4, date_out: T }), 'текущо заемане');
   ok(await h.api.account.charge({ reader_id: ids.reader, type: 'годишна такса', amount: 5, note: 'за ' + Y + ' г.' }), 'начисление');
 
@@ -168,7 +180,7 @@ test('0. подготовка: партиди, фонд, читател, зае�
 
   // Акт за отчисляване по чл. 30, т. 6.
   ids.act = ok(await h.api.deaccessionActs.create({
-    act: Object.assign({ no: 1, date: Y + '-06-20', order_no: '12', reason_code: 6,
+    act: Object.assign({ no: 1, date: D('06-20'), order_no: '12', reason_code: 6,
       reason_text: 'констатирани като липсващи при инвентаризация',
       disposal: 'предадени за вторични суровини', attach: 'протокол от инвентаризация' }, committee),
     bookIds: [ids.b1]
@@ -435,7 +447,7 @@ test('16. Етикети — фонд (всички и по диапазон) и
      е извън фонда. */
   ok(await h.api.deaccessionActs.create({
     act: {
-      no: 2, date: Y + '-07-01', reason_code: 5, reason_text: 'повредени или невърнати от ползватели',
+      no: 2, date: D('07-01'), reason_code: 5, reason_text: 'повредени или невърнати от ползватели',
       disposal: 'унищожени', committee1: 'Мария Иванова', committee2: 'Петър Петров', committee3: 'Елена Георгиева'
     },
     bookIds: [ids.b3]

@@ -22,6 +22,26 @@ const T = E.today();
 const Y = T.slice(0, 4);
 const Y1 = String(Number(Y) - 1);
 const YN = String(Number(Y) + 1);
+/* ДАТИТЕ НА БРОЕВЕТЕ СЕ СМЯТАТ ОТ ДНЕС (времева бомба в сценария).
+   Дотук бр. 1 и 2 на „Читалище“ стояха на 15.01.Y и 14.02.Y, бр. 3 — на
+   12.03.Y, бюлетинът — на 05.05.Y. През януари–март тези дати са в БЪДЕЩЕТО и
+   програмата правилно ги отказва („Датата на постъпване … е в бъдещето“), а
+   до 14.03 месечникът и не закъснява — т. 3 и 4 обаче проверяват точно
+   закъснелия брой на таблото. Затова:
+   • бр. 1 и 2 са на 15-о число три и два месеца назад, тоест следващият
+     очакван (14-о число на миналия месец) е винаги минал — „Читалище“ е
+     закъсняло всеки ден от годината. През януари–март поне бр. 1 е постъпил
+     още през Y1; той се вписва за КОМПЛЕКТА за Y (програмата допуска година
+     разлика — „брой за следващата година“), така че комплектът „Читалище, Y“
+     с 2 броя, който сценарият инвентира, е същият.
+   • останалите дати в Y остават каквито бяха, но не по-късно от днес. */
+const minD = (a, b) => (a < b ? a : b);
+const monthDay = (back, day) => new Date(Date.UTC(Number(Y), Number(T.slice(5, 7)) - 1 - back, day)).toISOString().slice(0, 10);
+const CH1 = monthDay(3, 15);      // бр. 1 на „Читалище“ (при 15.04 — 15.01.Y, както беше)
+const CH2 = monthDay(2, 14);      // бр. 2
+const CH_NEXT = monthDay(1, 14);  // следващият очакван (месечно) — винаги преди днес
+/* Надписът на реда в кардекса: брой, постъпил в друга година, носи „(компл. Y)“. */
+const chRowDate = (d) => E.bgDate(d) + (d.slice(0, 4) !== Y ? ' (компл. ' + Y + ')' : '');
 const ids = {};
 const findings = [];
 
@@ -225,13 +245,15 @@ test('3. кардекс — вписване на броеве, невалидн
   assert.equal(h.$('#issueF [name=date]').value, T, 'датата на постъпване е днес');
 
   // Без номер на брой.
-  let ts = await addIssueViaForm('', Y + '-01-15', '3.50');
+  let ts = await addIssueViaForm('', CH1, '3.50');
   assert.ok(ts.some(t => t.type === 'err' && /Въведете номер на брой/.test(t.msg)), JSON.stringify(ts));
   assert.equal(q('SELECT COUNT(*) AS n FROM periodical_issues').n, 0);
 
-  // Бр. 1 — 15.01, 3.50 € (цената в лева се преобразува).
+  // Бр. 1 — CH1, 3.50 € (цената в лева се преобразува).
   h.type('#issueF [name=issue_no]', '1');
-  h.type('#issueF [name=date]', Y + '-01-15');
+  h.type('#issueF [name=date]', CH1);
+  // Януари–март: бр. 1 е постъпил през Y1, но е за комплекта за Y (виж CH1 горе).
+  if (CH1.slice(0, 4) !== Y) h.type('#issueF [name=volume_year]', Y);
   h.type('#issueF [data-bgn-for=price]', '6.85');
   assert.equal(h.$('#issueF [name=price]').value, '3.50', 'левовете стават евро');
   let n = h.toasts.length;
@@ -240,12 +262,14 @@ test('3. кардекс — вписване на броеве, невалидн
   assert.ok(ts.some(t => t.msg === 'Брой 1 е вписан в кардекса.' && t.type === 'ok'), JSON.stringify(ts));
   const i1 = q('SELECT * FROM periodical_issues WHERE periodical_id = ?', ids.chit);
   assert.equal(i1.issue_no, '1');
-  assert.equal(i1.date, Y + '-01-15');
+  assert.equal(i1.date, CH1);
+  assert.equal(String(i1.volume_year), Y, 'бр. 1 е в комплекта за ' + Y);
   assert.equal(i1.price, 3.5);
-  assert.equal(lastAudit('Постъпил брой').detail, 'Читалище — бр. 1');
+  assert.equal(lastAudit('Постъпил брой').detail, 'Читалище — бр. 1'
+    + (CH1.slice(0, 4) !== Y ? ' (постъпил на ' + CH1 + ', за комплекта за ' + Y + ' г.)' : ''));
   // Кардексът се пречертава: редът на броя, годината в раздела „Годишни комплекти“.
   await h.waitFor(() => issueRow('1'), 'редът на бр. 1');
-  assert.match(h.text(issueRow('1')), rx('1 15.01.' + Y + ' 3.50 € / 6.85 лв.'));
+  assert.match(h.text(issueRow('1')), rx('1 ' + chRowDate(CH1) + ' 3.50 € / 6.85 лв.'));
   assert.ok(volumeRow(Y), 'годината ' + Y + ' се появява в раздела за комплекти');
   assert.match(h.text(volumeRow(Y)), rx(Y + ' 1 3.50 € / 6.85 лв. не е инвентиран Инвентирай годишния комплект'));
 
@@ -257,25 +281,25 @@ test('3. кардекс — вписване на броеве, невалидн
   assert.equal(badDate.ok, false); assert.match(badDate.error, /невалидна/);
   assert.equal(q('SELECT COUNT(*) AS n FROM periodical_issues').n, 1);
   // Отрицателна цена → отказ.
-  ts = await addIssueViaForm('2', Y + '-02-14', '-1');
+  ts = await addIssueViaForm('2', CH2, '-1');
   assert.ok(ts.some(t => t.type === 'err' && /Цената на броя трябва да е число/.test(t.msg)), JSON.stringify(ts));
   // Нечислова цена и липсващо издание през API.
-  const bad = await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: Y + '-02-14', price: 'abc' });
+  const bad = await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: CH2, price: 'abc', volume_year: Y });
   assert.equal(bad.ok, false); assert.match(bad.error, /число/);
   const noPer = await h.api.periodicalIssues.add({ periodical_id: 99999, issue_no: '2', date: T, price: 1 });
   assert.equal(noPer.ok, false); assert.match(noPer.error, /Изданието не е намерено/);
   // Цена със запетая → 3.50.
-  const comma = ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: Y + '-02-14', price: '3,50' }), 'запетая');
+  const comma = ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: CH2, price: '3,50', volume_year: Y }), 'запетая');
   assert.equal(q('SELECT price FROM periodical_issues WHERE id = ?', comma).price, 3.5);
 
   // Същият брой втори път (сканиран два пъти / второ работно място).
-  const dup = await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: Y + '-02-14', price: '3.50' });
+  const dup = await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '2', date: CH2, price: '3.50', volume_year: Y });
   await soft('НАХОДКА 4: дублиран брой (същият № и дата) се вписва втори път', async () => {
     // Няма проверка за повторение в periodicalIssues:add и няма UNIQUE в
     // схемата. Кардексът брои 3 броя вместо 2, сборът за годината (и оттам
     // предложената цена на годишния комплект в инвентарната книга) е с 3.50 €
     // повече от платеното.
-    assert.equal(dup.ok, false, 'очаква се отказ или предупреждение за повторен бр. 2 от ' + Y + '-02-14');
+    assert.equal(dup.ok, false, 'очаква се отказ или предупреждение за повторен бр. 2 от ' + CH2);
   });
   await openTitle('Читалище');
   const rows2 = Array.from(h.document.querySelectorAll('#modal table.ledger tbody tr')).filter(tr => tr.querySelector('button.dgr') && tr.firstElementChild.textContent.trim() === '2');
@@ -292,7 +316,7 @@ test('3. кардекс — вписване на броеве, невалидн
     await h.click(rows2[1].querySelector('button.dgr'));
     assert.ok(h.toastsSince(n).some(t => t.msg === 'Броят е изтрит.'), JSON.stringify(h.toastsSince(n)));
     assert.equal(q('SELECT COUNT(*) AS n FROM periodical_issues WHERE periodical_id = ?', ids.chit).n, 2);
-    assert.match(lastAudit('Изтрит брой').detail, rx('„Читалище“ — бр. 2 от ' + Y + '-02-14 (' + Y + ' г.), цена 3.50 €'));
+    assert.match(lastAudit('Изтрит брой').detail, rx('„Читалище“ — бр. 2 от ' + CH2 + ' (' + Y + ' г.), цена 3.50 €'));
     assert.doesNotMatch(lastAudit('Изтрит брой').detail, /ВНИМАНИЕ/);
     await h.waitFor(() => issueRow('1') && h.document.querySelectorAll('#modal table.ledger tbody tr button.dgr').length === 2, 'пречертан кардекс');
   }
@@ -301,12 +325,12 @@ test('3. кардекс — вписване на броеве, невалидн
   assert.equal(gone.ok, false);
   assert.match(gone.error, /вече не съществува/);
 
-  // Списъкът: 2 броя, жълта нула за комплекти, следващ очакван брой 14.03 (закъснял).
+  // Списъкът: 2 броя, жълта нула за комплекти, следващ очакван брой CH_NEXT (закъснял).
   await h.clickButton('Затвори', '#modal footer');
   await h.waitFor(() => rowOf('Читалище') && /2/.test(h.text(rowOf('Читалище'))), 'списъкът е опреснен при затваряне');
   await h.settle();
   const r = h.text(rowOf('Читалище'));
-  assert.match(r, rx('Читалище месечно Съюз на народните читалища 0324-0975 периодика 2 0 14.03.' + Y));
+  assert.match(r, rx('Читалище месечно Съюз на народните читалища 0324-0975 периодика 2 0 ' + E.bgDate(CH_NEXT)));
   const badge = rowOf('Читалище').querySelector('td:nth-child(7) .badge.warn');
   assert.ok(badge, 'нула инвентирани комплекта при вписани броеве е жълт знак');
   assert.match(badge.title, /не влиза в КДБФ/);
@@ -315,9 +339,10 @@ test('3. кардекс — вписване на броеве, невалидн
   const list = ok(await h.api.periodicals.list(), 'списък');
   const ch = list.find(p => p.id === ids.chit);
   assert.equal(ch.issue_count, 2);
-  assert.equal(ch.next_expected, Y + '-03-14');
-  const expDays = Math.round((new Date(T) - new Date(Y + '-03-14')) / 864e5);
-  assert.equal(ch.issue_overdue_days, Math.max(0, expDays), 'дните закъснение = днес − 14.03');
+  assert.equal(ch.next_expected, CH_NEXT);
+  const expDays = Math.round((new Date(T) - new Date(CH_NEXT)) / 864e5);
+  assert.ok(expDays > 0, 'фикстурата: следващият брой е очакван преди днес');
+  assert.equal(ch.issue_overdue_days, expDays, 'дните закъснение = днес − ' + CH_NEXT);
   noRendererErrors();
 });
 
@@ -331,7 +356,11 @@ test('4. табло — броят на изданията със закъсня
   assert.match(h.viewText(), /Периодични издания — закъснял\/липсващ брой 1/);
   // „Наука“ (тримесечно) — брой отпреди 150 дни → очакван преди ~60 дни.
   const old = E.addDays(T, -150);
-  ok(await h.api.periodicalIssues.add({ periodical_id: ids.nauka, issue_no: '1', date: old, price: 8 }), 'Наука бр. 1');
+  /* Броят е за комплекта за Y: т. 8 разчита „Наука“ да има брой в Y, за да
+     стигнат отказите до проверката, която всеки ред там търси (иначе пръв се
+     обажда отказът „няма нито един брой за Y“). Януари–май T−150 е в Y1 —
+     програмата допуска година разлика между постъпване и комплект. */
+  ok(await h.api.periodicalIssues.add({ periodical_id: ids.nauka, issue_no: '1', date: old, price: 8, volume_year: Y }), 'Наука бр. 1');
   d = ok(await h.api.dashboard.full(), 'табло');
   assert.equal(d.today.overduePeriodicals, 2);
   const nk = ok(await h.api.periodicals.list(), 'списък').find(p => p.id === ids.nauka);
@@ -466,11 +495,17 @@ test('5. ежедневник — 300+ броя, 31.12/01.01 в различни
   await h.clickButton('Затвори', '#modal footer');
   await h.settle();
   // Списъкът: 302 броя; седмично → следващ очакван 08.01.Y (закъснял).
+  /* Закъснял е от 09.01 нататък. През първите осем дни на януари броят от
+     01.01 още не е закъснял — програмата правилно не го брои, и тогава на
+     таблото остават двете издания от т. 4. Затова очакваното се смята от днес,
+     както дните закъснение на „Читалище“ в т. 3. */
   const tr = ok(await h.api.periodicals.list(), 'list').find(x => x.id === ids.trud);
   assert.equal(tr.issue_count, 302);
   assert.equal(tr.last_issue_date, Y + '-01-01');
   assert.equal(tr.next_expected, Y + '-01-08');
-  assert.equal(ok(await h.api.dashboard.full(), 'табло').today.overduePeriodicals, 3);
+  const trudLate = Math.round((new Date(T) - new Date(Y + '-01-08')) / 864e5);
+  assert.equal(tr.issue_overdue_days, Math.max(0, trudLate), 'дните закъснение = днес − 08.01');
+  assert.equal(ok(await h.api.dashboard.full(), 'табло').today.overduePeriodicals, trudLate > 0 ? 3 : 2);
   noRendererErrors();
 });
 
@@ -505,7 +540,7 @@ test('6. „Инвентирай годишния комплект“ — Чит
   h.type('#volF [name=acq_how]', 'закупуване');
   h.type('#volF [name=acq_doc_type]', 'фактура');
   h.type('#volF [name=acq_doc_no]', 'Ф-2026-17');
-  h.type('#volF [name=acq_doc_date]', Y + '-01-10');
+  h.type('#volF [name=acq_doc_date]', minD(Y + '-01-10', T)); // фактурата — не по-късно от днес (1–9 януари)
   h.type('#volF [name=note]', 'подвързан в 1 том');
   n = h.toasts.length;
   await h.clickButton('Впиши в инвентарната книга', '#modal2 footer');
@@ -748,7 +783,8 @@ test('9. комплект без нито един брой; вписан пре
     assert.ok(rGap.invGap || q("SELECT 1 FROM audit_log WHERE action = 'Прескочени инвентарни номера' AND id > ?", nAudit), 'няма следа за 38 прескочени номера');
   });
   // Комплектът за Y1 на „Труд“: цена по подразбиране = 301 × 0.85.
-  const rT = ok(await h.api.periodicalVolumes.register({ periodical_id: ids.trud, year: Y1, register_date: Y + '-01-05' }), 'Труд ' + Y1);
+  // Вписан през Y — 05.01, а на 1–4 януари днес (не по-късно от днес).
+  const rT = ok(await h.api.periodicalVolumes.register({ periodical_id: ids.trud, year: Y1, register_date: minD(Y + '-01-05', T) }), 'Труд ' + Y1);
   ids.volTrud = rT.book_id;
   assert.equal(rT.inv_number, 41);
   assert.equal(rT.issue_count, 301);
@@ -776,7 +812,8 @@ test('10. брой, добавен/изтрит след инвентиране�
      комплект. Сценарият проверява точно разминаването, затова го вписва изрично
      „само в кардекса“ (екранът пита за същото); отказът е заключен в
      kraeved-v2471.test.js. */
-  ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '3', date: Y + '-03-12', price: 3.5, outside_volume: true }), 'бр. 3');
+  // 12.03.Y, а преди 12 март — днес (брой не може да е постъпил в бъдещето).
+  ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: '3', date: minD(Y + '-03-12', T), price: 3.5, outside_volume: true }), 'бр. 3');
   const p = ok(await h.api.periodicals.get(ids.chit), 'get');
   const v = p.volumes.find(x => String(x.year) === Y);
   assert.equal(v.issue_count, 3, 'живият брой');
@@ -1138,7 +1175,8 @@ test('15. преименуван вид „продължаващо издани
     assert.equal(sug.suggestions.b_type_period, 2, 'очакват се 2 периодични (вчерашното + днешното): ' + JSON.stringify(sug.suggestions));
   });
   // Ново инвентиране → втора категория със старото име.
-  ok(await h.api.periodicalIssues.add({ periodical_id: ids.nered, issue_no: '2', date: Y + '-05-05', price: 0 }), 'брой');
+  // 05.05.Y, а преди 5 май — днес (брой не може да е постъпил в бъдещето).
+  ok(await h.api.periodicalIssues.add({ periodical_id: ids.nered, issue_no: '2', date: minD(Y + '-05-05', T), price: 0 }), 'брой');
   const rv = ok(await h.api.periodicalVolumes.register({ periodical_id: ids.nered, year: Y, price: 0 }), 'бюлетин ' + Y);
   const cats = all("SELECT id, name FROM categories WHERE name IN ('продължаващо издание', 'периодично издание') ORDER BY id");
   await soft('НАХОДКА 20: инвентирането след преименуване създава наново „продължаващо издание“ — фондът излиза с два вида за периодика', async () => {

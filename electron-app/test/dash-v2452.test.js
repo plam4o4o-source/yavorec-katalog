@@ -197,9 +197,21 @@ function upcomingFixture() {
   return { rows, byDay: [{ date: day(0), n: 9 }, { date: day(1), n: 5 }, { date: day(2), n: 2 }] };
 }
 
+/* СТАРТЪТ НА СТРАНИЦАТА НЕ БИВА ДА ПРЕЗАПИШЕ ТАБЛОТО. С празни настройки
+   (`{}`) страницата при зареждане решава, че е нова инсталация, слага
+   #setup и рендира „Настройки“ — по събитието hashchange, което под
+   натоварване (CI, няколко теста наведнъж) идва СЛЕД нашия renderDash() и
+   подменя #view: „липсва картата“ без грешка в таблото. Измерено: при 6
+   паралелни процеса hashchange пристига на 0,6–1,2 s, а settle() чака 40 ms.
+   Затова библиотеката има име (стартът отваря самото табло, без смяна на
+   адреса) и renderDash() се вика едва след като стартовият рендер е готов. */
 async function renderDashDom(data) {
-  const dom = buildDom({ 'dashboard.full': data, 'settings.get': {} });
-  await settle();
+  const dom = buildDom({ 'dashboard.full': data, 'settings.get': { lib_name: 'Тестова библиотека' } });
+  const t0 = Date.now();
+  while (!dom.window.document.querySelector('#view .normCard')) {
+    assert.ok(Date.now() - t0 < 15000, 'стартовият рендер на таблото не завърши');
+    await settle();
+  }
   await dom.window.renderDash();
   await settle();
   return dom.window.document;
@@ -289,7 +301,15 @@ test('изискването по чл. 40 стои горе, казва тем�
   const txt = card.textContent.replace(/\s+/g, ' ');
   assert.match(txt, /0 от 1\s?000 документа/);
   assert.match(txt, /чл\. 40, т\. 2/);
-  assert.match(txt, /Остават \d+ дни до 31 декември/);
+  /* „1 ден“, не „1 дни“: на 30 декември остава един ден и изгледът правилно
+     минава в единствено число — тестът с твърдото „дни“ падаше точно тогава.
+     Числото се сверява с часовника (±1 заради полунощ между рендера и проверката). */
+  const left = /Остават (\d+) (ден|дни) до 31 декември/.exec(txt);
+  assert.ok(left, 'изречението за оставащите дни липсва: ' + txt);
+  assert.equal(left[2], left[1] === '1' ? 'ден' : 'дни', 'числото и думата трябва да се съгласуват');
+  const now = new Date();
+  const expLeft = Math.max(0, Math.ceil((new Date(now.getFullYear(), 11, 31) - now) / 86400000));
+  assert.ok(Math.abs(Number(left[1]) - expLeft) <= 1, `дни до 31 декември: ${left[1]}, очаквани ${expLeft}`);
   assert.match(txt, /на месец, за да бъде изпълнено/);
   assert.ok(card.querySelector('.normBtn'), 'има бутон към самия раздел');
 

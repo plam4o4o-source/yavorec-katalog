@@ -32,6 +32,14 @@ const T = E.today();
 const Y = T.slice(0, 4);
 const Y1 = String(Number(Y) - 1);
 const Y2 = String(Number(Y) - 2);
+/* ДАТИ НА БРОЕВЕ „ПРЕЗ ТАЗИ ГОДИНА“ — НЕ ПО-КЪСНО ОТ ДНЕС. Фикстурите стояха
+   на твърди дати в текущата година (01.07.Y, 10.01.Y, 12.03.Y…). През първите
+   месеци на годината те са в БЪДЕЩЕТО и програмата правилно отказва брой с
+   бъдеща дата на постъпване („Датата на постъпване … е в бъдещето“) — тестът
+   падаше, без грешка в програмата. Датата остава същата, а ако още не е
+   дошла — днешната: пак е в текущата година (на 1 януари всички броеве са от
+   днес, с различни номера). */
+const notAfterToday = (d) => (d < T ? d : T);
 const ids = {};
 
 const ok = (r, what) => { assert.ok(r && r.ok, what + ': ' + (r && r.error)); return r.data; };
@@ -114,7 +122,8 @@ test('В5: „Забележка“ на броя има къде да се въ
     + 'полета: ' + fields.join(', '));
 
   h.type('#issueF [name=issue_no]', '7');
-  h.type('#issueF [name=date]', Y + '-07-01');
+  const d7 = notAfterToday(Y + '-07-01');
+  h.type('#issueF [name=date]', d7);
   h.type('#issueF [name=note]', 'получени два екземпляра');
   await h.clickButton('Добави брой', '#modal');
   await h.settle();
@@ -130,7 +139,7 @@ test('В5: „Забележка“ на броя има къде да се въ
   assert.match(printed, /получени два екземпляра/, 'и тя вече може да бъде попълнена');
 
   // Съветът в отказа при дубликат вече е изпълним.
-  const dup = await h.api.periodicalIssues.add({ periodical_id: ids.edin, issue_no: '7', date: Y + '-07-01' });
+  const dup = await h.api.periodicalIssues.add({ periodical_id: ids.edin, issue_no: '7', date: d7 });
   assert.equal(dup.ok, false);
   assert.match(dup.error, /забележката/, 'отказът продължава да праща към забележката — и тя вече съществува');
   await closeKardex();
@@ -209,7 +218,7 @@ test('Б14: надписът и бутонът под него броят в Е�
 test('Б12: отчисленият годишен комплект НЕ се брои за инвентиран на абонаментния списък', async () => {
   ids.selski = ok(await h.api.periodicals.create({ title: 'Селски вестник', freq: 'месечно' }), 'издание');
   for (let i = 1; i <= 2; i++) {
-    ok(await h.api.periodicalIssues.add({ periodical_id: ids.selski, issue_no: String(i), date: Y + '-0' + i + '-10', price: 3 }), 'брой');
+    ok(await h.api.periodicalIssues.add({ periodical_id: ids.selski, issue_no: String(i), date: notAfterToday(Y + '-0' + i + '-10'), price: 3 }), 'брой');
   }
   const reg = ok(await h.api.periodicalVolumes.register({ periodical_id: ids.selski, year: Y }), 'инвентиране');
   const no = ok(await h.api.deaccessionActs.nextNo(Y), 'следващ № на акт');
@@ -298,7 +307,7 @@ test('Б12: отчисленият годишен комплект САМ вди
 test('Б13: заместващ комплект след отчисляване се вписва от самия екран', async () => {
   ids.chit = ok(await h.api.periodicals.create({ title: 'Читалищен лист', freq: 'месечно' }), 'издание');
   for (let i = 1; i <= 3; i++) {
-    ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: String(i), date: Y + '-0' + i + '-12', price: 2 }), 'брой');
+    ok(await h.api.periodicalIssues.add({ periodical_id: ids.chit, issue_no: String(i), date: notAfterToday(Y + '-0' + i + '-12'), price: 2 }), 'брой');
   }
   const reg = ok(await h.api.periodicalVolumes.register({ periodical_id: ids.chit, year: Y }), 'инвентиране');
   const no = ok(await h.api.deaccessionActs.nextNo(Y), 'следващ №');

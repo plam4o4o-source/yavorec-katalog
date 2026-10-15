@@ -211,7 +211,16 @@ test('4. заемане по баркод на гишето, връщане съ
   assert.equal(all('SELECT 1 FROM loans WHERE book_id = ? AND date_in IS NULL', ids.book1).length, 1);
 
   // Времето минава: срокът е изтекъл преди 10 дни (фикстура — датата се мести в базата).
-  const due = E.addDays(T, -10);
+  /* ФИКСТУРАТА ЗАОБИКАЛЯ ОФИЦИАЛНИТЕ ПРАЗНИЦИ. Програмата вписва празниците в
+     календара (bg-holidays.js) и не брои забава за затворен ден — правилно. На
+     30.12.2026 обаче T−10 обхваща 24–26 декември и забавата излиза 6 дни, а
+     на 04.05.2027 Великден (30.04–03.05) я сваля на 5: пазачът по-долу падаше и
+     повличаше т. 5, 6, 8, 10, 11, 15 и D2, без грешка в програмата. Затова
+     падежът се мести с по ден назад, докато забавата стане поне 7 работни дни;
+     всяка стъпка добавя най-много един ден, тоест излиза точно 7 — в рамката. */
+  let back = 10;
+  while (E.effectiveDaysLate(h.db, E.addDays(T, -back), T) < 7 && back < 30) back++;
+  const due = E.addDays(T, -back);
   h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(due, loan.id);
   const daysLate = E.effectiveDaysLate(h.db, due, T);
   assert.ok(daysLate >= 7 && daysLate <= 10, 'фикстурата очаква 7–10 работни дни забава, има ' + daysLate);
@@ -889,7 +898,14 @@ test('D1. гише: сканирана читателска карта не би
    адресата, темата и бележка „поставете с Ctrl+V“; регистърът се пипа само тогава. */
 test('D2. „Отвори в пощата“ с дълго писмо: текстът в буфера, писмото — отворено', async () => {
   const loan = await checkoutByScan('1001', '101');
-  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(E.addDays(T, -5), loan.id); // първа степен
+  /* Писмото трябва да носи ред за обезщетение — без него се побира в mailto: и
+     пътят през буфера изобщо не се изпитва. На 04.05.2027 T−5 е 29.04, а
+     30.04–04.05 са Великден и 1 май с компенсационния ден: забавата е 0 дни
+     и редът изчезва. Затова падежът се мести назад, докато има поне ден
+     забава; остава под 14 календарни дни — първа степен. */
+  let back = 5;
+  while (E.effectiveDaysLate(h.db, E.addDays(T, -back), T) < 1 && back < 13) back++;
+  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(E.addDays(T, -back), loan.id); // първа степен
   const clip = [];
   Object.defineProperty(h.window.navigator, 'clipboard', { configurable: true, value: { writeText: async (t) => { clip.push(t); } } });
   await h.go('over');

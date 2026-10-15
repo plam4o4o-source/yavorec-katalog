@@ -28,6 +28,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { freshDb, fakeIpcMain, runDep, cleanupTmpDirs, APP_DIR } = require('./helpers/audit-fixtures');
+const { localToday } = require('./helpers/local-day');
 
 const DNEVNIK_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'dnevnik.js'), 'utf8');
 const REPORTS_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'reports.js'), 'utf8');
@@ -172,6 +173,16 @@ test('годишният отчет ползва същото разделяне
    2. Анулиран акт връща и резервациите
    ------------------------------------------------------------------ */
 
+/* АКТОВЕТЕ СА ОТ ТЕКУЩАТА ГОДИНА. Дотук стояха на 01.06.2026 — а от 2027 г.
+   нататък 2026 е ПРИКЛЮЧЕНА година и анулирането на акт от нея иска изрично
+   второ потвърждение (confirmClosedYear, v2.4.61): анулирането тук отказваше,
+   без грешка в програмата. Тези тестове са за резервациите, не за приключената
+   година — затова актът е датиран ДНЕС, а книгите и читателите са вписани на
+   1 януари на същата година (≤ датата на акта, и то на самия 1 януари). */
+const ACT_DAY = localToday();
+const Y = ACT_DAY.slice(0, 4);
+const JAN1 = Y + '-01-01';
+
 function deaccSetup() {
   const { db } = freshDb('inv-docs-2454-');
   const ipc = fakeIpcMain();
@@ -181,7 +192,10 @@ function deaccSetup() {
     run: runDep,
     logAudit: (a, d) => audit.push({ a, d }),
     BOOK_SELECT: 'SELECT b.*, COALESCE(i.quantity,0) AS quantity FROM books b LEFT JOIN inventory i ON i.book_id = b.id',
-    yearOf: (d) => Number(String(d).slice(0, 4)),
+    /* НИЗ, както yearOf в main.js. Тук стоеше Number(...): числото, вързано от
+       better-sqlite3 в колоната deaccession_acts.year (TEXT), се записва като
+       „2026.0“ — и съобщенията излизаха „Акт № 9/2026.0“. Програмата подава низ. */
+    yearOf: (d) => String(d || localToday()).slice(0, 4),
     scheduleCatalogWrite: () => {},
     flushCatalogWrite: () => {},
     normalizeScanCode: (s) => String(s || '').trim()
@@ -191,10 +205,10 @@ function deaccSetup() {
 
 function seedBookWithHold(db, status) {
   const bid = db.prepare(`INSERT INTO books (inv_number, title, author, price, register_date, status, language)
-    VALUES (?, 'Резервирана', 'Автор', 5, '2026-01-01', 'наличен', 'български')`).run(4100).lastInsertRowid;
+    VALUES (?, 'Резервирана', 'Автор', 5, ?, 'наличен', 'български')`).run(4100, JAN1).lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
   const rid = db.prepare(`INSERT INTO readers (name, card_no, category, registered_at)
-    VALUES ('Мария Чакаща', 'K-1', 'възрастен', '2026-01-01')`).run().lastInsertRowid;
+    VALUES ('Мария Чакаща', 'K-1', 'възрастен', ?)`).run(JAN1).lastInsertRowid;
   db.prepare('INSERT INTO holds (book_id, reader_id, status, placed_at) VALUES (?,?,?,datetime(\'now\'))')
     .run(bid, rid, status);
   return { bid, rid };
@@ -216,7 +230,7 @@ test('анулираният акт КАЗВА колко резервации �
     const created = ipc.invoke('deaccessionActs:create', {
       /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
          отказва по чл. 35 — затова актовете в този файл носят комисия. */
-      act: { no: 9, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
+      act: { no: 9, date: ACT_DAY, reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
       bookIds: [bid]
     });
     assert.ok(created.ok, created.error);
@@ -242,10 +256,10 @@ test('анулираният акт КАЗВА колко резервации �
 test('без отказани резервации следата не плаши напразно', () => {
   const { db, ipc, audit } = deaccSetup();
   const bid = db.prepare(`INSERT INTO books (inv_number, title, price, register_date, status, language)
-    VALUES (4200, 'Без резервации', 3, '2026-01-01', 'наличен', 'български')`).run().lastInsertRowid;
+    VALUES (4200, 'Без резервации', 3, ?, 'наличен', 'български')`).run(JAN1).lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
   const c = ipc.invoke('deaccessionActs:create', {
-    act: { no: 11, date: '2026-06-01', reason_code: 1, reason_text: 'амортизация', committee1: 'А', committee3: 'В' }, bookIds: [bid]
+    act: { no: 11, date: ACT_DAY, reason_code: 1, reason_text: 'амортизация', committee1: 'А', committee3: 'В' }, bookIds: [bid]
   });
   const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });
   assert.equal(r.data.droppedHolds, 0);
@@ -258,12 +272,12 @@ test('броят се само резервациите на ТОЗИ акт, н
   const { bid } = seedBookWithHold(db, 'чака');
   // втора резервация на същата книга, отказана РЪЧНО преди акта
   const rid2 = db.prepare(`INSERT INTO readers (name, card_no, category, registered_at)
-    VALUES ('Отказал се', 'K-2', 'възрастен', '2026-01-01')`).run().lastInsertRowid;
+    VALUES ('Отказал се', 'K-2', 'възрастен', ?)`).run(JAN1).lastInsertRowid;
   db.prepare(`INSERT INTO holds (book_id, reader_id, status, placed_at, resolved_at)
     VALUES (?,?, 'отказана', datetime('now'), datetime('now'))`).run(bid, rid2);
 
   const c = ipc.invoke('deaccessionActs:create', {
-    act: { no: 10, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' }, bookIds: [bid]
+    act: { no: 10, date: ACT_DAY, reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' }, bookIds: [bid]
   });
   assert.ok(c.ok, c.error);
   const r = ipc.invoke('deaccessionActs:revoke', c.data, { reason: 'сгрешен акт (тест)' });

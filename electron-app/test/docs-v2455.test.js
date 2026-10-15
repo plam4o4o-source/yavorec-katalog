@@ -39,6 +39,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { freshDb, fakeIpcMain, runDep, cleanupTmpDirs, APP_DIR } = require('./helpers/audit-fixtures');
+const { localToday } = require('./helpers/local-day');
 
 const DNEVNIK_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'dnevnik.js'), 'utf8');
 
@@ -97,6 +98,14 @@ test('свръхширока група получава собствен, по-
    2. Анулиране на акт при РАЗЛИЧНИ id-та на книга и акт
    ------------------------------------------------------------------ */
 
+/* Актът е от ТЕКУЩАТА година (виж същата бележка в docs-v2454.test.js): с
+   твърдо '2026-06-01' от 2027 г. нататък актът е от ПРИКЛЮЧЕНА година и
+   анулирането му иска изрично потвърждение (confirmClosedYear) — тестът падаше
+   на анулирането, а той е за id-тата на книга и акт, не за приключената година.
+   Книгите и читателят са вписани на 1 януари — ≤ датата на акта и на 1 януари. */
+const ACT_DAY = localToday();
+const JAN1 = ACT_DAY.slice(0, 4) + '-01-01';
+
 function deaccSetup() {
   const { db } = freshDb('inv-docs-2455-');
   const ipc = fakeIpcMain();
@@ -106,7 +115,9 @@ function deaccSetup() {
     run: runDep,
     logAudit: (a, d) => audit.push({ a, d }),
     BOOK_SELECT: 'SELECT b.*, COALESCE(i.quantity,0) AS quantity FROM books b LEFT JOIN inventory i ON i.book_id = b.id',
-    yearOf: (d) => Number(String(d).slice(0, 4)),
+    /* НИЗ, както yearOf в main.js: Number(...) се записваше в TEXT колоната
+       deaccession_acts.year като „2026.0“ (better-sqlite3 връзва числото като REAL). */
+    yearOf: (d) => String(d || localToday()).slice(0, 4),
     scheduleCatalogWrite: () => {},
     flushCatalogWrite: () => {},
     normalizeScanCode: (s) => String(s || '').trim()
@@ -116,7 +127,7 @@ function deaccSetup() {
 
 function insertDummyBook(db, n) {
   const bid = db.prepare(`INSERT INTO books (inv_number, title, price, register_date, status, language)
-    VALUES (?, ?, 1, '2026-01-01', 'наличен', 'български')`).run(9000 + n, 'Запълваща ' + n).lastInsertRowid;
+    VALUES (?, ?, 1, ?, 'наличен', 'български')`).run(9000 + n, 'Запълваща ' + n, JAN1).lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
   return bid;
 }
@@ -132,16 +143,16 @@ test('резервацията се отказва правилно дори к�
   const { db, ipc, audit } = deaccSetup();
   for (let i = 1; i <= 5; i++) insertDummyBook(db, i);
   const bid = db.prepare(`INSERT INTO books (inv_number, title, price, register_date, status, language)
-    VALUES (4500, 'Резервирана (различни id-та)', 5, '2026-01-01', 'наличен', 'български')`).run().lastInsertRowid;
+    VALUES (4500, 'Резервирана (различни id-та)', 5, ?, 'наличен', 'български')`).run(JAN1).lastInsertRowid;
   db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)').run(bid);
   const rid = db.prepare(`INSERT INTO readers (name, card_no, category, registered_at)
-    VALUES ('Читателка', 'K-9', 'възрастен', '2026-01-01')`).run().lastInsertRowid;
+    VALUES ('Читателка', 'K-9', 'възрастен', ?)`).run(JAN1).lastInsertRowid;
   db.prepare(`INSERT INTO holds (book_id, reader_id, status, placed_at) VALUES (?,?,'чака',datetime('now'))`).run(bid, rid);
 
   const created = ipc.invoke('deaccessionActs:create', {
     /* v2.4.71 (находка И2): акт без член 1 (библиотекар) и член 3 (счетоводител) вече се
        отказва по чл. 35 — затова актовете в този файл носят комисия. */
-    act: { no: 1, date: '2026-06-01', reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
+    act: { no: 1, date: ACT_DAY, reason_code: 6, reason_text: 'невърнати от ползватели', committee1: 'А', committee3: 'В' },
     bookIds: [bid]
   });
   assert.ok(created.ok, created.error);

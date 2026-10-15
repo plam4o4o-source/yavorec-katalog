@@ -50,6 +50,22 @@ function mkLoan(readerId, bookId, out, due) {
   return Number(h.db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?,?,?,?)')
     .run(readerId, bookId, out, due).lastInsertRowid);
 }
+/* ПАДЕЖИТЕ НА ФИКСТУРИТЕ ЗАОБИКАЛЯТ ОФИЦИАЛНИТЕ ПРАЗНИЦИ. Програмата вписва
+   празниците в календара (bg-holidays.js) и не брои забава за затворен ден —
+   правилно. Тестовете по-долу обаче искат точни суми: „падеж преди 2 дни“ =
+   0,20 €, „преди 4 дни“ = 0,40 €. В празник или ден след празник (30.12,
+   04.01, 03.03, 04.05, 22.09 …) T−2 носи само 1 ден забава и сумите се
+   разминаваха, без грешка в програмата. Затова падежът се търси назад от T−n,
+   докато забавата към днес (огледалото E.effectiveDaysLate) стане n дни; всяка
+   стъпка добавя най-много един ден, тоест излиза точно n и числата остават. */
+function dueLate(n) {
+  let k = n;
+  while (E.effectiveDaysLate(h.db, E.addDays(T, -k), T) < n) {
+    k++;
+    assert.ok(k < n + 30, 'няма падеж с ' + n + ' дни забава към ' + T);
+  }
+  return E.addDays(T, -k);
+}
 /* Отговори на askConfirm (в тестовата среда минава през window.confirm). */
 function answers(...seq) {
   const asked = [];
@@ -118,7 +134,7 @@ test('Ч1 — карта на читател в полето „Връщане�
 test('Ч2 — изтритият ред „забава“ намалява и сумата по заемането: писмото иска само новата забава', async () => {
   const r = mkReader('Мария Опростена', { email: 'maria@example.bg', phone: '0888 1' });
   const b = mkBook();
-  const loan = mkLoan(r.id, b.id, E.addDays(T, -30), E.addDays(T, -2));
+  const loan = mkLoan(r.id, b.id, E.addDays(T, -30), dueLate(2));
   const ext = ok(await h.api.loans.extend({ id: loan }), 'продължение на просрочено');
   assert.equal(ext.fine, 0.2, 'начислени 2 дни × 0,10 €');
   const line = q("SELECT * FROM account_lines WHERE reader_id = ? AND type = 'забава'", r.id);
@@ -137,7 +153,7 @@ test('Ч2 — изтритият ред „забава“ намалява и �
   assert.equal(q('SELECT fine FROM loans WHERE id = ?', loan).fine, 0, 'loans.fine е намалено със същото');
   assert.match(lastAudit('Изтрит ред от сметката').detail, /забавата по заемането на инв\. № \d+ е намалена от 0\.20 € на 0\.00 €/);
   // Времето минава: срокът пак е изтекъл преди 4 дни → нова забава 0,40 €.
-  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(E.addDays(T, -4), loan);
+  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(dueLate(4), loan);
   const letter = ok(await h.api.loans.overdueByReader(), 'писма').find(x => x.reader_id === r.id);
   assert.equal(letter.fine, 0.4, 'писмото по чл. 43 иска 0,40 €, не 0,60 €');
   const rem = ok(await h.api.loans.reminders(), 'напомняния').find(x => x.reader_id === r.id);
@@ -181,19 +197,28 @@ test('Ч4 — забавата тръгва от първия работен д�
 test('Ч4 — затворен ден, обявен след заемането, мести падежа; „Просрочени“ и таблото не го броят', async () => {
   const r = mkReader('Вчерашен Падеж');
   const b = mkBook();
-  const Dy = E.addDays(T, -1);
+  /* Dy е последният ОТВОРЕН ден преди днес, а новият падеж — първият работен
+     ден след него по календара (огледалото E.nextWorkDay). В обикновен ден това
+     е точно T−1 → T. Около официален празник не е: на 04.05.2027 T−1 (03.05)
+     вече е затворен — „обявяването“ му не е нова новина, — а самото T е
+     компенсационен ден, тоест падежът правилно отива на 05.05. Твърдеше се
+     твърдо T и тестът падаше, без грешка в програмата. */
+  let Dy = E.addDays(T, -1);
+  while (q('SELECT 1 FROM calendar_closed WHERE date = ?', Dy)) Dy = E.addDays(Dy, -1);
   const loan = mkLoan(r.id, b.id, E.addDays(T, -15), Dy);
   const before = ok(await h.api.dashboard.full(), 'табло').overdueCount;
   const res = ok(await h.api.calendar.addClosed({ date: Dy, reason: 'празник' }), 'затворен ден');
+  const newDue = E.nextWorkDay(h.db, Dy);
+  assert.ok(newDue >= T, 'фикстурата: новият падеж е днес или по-късно, не ' + newDue);
   assert.equal(res.moved, 1);
-  assert.match(res.message, rx('падежът на 1 отворено заемане е преместен на първия работен ден (' + E.bgDate(Dy) + ' → ' + E.bgDate(T) + ')'));
-  assert.equal(q('SELECT date_due FROM loans WHERE id = ?', loan).date_due, T);
+  assert.match(res.message, rx('падежът на 1 отворено заемане е преместен на първия работен ден (' + E.bgDate(Dy) + ' → ' + E.bgDate(newDue) + ')'));
+  assert.equal(q('SELECT date_due FROM loans WHERE id = ?', loan).date_due, newDue);
   assert.match(lastAudit('Календар').detail, /преместен/);
   assert.ok(!ok(await h.api.loans.overdue(), 'просрочени').some(x => x.id === loan), 'не е в „Просрочени“');
   assert.ok(!ok(await h.api.loans.overdueByReader(), 'писма').some(x => x.reader_id === r.id), 'няма писмо по чл. 43');
   assert.equal(ok(await h.api.dashboard.full(), 'табло').overdueCount, before - 1, 'таблото не го брои');
   ok(await h.api.calendar.removeClosed(Dy), 'махане');
-  assert.equal(q('SELECT date_due FROM loans WHERE id = ?', loan).date_due, T, 'срокът не се скъсява обратно');
+  assert.equal(q('SELECT date_due FROM loans WHERE id = ?', loan).date_due, newDue, 'срокът не се скъсява обратно');
   h.db.prepare('UPDATE loans SET date_in = ? WHERE id = ?').run(T, loan);
 });
 
@@ -205,7 +230,7 @@ test('Ч5 — „Приеми“ на просрочена книга с рез�
   const r = mkReader('Просрочил Резервирана');
   const w = mkReader('Чакащ Читател', { phone: '0888 2' });
   const b = mkBook();
-  const loan = mkLoan(r.id, b.id, E.addDays(T, -20), E.addDays(T, -3));
+  const loan = mkLoan(r.id, b.id, E.addDays(T, -20), dueLate(3));
   ok(await h.api.holds.add({ reader_id: w.id, code: b.code }), 'резервация');
   await desk(r.id);
   const n = h.toasts.length;
@@ -218,9 +243,9 @@ test('Ч5 — „Приеми“ на просрочена книга с рез�
 test('Ч6 и Ч10 — „забава 4 дни“ носи 0,40 €, общото и по-ранното отделно; loans.fine е точно 0.6', async () => {
   const r = mkReader('Продължил Закъснял');
   const b = mkBook();
-  const loan = mkLoan(r.id, b.id, E.addDays(T, -30), E.addDays(T, -2));
+  const loan = mkLoan(r.id, b.id, E.addDays(T, -30), dueLate(2));
   assert.equal(ok(await h.api.loans.extend({ id: loan }), 'продължение').fine, 0.2);
-  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(E.addDays(T, -4), loan);
+  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(dueLate(4), loan);
   const back = await returnByScan(b.code);
   // Видимият текст слага интервал след всеки <b>…</b> — затова „\s*,“.
   assert.match(back.log, new RegExp(rx('Забава 4 дни · обезщетение ' + E.mny(0.4) + ' (начислени сега); общо по заемането '
@@ -232,9 +257,9 @@ test('Ч6 и Ч10 — „забава 4 дни“ носи 0,40 €, общот�
   // Същото по бутона „Приеми“.
   const r2 = mkReader('Приет С Бутон');
   const b2 = mkBook();
-  const loan2 = mkLoan(r2.id, b2.id, E.addDays(T, -30), E.addDays(T, -2));
+  const loan2 = mkLoan(r2.id, b2.id, E.addDays(T, -30), dueLate(2));
   ok(await h.api.loans.extend({ id: loan2 }), 'продължение');
-  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(E.addDays(T, -4), loan2);
+  h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(dueLate(4), loan2);
   await desk(r2.id);
   const n = h.toasts.length;
   await h.window.returnBook(loan2); await h.settle();
