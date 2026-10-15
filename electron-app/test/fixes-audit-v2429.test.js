@@ -251,15 +251,32 @@ test('books:create записва година и страници, подаде
 test('stats:report връща просрочените в момента (openOverdue) и подрежда „Най-търсени“ по заглавие, не по екземпляр', async () => {
   await boot();
   const y = String(new Date().getFullYear());
+  /* ЗАЕМАНИЯТА СА В МИНАЛОТО. Дотук бяха на 05.01 с падеж 05.02 от тази година —
+     на 1 – 4 януари заемането е в бъдещето и програмата правилно го отказва
+     („Датата на заемане … е в бъдещето“), а до 05.02 падежът още не е минал.
+     Сега падежът е 05.02, но не по-късно от вчера, а заемането — 05.01, но не
+     след падежа. „Най-търсени“ брои по година на ЗАЕМАНЕ, а „просрочени в
+     момента“ се връща само в справката за текущата година: на 1 януари в тази
+     година още няма минал ден, затова заеманията са от миналата и
+     „Най-търсени“ се чете от нейната справка — двете твърдения остават същите. */
+  const T = daysAgo(0);
+  const ly = T > y + '-01-01' ? y : String(Number(y) - 1);
+  const upTo = (d, max) => (d > max ? max : d);
+  const due = upTo(ly + '-02-05', daysAgo(1));
+  const out = upTo(ly + '-01-05', due);
   const r1 = await reader({}), r2 = await reader({}), r3 = await reader({});
   const c1 = await book({ title: 'Под игото (2429)', author: 'Вазов' }), c2 = await book({ title: 'Под игото (2429)', author: 'Вазов' });
   const t = await book({ title: 'Тютюн (2429)' });
-  const out = y + '-01-05';
-  await ok('loans:checkout', { reader_id: r1, book_id: c1, date_out: out, date_due: y + '-02-05' });
-  await ok('loans:checkout', { reader_id: r2, book_id: c2, date_out: out, date_due: y + '-02-05' });
-  await ok('loans:checkout', { reader_id: r3, book_id: t, date_out: out, date_due: y + '-02-05' });
+  await ok('loans:checkout', { reader_id: r1, book_id: c1, date_out: out, date_due: due });
+  await ok('loans:checkout', { reader_id: r2, book_id: c2, date_out: out, date_due: due });
+  await ok('loans:checkout', { reader_id: r3, book_id: t, date_out: out, date_due: due });
   const rep = await ok('stats:report', y);
   assert.ok(rep.openOverdue >= 3, 'трите незавършени заемания с минал падеж се броят: ' + rep.openOverdue);
+  if (ly !== y) {
+    // Преди да се смени справката: заеманията от миналата година не влизат в „Най-търсени“ за тази.
+    assert.ok(!rep.topLoans.some(x => x.title === 'Под игото (2429)'), 'заемане от ' + ly + ' попадна в „Най-търсени“ за ' + y);
+    rep.topLoans = (await ok('stats:report', ly)).topLoans;
+  }
   const top = rep.topLoans.find(x => x.title === 'Под игото (2429)');
   assert.ok(top && top.n === 2 && top.author === 'Вазов', 'двата екземпляра се събират в едно заглавие: ' + JSON.stringify(rep.topLoans));
   assert.equal(rep.topLoans.filter(x => x.title === 'Под игото (2429)').length, 1, 'заглавието не се повтаря');

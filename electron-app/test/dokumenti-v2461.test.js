@@ -46,8 +46,13 @@ test.before(async () => {
   })), 'запис на настройките');
   await h.window.loadSettingsCache();
 
+  /* Вписването е 14.03 от тази година, но НЕ по-късно от днес: актът по-долу е
+     с днешна дата, а акт преди вписването на документа програмата правилно
+     отказва („Инв. № … е вписан … на 14.03, а актът е с дата …“) — през
+     януари – март 14.03 още не е настъпил. */
+  const REG = Y + '-03-14' > T ? T : Y + '-03-14';
   const mk = async (inv, title, price) => ok(await h.api.books.create({
-    inv_number: inv, title, author: 'Вазов, Иван', register_date: Y + '-03-14', price,
+    inv_number: inv, title, author: 'Вазов, Иван', register_date: REG, price,
     department: 'за възрастни', status: 'наличен', year: 2020
   }), 'документ инв. № ' + inv);
   ids.b1 = await mk(1000, 'Под игото', 30);
