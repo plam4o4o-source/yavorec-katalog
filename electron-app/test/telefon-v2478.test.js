@@ -683,7 +683,10 @@ test('Един документ под два кода („9“ и „0009“) �
   const inp = d2.getElementById('shotInp');
   Object.defineProperty(inp, 'files', { value: [{ name: 's.jpg' }], configurable: true });
   inp.dispatchEvent(new w2.Event('change'));
-  return tick(30).then(() => {
+  /* Чака се отговорът, не фиксирани 30 ms: под натоварване (няколко пълни
+     поредици наведнъж) разчитането на снимката идва по-късно и #hit още е празно. */
+  const until = async (ok, ms = 3000) => { for (let t = 0; t < ms && !ok(); t += 20) await tick(20); };
+  return until(() => /ISSN/.test(d2.getElementById('hit').textContent)).then(() => {
     assert.equal(d2.getElementById('cnt').textContent, '0');
     assert.match(d2.getElementById('hit').textContent, /е ISSN от корицата/);
   });
