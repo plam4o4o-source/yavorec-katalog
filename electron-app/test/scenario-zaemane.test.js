@@ -16,6 +16,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const E = require('./helpers/e2e-app');
+const { bulgarianHolidays } = require('../bg-holidays');
 
 let h;
 const T = E.today();
@@ -52,8 +53,19 @@ function lastDow(from, wd) { let d = from; while (dow(d) !== wd) d = E.addDays(d
    където т. 12 слага падежи T−3/T−5/T−20, а те в някои дни от седмицата са
    събота или неделя (работните дни тук са пон–пет). */
 const lateDays = (due, inD) => E.effectiveDaysLate(h.db, E.nextWorkDay(h.db, due), inD);
-const W = lastDow(E.addDays(T, -15), 3);   // сряда, поне 15 дни назад
-const S0 = lastDow(E.addDays(T, -40), 6);  // събота, поне 40 дни назад
+/* ФИКСТУРИТЕ ЗАОБИКАЛЯТ ОФИЦИАЛНИТЕ ПРАЗНИЦИ. Програмата вписва празниците
+   в календара (bg-holidays.js) и падежът ги прескача — правилно. Тестът обаче
+   очаква падежа на точно определен ден (S0+14 → понеделник M1 → вторник M1+1).
+   На 15.10.2026 S0 беше 05.09, а M1+1 — 22.09, Денят на Независимостта: падежът
+   излезе 23.09 и седем стъпки паднаха една след друга, без грешка в програмата.
+   Затова S0 и W се отместват с по седмица назад, докато дните, на които стоят
+   твърденията, не са празник. */
+const HOLIDAYS = new Set([-1, 0].flatMap(k => bulgarianHolidays(Number(T.slice(0, 4)) + k)).map(x => x.date));
+const clearOf = (base, offs) => offs.every(k => !HOLIDAYS.has(E.addDays(base, k)));
+let W = lastDow(E.addDays(T, -15), 3);     // сряда, поне 15 дни назад
+while (!clearOf(W, Array.from({ length: 13 }, (_, k) => k))) W = E.addDays(W, -7); // W…W+12: т. 5 брои 7–8 работни дни
+let S0 = lastDow(E.addDays(T, -40), 6);    // събота, поне 40 дни назад
+while (!clearOf(S0, [0, 14, 15, 16, 17, 18])) S0 = E.addDays(S0, -7);
 const M1 = E.addDays(S0, 16);              // понеделникът след S0 + 14 (събота)
 
 /* ---- гише ---- */
