@@ -181,6 +181,10 @@ async function bootApp() {
     let out = '';
     for (const c of node.childNodes) {
       if (c.nodeType === 3) out += c.nodeValue;
+      /* span.pnw (v2.4.87) е само обвивка за подредбата — „7.59 €“ не се къса на
+         два реда. В браузъра не носи интервал; тук също, иначе „(0.10 €“ би
+         излизало „( 0.10 €“. */
+      else if (c.nodeType === 1 && c.classList && c.classList.contains('pnw')) out += textOf(c);
       else if (c.nodeType === 1 && c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') out += ' ' + textOf(c) + ' ';
     }
     return out;

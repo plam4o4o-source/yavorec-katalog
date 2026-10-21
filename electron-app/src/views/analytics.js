@@ -166,7 +166,7 @@ async function printAnalytics() {
           ANL_Q ? 'само съдържащите „' + esc(ANL_Q) + '“' : ''
         ].filter(Boolean).join(', ')} — <b>${rows.length}</b> описания. Това НЕ е пълният списък.`
       : `Пълен списък — всички <b>${rows.length}</b> аналитични описания към ${bg(today())} г.`}</div>
-    ${rows.map(a => `<div style="margin-bottom:8px">
+    ${rows.map(a => `<div class="pentry" style="margin-bottom:8px">
       <b>${esc(a.title)}</b>${a.subtitle ? ' : ' + esc(a.subtitle) : ''}${a.year ? ' (' + esc(a.year) + ')' : ''}
       ${a.is_local ? ' <i>— краеведски</i>' : ''}
       ${a.author ? `<div style="font-size:10.5pt">${esc(a.author)}</div>` : ''}
