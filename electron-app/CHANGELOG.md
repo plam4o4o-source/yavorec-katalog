@@ -45,7 +45,7 @@ for full detail.
 - Наръчникът, 9.3 — бележка за подредбата на листа.
 
 **Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
-Europe/Sofia + страницата на каталога); `node --test` — **@@N@@ теста, 0 неуспешни** (преди: 2548).
+Europe/Sofia + страницата на каталога); `node --test` — **2554 теста, 0 неуспешни** (преди: 2548).
 Нов тест `test/pechat-v2487.test.js`: сумите и номерата (и че текстът, атрибутите, `<style>` и
 `<svg>` не се пипат), че `doPrint` минава през тях, правилата за ред/запис/година, бележката за
 текущата година, подписът на картона за дете, и в Chromium — че в тясна колона всяка сума е на един
@@ -73,7 +73,7 @@ raised; nothing in the data changes.
 - Handbook, 9.3 — a note on sheet layout.
 
 **Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia + the
-catalog page); `node --test` — **@@N@@ tests, 0 failed** (before: 2548). New test
+catalog page); `node --test` — **2554 tests, 0 failed** (before: 2548). New test
 `test/pechat-v2487.test.js`.
 
 ## v2.4.86
