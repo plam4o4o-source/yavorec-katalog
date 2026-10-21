@@ -11,6 +11,71 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.87
+
+**BG:** **Всичко, което се печата — прегледано лист по лист.** Версията на базата не се вдига;
+нищо в данните не се променя.
+
+- **Как беше проверено.** Истинските екрани в Chromium, свързани с истинската програма, с голяма
+  база: 125 документа с дълги заглавия и УДК, 30 читатели, 24 просрочени заемания, акт с 55
+  документа, инвентаризация с 60 липсващи, месец в Дневника, периодика, краезнание. Всяка разпечатка —
+  **35 документа, 76 листа** — беше отпечатана в PDF по пътя на „Запази PDF…“ и проверена
+  автоматично: текст отвъд ръба на листа, застъпен текст, „undefined/null/NaN“, почти празен последен
+  лист. После всеки лист беше прегледан и с очи.
+  - Документите: КДБФ (трите части), инвентарната книга, Дневникът (А и Б), актът за дарение,
+    протоколът без първичен документ, актът за отчисляване (и анулиран), протоколът от
+    инвентаризация, разписката, квитанцията и известието за начисление, читателският картон,
+    картите (една и всички, и на лист), напомнителните писма, МЗС (изходяща и входяща),
+    аналитичното описание, летописът, персоналиите, абонаментният списък и картонът на изданието,
+    етикетите за фонда и сигнатурните (всички и диапазон, на лист Avery L7160) и всичките 6
+    готови справки.
+- **Сумата и номерът не се късат на два реда.** В тясна колона „7.59 € / 14.84 лв.“ се разпадаше
+  на четири реда — „€“ отделно от числото — и всеки ред на инвентарната книга ставаше четири реда
+  висок: 125 вписвания излизаха на **13 листа, сега на 9**. И „№ 1 / 2026“ в заглавие — „2026“
+  сам на втори ред. Поправено на едно място (`doPrint`), за всички документи; текстът на документа
+  е дума по дума същият.
+- **Ред от таблица не се разкъсва между два листа** (инвентарната книга: „11.29 € /“ на единия
+  лист, „лв.“ на другия).
+- **Записът не се разкъсва** в персоналиите, аналитичното описание и летописа — последният ред на
+  запис стоеше сам на следващия лист, до подписите. Годината в летописа не остава сама в дъното.
+- **Читателски картон на дете:** текстът казваше, че подписва родителят, а редът гласеше „Подпис
+  на читателя“. Сега — „Подпис на родителя/настойника“.
+- **Част № 2 на КДБФ и справката за фонда, отпечатани през годината**, казват, че годината не е
+  приключила и числата са към деня на печата („към 31.12.“ по образеца остава).
+- Наръчникът, 9.3 — бележка за подредбата на листа.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **@@N@@ теста, 0 неуспешни** (преди: 2548).
+Нов тест `test/pechat-v2487.test.js`: сумите и номерата (и че текстът, атрибутите, `<style>` и
+`<svg>` не се пипат), че `doPrint` минава през тях, правилата за ред/запис/година, бележката за
+текущата година, подписът на картона за дете, и в Chromium — че в тясна колона всяка сума е на един
+ред, а клетката — най-много два.
+
+**EN:** **Everything that is printed — reviewed sheet by sheet.** The database version is not
+raised; nothing in the data changes.
+
+- **How it was checked.** The real screens in Chromium, wired to the real program, with a large
+  database (125 documents with long titles and UDC, 30 readers, 24 overdue loans, an act with 55
+  documents, an inventory with 60 missing, a month of the Daily log, periodicals, local history).
+  Every printout — **35 documents, 76 sheets** — was printed to PDF through the "Save PDF…" path and
+  checked automatically (text beyond the sheet edge, overlapping text, "undefined/null/NaN", an
+  almost empty last sheet), then every sheet was also reviewed by eye.
+- **Amounts and numbers no longer break across two lines.** In a narrow column
+  "7.59 € / 14.84 лв." fell apart into four lines ("€" separated from the number), making every
+  inventory book row four lines tall: 125 entries took **13 sheets, now 9**. Likewise "№ 1 / 2026"
+  in a title. Fixed in one place (`doPrint`) for all documents; the document text is unchanged.
+- **A table row is not split across two sheets.**
+- **An entry is not split** in the persons, analytical description and chronicle lists — the last
+  line of an entry used to stand alone on the next sheet next to the signatures.
+- **A child's reader card:** the signature line now reads "Signature of the parent/guardian".
+- **KDBF Part 2 and the fund report printed during the year** state that the year is not closed and
+  the figures are as of the print date ("as of 31.12." per the template stays).
+- Handbook, 9.3 — a note on sheet layout.
+
+**Verified:** `npm run test:all` passes (type check + the suite in UTC and in Europe/Sofia + the
+catalog page); `node --test` — **@@N@@ tests, 0 failed** (before: 2548). New test
+`test/pechat-v2487.test.js`.
+
 ## v2.4.86
 
 **BG:** **Цялостна проверка на работата: известията вече наистина не пречат на бутоните; тестовете

@@ -11,6 +11,7 @@
      П2  ред от таблица се разкъсваше между два листа (инвентарната книга).
      П3  запис от персоналиите / аналитичното описание — последният му ред сам на
          следващия лист, до подписите.
+     П5  читателски картон на дете — редът за подпис казва „родителя/настойника“.
      П4  Част № 2 на КДБФ и справката за фонда — „към 31.12.<година>“ за година,
          която още тече, без дума, че числата са към днес. */
 const test = require('node:test');
@@ -79,6 +80,21 @@ test('П4 — „годината не е приключила“: за теку
   assert.equal(w.yearOpenNote(String(Number(Y) - 1)), '');
   assert.match(view('kdbf.js'), /към 31\.12\.\$\{y\} г\.\$\{\s*yearOpenNote\(y\)/, 'Част № 2 на КДБФ носи бележката');
   assert.match(view('reports.js'), /Фонд към 31\.12\.\$\{r\.year\} г\.[^\n]*\n\s*yearOpenNote\(r\.year\)/, 'справката за фонда — също');
+});
+
+test('П5 — картонът на дете: подписва родителят/настойникът, на възрастен — читателят', async () => {
+  const w = h.window;
+  const mk = async (o) => { const r = await h.api.readers.create(Object.assign({ category: 'възрастен', gdpr_consent: 1, status: 'активен' }, o));
+    assert.ok(r.ok, JSON.stringify(r)); return r.data && r.data.id != null ? r.data.id : r.data; };
+  const kid = await mk({ name: 'Детко Детков', card_no: '8701', category: 'дете', birth_date: '2017-02-02', guarantor_name: 'Мама Деткова', guarantor_relation: 'майка' });
+  const adult = await mk({ name: 'Възрастен Възрастнов', card_no: '8702' });
+  await w.printReaderCard(kid); await h.settle();
+  assert.match(h.text('#ppSheet .psig'), /Подпис на родителя\/настойника:/);
+  assert.doesNotMatch(h.text('#ppSheet .psig'), /Подпис на читателя/);
+  w.ppClose(); await h.settle();
+  await w.printReaderCard(adult); await h.settle();
+  assert.match(h.text('#ppSheet .psig'), /Подпис на читателя:/);
+  w.ppClose(); await h.settle();
 });
 
 /* ----------------------------------------------------------------------
