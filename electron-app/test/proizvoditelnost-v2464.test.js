@@ -387,9 +387,10 @@ test('7. printInvBookDoc({from,to}) е НЕПРОМЕНЕНА — печата �
   assert.match(t, /инв\. № 10 – 19/, 'главата назовава границите — листът се прошнурова и заверява');
   assert.match(t, /НЕ е пълната инвентарна книга/);
   assert.match(t, /съдържа общо 500 вписвания/, 'и колко е цялата книга');
-  const sheet = window.document.querySelector('#ppSheet').innerHTML;
+  /* Текстът на листа, не HTML-ът: от v2.4.87 „№ 10“ е в span.pnw (не се къса на два реда). */
+  const sheet = window.document.querySelector('#ppSheet').textContent.replace(/\s+/g, ' ');
   assert.ok(sheet.includes('Документ № 10') && sheet.includes('Документ № 19'));
-  assert.ok(!sheet.includes('Документ № 9<') && !sheet.includes('Документ № 20<'),
+  assert.ok(!/Документ № 9(?!\d)/.test(sheet) && !/Документ № 20(?!\d)/.test(sheet),
     'извън диапазона не бива да попада нито един ред');
   // И без диапазон — пак както досега.
   await window.printInvBookDoc();

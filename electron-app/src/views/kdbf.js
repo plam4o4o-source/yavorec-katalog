@@ -330,7 +330,8 @@ function printKdbfDoc() {
      ${ssig(['Библиотекар: …………………', 'Счетоводител: …………………', approverLine((SETTINGS_CACHE || {}).director_role || 'Ръководител', (SETTINGS_CACHE || {}).director, '')])}</div>
 
     <div class="pdoc">${shead()}<h2>РЕЗУЛТАТИ ОТ ДВИЖЕНИЕТО НА БИБЛИОТЕЧНИЯ ФОНД</h2>
-     <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.</div>
+     <div class="pmeta"><b>Част № 2</b> · Приложение № 2 към чл. 13, ал. 3, т. 2 · към 31.12.${y} г.${
+       yearOpenNote(y) ? `<br><i>${yearOpenNote(y)}</i>` : ''}</div>
      <table><thead><tr><th>Показател</th><th>Брой</th><th>Стойност, € / лв.</th></tr></thead><tbody>
      ${/* Закръгляне до стотинки преди печат — виж бележката при kdbfPart2Html:
           иначе Приложение № 2 на първата година излиза с „-0.00 €“. */''}

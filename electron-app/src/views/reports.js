@@ -229,7 +229,8 @@ function reportPrintHtml(r) {
   }
   if (r.id === 'fund_breakdown') {
     return `
-      <div class="pmeta">Фонд към 31.12.${r.year} г. — общо ${r.fundCount} бр., ${mny(r.fundValue)}</div>
+      <div class="pmeta">Фонд към 31.12.${r.year} г. — общо ${r.fundCount} бр., ${mny(r.fundValue)}${
+        yearOpenNote(r.year) ? `<br><i>${yearOpenNote(r.year)}</i>` : ''}</div>
       ${prTable(['Отдел', 'Бр.'], r.byDepartment)}
       ${prTable(['Категория', 'Бр.'], r.byCategory)}
       ${prTable(['Език', 'Бр.'], r.byLanguage)}`;

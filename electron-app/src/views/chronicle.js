@@ -314,7 +314,7 @@ async function printChronicle() {
         Това НЕ е пълният летопис.`
       : `Пълен летопис — всички <b>${rows.length}</b> вписани записа, към ${bg(today())} г.`}</div>
     ${years.map(y => `<h3 style="margin:10px 0 4px">${esc(y)} г.</h3>
-      ${byYear[y].map((c, i) => `<div style="margin-bottom:7px">
+      ${byYear[y].map((c, i) => `<div class="pentry" style="margin-bottom:7px">
         <b>№ ${i + 1}. ${esc(c.title)}</b>${c.date ? ' · ' + esc(bg(c.date)) : ''}${c.category ? ' · ' + esc(c.category) : ''}
         ${c.body ? `<div style="font-size:11pt">${esc(c.body).replace(/\n/g, '<br>')}</div>` : ''}
         ${c.participants ? `<div style="font-size:10pt"><i>Участници: ${esc(c.participants)}</i></div>` : ''}

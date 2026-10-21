@@ -149,7 +149,7 @@ async function printPersons() {
     <div class="pmeta">${PRS_Q
       ? `<b>Обхват:</b> само записите, съдържащи „${esc(PRS_Q)}“ — <b>${rows.length}</b> от целия раздел. Това НЕ е пълният списък.`
       : `Пълен списък — всички <b>${rows.length}</b> вписани персоналии към ${bg(today())} г.`}</div>
-    ${rows.map((p, i) => `<div style="margin-bottom:10px">
+    ${rows.map((p, i) => `<div class="pentry" style="margin-bottom:10px">
       <b>${esc(p.name)}</b>${personDates(p) ? ' · ' + esc(personDates(p)) : ''}
       ${p.activity ? `<div style="font-size:11pt"><i>${esc(p.activity)}</i></div>` : ''}
       ${p.bio ? `<div style="font-size:10.5pt">${esc(p.bio).replace(/\n/g, '<br>')}</div>` : ''}

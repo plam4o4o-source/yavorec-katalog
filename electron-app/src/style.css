@@ -1136,6 +1136,14 @@ table.ledger input[type=checkbox]{width:17px; height:17px; accent-color:var(--br
 .pdoc table{border-collapse:collapse; width:100%; margin-bottom:5mm; font-size:9.5pt}
 .pdoc table th,.pdoc table td{border:1px solid #999; padding:1.5mm 2mm; text-align:left}
 .pdoc table th{background:#eee}
+/* ЦЯЛ РЕД, ЦЯЛ ЗАПИС, ЦЯЛА СУМА (v2.4.87). Ред от таблица се разкъсваше между два
+   листа (в инвентарната книга „11.29 € /“ на единия, „лв.“ на другия), а запис
+   от персоналиите и аналитичното описание — с последния си ред сам на следващия
+   лист, до подписите. Заглавие на година в летописа не остава само в дъното. */
+.pdoc table tbody tr{break-inside:avoid; page-break-inside:avoid}
+.pdoc .pentry{break-inside:avoid; page-break-inside:avoid}
+.pdoc h3{break-after:avoid; page-break-after:avoid}
+.pnw{white-space:nowrap}
 .pdoc .psig{display:flex; justify-content:space-between; margin-top:14mm; font-size:10pt; gap:20mm}
 .pdoc .psig div{flex:1; border-top:1px solid #000; padding-top:2mm}
 /* ПОДПИСИТЕ НЕ ОСТАВАТ САМИ НА ПОСЛЕДНИЯ ЛИСТ (v2.4.69, кръг 44, Е5).

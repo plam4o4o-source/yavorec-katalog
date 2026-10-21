@@ -126,7 +126,10 @@ async function oldWaySheet(cardName, from, to) {
    как jsdom е нормализирал кавичките в единия от тях. */
 function normalized(html) {
   const d = h.document.createElement('div');
-  d.innerHTML = html;
+  /* Листът минава през doPrint(), а той (v2.4.87) обвива „№ …“ и сумите в
+     span.pnw — неразкъсваеми на два реда. „Същият лист“ значи същото, което
+     doPrint() би сложил и от стария път. */
+  d.innerHTML = h.window.ppNoBreak(html);
   return d.innerHTML;
 }
 const sheetHtml = () => h.$('#ppSheet').innerHTML;
