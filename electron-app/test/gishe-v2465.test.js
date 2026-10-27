@@ -46,6 +46,13 @@ function mkReader(name, card, o = {}) {
     .run(name, card, o.category || 'възрастен', o.gdpr_consent == null ? 1 : o.gdpr_consent,
       o.parent_consent == null ? 0 : o.parent_consent).lastInsertRowid);
 }
+/* Падеж, след който до днес има поне n дни забава по календара на програмата
+   (огледалото E.effectiveDaysLate). Тръгва от преди 4 дни и отстъпва назад. */
+function dueWithLate(n) {
+  let d = E.addDays(T, -4);
+  for (let i = 0; i < 40 && E.effectiveDaysLate(h.db, d, T) < n; i++) d = E.addDays(d, -1);
+  return d;
+}
 function mkLoan(readerId, bookId, out, due) {
   h.db.prepare('INSERT INTO loans (reader_id, book_id, date_out, date_due) VALUES (?,?,?,?)').run(readerId, bookId, out, due);
   return Number(q('SELECT id FROM loans WHERE reader_id = ? AND book_id = ? ORDER BY id DESC', readerId, bookId).id);
@@ -71,7 +78,10 @@ test('А3 — платеното на гишето се приспада на е
 
   // След време заемането пак е просрочено — новите дни се смятат по СЪЩИЯ
   // календар, по който ще ги начисли и гишето (затворените дни отпадат).
-  const newDue = E.addDays(T, -4);
+  /* Поне 2 дни нова забава ПО КАЛЕНДАРА — не „преди 4 дни“: на 28.12 четири дни
+     назад е 24.12, а 24 – 27.12 са затворени и забавата излизаше 0 (дата-бомба,
+     намерена с изкуствен часовник при пълната проверка от 27.10.2026). */
+  const newDue = dueWithLate(2);
   h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(newDue, lid);
   const остава = Math.round(E.effectiveDaysLate(h.db, newDue, T) * 0.10 * 100) / 100;
   const начислено = Math.round((dueOnCounter + остава) * 100) / 100;
@@ -143,7 +153,7 @@ test('А3 — платеното на гишето се приспада и ко
     'по сметката остава разликата, а не цялото начислено');
 
   // След време заемането пак е просрочено — новите дни се смятат по същия календар.
-  const newDue = E.addDays(T, -4);
+  const newDue = dueWithLate(2); // виж горния тест — празниците не крадат дните
   h.db.prepare('UPDATE loans SET date_due = ? WHERE id = ?').run(newDue, lid);
   const нови = Math.round(E.effectiveDaysLate(h.db, newDue, T) * 0.10 * 100) / 100;
   const остава = Math.round((неплатено + нови) * 100) / 100;
