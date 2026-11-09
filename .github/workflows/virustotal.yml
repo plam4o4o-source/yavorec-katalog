@@ -2,6 +2,11 @@ name: VirusTotal Scan
 
 on:
   workflow_dispatch:
+    inputs:
+      rescan:
+        description: 'Ask VirusTotal to analyse the already-known file again (fresh verdicts from every engine)'
+        type: boolean
+        default: false
 
   # NOT "release: published". Releasing creates the release BEFORE
   # electron-builder uploads the files into it: measured across three releases,
@@ -110,6 +115,25 @@ jobs:
             exit 1
           fi
 
+      # A known file is NOT re-analysed by default: VirusTotal returns the verdicts
+      # from its last analysis. With `rescan`, the file is sent for a fresh
+      # analysis and the wait step below collects it — the only way to see
+      # whether a single detection is still there (false positives from one
+      # engine are often withdrawn within days).
+      - name: Request a fresh VirusTotal analysis
+        id: rescan
+        if: steps.check.outputs.exists == 'true' && inputs.rescan
+        env:
+          VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          ANALYSIS_ID=$(curl --fail --silent --show-error --request POST \
+            --header "x-apikey: $VT_API_KEY" \
+            "https://www.virustotal.com/api/v3/files/$SHA256/analyse" \
+            | python -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+          echo "Re-analysis: $ANALYSIS_ID"
+          echo "analysis_id=$ANALYSIS_ID" >> "$GITHUB_OUTPUT"
+
       - name: Get VirusTotal upload URL
         id: upload_url
         if: steps.check.outputs.exists != 'true'
@@ -151,10 +175,10 @@ jobs:
           echo "analysis_id=$ANALYSIS_ID" >> "$GITHUB_OUTPUT"
 
       - name: Wait for VirusTotal analysis
-        if: steps.check.outputs.exists != 'true'
+        if: steps.check.outputs.exists != 'true' || steps.rescan.outputs.analysis_id != ''
         env:
           VT_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
-          ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id }}
+          ANALYSIS_ID: ${{ steps.upload.outputs.analysis_id || steps.rescan.outputs.analysis_id }}
         run: |
           for i in {1..40}; do
 
@@ -183,7 +207,7 @@ jobs:
           fi
 
       - name: Get existing VirusTotal file information
-        if: steps.check.outputs.exists == 'true'
+        if: steps.check.outputs.exists == 'true' && steps.rescan.outputs.analysis_id == ''
         run: |
           cp vt-existing.json analysis.json
 
@@ -209,6 +233,17 @@ jobs:
 
           sha256 = os.environ["SHA256"]
 
+          # WHICH engine said what. Until v2.4.88 the report carried only the
+          # counts, so "Malicious 1" could not be checked without logging in to
+          # VirusTotal. `results` (fresh analysis) or `last_analysis_results`
+          # (already-known file) hold the per-engine verdicts.
+          per_engine = attrs.get("results") or attrs.get("last_analysis_results") or {}
+          flagged = sorted(
+              (name, r.get("category", ""), r.get("result") or "", r.get("engine_version") or "", r.get("engine_update") or "")
+              for name, r in per_engine.items()
+              if r.get("category") in ("malicious", "suspicious")
+          )
+
           malicious = stats.get("malicious", 0)
           suspicious = stats.get("suspicious", 0)
           harmless = stats.get("harmless", 0)
@@ -226,6 +261,17 @@ jobs:
               f"| 🟢 Harmless | {harmless} |",
               f"| ⚪ Undetected | {undetected} |",
               "",
+          ]
+          if flagged:
+              lines += [
+                  "**Flagged by**",
+                  "",
+                  "| Engine | Verdict | Name | Engine version / update |",
+                  "|---|---|---|---|",
+              ]
+              lines += [f"| {n} | {c} | `{res}` | {v} / {u} |" for n, c, res, v, u in flagged]
+              lines += [""]
+          lines += [
               "**SHA-256**",
               "",
               f"`{sha256}`",
@@ -251,6 +297,8 @@ jobs:
               f.write(f"Suspicious: {suspicious}\n")
               f.write(f"Harmless: {harmless}\n")
               f.write(f"Undetected: {undetected}\n")
+              for n, c, res, v, u in flagged:
+                  f.write(f"Flagged: {n} — {c} — {res} (engine {v}, update {u})\n")
               f.write(f"VirusTotal: https://www.virustotal.com/gui/file/{sha256}\n")
           PY
 
@@ -269,6 +317,18 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --json body \
             --jq '.body' > current-notes.md
+
+          # A repeated scan (rescan) REPLACES the earlier section instead of
+          # stacking a second one under it: everything from the first
+          # "## 🛡️ VirusTotal Scan" heading to the end is the old report.
+          python - <<'PY'
+          p = "current-notes.md"
+          body = open(p, encoding="utf-8").read()
+          i = body.find("## 🛡️ VirusTotal Scan")
+          if i >= 0:
+              body = body[:i].rstrip() + "\n\n"
+          open(p, "w", encoding="utf-8").write(body)
+          PY
 
           cat virustotal-report.md >> current-notes.md
 
