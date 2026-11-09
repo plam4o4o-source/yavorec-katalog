@@ -414,7 +414,7 @@ test('П8. разпечатката на инвентарната книга в�
 /* ==================================================================
    П13. Запис при разгърнат списък не пречертава всичко
    ================================================================== */
-test('П13. запис на нова книга при разгърнати над 300 реда пипа само един ред — без books:list', async () => {
+test('П13. запис на нова книга при разгърнат списък (над една порция) пипа само един ред — без books:list', async () => {
   const ins = h.db.prepare(`INSERT INTO books (inv_number, title, author, price, register_date, status, status_date, department)
     VALUES (?, ?, 'Мащабов, М.', 1, ?, 'наличен', ?, 'за възрастни')`);
   const inv = h.db.prepare('INSERT INTO inventory (book_id, quantity) VALUES (?, 1)');
@@ -424,7 +424,9 @@ test('П13. запис на нова книга при разгърнати на
   h.db.prepare('UPDATE settings SET next_inv_number = 20700 WHERE id = 1').run();
   await h.go('books');
   await h.clickButton('Покажи още', '#bMore');
-  assert.ok(h.document.querySelectorAll('#bBody tr').length > 300, 'списъкът е разгърнат');
+  /* Над една порция (RENDER_PAGE_SIZE от core.js) — точно прагът, над който
+     saveBook вмъква един ред вместо да пречертава целия прозорец. */
+  assert.ok(h.document.querySelectorAll('#bBody tr').length > W().RENDER_PAGE_SIZE, 'списъкът е разгърнат');
   const painted = h.document.querySelectorAll('#bBody tr').length;
   await W().bookForm(null); await h.settle();
   h.type('#bookF [name=title]', 'Мащаб — нова книга');
@@ -436,7 +438,7 @@ test('П13. запис на нова книга при разгърнати на
   assert.match(h.text('#bBody tr:first-child'), /Мащаб — нова книга/, 'новият запис е най-отгоре');
   assert.match(h.text('#bMore'), /най-отгоре/, 'и се казва защо е там');
   // Малък списък (една порция) — пълното пречертаване остава: там дава и подредбата.
-  W().eval('BOOKS_RENDER_LIMIT = 300');
+  W().eval('BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE');
   await h.go('books');
 });
 
