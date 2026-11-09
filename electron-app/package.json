@@ -1,6 +1,6 @@
 {
   "name": "inventar-desktop",
-  "version": "2.4.87",
+  "version": "2.4.88",
   "description": "Библиотечна система „InvLib“ — Windows десктоп приложение (Electron + SQLite)",
   "main": "main.js",
   "author": {
@@ -52,6 +52,10 @@
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"
     ],
+    "electronLanguages": [
+      "bg",
+      "en-US"
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -74,7 +78,15 @@
       "db/fund-sql.js",
       "db/author-table.js",
       "icon.ico",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/better-sqlite3/{deps,src}${/*}",
+      "!node_modules/better-sqlite3/build/{deps,Release/obj,Release/.deps}${/*}",
+      "!node_modules/better-sqlite3/build/**/*.{pdb,iobj,ipdb,ilk,exp,lib,tlog}",
+      "!node_modules/zxing-wasm/dist/{full,writer,es,miniprogram}${/*}",
+      "!node_modules/zxing-wasm/dist/{iife,cjs}/{full,writer}${/*}",
+      "!node_modules/zxing-wasm/node_modules${/*}",
+      "!node_modules/@types${/*}",
+      "!node_modules/type-fest${/*}"
     ],
     "win": {
       "target": "nsis",

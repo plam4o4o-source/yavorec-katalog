@@ -19,6 +19,9 @@
         „Постъпления“     — КДБФ част 1 е регистър: вписаното остава;
                             800 / 319 КБ → 300 / 120 КБ.
 
+      (Измерено при порция от 300 реда. От v2.4.88 RENDER_PAGE_SIZE е 100 —
+      тестовете по-долу взимат размера на порцията от core.js, не от тук.)
+
       Изрично НЕ се пипат екраните, които по устройство не могат да пораснат —
       излишният бутон „Покажи още“ там е влошаване, не подобрение. Последният
       тест в този файл пази точно това решение.
@@ -177,8 +180,8 @@ const makeAnalytics = n => R(n, i => ({
   year: String(1960 + (i % 65)), pages: String(i), source_kind: 'друго', source_text: 'Източник ' + i
 }));
 /* Годините вървят низходящо и на групи по 40 — точно както ги връща
-   chronicle:list (ORDER BY year DESC). При порция от 300 това значи, че всяка
-   порция реже някоя година по средата: точно случаят, при който старото
+   chronicle:list (ORDER BY year DESC). При порция от 100 (или 300) реда това
+   значи, че всяка порция реже някоя година по средата: точно случаят, при който старото
    групиране по <div class="chrYear"> би повторило заглавието на годината. */
 const makeChronicle = n => R(n, i => ({
   id: i, year: String(2025 - Math.floor((i - 1) / 40)), date: DAY(i),
@@ -197,29 +200,38 @@ const makeAudit = n => R(n, i => ({
   detail: 'Книга инв. № ' + i, diff: null
 }));
 
-const PAGE = 300; // RENDER_PAGE_SIZE в core.js
+/* RENDER_PAGE_SIZE от core.js — взет от самия източник, а не повторен тук като
+   число: тестовете проверяват устройството на прозореца, не точния размер на
+   порцията (300 реда до v2.4.88, 100 оттогава). Първият тест сверява, че и
+   изгледът наистина го излага така. */
+const PAGE = Number(/const RENDER_PAGE_SIZE = (\d+);/.exec(
+  fs.readFileSync(path.join(VIEWS_DIR, 'core.js'), 'utf8'))[1]);
+/* Колко натискания на „Покажи още“ трябват, за да се разгърнат n реда. */
+const clicksFor = n => Math.ceil(n / PAGE) - 1;
 
 /* ================= 1а) „Просрочени“ ================= */
 
-test('Просрочени: изчертава прозорец от 300 реда, не всичките 1 200', async () => {
+test('Просрочени: изчертава прозорец от една порция (RENDER_PAGE_SIZE), не всичките 1 200', async () => {
   const dom = buildDom({ 'loans.overdue': makeOverdue(1200) });
   const window = await openView(dom, 'over');
+  assert.equal(window.RENDER_PAGE_SIZE, PAGE, 'PAGE в теста трябва да е същото число, което изгледите ползват');
+  assert.ok(PAGE * 2 < 1200, 'данните трябва да са поне две порции');
   assert.equal(window.document.querySelectorAll('#ovBody tr').length, PAGE,
     'при 1 200 просрочени се изчертават 1 200 реда с по два бутона всеки — точно това ограничава поправката');
   const btn = window.document.querySelector('#ovMore button');
   assert.ok(btn, 'трябва да има бутон „Покажи още“, щом има още редове');
-  assert.match(btn.textContent, /900 от общо 1\s*200|900 от общо 1200/);
+  assert.match(btn.textContent, new RegExp(`\\(${1200 - PAGE} от общо 1200\\)`));
 });
 
 test('Просрочени: броячът казва „показани са N от M“, а не само общия брой', async () => {
   const dom = buildDom({ 'loans.overdue': makeOverdue(1200) });
   const window = await openView(dom, 'over');
   const bar = window.document.getElementById('ovMore');
-  assert.match(bar.textContent, /Показани са 300 от 1200/,
+  assert.match(bar.textContent, new RegExp(`Показани са ${PAGE} от 1200`),
     'скъсен списък, който изглежда пълен, е по-лош от дълъг — броячът трябва да казва истината');
   // И след разгръщането броячът трябва да е верен, а не да е останал от преди.
   window.document.querySelector('#ovMore button').click();
-  assert.match(window.document.getElementById('ovMore').textContent, /Показани са 600 от 1200/);
+  assert.match(window.document.getElementById('ovMore').textContent, new RegExp(`Показани са ${2 * PAGE} от 1200`));
 });
 
 test('Просрочени: „Покажи още“ разгръща без нито едно ново IPC извикване и без дублирани редове', async () => {
@@ -228,7 +240,7 @@ test('Просрочени: „Покажи още“ разгръща без н
   const window = await openView(dom, 'over');
   const before = dom.callCounts['loans.overdue'];
   const clicks = expandAll(window, '#ovMore');
-  assert.equal(clicks, 3, '1 200 реда при порция 300 = точно три натискания');
+  assert.equal(clicks, clicksFor(1200), `1 200 реда при порция ${PAGE} = точно ${clicksFor(1200)} натискания`);
   assert.equal(dom.callCounts['loans.overdue'], before,
     'редовете вече са в паметта — разгръщането не бива да ги тегли наново по IPC');
   assertNoGapsNoDupes(
@@ -267,11 +279,11 @@ test('Просрочени: изгледът НЕ смята дни и обез�
 
 /* ================= 1б) „Аналитично описание“ ================= */
 
-test('Аналитично описание: прозорец от 300 реда при 4 000 описания', async () => {
+test('Аналитично описание: прозорец от една порция при 4 000 описания', async () => {
   const dom = buildDom({ 'analytics.list': makeAnalytics(4000), 'analytics.years': [] });
   const window = await openView(dom, 'analytics');
   assert.equal(window.document.querySelectorAll('#anlBody tr').length, PAGE);
-  assert.match(window.document.getElementById('anlMore').textContent, /Показани са 300 от 4000/);
+  assert.match(window.document.getElementById('anlMore').textContent, new RegExp(`Показани са ${PAGE} от 4000`));
 });
 
 test('Аналитично описание: броячите горе продължават да броят ЦЕЛИЯ резултат', async () => {
@@ -291,7 +303,7 @@ test('Аналитично описание: „Покажи още“ разг�
   const dom = buildDom({ 'analytics.list': rows, 'analytics.years': [] });
   const window = await openView(dom, 'analytics');
   const before = dom.callCounts['analytics.list'];
-  assert.equal(expandAll(window, '#anlMore'), 3, '1 000 реда при порция 300 = три натискания');
+  assert.equal(expandAll(window, '#anlMore'), clicksFor(1000), `1 000 реда при порция ${PAGE} = ${clicksFor(1000)} натискания`);
   assert.equal(dom.callCounts['analytics.list'], before, 'без ново analytics.list извикване');
   assertNoGapsNoDupes(
     keysOf(window, '#anlBody tr', tr => tr.cells[0].textContent.trim().split('\n')[0]),
@@ -324,16 +336,16 @@ test('Аналитично описание: търсенето е ПЪЛЕН р
 
 /* ================= 1в) „Летопис“ ================= */
 
-test('Летопис: прозорец от 300 записа при 3 000', async () => {
+test('Летопис: прозорец от една порция записи при 3 000', async () => {
   const dom = buildDom({ 'chronicle.list': makeChronicle(3000), 'chronicle.years': [] });
   const window = await openView(dom, 'chronicle');
   assert.equal(window.document.querySelectorAll('#chrItems .chrItem').length, PAGE);
-  assert.match(window.document.getElementById('chrMore').textContent, /Показани са 300 от 3000/);
+  assert.match(window.document.getElementById('chrMore').textContent, new RegExp(`Показани са ${PAGE} от 3000`));
 });
 
 test('Летопис: заглавието на годината не се повтаря на границата на порцията', async () => {
   /* Тук е капанът на този екран: годините идват на групи по 40, тоест порцията
-     от 300 реже 7,5-ата година по средата. При старото гнездене (група <div
+     (100 реда — 2,5 години; при старите 300 — 7,5) реже година по средата. При старото гнездене (група <div
      class="chrYear"> на година) следващата порция или щеше да повтори заглавието
      „2018“, или да залепи записите в чужда група. */
   const rows = makeChronicle(3000);
@@ -353,19 +365,20 @@ test('Летопис: „Покажи още“ разгръща без ново
   const dom = buildDom({ 'chronicle.list': makeChronicle(900), 'chronicle.years': [] });
   const window = await openView(dom, 'chronicle');
   const before = dom.callCounts['chronicle.list'];
-  assert.equal(expandAll(window, '#chrMore'), 2);
+  assert.ok(PAGE % 40 !== 0, 'порцията трябва да реже някоя година по средата, иначе тестът не разграничава нищо');
+  assert.equal(expandAll(window, '#chrMore'), clicksFor(900));
   assert.equal(dom.callCounts['chronicle.list'], before, 'без ново chronicle.list извикване');
   assert.equal(window.document.querySelectorAll('#chrItems .chrItem').length, 900);
 });
 
 /* ================= 1г) „Персоналии“ ================= */
 
-test('Персоналии: прозорец от 300 карти при 1 500', async () => {
+test('Персоналии: прозорец от една порция карти при 1 500', async () => {
   const dom = buildDom({ 'persons.list': makePersons(1500) });
   const window = await openView(dom, 'persons');
   assert.equal(window.document.querySelectorAll('#prsGrid .prsCard').length, PAGE,
     'всяка карта носи и <img> — 1 500 наведнъж значат и 1 500 четения от диска');
-  assert.match(window.document.getElementById('prsMore').textContent, /Показани са 300 от 1500/);
+  assert.match(window.document.getElementById('prsMore').textContent, new RegExp(`Показани са ${PAGE} от 1500`));
 });
 
 test('Персоналии: разгръщането не дублира и не пропуска карти', async () => {
@@ -373,7 +386,7 @@ test('Персоналии: разгръщането не дублира и не
   const dom = buildDom({ 'persons.list': rows });
   const window = await openView(dom, 'persons');
   const before = dom.callCounts['persons.list'];
-  assert.equal(expandAll(window, '#prsMore'), 4);
+  assert.equal(expandAll(window, '#prsMore'), clicksFor(1500));
   assert.equal(dom.callCounts['persons.list'], before, 'без ново persons.list извикване');
   assertNoGapsNoDupes(
     keysOf(window, '#prsGrid .prsCard', el => el.getAttribute('aria-label')),
@@ -382,14 +395,14 @@ test('Персоналии: разгръщането не дублира и не
 
 /* ================= 1д) „Постъпления“ ================= */
 
-test('Постъпления: прозорец от 300 партиди при 800', async () => {
+test('Постъпления: прозорец от една порция партиди при 800', async () => {
   const rows = makeAcq(800);
   const dom = buildDom({ 'acquisitions.list': rows });
   const window = await openView(dom, 'acq');
   assert.equal(window.document.querySelectorAll('#acqBody tr').length, PAGE);
-  assert.match(window.document.getElementById('acqMore').textContent, /Показани са 300 от 800/);
+  assert.match(window.document.getElementById('acqMore').textContent, new RegExp(`Показани са ${PAGE} от 800`));
   const before = dom.callCounts['acquisitions.list'];
-  assert.equal(expandAll(window, '#acqMore'), 2);
+  assert.equal(expandAll(window, '#acqMore'), clicksFor(800));
   assert.equal(dom.callCounts['acquisitions.list'], before, 'без ново acquisitions.list извикване');
   assertNoGapsNoDupes(
     keysOf(window, '#acqBody tr', tr => tr.cells[0].textContent.trim()),
@@ -587,7 +600,7 @@ test('„Приеми"/„Продължи" НЕ свива разгърнати
   for (const f of ['loans.js', 'housebound.js']) {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', f), 'utf8');
     assert.match(src, /renderOver\(true\)/,
-      f + ' вика renderOver след приемане — при над 300 просрочени библиотекарят иначе ' +
+      f + ' вика renderOver след приемане — при повече от една порция просрочени библиотекарят иначе ' +
       'разгръща наново след ВСЯКО върнато копие');
   }
 });

@@ -51,6 +51,9 @@ const MAIN_JS = fs.readFileSync(path.join(APP_DIR, 'main.js'), 'utf8');
 const BACKUP_JS = fs.readFileSync(path.join(APP_DIR, 'handlers', 'backup.js'), 'utf8');
 const CORE_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'core.js'), 'utf8');
 const MZS_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'mzs.js'), 'utf8');
+/* Размерът на порцията — RENDER_PAGE_SIZE от core.js (300 реда до v2.4.88, 100
+   оттогава), взет от източника, а не повторен тук като число. */
+const PAGE = Number(/const RENDER_PAGE_SIZE = (\d+);/.exec(CORE_JS)[1]);
 const PERIODICALS_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'periodicals.js'), 'utf8');
 const INVBOOK_JS = fs.readFileSync(path.join(APP_DIR, 'src', 'views', 'inv-book.js'), 'utf8');
 
@@ -290,13 +293,17 @@ const flat = (s) => String(s).replace(/[\s  ]+/g, ' ').trim();
 test('6. прозоречният рендер СПИРА на тавана — и казва защо, вместо да мълчи', async () => {
   const dom = buildDom({ 'loans.overdue': makeOverdue(15000) });
   const window = await openView(dom, 'over');
-  assert.equal(window.document.querySelectorAll('#ovBody tr').length, 300, 'първата порция е 300 реда');
+  assert.equal(window.RENDER_PAGE_SIZE, PAGE, 'PAGE в теста е същото число, което изгледите ползват');
+  assert.equal(window.document.querySelectorAll('#ovBody tr').length, PAGE, 'първата порция е RENDER_PAGE_SIZE реда');
   const clicks = expandAll(window, '#ovMore');
   const rows = window.document.querySelectorAll('#ovBody tr').length;
   assert.equal(rows, window.RENDER_MAX_ROWS,
     'разгръщането трябва да спре на тавана (' + window.RENDER_MAX_ROWS + '), а не да стигне до 15 000');
   assert.equal(rows, 3000, 'таванът е 3 000 реда — последната измерена стъпка, при която прозорецът остава използваем');
-  assert.ok(clicks < 20, 'до тавана се стига за ' + clicks + ' натискания');
+  /* Точно толкова натискания, колкото порции делят първата от тавана — нито едно
+     повече (бутонът изчезва на тавана, иначе expandAll би стигнал до своя предел). */
+  assert.equal(clicks, Math.ceil(window.RENDER_MAX_ROWS / PAGE) - 1,
+    'до тавана се стига за ' + clicks + ' натискания');
   // Лентата отдолу: вече няма бутон, а честно изречение.
   assert.equal(window.document.querySelector('#ovMore button'), null, 'на тавана бутонът „Покажи още“ пада');
   const bar = flat(window.document.getElementById('ovMore').textContent);
@@ -481,22 +488,25 @@ const makeMzs = (n) => R(n, i => ({
   requester: 'Читател ' + i, status: 'заявено'
 }));
 
-test('8. МЗС: регистърът вече е прозоречен — 300 реда от 500, не 500', async () => {
+test('8. МЗС: регистърът вече е прозоречен — една порция от 500, не 500', async () => {
+  assert.ok(PAGE < 500, 'тестът има смисъл само ако 500 заявки са повече от една порция');
   const dom = buildDom({ 'mzs.list': makeMzs(500) });
   const window = await openView(dom, 'mzs');
-  assert.equal(window.document.querySelectorAll('#mzsBody tr').length, 300,
+  assert.equal(window.document.querySelectorAll('#mzsBody tr').length, PAGE,
     'при 500 заявки се изчертаваха 500 реда (5 516 DOM възела) — точно това ограничава поправката');
   const btn = window.document.querySelector('#mzsMore button');
   assert.ok(btn, 'трябва да има „Покажи още“, щом има още заявки');
-  assert.match(flat(btn.textContent), /Покажи още \(200 от общо 500\)/);
+  assert.match(flat(btn.textContent), new RegExp(`Покажи още \\(${500 - PAGE} от общо 500\\)`));
   // Разгръщането не праща ново IPC — списъкът вече е в паметта.
   const before = (dom.calls['mzs.list'] || []).length;
   btn.click();
-  assert.equal(window.document.querySelectorAll('#mzsBody tr').length, 500, 'втората порция допълва първата');
+  assert.equal(window.document.querySelectorAll('#mzsBody tr').length, Math.min(2 * PAGE, 500), 'втората порция допълва първата');
+  expandAll(window, '#mzsMore');
+  assert.equal(window.document.querySelectorAll('#mzsBody tr').length, 500, 'разгърнат докрай, регистърът е цял');
   assert.equal((dom.calls['mzs.list'] || []).length, before, '„Покажи още“ не бива да праща нова заявка');
   // И без дублирани/пропуснати редове на границата на порцията.
   const nums = Array.from(window.document.querySelectorAll('#mzsBody tr td:first-child')).map(td => flat(td.textContent));
-  assert.equal(new Set(nums).size, 500, 'няма дублиран ред на границата на порцията');
+  assert.equal(new Set(nums).size, 500, 'няма дублиран ред на границата на порциите');
 });
 
 test('8. МЗС: малък регистър си остава без бутон', async () => {
@@ -524,30 +534,32 @@ test('8. кардексът „всички години“ вече минав�
   await openView(dom, 'periodika');
   await window.openPeriodical(7, 'всички');
   await settle();
-  assert.equal(window.document.querySelectorAll('#perIssuesBody tr').length, 300,
+  assert.equal(window.document.querySelectorAll('#perIssuesBody tr').length, PAGE,
     '1 200 броя се чертаеха до един (7 295 DOM възела) в кутия с превъртане 240 px');
   const btn = window.document.querySelector('#perIssuesMore button');
   assert.ok(btn, 'има „Покажи още“');
-  assert.match(flat(btn.textContent), /Покажи още \(900 от общо 1200\)/);
+  assert.match(flat(btn.textContent), new RegExp(`Покажи още \\(${1200 - PAGE} от общо 1200\\)`));
   assert.match(flat(window.document.getElementById('perIssueCount').textContent),
-    /Показани 300 от 1200 броя — всички години/, 'надписът казва колко от колко и за кой разрез');
+    new RegExp(`Показани ${PAGE} от 1200 броя — всички години`), 'надписът казва колко от колко и за кой разрез');
   btn.click();
-  assert.equal(window.document.querySelectorAll('#perIssuesBody tr').length, 600, 'втората порция допълва първата');
-  assert.match(flat(window.document.getElementById('perIssueCount').textContent), /Показани 600 от 1200/);
+  assert.equal(window.document.querySelectorAll('#perIssuesBody tr').length, 2 * PAGE, 'втората порция допълва първата');
+  assert.match(flat(window.document.getElementById('perIssueCount').textContent), new RegExp(`Показани ${2 * PAGE} от 1200`));
 });
 
 test('8. „×“ на реда от втората порция сочи към СВОЯ брой, а не към чужд', async () => {
-  const dom = buildDom({ 'periodicals.list': [], 'periodicals.get': periodicalAll(600) });
+  const N = 2 * PAGE; // точно две порции — последният ред е последният от втората
+  const dom = buildDom({ 'periodicals.list': [], 'periodicals.get': periodicalAll(N) });
   const { window } = dom;
   await openView(dom, 'periodika');
   await window.openPeriodical(7, 'всички');
   await settle();
+  assert.equal(window.document.querySelectorAll('#perIssuesBody tr').length, PAGE, 'отначало — само първата порция');
   window.perIssuesMore();
   const rows = window.document.querySelectorAll('#perIssuesBody tr');
-  assert.equal(rows.length, 600);
+  assert.equal(rows.length, N);
   const last = rows[rows.length - 1];
-  assert.equal(flat(last.children[0].textContent), '600', 'последният ред е брой № 600');
-  assert.match(last.querySelector('button.dgr').getAttribute('onclick'), /delIssue\(600,7,/,
+  assert.equal(flat(last.children[0].textContent), String(N), 'последният ред е брой № ' + N);
+  assert.match(last.querySelector('button.dgr').getAttribute('onclick'), new RegExp(`delIssue\\(${N},7,`),
     'бутонът „×“ носи ident-а на СВОЯ брой и на своето издание');
 });
 

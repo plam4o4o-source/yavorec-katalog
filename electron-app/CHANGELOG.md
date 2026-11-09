@@ -11,6 +11,61 @@ automatically into the matching GitHub Release description. Versions before
 v1.13.7 are not documented here in detail — see the GitHub commit history
 for full detail.
 
+## v2.4.88
+
+**BG:** **По-бързи големи таблици, естествена подредба, по-малък инсталатор.** Версията на базата
+не се вдига; нищо в данните не се променя.
+
+- **Големите таблици се отварят около 2,5 пъти по-бързо.** „Книги“, „Читатели“, „Инвентарна
+  книга“, „Просрочени“, аналитичното описание, летописът, персоналиите, постъпленията, МЗС и
+  кардексът на периодиката чертаят по **100 реда** наведнъж (бяха 300). Измерено в истински
+  Chromium при 4 пъти забавен процесор (като по-слаб библиотечен компютър) и 15 000 книги:
+  „Книги“ се отваря за **212 ms (беше 508)**, „Читатели“ — **217 (565)**, „Инвентарна книга“ —
+  **239 (529)**.
+- **Следващите редове идват сами.** Щом превъртите до края на таблицата, следващата порция се
+  зарежда без щракване — както в списъците на телефона. Бутонът „Покажи още“ остава (за
+  клавиатурата и екранния четец), таванът от 3 000 реда — също.
+- **Аналитично описание: „част 2“ преди „част 10“.** Поредица статии („Яворец през вековете,
+  част 1, 2 … 12“) излизаше като „част 1, 10, 11, 12, 2…“. Сега числата в заглавието се сравняват
+  като числа, а буквите — по българската азбука; годината остава първият ключ. И на екрана, и в
+  разпечатката.
+- **По-малък инсталатор.** Програмата носи само българските и английските езикови файлове на
+  Chromium (бяха над 50 езика), без изходния код на SQLite и без неизползваните части на четеца
+  за баркодове.
+- **Проверките.** Тестовете в истински Chromium (печат в PDF, оформление, известия, работен ден на
+  гишето, баркодовете на етикетите, самозареждането) вече вървят в CI — отделна задача, която пада,
+  ако някой от тях бъде пропуснат заради липсващ инструмент. Действията на GitHub са на версии с
+  Node 24. Два трепкащи теста са стабилизирани: щракването изчаква закъснелия прозорец, а
+  съобщенията на програмата при стартиране вече не объркват изпълнителя на тестовете.
+
+**Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
+Europe/Sofia + страницата на каталога); `node --test` — **2566 теста, 0 неуспешни** (преди: 2557).
+Нови тестове: `test/obnovyavane-v2488.test.js` (порцията и самозареждането, подредбата, файловете
+на инсталатора, задачата в CI, версиите на действията, изчакването и тихото стартиране) и
+`test/samozarezhdane-chromium.test.js` (в Chromium: превъртането до края зарежда следващите 100
+реда — в „Книги“ и „Читатели“, без дублирани редове). Пробна сглобка на програмата: езиците са
+`bg` и `en-US`, а четецът за телефона се намира в пакета.
+
+**EN:** **Faster big tables, natural sorting, a smaller installer.** The database version is not
+raised; nothing in the data changes.
+
+- **Big tables open about 2.5× faster.** Books, Readers, Inventory register, Overdue, analytic
+  entries, chronicle, persons, acquisitions, ILL and the periodical kardex now draw **100 rows** at a
+  time (was 300). Measured in real Chromium with a 4× throttled CPU and 15,000 books: Books opens
+  in **212 ms (was 508)**, Readers **217 (565)**, Inventory register **239 (529)**.
+- **The next rows load by themselves.** Scrolling to the end of a table loads the next page with no
+  click, like lists on a phone. The "Show more" button stays (keyboard, screen reader), and so does
+  the 3,000-row cap.
+- **Analytic entries: "part 2" before "part 10".** Numbers in titles now compare as numbers and
+  letters follow the Bulgarian alphabet; the year stays the first key. On screen and in print.
+- **Smaller installer.** Only the Bulgarian and English Chromium locale files (was 50+), no SQLite
+  source code and no unused parts of the barcode reader.
+- **Checks.** The real-Chromium tests now run in CI as a separate job that fails if any of them is
+  skipped for a missing tool. GitHub actions moved to Node 24 versions. Two flaky tests were
+  stabilised (clicks wait for a late dialog; start-up messages no longer confuse the test runner).
+
+**Verified:** `npm run test:all` passes; `node --test` — **2566 tests, 0 failed** (was 2557).
+
 ## v2.4.87
 
 **BG:** **Всичко, което се печата — прегледано лист по лист.** Версията на базата не се вдига;

@@ -197,16 +197,29 @@ test('Б14: надписът и бутонът под него броят в Е�
   await openKardex('Дневникът');
   h.type('#perIssueYear', Y1);
   await h.settle();
+  /* Порцията е RENDER_PAGE_SIZE от core.js (300 до v2.4.88, 100 оттогава). Тестът
+     има смисъл, докато една порция е под 365 броя на годината. */
+  const PAGE = h.window.RENDER_PAGE_SIZE;
+  assert.ok(Number.isInteger(PAGE) && PAGE < 365, 'годината трябва да е повече от една порция');
   const label1 = flat(h.text('#perIssueCount'));
   const bar1 = flat(h.text('#perIssuesMore'));
-  assert.match(label1, new RegExp('Показани 300 от 365 броя — ' + Y1 + ' г\\.'),
+  assert.match(label1, new RegExp('Показани ' + PAGE + ' от 365 броя — ' + Y1 + ' г\\.'),
     'знаменателят е броят за ИЗБРАНАТА година, не целият кардекс: ' + label1);
-  assert.match(bar1, /Покажи още \(65 от общо 365\)/, 'бутонът брои по същата бройка: ' + bar1);
+  assert.match(bar1, new RegExp('Покажи още \\(' + (365 - PAGE) + ' от общо 365\\)'), 'бутонът брои по същата бройка: ' + bar1);
   assert.match(label1, /целият кардекс: 405 броя/,
     'целият кардекс се назовава отделно, за да не изглежда, че броевете са изчезнали');
 
-  await h.clickButton('Покажи още', '#modal');
-  await h.settle();
+  // Разгръщане докрай — на всяка порция надписът и бутонът броят в същия обхват.
+  for (let i = 0; h.document.querySelector('#perIssuesMore button') && i < 20; i++) {
+    await h.clickButton('Покажи още', '#modal');
+    await h.settle();
+    const shown = Math.min(365, (i + 2) * PAGE);
+    const lbl = flat(h.text('#perIssueCount'));
+    assert.match(lbl, new RegExp('Показани ' + shown + ' от 365 броя — ' + Y1 + ' г\\.'), lbl);
+    if (shown < 365) {
+      assert.match(flat(h.text('#perIssuesMore')), new RegExp('Покажи още \\(' + (365 - shown) + ' от общо 365\\)'));
+    }
+  }
   const label2 = flat(h.text('#perIssueCount'));
   assert.match(label2, new RegExp('Показани 365 от 365 броя — ' + Y1 + ' г\\.'),
     'след последната порция надписът не бива да твърди, че липсват броеве: ' + label2);

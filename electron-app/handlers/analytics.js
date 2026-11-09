@@ -23,6 +23,10 @@ function ensureKraeFunctions(db) {
   KRAE_FN_READY.add(db);
   return db;
 }
+/* Естествено сравнение на заглавия: „част 2“ преди „част 10“ (v2.4.88). */
+const naturalCmp = new Intl.Collator('bg', { numeric: true, sensitivity: 'base' }).compare;
+/* Обратна двоична подредба — като `a.year DESC` в SQLite. */
+const desc = (x, y) => (x < y ? 1 : x > y ? -1 : 0);
 function bgLikeArg(raw) {
   return '%' + String(raw == null ? '' : raw).toLowerCase().replace(/[\\%_]/g, '\\$&') + '%';
 }
@@ -288,7 +292,18 @@ module.exports = function registerAnalyticsHandlers(ipcMain, deps) {
       if (onlyLocal) where.push('a.is_local = 1');
       const sql = ANALYTIC_SELECT + (where.length ? ' WHERE ' + where.join(' AND ') : '') +
         ' ORDER BY yearkey(a.year) DESC, a.year DESC, a.title';
-      return db.prepare(sql).all(args);
+      /* ЕСТЕСТВЕНА ПОДРЕДБА НА ЗАГЛАВИЯТА В ЕДНА ГОДИНА (v2.4.88). `a.title` в SQL
+         сравнява текст знак по знак, тоест „Яворец през вековете, част 10“ излизаше
+         ПРЕДИ „… част 2“ — а поредица статии („част 1, 2 … 12“) е точно онова, което
+         краеведът вписва. Intl.Collator с numeric:true сравнява числата като
+         числа и подрежда по български азбучен ред (малки и главни заедно).
+         Годината остава първият ключ — сортира се САМО вътре в една и съща година
+         (Array.prototype.sort е устойчив, т.е. SQL редът се пази за всичко
+         останало). Същият канал храни и екрана, и разпечатката. */
+      const yk = (r) => { const m = /\d{3,4}/.exec(String(r.year == null ? '' : r.year)); return m ? Number(m[0]) : -1; };
+      return db.prepare(sql).all(args).sort((a, b) =>
+        (yk(b) - yk(a)) || desc(String(a.year || ''), String(b.year || ''))
+        || naturalCmp(String(a.title || ''), String(b.title || '')));
     })
   );
   ipcMain.handle('analytics:get', /** @param {unknown} e @param {IpcArg<'analytics:get'>} id @returns {IpcReply<'analytics:get'>} */ (e, id) =>

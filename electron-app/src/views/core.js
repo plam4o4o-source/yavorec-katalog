@@ -304,10 +304,11 @@ window.flashRow = flashRow;
    (За сравнение, същите стъпки в jsdom: ~175 ms на порция — число, което не
    отговаря на нищо, което библиотекарят изживява.)
 
-   ЗАТОВА ТАВАН НА ОБЩИЯ БРОЙ РЕДОВЕ, А НЕ ПО-МАЛКА ПОРЦИЯ. Понеже самото
-   вписване е плоско, смаляването на порцията не печели нищо — цената идва от
-   това КОЛКО реда стоят на екрана общо. RENDER_MAX_ROWS слага таван на точно
-   това число.
+   ЗАТОВА ТАВАН НА ОБЩИЯ БРОЙ РЕДОВЕ. Понеже самото ДОБАВЯНЕ е плоско, при
+   разгъване цената идва от това КОЛКО реда стоят на екрана общо.
+   RENDER_MAX_ROWS слага таван на точно това число. (Друго е ОТВАРЯНЕТО на
+   раздела: там първата порция се чертае и подрежда наново, и цената ѝ расте с
+   размера ѝ — затова от v2.4.88 порцията е по-малка, виж RENDER_PAGE_SIZE.)
 
    ЗАЩО 3 000. Това е последната стъпка от измерването, при която прозорецът
    остава използваем: 283 ms и +248 МБ. Следващата (6 000) вече е 517 ms и
@@ -320,8 +321,13 @@ window.flashRow = flashRow;
    отрязан списък е по-лошо от отрязан списък с надпис: библиотекарят решава, че
    книгите ги няма.
 
-   RENDER_PAGE_SIZE е общият размер на порцията (300 реда — толкова, колкото
-   вече ползват трите екрана).
+   RENDER_PAGE_SIZE е общият размер на порцията. v2.4.88: 100 реда вместо 300 —
+   измерено в истински Chromium при 4× забавен процесор (като по-слаб библиотечен
+   компютър) и 15 000 книги: отварянето на „Книги“ спадна от 508 на 198 ms,
+   „Читатели“ от 565 на 216 ms, „Инвентарна книга“ от 529 на 226 ms. По-малката
+   порция не струва нищо при четене, защото следващата се зарежда САМА, щом
+   лентата „Покажи още“ влезе в полезрението (autoMoreWatch по-долу) — бутонът
+   остава за клавиатура и екранен четец.
 
    o = { body, bar, rows, limit, painted, total, rowsHtml, emptyHtml, moreHtml }
      body/bar  — CSS селектор или елемент; bar е лентата с „Покажи още“
@@ -333,7 +339,7 @@ window.flashRow = flashRow;
      moreHtml(more, total) — HTML на лентата отдолу (при достигнат таван на нейно
                  място застава renderCapHtml — един и същ надпис за всички екрани)
    Връща новия брой изчертани редове — извикващият го пази за следващия път. */
-const RENDER_PAGE_SIZE = 300;
+const RENDER_PAGE_SIZE = 100;
 /* Таванът на ОБЩИЯ брой редове в едно тяло на таблица — виж измерването горе. */
 const RENDER_MAX_ROWS = 3000;
 window.RENDER_PAGE_SIZE = RENDER_PAGE_SIZE;
@@ -384,10 +390,70 @@ function paintRowWindow(o) {
   if (bar) {
     bar.innerHTML = capped ? renderCapHtml(shown, total)
       : (o.moreHtml ? o.moreHtml(rows.length - shown, rows.length) : '');
+    autoMoreWatch(bar);
   }
   return shown;
 }
 window.paintRowWindow = paintRowWindow;
+
+/* Самозареждане на следващата порция (v2.4.88). Когато лентата „Покажи още“
+   влезе в полезрението (библиотекарят е превъртял до края на изчертаното),
+   бутонът в нея се натиска сам — както в списъците на телефон. Лентата се следи
+   ЕДНОКРАТНО: след натискането наблюдението се спира, а paintRowWindow го пуска
+   наново, когато изчертае следващата порция и новата лента. Така едно
+   превъртане зарежда една порция, а не всички до тавана наведнъж; ако екранът
+   е толкова висок, че и новата лента пак се вижда, идва още една — колкото да
+   се напълни екранът. При достигнат таван в лентата няма бутон и няма какво
+   да се натиска. В jsdom (тестовете) IntersectionObserver липсва — нищо. */
+let AUTO_MORE_OBS = null;
+/* Кой бутон се следи във всяка лента: същият бутон не се „въоръжава“ втори път
+   (иначе всяка промяна в изгледа би го натиснала отново, докато предишната
+   порция още идва от базата); нов бутон (нова порция) — да. */
+const AUTO_MORE_BTN = new WeakMap();
+function autoMoreWatch(bar) {
+  if (typeof IntersectionObserver !== 'function' || !bar) return;
+  if (!AUTO_MORE_OBS) {
+    AUTO_MORE_OBS = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) continue;
+        AUTO_MORE_OBS.unobserve(en.target);
+        const btn = autoMoreButton(en.target);
+        if (btn && !btn.disabled && en.target.isConnected && AUTO_MORE_BTN.get(en.target) === btn) btn.click();
+      }
+    }, { rootMargin: '0px 0px 200px 0px' });
+  }
+  const btn = autoMoreButton(bar);
+  if (btn && AUTO_MORE_BTN.get(bar) === btn) return;
+  AUTO_MORE_OBS.unobserve(bar);
+  AUTO_MORE_BTN.set(bar, btn);
+  if (btn) AUTO_MORE_OBS.observe(bar);
+}
+/* Само бутонът „Покажи още“ — не друг бутон, който някой изглед би сложил в лентата. */
+function autoMoreButton(bar) {
+  return Array.from(bar.querySelectorAll('button')).find(b => /^\s*Покажи още/.test(b.textContent || '')) || null;
+}
+/* Първото изчертаване на повечето изгледи слага лентата направо в шаблона на
+   раздела (без paintRowWindow) — затова и едно общо наблюдение върху #view:
+   след всяка промяна в него (веднъж на кадър) лентите „…More“ се проверяват.
+   Лентите на всички прозоречни таблици завършват на „More“ (#bMore, #rMore,
+   #ibMore, #ovMore, #anlMore, #chrMore, #prsMore, #acqMore, #mzsMore,
+   #perIssuesMore). */
+let AUTO_MORE_MO = null;
+function autoMoreInit() {
+  if (AUTO_MORE_MO || typeof MutationObserver !== 'function' || typeof IntersectionObserver !== 'function') return;
+  const view = document.getElementById('view');
+  if (!view) return;
+  let pending = false;
+  AUTO_MORE_MO = new MutationObserver(() => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; view.querySelectorAll('[id$="More"]').forEach(autoMoreWatch); });
+  });
+  AUTO_MORE_MO.observe(view, { childList: true, subtree: true });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoMoreInit);
+else autoMoreInit();
+window.autoMoreWatch = autoMoreWatch;
 
 /* Звуков сигнал при сканиране (v1.69.0) — кратък висок тон при успех, двоен
    нисък при отказ. При баркод четец очите са върху книгата, не върху екрана —

@@ -277,11 +277,15 @@ test('Етикетът за фонда (40 мм) си остава на 3 кол
 });
 
 /* ---------- 5) „Покажи още“ добавя, вместо да преизчертава ---------- */
+/* Порцията е RENDER_PAGE_SIZE от core.js (300 реда до v2.4.88, 100 оттогава) —
+   тестовете я взимат от изгледа. Разграничаващото е съотношението: след едно
+   натискане стоят 2 × порцията, а на rowsHtml се подава САМО една порция. */
 
-test('Книги: „Покажи още“ чертае САМО новите 300 реда, не всичките 600', async () => {
+test('Книги: „Покажи още“ чертае САМО новата порция, не целия разгърнат прозорец', async () => {
   const dom = buildDom({ 'books.list': makeBooks(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = window.RENDER_PAGE_SIZE;
   window.location.hash = '#books';
   await window.route();
   await new Promise(r => setTimeout(r, 60));
@@ -293,8 +297,8 @@ test('Книги: „Покажи още“ чертае САМО новите 3
   window.booksRowsHtml = function (part) { sizes.push(part.length); return orig.apply(this, arguments); };
   window.document.querySelector('#bMore button').click();
   window.booksRowsHtml = orig;
-  assert.equal(window.document.querySelectorAll('#bBody tr').length, 600);
-  assert.deepEqual(sizes, [300],
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, 2 * PAGE);
+  assert.deepEqual(sizes, [PAGE],
     'подава се само новата порция — презаписът на целия <tbody> е квадратичен: '
     + '49 натискания до 15 000 реда чертаеха 382 200 реда вместо 14 700');
   assert.equal(window.document.querySelector('#bBody tr').getAttribute('data-probe'), 'жив',
@@ -305,6 +309,7 @@ test('Инвентарна книга: „Покажи още“ също доб
   const dom = buildDom({ 'invBook.list': makeInvRows(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = window.RENDER_PAGE_SIZE;
   window.location.hash = '#invbook';
   await window.route();
   await new Promise(r => setTimeout(r, 60));
@@ -315,8 +320,8 @@ test('Инвентарна книга: „Покажи още“ също доб
   window.invBookRowsHtml = function (part) { sizes.push(part.length); return orig.apply(this, arguments); };
   window.document.querySelector('#ibMore button').click();
   window.invBookRowsHtml = orig;
-  assert.equal(window.document.querySelectorAll('#ibBody tr').length, 600);
-  assert.deepEqual(sizes, [300]);
+  assert.equal(window.document.querySelectorAll('#ibBody tr').length, 2 * PAGE);
+  assert.deepEqual(sizes, [PAGE]);
   assert.equal(window.document.querySelector('#ibBody tr').getAttribute('data-probe'), 'жив');
 });
 
@@ -324,6 +329,7 @@ test('Читатели: „Покажи още“ добавя само нова
   const dom = buildDom({ 'readers.list': makeReaders(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = window.RENDER_PAGE_SIZE;
   window.location.hash = '#readers';
   await window.route();
   await new Promise(r => setTimeout(r, 60));
@@ -334,8 +340,8 @@ test('Читатели: „Покажи още“ добавя само нова
   window.readersRowsHtml = function (part) { sizes.push(part.length); return orig.apply(this, arguments); };
   window.document.querySelector('#rMore button').click();
   window.readersRowsHtml = orig;
-  assert.equal(window.document.querySelectorAll('#rBody tr').length, 600);
-  assert.deepEqual(sizes, [300]);
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, 2 * PAGE);
+  assert.deepEqual(sizes, [PAGE]);
   assert.equal(window.document.querySelector('#rBody tr').getAttribute('data-probe'), 'жив');
 });
 
@@ -345,11 +351,12 @@ test('Търсенето и филтърът остават ПЪЛЕН ренд�
   const dom = buildDom({ 'books.list': books });
   const { window } = dom;
   await settled(dom);
+  const PAGE = window.RENDER_PAGE_SIZE;
   window.location.hash = '#books';
   await window.route();
   await new Promise(r => setTimeout(r, 60));
   window.document.querySelector('#bMore button').click();
-  assert.equal(window.document.querySelectorAll('#bBody tr').length, 600);
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, 2 * PAGE);
   const first = window.document.querySelector('#bBody tr');
   first.setAttribute('data-probe', 'жив');
   // Смяна на филтъра: наборът редове е ДРУГ — добавяне тук би долепило новите
@@ -357,7 +364,7 @@ test('Търсенето и филтърът остават ПЪЛЕН ренд�
   const sel = window.document.getElementById('bDeptFilter');
   sel.value = 'за деца';
   sel.dispatchEvent(new window.Event('change'));
-  assert.equal(window.document.querySelectorAll('#bBody tr').length, 300,
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, PAGE,
     'филтърът се връща на първата страница от новия резултат');
   assert.equal(window.document.querySelector('#bBody tr').getAttribute('data-probe'), null,
     'при смяна на филтъра таблицата се преизчертава изцяло');
@@ -371,13 +378,14 @@ test('Груповият избор оцелява при „Покажи още
   const dom = buildDom({ 'books.list': makeBooks(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = window.RENDER_PAGE_SIZE;
   window.location.hash = '#books';
   await window.route();
   await new Promise(r => setTimeout(r, 60));
   window.toggleBookSelAll(true); // „Избери всички“ — и отвъд видимия прозорец
   window.document.querySelector('#bMore button').click();
   const boxes = [...window.document.querySelectorAll('#bBody .bkChk')];
-  assert.equal(boxes.length, 600);
+  assert.equal(boxes.length, 2 * PAGE);
   assert.ok(boxes.every(b => b.checked), 'и новодобавените редове трябва да са отметнати');
   const chkAll = window.document.getElementById('chkAll');
   assert.equal(chkAll.checked, true, 'заглавната отметка следва реалния избор (syncChkAll)');

@@ -99,13 +99,15 @@ function boot(dbFolder) {
   stubModule(UPDATER_ID, {
     autoUpdater: { autoDownload: false, autoInstallOnAppQuit: false, on: () => {}, checkForUpdates: async () => ({}), quitAndInstall: () => {} }
   });
+  // Тихо — защо, виж quietBoot() в test/helpers/main-app.js.
+  const loud = require('./main-app').quietBoot();
   delete require.cache[MAIN_ID];
-  require(MAIN_ID);
+  try { require(MAIN_ID); } catch (e) { loud(); throw e; }
   // app.whenReady().then(initDb + регистрация на ~200 канала) е АСИНХРОННО —
   // изчакваме опашката от микротаски да се изпразни, преди да върнем управлението
   // (същия модел като test/helpers/main-app.js).
   return new Promise((resolve) => {
-    setImmediate(() => setImmediate(() => setImmediate(resolve)));
+    setImmediate(() => setImmediate(() => setImmediate(() => { loud(); resolve(); })));
   });
 }
 

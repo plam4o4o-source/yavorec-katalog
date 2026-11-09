@@ -16,10 +16,12 @@
    разгръщане на голям фонд страница по страница пращаше едни и същи хиляди редове
    толкова пъти, колкото пъти е натиснат бутонът.
 
-   И трите изгледа вече ползват установения модел: прозорец от 300 реда, „Покажи
+   И трите изгледа вече ползват установения модел: прозорец от една порция
+   (RENDER_PAGE_SIZE от core.js — 300 реда до v2.4.88, 100 оттогава), „Покажи
    още“ разширява прозореца БЕЗ ново IPC извикване, а търсенето в „Инвентарна
    книга“ е с debounce (300 ms) на слушателя на полето, като в „Книги“ и
-   „Читатели“. */
+   „Читатели“. Тестовете взимат размера на порцията от window.RENDER_PAGE_SIZE,
+   а не го повтарят като число — иначе всяка промяна на порцията ги чупи. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -147,30 +149,40 @@ function makeReadersRows(n) {
   return rows;
 }
 
+/* Размерът на една порция — от самия core.js, не повторен тук като число. */
+function pageSize(window) {
+  const page = window.RENDER_PAGE_SIZE;
+  assert.ok(Number.isInteger(page) && page > 0, 'core.js трябва да излага window.RENDER_PAGE_SIZE');
+  return page;
+}
+
 /* --- Инвентарна книга: прозоречен рендер --- */
 
-test('Инвентарна книга: рендира прозорец от 300 реда, не всичките 1200', async () => {
+test('Инвентарна книга: рендира прозорец от една порция (RENDER_PAGE_SIZE), не всичките 1200', async () => {
   const dom = buildDom({ 'invBook.list': makeInvBookRows(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = pageSize(window);
+  assert.ok(PAGE * 2 < 1200, 'данните трябва да са поне две порции, за да има какво да се разгърне');
   window.location.hash = '#invbook';
   await window.route();
   const rowCount = window.document.querySelectorAll('#ibBody tr').length;
-  assert.equal(rowCount, 300);
+  assert.equal(rowCount, PAGE);
   const moreBtn = window.document.querySelector('#ibMore button');
   assert.ok(moreBtn, 'бутонът „Покажи още“ трябва да присъства, когато има още редове');
-  assert.match(moreBtn.textContent, /900 от общо 1\s*200|900 от общо 1200/);
+  assert.match(moreBtn.textContent, new RegExp(`\\(${1200 - PAGE} от общо 1200\\)`));
 });
 
 test('Инвентарна книга: „Покажи още“ разширява прозореца без ново IPC извикване', async () => {
   const dom = buildDom({ 'invBook.list': makeInvBookRows(1200) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = pageSize(window);
   window.location.hash = '#invbook';
   await window.route();
   const before = dom.callCounts['invBook.list'];
   window.document.querySelector('#ibMore button').click();
-  assert.equal(window.document.querySelectorAll('#ibBody tr').length, 600);
+  assert.equal(window.document.querySelectorAll('#ibBody tr').length, 2 * PAGE);
   assert.equal(dom.callCounts['invBook.list'], before,
     '„Покажи още“ не бива да предизвиква ново извикване на invBook.list — данните вече са в паметта');
 });
@@ -205,8 +217,13 @@ test('Инвентарна книга: търсенето е с debounce — п�
   const after = window.document.getElementById('ibBody').innerHTML;
   assert.notEqual(after, before, 'след изтичане на debounce интервала тялото трябва да е пририсувано');
   // Само редовете на „Вазов, Иван" би трябвало да минат филтъра по автор.
+  // (Броят на редовете сам не стига: при порция от 100 реда и 171 съвпадения
+  // и филтрираният, и нефилтрираният списък показват по една пълна порция —
+  // затова се проверява и че ВСЕКИ изчертан ред е на Вазов.)
   const rows = window.document.querySelectorAll('#ibBody tr');
-  assert.ok(rows.length > 0 && rows.length < 300, 'филтърът трябва реално да стеснява резултата');
+  assert.ok(rows.length > 0 && rows.length <= pageSize(window), 'филтърът трябва реално да стеснява резултата');
+  assert.ok(Array.from(rows).every(tr => /Вазов/.test(tr.textContent)),
+    'всеки изчертан ред след филтъра трябва да е на „Вазов, Иван“');
   // Филтърът е изцяло клиентски — писането не бива да праща нито едно IPC извикване.
   assert.equal(dom.callCounts['invBook.list'], ipcBefore,
     'търсенето филтрира в паметта и не бива да презарежда списъка по IPC');
@@ -218,13 +235,14 @@ test('Книги: „Покажи още“ разширява прозорец�
   const dom = buildDom({ 'books.list': makeBooksRows(900), 'categories.list': [] });
   const { window } = dom;
   await settled(dom);
+  const PAGE = pageSize(window);
   window.location.hash = '#books';
   await window.route();
-  assert.equal(window.document.querySelectorAll('#bBody tr').length, 300);
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, PAGE);
   const beforeList = dom.callCounts['books.list'];
   const beforeCats = dom.callCounts['categories.list'];
   window.document.querySelector('#bMore button').click();
-  assert.equal(window.document.querySelectorAll('#bBody tr').length, 600);
+  assert.equal(window.document.querySelectorAll('#bBody tr').length, 2 * PAGE);
   assert.equal(dom.callCounts['books.list'], beforeList, 'без ново books.list извикване');
   assert.equal(dom.callCounts['categories.list'], beforeCats, 'без ново categories.list извикване');
 });
@@ -233,12 +251,13 @@ test('Читатели: „Покажи още“ разширява прозо�
   const dom = buildDom({ 'readers.list': makeReadersRows(900) });
   const { window } = dom;
   await settled(dom);
+  const PAGE = pageSize(window);
   window.location.hash = '#readers';
   await window.route();
-  assert.equal(window.document.querySelectorAll('#rBody tr').length, 300);
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, PAGE);
   const before = dom.callCounts['readers.list'];
   window.document.querySelector('#rMore button').click();
-  assert.equal(window.document.querySelectorAll('#rBody tr').length, 600);
+  assert.equal(window.document.querySelectorAll('#rBody tr').length, 2 * PAGE);
   assert.equal(dom.callCounts['readers.list'], before, 'без ново readers.list извикване');
 });
 
