@@ -226,8 +226,15 @@ async function bootApp() {
     if (!e) throw new Error('Няма елемент ' + sel);
     return e;
   }
+  /* Щракването ИЗЧАКВА елемента (до 4 s), вместо да гърми веднага, ако го няма.
+     ЗАЩО (v2.4.88): при натоварена машина (пълната поредица в двете часови зони
+     наведнъж) модалният прозорец понякога се отваряше след първото settle() —
+     тоест тестът падаше с „Няма елемент #modal footer“, без нищо да е счупено.
+     Елемент, който изобщо не идва, пак е грешка — само след срока. */
+  const present = (fn) => { try { return fn(); } catch (e) { return null; } };
   async function click(sel, opts) {
-    el(sel).click();
+    const e = typeof sel === 'string' ? await waitFor(() => $(sel), 'елемент ' + sel).catch(() => el(sel)) : el(sel);
+    e.click();
     if (!(opts && opts.noSettle)) await settle(opts && opts.quiet);
   }
   /* Бутон по видимия му надпис (частично съвпадение), в даден контейнер. */
@@ -240,7 +247,10 @@ async function bootApp() {
     if (!b) throw new Error('Няма бутон „' + label + '“' + (root ? ' в ' + root : ''));
     return b;
   }
-  async function clickButton(label, root, opts) { return click(button(label, root), opts); }
+  async function clickButton(label, root, opts) {
+    const b = await waitFor(() => present(() => button(label, root)), 'бутон „' + label + '“').catch(() => button(label, root));
+    return click(b, opts);
+  }
   function fire(e, type, init) { e.dispatchEvent(new window.Event(type, Object.assign({ bubbles: true }, init || {}))); }
   /* Попълва поле както го прави човек: стойност + input + change. */
   function type(sel, value) {

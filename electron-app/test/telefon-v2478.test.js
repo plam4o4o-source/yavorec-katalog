@@ -529,7 +529,7 @@ test('build-skener-site: страница с манифест, четец до �
   for (const f of ['index.html', 'zxing_reader.wasm', 'zxing-reader.js']) assert.ok(sw.includes(JSON.stringify(f)), 'кешира ' + f);
   const wf = fs.readFileSync(path.join(APP, '..', '.github', 'workflows', 'skener-pages.yml'), 'utf8');
   assert.match(wf, /node scripts\/build-skener-site\.js \.\.\/_site/);
-  assert.match(wf, /actions\/deploy-pages@v4/);
+  assert.match(wf, /actions\/deploy-pages@v5/);
 });
 
 test('Страницата от файла и приложението са ЕДИН шаблон — приложението по https носи името от адреса', async () => {

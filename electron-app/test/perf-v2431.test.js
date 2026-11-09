@@ -366,6 +366,13 @@ test('books:create отказва инв. №, който числово съв�
    ================================================================== */
 const mkBooks = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1, inv_number: i + 1, title: 'Книга ' + (i + 1), author: 'А', category_id: 1, category_name: 'книга', department: i % 2 ? 'детски' : 'за възрастни', status: 'наличен', quantity: 1, available: 1 }));
 const PAGES = []; // apiMock пази само първия аргумент — page се записва тук
+/* Размерът на една порция — RENDER_PAGE_SIZE от core.js (300 до v2.4.88, 100
+   оттогава). Тестовете го взимат от изгледа, вместо да го повтарят като число. */
+function pageSize(window) {
+  const page = window.RENDER_PAGE_SIZE;
+  assert.ok(Number.isInteger(page) && page > 0, 'core.js трябва да излага window.RENDER_PAGE_SIZE');
+  return page;
+}
 function windowedBooksMock(all) {
   return ([, , page]) => {
     PAGES.push(page);
@@ -381,42 +388,54 @@ test('Книги (прозоречен режим): първата порция,
   const dom = buildDom({ 'books.list': windowedBooksMock(all), 'categories.list': [{ id: 1, name: 'книга' }], 'searchHistory.suggest': [] });
   const { window } = dom; await settle();
   const doc = window.document;
+  const PAGE = pageSize(window);
+  assert.ok(PAGE * 3 < 900, 'данните трябва да са над три порции — тестът разгръща две и после още една с двоен клик');
   PAGES.length = 0;
   window.location.hash = '#books'; await window.route(); await settle();
   const calls = () => PAGES.filter(p => p && typeof p === 'object');
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
-  assert.match(doc.querySelector('#bMore').textContent, /Покажи още \(600 от общо 900\)/);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, PAGE);
+  assert.match(doc.querySelector('#bMore').textContent, new RegExp(`Покажи още \\(${900 - PAGE} от общо 900\\)`));
   assert.ok(calls().length >= 1 && calls().every(p => p.offset === 0), 'първото зареждане иска offset 0');
-  // Покажи още → IPC с offset 300, редовете се долепят
+  // Покажи още → IPC с offset PAGE, редовете се долепят
   const first = doc.querySelector('#bBody tr'); first.setAttribute('data-probe', 'жив');
   doc.querySelector('#bMore button').click(); await settle();
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 600);
-  assert.equal(calls().at(-1).offset, 300, 'втората порция се иска от базата с offset 300');
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 2 * PAGE);
+  assert.equal(calls().at(-1).offset, PAGE, `втората порция се иска от базата с offset ${PAGE}`);
   assert.equal(doc.querySelector('#bBody tr').getAttribute('data-probe'), 'жив', 'вече показаните редове не се пресъздават');
-  assert.match(doc.querySelector('#bMore').textContent, /300 от общо 900/);
+  assert.match(doc.querySelector('#bMore').textContent, new RegExp(`\\(${900 - 2 * PAGE} от общо 900\\)`));
   /* Проверка при прегледа: двоен клик върху „Покажи още“, преди първата порция да
      се върне, пращаше ДВЕ заявки с ЕДИН И СЪЩ offset (loaded се чете преди await-а,
-     без предпазител) — резултатът беше 300 дублирани реда и цяла следваща порция,
-     изтеглена никога. Двата паралелни извиквания тук симулират точно това. */
+     без предпазител) — резултатът беше цяла порция дублирани редове и цяла следваща
+     порция, изтеглена никога. Двата паралелни извиквания тук симулират точно това:
+     трябва да дойде ТОЧНО една нова порция, с нов offset и без дублирани редове. */
   const beforeCalls = calls().length;
   await Promise.all([window.booksMore(), window.booksMore()]);
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 900, 'двоен клик не бива да дублира или да прескача редове');
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 3 * PAGE, 'двоен клик не бива да дублира или да прескача редове');
   assert.equal(calls().length, beforeCalls + 1, 'вторият, застъпващ се клик не пуска втора заявка');
+  assert.equal(calls().at(-1).offset, 2 * PAGE, 'единствената заявка от двойния клик продължава от края на заредените');
+  const ids3 = [...doc.querySelectorAll('#bBody tr')].map(tr => tr.getAttribute('data-id'));
+  assert.equal(new Set(ids3).size, 3 * PAGE, 'без дублирани редове след двойния клик');
+  // Разгръщане докрай — всяко натискане носи точно една порция, накрая няма бутон.
+  for (let i = 0; doc.querySelector('#bMore button') && i < 900; i++) {
+    doc.querySelector('#bMore button').click(); await settle();
+  }
   const ids900 = [...doc.querySelectorAll('#bBody tr')].map(tr => tr.getAttribute('data-id'));
-  assert.equal(new Set(ids900).size, 900, 'без дублирани редове след двойния клик');
+  assert.equal(ids900.length, 900, 'накрая е изчертан целият резултат');
+  assert.equal(new Set(ids900).size, 900, 'без дублирани редове');
+  assert.deepEqual(ids900, all.map(b => String(b.id)), 'без пропуснат ред и в реда на базата');
   assert.equal(doc.querySelector('#bMore').textContent.trim(), '', 'няма повече — целият резултат е зареден');
   // Връща състоянието към първата порция, преди да продължи тестът със следващите стъпки.
   window.eval("BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();"); await settle();
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, PAGE);
   // Филтър по отдел → нова заявка с dept, броячът е по базата
   window.eval("BOOKS_FILTER_DEPT = 'детски'; booksFilterChanged();"); await settle();
   assert.equal(calls().at(-1).dept, 'детски');
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
-  assert.match(doc.querySelector('#bMore').textContent, /150 от общо 450/);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, PAGE);
+  assert.match(doc.querySelector('#bMore').textContent, new RegExp(`\\(${450 - PAGE} от общо 450\\)`));
   /* v2.4.69 (кръг 44, П4): колоната „Сигнатура“ след „Автор“ измести „Отдел“ на
      седмо място в реда. Проверката е същата — всички показани са от „детски“. */
   assert.ok([...doc.querySelectorAll('#bBody tr td:nth-child(7)')].every(td => td.textContent === 'детски'));
-  // Избери всички → idsOnly, изборът е целият резултат (450), не само видимите 300
+  // Избери всички → idsOnly, изборът е целият резултат (450), не само видимата порция
   await window.toggleBookSelAll(true); await settle();
   assert.ok(calls().some(p => p.idsOnly && p.dept === 'детски'));
   assert.equal(window.eval('BOOKS_SELECTED.size'), 450);
@@ -441,23 +460,24 @@ test('Инвентарна книга (прозоречен режим): пок�
     return { rows: rows.slice(page.offset, page.offset + page.limit), total: rows.length, summary };
   } });
   const { window } = dom; await settle();
+  const PAGE = pageSize(window);
   window.location.hash = '#invbook'; await window.route(); await settle();
   const doc = window.document;
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 300);
-  assert.match(doc.querySelector('#ibMore').textContent, /400 от общо 700/);
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, PAGE);
+  assert.match(doc.querySelector('#ibMore').textContent, new RegExp(`\\(${700 - PAGE} от общо 700\\)`));
   const nums = [...doc.querySelectorAll('#view .kpi-num')].map(e => e.textContent.trim());
-  assert.deepEqual(nums, ['700', '686', '14', '0'], 'показателите идват от summary (целия регистър), не от 300-те реда');
+  assert.deepEqual(nums, ['700', '686', '14', '0'], 'показателите идват от summary (целия регистър), не от видимата порция');
   doc.querySelector('#ibMore button').click(); await settle();
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 600);
-  assert.equal(IB.at(-1).offset, 300);
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, 2 * PAGE);
+  assert.equal(IB.at(-1).offset, PAGE);
   // Търсене през полето → debounce → IPC с q, пълен рендер на тялото
   const input = doc.getElementById('ibSearch');
   input.focus();
   input.value = 'Вазов'; input.dispatchEvent(new window.Event('input', { bubbles: true }));
   await new Promise(r => setTimeout(r, 400)); await settle();
   assert.equal(IB.at(-1).q, 'Вазов');
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 300);
-  assert.match(doc.querySelector('#ibMore').textContent, /166 от общо 466/);
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, PAGE);
+  assert.match(doc.querySelector('#ibMore').textContent, new RegExp(`\\(${466 - PAGE} от общо 466\\)`));
   assert.equal(doc.activeElement, input, 'полето за търсене не се пресъздава — курсорът остава');
   // Печатът тегли ЦЕЛИЯ регистър (без page), не порцията
   await window.printInvBookDoc(); await settle();
@@ -475,15 +495,26 @@ test('Читатели (прозоречен режим): порции, филт
     return { rows: rows.slice(page.offset, page.offset + page.limit), total: rows.length };
   }, 'searchHistory.suggest': [] });
   const { window } = dom; await settle();
+  const PAGE = pageSize(window);
   window.location.hash = '#readers'; await window.route(); await settle();
   const doc = window.document;
-  assert.equal(doc.querySelectorAll('#rBody tr').length, 300);
-  assert.match(doc.querySelector('#rMore').textContent, /500 от общо 800/);
+  assert.equal(doc.querySelectorAll('#rBody tr').length, PAGE);
+  assert.match(doc.querySelector('#rMore').textContent, new RegExp(`\\(${800 - PAGE} от общо 800\\)`));
   doc.querySelector('#rMore button').click(); await settle();
-  assert.equal(doc.querySelectorAll('#rBody tr').length, 600);
-  assert.equal(RP.at(-1).offset, 300);
+  assert.equal(doc.querySelectorAll('#rBody tr').length, 2 * PAGE);
+  assert.equal(RP.at(-1).offset, PAGE);
   const sel = doc.getElementById('rCatFilter'); sel.value = 'дете до 14 г.'; sel.dispatchEvent(new window.Event('change')); await settle();
   assert.equal(RP.at(-1).cat, 'дете до 14 г.');
+  assert.equal(RP.at(-1).offset, 0, 'смененият филтър е нов резултат — започва от първата порция');
+  // 200 деца в базата: при порция под 200 се вижда една порция и бутонът казва „от общо 200“.
+  assert.equal(doc.querySelectorAll('#rBody tr').length, Math.min(PAGE, 200));
+  if (PAGE < 200) {
+    assert.match(doc.querySelector('#rMore').textContent, new RegExp(`\\(${200 - PAGE} от общо 200\\)`));
+    for (let i = 0; doc.querySelector('#rMore button') && i < 200; i++) {
+      doc.querySelector('#rMore button').click(); await settle();
+    }
+    assert.equal(RP.at(-1).cat, 'дете до 14 г.', '„Покажи още“ пази филтъра в заявката към базата');
+  }
   assert.equal(doc.querySelectorAll('#rBody tr').length, 200);
   assert.equal(doc.querySelector('#rMore').textContent.trim(), '');
 });
@@ -493,6 +524,7 @@ test('Инвентарна книга и Читатели (прозоречен 
   const readers = Array.from({ length: 800 }, (_, i) => ({ id: i + 1, name: (i % 4 ? 'Петров ' : 'Иванов ') + (i + 1), card_no: String(i + 1), category: 'възрастен', status: 'активен', open_loans: 0, overdue_loans: 0 }));
   const dom = buildDom({ 'searchHistory.suggest': [] });
   const { window } = dom; await settle();
+  const PAGE = pageSize(window);
   const realApi = window.api;
   const pending = []; let delayNext = false;
   const wrap = (impl) => (...a) => delayNext ? new Promise(res => pending.push(() => res(impl(...a)))) : Promise.resolve(impl(...a));
@@ -506,23 +538,25 @@ test('Инвентарна книга и Читатели (прозоречен 
   };
   window.api = new Proxy(realApi, { get: (t, p) => p === 'invBook' ? { list: wrap(invList) } : p === 'readers' ? { list: wrap(rdList) } : t[p] });
   const doc = window.document;
-  // Инвентарна книга: бавно „Покажи още“ (Т301…Т600), после бързо търсене „Друг“ (234 реда)
+  // Инвентарна книга: бавно „Покажи още“ (втората порция Т…), после бързо търсене „Друг“ (234 реда)
   window.location.hash = '#invbook'; await window.route(); await settle();
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 300);
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, PAGE);
   delayNext = true; doc.querySelector('#ibMore button').click(); await settle(); delayNext = false;
   window.eval("INVBOOK_QUERY = 'Друг'; INVBOOK_RENDER_LIMIT = INVBOOK_PAGE_SIZE; invBookReload();"); await settle();
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 234);
+  const ibShown = Math.min(PAGE, 234); // първата порция от резултата на търсенето
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, ibShown);
   pending.shift()(); await settle();
-  assert.equal(doc.querySelectorAll('#ibBody tr').length, 234, 'закъснялата порция от стария списък се изхвърля (инвентарна книга)');
+  assert.equal(doc.querySelectorAll('#ibBody tr').length, ibShown, 'закъснялата порция от стария списък се изхвърля (инвентарна книга)');
   assert.ok([...doc.querySelectorAll('#ibBody tr')].every(tr => /Друг/.test(tr.textContent)));
   // Читатели: същото с READERS_GEN
   window.location.hash = '#readers'; await window.route(); await settle();
-  assert.equal(doc.querySelectorAll('#rBody tr').length, 300);
+  assert.equal(doc.querySelectorAll('#rBody tr').length, PAGE);
   delayNext = true; doc.querySelector('#rMore button').click(); await settle(); delayNext = false;
   window.eval("READERS_QUERY = 'Иванов'; READERS_RENDER_LIMIT = READERS_PAGE_SIZE; refreshReadersList();"); await settle();
-  assert.equal(doc.querySelectorAll('#rBody tr').length, 200);
+  const rdShown = Math.min(PAGE, 200); // първата порция от 200-те Иванови
+  assert.equal(doc.querySelectorAll('#rBody tr').length, rdShown);
   pending.shift()(); await settle();
-  assert.equal(doc.querySelectorAll('#rBody tr').length, 200, 'закъснялата порция от стария списък се изхвърля (читатели)');
+  assert.equal(doc.querySelectorAll('#rBody tr').length, rdShown, 'закъснялата порция от стария списък се изхвърля (читатели)');
   assert.ok([...doc.querySelectorAll('#rBody tr')].every(tr => /Иванов/.test(tr.textContent)));
   window.api = realApi;
 });
@@ -556,9 +590,15 @@ test('Книги (прозоречен режим): „Покажи още“ п
   window.api = new Proxy(realApi, { get: (t, p) => p === 'books'
     ? { list: (q, sort, page) => delayNext ? new Promise(res => pending.push(() => res(listImpl(q, sort, page)))) : Promise.resolve(listImpl(q, sort, page)), delete: async () => ({ ok: true, data: true }) }
     : t[p] });
+  const PAGE = pageSize(window);
+  /* Резултатът от търсенето „Книга 1“ — 111 книги (1, 10–19, 100–199). Таблицата
+     трябва да покаже ТОЧНО първата му порция, в реда на базата. */
+  const hitIds = all.filter(b => b.title.startsWith('Книга 1')).map(b => String(b.id));
+  const hitShown = hitIds.slice(0, PAGE);
+  const idsOf = () => [...doc.querySelectorAll('#bBody tr')].map(tr => tr.getAttribute('data-id'));
   window.location.hash = '#books'; await window.route(); await settle();
   const doc = window.document;
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, PAGE);
   // Търсене с чакащ отговор + „Покажи още“ преди да е дошъл
   delayNext = true;
   window.eval("BOOKS_QUERY = 'Книга 1'; BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();");
@@ -566,29 +606,33 @@ test('Книги (прозоречен режим): „Покажи още“ п
   doc.querySelector('#bMore button').click(); await settle(); // порцията от СТАРИЯ списък пристига първа
   pending.shift()(); await settle();                          // после отговорът на търсенето
   const rows = [...doc.querySelectorAll('#bBody tr')];
-  assert.ok(rows.length < 300 && rows.length > 0, 'таблицата показва резултата от търсенето: ' + rows.length);
+  /* Точно първата порция от резултата на търсенето — нито ред повече. (Само
+     „по-малко от порция“ вече не разграничава нищо: при порция от 100 и 111
+     съвпадения и резултатът от търсенето е цяла порция.) */
+  assert.deepEqual(idsOf(), hitShown, 'таблицата показва резултата от търсенето: ' + rows.length);
   assert.ok(rows.every(tr => /Книга 1/.test(tr.textContent)), 'без долепени редове от стария списък');
   assert.doesNotMatch(doc.querySelector('#bMore').textContent, /от общо 900/);
-  // Обратният ред: „Покажи още“ е БАВНОТО повикване, търсенето го изпреварва — порцията от стария
-  // списък (Книга 300…599) пристига, след като таблицата вече показва резултата от търсенето.
+  // Обратният ред: „Покажи още“ е БАВНОТО повикване, търсенето го изпреварва — втората порция от стария
+  // списък пристига, след като таблицата вече показва резултата от търсенето.
   window.eval("BOOKS_QUERY = ''; BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();"); await settle();
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 300);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, PAGE);
   delayNext = true;
   doc.querySelector('#bMore button').click(); await settle();
   delayNext = false;
   window.eval("BOOKS_QUERY = 'Книга 1'; BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();"); await settle();
   const shown = doc.querySelectorAll('#bBody tr').length;
-  assert.ok(shown > 0 && shown < 300, 'таблицата показва резултата от търсенето: ' + shown);
+  assert.deepEqual(idsOf(), hitShown, 'таблицата показва резултата от търсенето: ' + shown);
   pending.shift()(); await settle(); // закъснялата порция от стария списък
   const rows2 = [...doc.querySelectorAll('#bBody tr')];
   assert.equal(rows2.length, shown, 'закъснялата порция „Покажи още“ от стария списък се изхвърля');
+  assert.deepEqual(idsOf(), hitShown, 'без долепени редове от стария списък');
   assert.ok(rows2.every(tr => /Книга 1/.test(tr.textContent)), 'без долепени редове от стария списък');
   // Разгърнат списък оцелява след пълен рендер (запис/изтриване викат renderBooks)
   window.eval("BOOKS_QUERY = ''; BOOKS_RENDER_LIMIT = BOOKS_PAGE_SIZE; refreshBooksList();"); await settle();
   doc.querySelector('#bMore button').click(); await settle();
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 600);
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 2 * PAGE);
   await window.renderBooks(); await settle();
-  assert.equal(doc.querySelectorAll('#bBody tr').length, 600, 'след пълен рендер прозорецът остава 600, не се свива на 300');
+  assert.equal(doc.querySelectorAll('#bBody tr').length, 2 * PAGE, 'след пълен рендер разгърнатият прозорец остава, не се свива до една порция');
   // Изтритият документ отпада от избора
   window.eval('BOOKS_SELECTED.add(5); BOOKS_SELECTED.add(6);');
   await window.deleteBook(5); await settle();

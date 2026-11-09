@@ -171,11 +171,14 @@ function startMainApp(opts) {
     channels: () => [...handlers.keys()],
     ready: async () => {
       isReady = true;
-      readyResolve();
-      // изчакваме .then(...) веригата на main.js (initDb + миграции) да мине
-      await readyPromise;
-      await new Promise((r) => setImmediate(r));
-      await new Promise((r) => setImmediate(r));
+      const loud = quietBoot();
+      try {
+        readyResolve();
+        // изчакваме .then(...) веригата на main.js (initDb + миграции) да мине
+        await readyPromise;
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+      } finally { loud(); }
     },
     stop: () => {
       // Ако ready() не е викан, базата не е отворена и 'window-all-closed'
@@ -189,4 +192,19 @@ function startMainApp(opts) {
   return started;
 }
 
-module.exports = { startMainApp };
+/* Тихо зареждане на main.js (v2.4.88): при стартиране той пише в stdout по ред
+   на всяка миграция („Схемата на базата данни е обновена до версия …“ — около 20
+   реда върху празна база). Изпълнителят на тестове на Node 22 чете stdout на
+   тестовия файл като поток от сериализирани съобщения и при натоварване (двете
+   часови зони наведнъж) тези редове се вклиняват в него — целият файл пада с
+   „Unable to deserialize cloned data“, без нито един тест да е сгрешил.
+   Затова console.log/info мълчат САМО докато main.js се зарежда; грешките
+   (console.error/warn) остават. TEST_VERBOSE=1 ги пуска обратно. */
+function quietBoot() {
+  if (process.env.TEST_VERBOSE) return () => {};
+  const keep = { log: console.log, info: console.info };
+  console.log = () => {}; console.info = () => {};
+  return () => { console.log = keep.log; console.info = keep.info; };
+}
+
+module.exports = { startMainApp, quietBoot };

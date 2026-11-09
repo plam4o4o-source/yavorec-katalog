@@ -77,9 +77,9 @@ jobs:
       run:
         working-directory: electron-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           # Кеш на изтеглените пакети. package-lock.json не е в корена, а в
@@ -220,7 +220,7 @@ jobs:
 
       # Пълният TAP изход се пази като artifact. Името носи и часовата зона:
       # двете задачи от матрицата иначе биха качили артефакт с едно и също име,
-      # а upload-artifact@v4 отказва при повторение — тоест диагностиката щеше
+      # а upload-artifact (v4 и следващите) отказва при повторение — тоест диагностиката щеше
       # да се губи точно когато и двете зони падат.
       # Пълният TAP изход се пази като artifact: резюмето отгоре показва кой е
       # паднал, а тук остава целият контекст (реда на файловете, времената на
@@ -228,7 +228,7 @@ jobs:
       # Само при провал — при зелено пускане няма какво да се разследва.
       - name: Запазване на пълния TAP изход
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tap-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: /tmp/test-*.tap
@@ -252,9 +252,9 @@ jobs:
     name: Публична каталожна страница (site/)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -284,3 +284,89 @@ jobs:
         env:
           NODE_PATH: ../electron-app/node_modules
         run: node test-page-katalog-view.js
+
+  # ТЕСТОВЕТЕ В ИСТИНСКИ CHROMIUM (v2.4.88).
+  # Девет файла (осем в Chromium и наръчникът в PDF) проверяват онова, което
+  # jsdom не може да види: истинското оформление (сума на един ред в тясна
+  # колона), листовете на PDF-а от „Запази PDF…“, щракването върху известие, цял работен ден на гишето в
+  # браузър, баркодовете на етикетите, прочетени от два независими декодера.
+  # Без Chromium на машината те се ПРОПУСКАТ — и в основната задача горе
+  # винаги се пропускаха, тоест CI мълчаливо не проверяваше печата. Тук
+  # Chromium, pdftotext (poppler) и декодерите на Python се слагат изрично, а
+  # последната стъпка пада, ако някой от тези тестове пак е бил пропуснат
+  # заради липсващ инструмент: пропуснат тест тук е проверка, която не е
+  # станала, а не „минало“.
+  chromium:
+    name: Печат и екран в истински Chromium
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: electron-app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: electron-app/package-lock.json
+
+      - name: Инсталиране на зависимости (без postinstall за Electron)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Компилиране на better-sqlite3 за обикновен Node
+        run: npm rebuild better-sqlite3
+
+      # playwright е глобален, не зависимост на проекта: тестовете го търсят
+      # по PECHAT_PLAYWRIGHT / NODE_PATH и без него просто се пропускат —
+      # тоест разработчик без Chromium не е задължен да го тегли (~170 MB).
+      - name: Chromium (playwright), pdftotext и декодерите на баркодове
+        shell: bash
+        run: |
+          set -e
+          npm install -g --no-audit --no-fund playwright@1.63.0
+          npx --yes playwright@1.63.0 install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends poppler-utils libzbar0
+          python3 -m pip install --user --break-system-packages --quiet zxing-cpp pyzbar pymupdf pillow
+          G=$(npm root -g)
+          EXE=$(NODE_PATH="$G" node -e "console.log(require('playwright').chromium.executablePath())")
+          test -x "$EXE"
+          {
+            echo "NODE_PATH=$G"
+            echo "PECHAT_PLAYWRIGHT=$G/playwright"
+            echo "PECHAT_CHROMIUM=$EXE"
+            echo "CHROMIUM_PATH=$EXE"
+          } >> "$GITHUB_ENV"
+          echo "Chromium: $EXE"
+
+      - name: Тестовете в Chromium
+        shell: bash
+        env:
+          TZ: Europe/Sofia
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=2 \
+            test/pechat-v2469.test.js test/pechat-v2471.test.js test/pechat-v2471-podpisi.test.js \
+            test/pechat-v2487.test.js test/kraeved-v2469.test.js test/izvestiya-v2486.test.js \
+            test/raboten-den-chromium.test.js test/samozarezhdane-chromium.test.js test/docs-v2471.test.js \
+            | tee /tmp/test-chromium.tap
+
+      - name: Нито един тест не е пропуснат заради липсващ инструмент
+        if: success()
+        shell: bash
+        run: |
+          grep -E '# SKIP' /tmp/test-chromium.tap || true
+          if grep -E '# SKIP.*(Chromium|playwright|pdftotext|poppler|python|zxing|pyzbar)' /tmp/test-chromium.tap; then
+            echo "Горните тестове са пропуснати — Chromium/pdftotext/декодерите не са стигнали до тях."
+            exit 1
+          fi
+          grep -E '^# (tests|pass|fail|skipped) ' /tmp/test-chromium.tap | tail -4
+
+      - name: Запазване на TAP изхода
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tap-chromium-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/test-chromium.tap
+          retention-days: 14
+          if-no-files-found: ignore
