@@ -39,7 +39,7 @@ for full detail.
   съобщенията на програмата при стартиране вече не объркват изпълнителя на тестовете.
 
 **Проверено:** `npm run test:all` минава (проверка на типовете + тестовете в UTC и в
-Europe/Sofia + страницата на каталога); `node --test` — **@@TESTS@@ теста, 0 неуспешни** (преди: 2557).
+Europe/Sofia + страницата на каталога); `node --test` — **2566 теста, 0 неуспешни** (преди: 2557).
 Нови тестове: `test/obnovyavane-v2488.test.js` (порцията и самозареждането, подредбата, файловете
 на инсталатора, задачата в CI, версиите на действията, изчакването и тихото стартиране) и
 `test/samozarezhdane-chromium.test.js` (в Chromium: превъртането до края зарежда следващите 100
@@ -64,7 +64,7 @@ raised; nothing in the data changes.
   skipped for a missing tool. GitHub actions moved to Node 24 versions. Two flaky tests were
   stabilised (clicks wait for a late dialog; start-up messages no longer confuse the test runner).
 
-**Verified:** `npm run test:all` passes; `node --test` — **@@TESTS@@ tests, 0 failed** (was 2557).
+**Verified:** `npm run test:all` passes; `node --test` — **2566 tests, 0 failed** (was 2557).
 
 ## v2.4.87
 
